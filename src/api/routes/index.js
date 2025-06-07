@@ -55,15 +55,13 @@ const lightning = new LightningService();
 router.use(helmet());
 router.use(cors({
   origin: '*', // 必要に応じて許可ドメインを限定
-    timestamp: new Date().toISOString(),
-    status: 'online',
-    services: {
-      gpu: gpuStatus,
-      p2p: p2pStatus,
-      lightning: lightningStatus
-    }
-  });
 }));
+// --- レートリミット ---
+const rateLimit = require('../middleware/rate-limit');
+router.use(rateLimit);
+// --- 監査ログ ---
+const auditLogger = require('../middleware/audit');
+router.use(auditLogger);
 
 // 各ルートモジュールをマウント
 router.use('/gpus', gpuRoutes);

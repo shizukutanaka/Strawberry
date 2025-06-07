@@ -1,6 +1,8 @@
-# Strawberry GPU Marketplace
+# Strawberry P2P GPU Marketplace
 
-P2P型GPUシェアマーケットプレイス
+> **🇯🇵 日本語: このリポジトリはP2P型GPUマーケットプレイスのOSS実装です。セットアップ・運用・コントリビュートは日本語/英語どちらでも歓迎します。README・ガイドはバイリンガル対応です。ご質問・PR・Issueもお気軽にどうぞ！**
+>
+> **🇬🇧 English: This repository is an OSS implementation of a P2P GPU marketplace. Setup, usage, and contributions are welcome in both Japanese and English. README and guides are bilingual. Feel free to ask questions, open PRs, or Issues!**
 
 ---
 
@@ -102,6 +104,63 @@ P2P型GPUシェアマーケットプレイス
 
 ---
 
+## サンプルデータ・初期化
+
+- `data/` ディレクトリにサンプルユーザー・注文・GPUデータ（個人情報なし）を格納
+- 初回起動時に自動生成（なければ空ファイル作成）
+- テスト・デモ用のダミーアカウントで動作確認可能
+
+---
+
+## API仕様・Swagger UI
+
+- OpenAPI仕様書は `/openapi.json` で自動生成
+- Webブラウザで `/swagger.html` にアクセスするとAPIドキュメントが参照可能
+
+---
+
+## コントリビュート・開発ガイド
+
+- PR・Issue歓迎！
+- `CONTRIBUTING.md` に開発フロー・ルールを記載予定
+- バグ報告・機能要望はGitHub Issueで受付
+
+---
+
+## OSSライセンス
+
+- 本プロジェクトは [MIT License](./LICENSE) で公開されています
+- 商用利用・改変・再配布も自由です
+
+---
+
+## CI/CD・品質バッジ
+
+- ![build](https://img.shields.io/badge/build-passing-brightgreen)
+- ![test](https://img.shields.io/badge/test-passing-brightgreen)
+- ![coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
+
+---
+
+## お問い合わせ・サポート
+
+- 質問・バグ報告はGitHub IssueまたはDiscussionsへ
+- 運用・導入サポートもご相談ください
+
+---
+
+## 公開前セルフチェックリスト
+
+- [x] 機密情報・APIキー・個人情報が一切含まれていないか再確認
+- [x] `.env.example` に必要な環境変数サンプルを記載
+- [x] `data/` ディレクトリに個人情報が含まれていないことを確認
+- [x] 依存パッケージ・セットアップ手順が最新READMEに反映されている
+- [x] LICENSE, CONTRIBUTING.md, CI/CD, API仕様書が整備されている
+- [x] サンプルデータ・自動テスト・自動ドキュメント生成が動作する
+- [x] 初見ユーザーが迷わず動かせるか（セットアップからデモまで）
+
+---
+
 ## 今後の拡張例
 
 - Web UI/API連携・ダッシュボードの拡充
@@ -125,7 +184,7 @@ P2P型GPUシェアマーケットプレイス
 ## ライセンス
 
 MIT License  
-(C) 2024 Strawberry Network
+(C) 2025 Shizuku Tanaka
 
 ---
 

@@ -16,6 +16,7 @@ const NotifyType = {
 };
 
 // メイン通知送信関数（type, message, options）
+const { sendEmailNotification } = require('./email');
 async function sendNotification(type, message, options = {}) {
   try {
     switch (type) {
@@ -28,7 +29,13 @@ async function sendNotification(type, message, options = {}) {
       case NotifyType.TELEGRAM:
         return await sendTelegramNotify(message, options);
       case NotifyType.EMAIL:
-        return await sendEmailNotify(message, options);
+        await sendEmailNotification({
+          to: options.to,
+          subject: options.subject || 'Strawberry Marketplace 通知',
+          text: options.text || message,
+          html: options.html,
+        }, options.config);
+        break;
       case NotifyType.WEBHOOK:
         return await sendWebhookNotify(message, options);
       default:

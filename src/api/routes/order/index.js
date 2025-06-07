@@ -89,55 +89,61 @@ const { sanitizeObject } = require('../../../utils/sanitize');
 router.get('/', 
   apiKeyAuth,
   authenticateJWT,
-  asyncHandler(async (req, res) => {
-    logger.info('Fetching orders');
-    let orders;
-    if (req.user.role === 'admin') {
-      orders = OrderRepository.getAll();
-    } else if (req.user.role === 'provider') {
-      orders = OrderRepository.getAll().filter(o => o.providerId === req.user.id);
-    } else {
-      orders = OrderRepository.getByUserId(req.user.id);
-    }
-    const status = req.query.status;
-    if (status) {
-      orders = orders.filter(order => order.status === status);
-    }
-    const sortBy = req.query.sortBy || 'createdAt';
-    const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
-    orders.sort((a, b) => {
-      if (a[sortBy] < b[sortBy]) return -1 * sortDir;
-      if (a[sortBy] > b[sortBy]) return 1 * sortDir;
-      return 0;
-    });
-    // 5分単価・現金換算を付与
-    const SATOSHI_TO_JPY = 0.0001;
-    const ordersWithPricing = orders.map(order => {
-      let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-      if (!pricePerHour && order.gpuId) {
-        try {
-          const GpuRepository = require('../../../db/json/GpuRepository');
-          const gpu = GpuRepository.getById(order.gpuId);
-          if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-        } catch {}
+  asyncHandler(async (req, res, next) => {
+    try {
+      logger.info('Fetching orders');
+      let orders;
+      if (req.user.role === 'admin') {
+        orders = OrderRepository.getAll();
+      } else if (req.user.role === 'provider') {
+        orders = OrderRepository.getAll().filter(o => o.providerId === req.user.id);
+      } else {
+        orders = OrderRepository.getByUserId(req.user.id);
       }
-      const durationMinutes = order.durationMinutes || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * (durationMinutes / 5);
-      const totalPriceJPY = Math.round(totalPrice * SATOSHI_TO_JPY);
-      return {
-        ...order,
-        pricePerHour,
-        pricePer5Min,
-        totalPrice,
-        totalPriceJPY
-      };
-    });
-    res.json({
-      message: 'Fetched orders',
-      total: ordersWithPricing.length,
-      orders: ordersWithPricing
-    });
+      const status = req.query.status;
+      if (status) {
+        orders = orders.filter(order => order.status === status);
+      }
+      const sortBy = req.query.sortBy || 'createdAt';
+      const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
+      orders.sort((a, b) => {
+        if (a[sortBy] < b[sortBy]) return -1 * sortDir;
+        if (a[sortBy] > b[sortBy]) return 1 * sortDir;
+        return 0;
+      });
+      // リアルタイムBTC/JPY換算
+      const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
+      const satoshiToJPY = await getBTCtoJPYRate();
+      const ordersWithPricing = orders.map(order => {
+        let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
+        if (!pricePerHour && order.gpuId) {
+          try {
+            const GpuRepository = require('../../../db/json/GpuRepository');
+            const gpu = GpuRepository.getById(order.gpuId);
+            if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
+          } catch {}
+        }
+        const durationMinutes = order.durationMinutes || 0;
+        const pricePer5Min = pricePerHour / 12;
+        const totalPrice = pricePer5Min * (durationMinutes / 5);
+        // 冗長化為替APIで換算（キャッシュ活用）
+        const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+        return {
+          ...order,
+          pricePerHour,
+          pricePer5Min,
+          totalPrice,
+          totalPriceJPY
+        };
+      });
+      res.json({
+        message: 'Fetched orders',
+        total: ordersWithPricing.length,
+        orders: ordersWithPricing
+      });
+    } catch (error) {
+      next(error);
+    }
   })
 );
 
@@ -148,18 +154,19 @@ router.post('/:id/heartbeat',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     const { role } = req.body;
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!['lender', 'renter'].includes(role)) {
-      return res.status(400).json({ error: 'role must be lender or renter' });
+      throw new APIError(ErrorTypes.VALIDATION, 'role must be lender or renter', 400);
     }
     // オーダー取得
     const order = OrderRepository.getById(orderId);
     if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
     // 権限チェック
     if ((role === 'lender' && req.user.id !== order.providerId) ||
         (role === 'renter' && req.user.id !== order.userId)) {
-      return res.status(403).json({ error: 'No permission for this order as this role' });
+      throw new APIError(ErrorTypes.FORBIDDEN, 'No permission for this order as this role', 403);
     }
     // セッション取得または作成
     let session = usageSessions.get(orderId);
@@ -176,34 +183,40 @@ router.post('/:id/heartbeat',
 router.get('/:id',
   apiKeyAuth,
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
-  asyncHandler(async (req, res) => {
-    logger.info(`Fetching order detail: ${req.params.id}`);
-    const order = req.resource;
-    let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-    if (!pricePerHour && order.gpuId) {
-      try {
-        const GpuRepository = require('../../../db/json/GpuRepository');
-        const gpu = GpuRepository.getById(order.gpuId);
-        if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-      } catch {}
-    }
-    const durationMinutes = order.durationMinutes || 0;
-    const pricePer5Min = pricePerHour / 12;
-    const totalPrice = pricePer5Min * (durationMinutes / 5);
-    const SATOSHI_TO_JPY = 0.0001;
-    const totalPriceJPY = Math.round(totalPrice * SATOSHI_TO_JPY);
-    res.json({
-      message: 'Fetched order detail',
-      order: {
-        ...order,
-        pricePerHour,
-        pricePer5Min,
-        totalPrice,
-        totalPriceJPY
+  asyncHandler(async (req, res, next) => {
+    try {
+      logger.info(`Fetching order detail: ${req.params.id}`);
+      const order = req.resource;
+      let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
+      if (!pricePerHour && order.gpuId) {
+        try {
+          const GpuRepository = require('../../../db/json/GpuRepository');
+          const gpu = GpuRepository.getById(order.gpuId);
+          if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
+        } catch {}
       }
-    });
+      const durationMinutes = order.durationMinutes || 0;
+      const pricePer5Min = pricePerHour / 12;
+      const totalPrice = pricePer5Min * (durationMinutes / 5);
+      // 冗長化為替APIで換算（キャッシュ活用）
+      const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
+      const satoshiToJPY = await getBTCtoJPYRate();
+      const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+      res.json({
+        message: 'Fetched order detail',
+        order: {
+          ...order,
+          pricePerHour,
+          pricePer5Min,
+          totalPrice,
+          totalPriceJPY
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
   })
 );
 
@@ -211,7 +224,7 @@ router.get('/:id',
 router.put('/:id',
   apiKeyAuth,
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
@@ -237,18 +250,19 @@ router.put('/:id',
 // オーダー削除 (認証必須)
 router.delete('/:id',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
     logger.info(`Deleting order: ${order.id}`);
     // 状態チェック
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!['pending', 'matched'].includes(order.status)) {
-      return res.status(400).json({ error: 'Only pending or matched orders can be deleted' });
+      throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
     }
     const deleted = OrderRepository.delete(order.id);
     if (!deleted) {
-      return res.status(404).json({ error: 'Order not found' });
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
     logger.info(`Order deleted: ${order.id}`);
     res.json({ message: 'Order deleted', orderId: order.id });
@@ -299,7 +313,7 @@ router.post('/',
     // 5分単価
     const pricePer5Min = pricePerHour / 12;
     const totalPrice = pricePer5Min * (durationMinutes / 5);
-    // リアルタイムBTC/JPY換算
+    // 冗長化為替APIで換算（キャッシュ活用）
     const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
     const satoshiToJPY = await getBTCtoJPYRate();
     const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
@@ -310,24 +324,32 @@ router.post('/',
     // 通知サービス呼び出し
     const { sendNotification, NotifyType } = require('../../../utils/notifier');
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;
+    // メール通知（ユーザーのメールアドレスが取得できる場合のみ）
+    if (req.user.email) {
+      sendNotification(NotifyType.EMAIL, notifyMsg, {
+        to: req.user.email,
+        subject: `【Strawberry】新規注文 #${createdOrder.id} 受付通知`,
+        text: notifyMsg
+      }).catch(() => {});
+    }
     // 環境変数から通知先を取得（例: LINE_TOKEN, DISCORD_WEBHOOK, SLACK_WEBHOOK, GENERIC_WEBHOOK）
     if (process.env.LINE_TOKEN) {
-      sendNotification(NotifyType.LINE, notifyMsg, { token: process.env.LINE_TOKEN }).catch(()=>{});
+      sendNotification(NotifyType.LINE, notifyMsg, { token: process.env.LINE_TOKEN }).catch(() => {});
     }
     if (process.env.DISCORD_WEBHOOK) {
-      sendNotification(NotifyType.DISCORD, notifyMsg, { webhookUrl: process.env.DISCORD_WEBHOOK }).catch(()=>{});
+      sendNotification(NotifyType.DISCORD, notifyMsg, { webhookUrl: process.env.DISCORD_WEBHOOK }).catch(() => {});
     }
     if (process.env.SLACK_WEBHOOK) {
-      sendNotification(NotifyType.SLACK, notifyMsg, { webhookUrl: process.env.SLACK_WEBHOOK }).catch(()=>{});
+      sendNotification(NotifyType.SLACK, notifyMsg, { webhookUrl: process.env.SLACK_WEBHOOK }).catch(() => {});
     }
     if (process.env.GENERIC_WEBHOOK) {
-      sendNotification(NotifyType.WEBHOOK, notifyMsg, { webhookUrl: process.env.GENERIC_WEBHOOK }).catch(()=>{});
+      sendNotification(NotifyType.WEBHOOK, notifyMsg, { webhookUrl: process.env.GENERIC_WEBHOOK }).catch(() => {});
     }
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
       sendNotification(NotifyType.TELEGRAM, notifyMsg, {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
         chatId: process.env.TELEGRAM_CHAT_ID
-      }).catch(()=>{});
+      }).catch(() => {});
     }
     // Googleカレンダー連携（非同期で実行、失敗はログのみ）
     try {
@@ -370,6 +392,7 @@ router.post('/',
 // マッチング要求 (認証必須)
 router.post('/:id/match', 
   authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Requesting matching for order: ${orderId}`);
@@ -430,8 +453,11 @@ router.post('/:id/match',
 );
 
 // オーダー実行開始 (認証必須)
+const Joi = require('joi');
+
 router.post('/:id/start', 
   authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Starting order execution: ${orderId}`);
@@ -439,13 +465,14 @@ router.post('/:id/start',
     // オーダー情報を取得
     const order = await p2pNetwork.getOrderById(orderId);
     
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
     
     // オーダーの所有者確認
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      return res.status(403).json({ error: 'You do not have permission to start this order' });
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to start this order', 403);
     }
     
     // オーダーがmatched状態であることを確認
@@ -460,10 +487,7 @@ router.post('/:id/start',
     const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
     
     if (!allocation.success) {
-      return res.status(500).json({ 
-        error: 'Failed to allocate GPU',
-        details: allocation.message
-      });
+      throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation.message });
     }
     
     // オーダーステータスを更新
@@ -483,6 +507,7 @@ router.post('/:id/start',
 // オーダー実行終了 (認証必須)
 router.post('/:id/stop', 
   authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
@@ -490,21 +515,24 @@ router.post('/:id/stop',
     // オーダー情報を取得
     const order = await p2pNetwork.getOrderById(orderId);
     
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
     
     // オーダーの所有者確認
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      return res.status(403).json({ error: 'You do not have permission to stop this order' });
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
     }
     
     // オーダーがactive状態であることを確認
     if (order.status !== 'active') {
-      return res.status(400).json({ 
-        error: 'Order cannot be stopped',
-        details: `Current status: ${order.status}`
-      });
+      throw new APIError(
+        ErrorTypes.VALIDATION,
+        'Order cannot be stopped',
+        400,
+        { details: `Current status: ${order.status}` }
+      );
     }
     
     // GPUを解放

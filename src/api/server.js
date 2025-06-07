@@ -2,6 +2,9 @@
 const express = require('express');
 const path = require('path');
 const routes = require('./routes');
+const masterAuthRouter = require('./routes/master-auth');
+const paymentRouter = require('./routes/payment');
+const profitAddressesRouter = require('./routes/profit-addresses');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
@@ -40,6 +43,9 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // 静的ファイル
 app.use(express.static(path.join(__dirname, '../../public')));
+
+// マスター認証ルート（/master-auth）
+app.use('/master-auth', masterAuth.router);
 
 // リクエストロギング
 app.use(responseTime);

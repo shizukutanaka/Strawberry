@@ -26,16 +26,13 @@ router.post('/invoice',
     logger.info(`Creating invoice for ${amount} satoshis`);
     
     // 金額の範囲をチェック
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (amount < config.lightning.minPaymentSatoshis) {
-      return res.status(400).json({ 
-        error: `Amount too small. Minimum: ${config.lightning.minPaymentSatoshis} satoshis` 
-      });
+      throw new APIError(ErrorTypes.VALIDATION, `Amount too small. Minimum: ${config.lightning.minPaymentSatoshis} satoshis`, 400);
     }
     
     if (amount > config.lightning.maxPaymentSatoshis) {
-      return res.status(400).json({ 
-        error: `Amount too large. Maximum: ${config.lightning.maxPaymentSatoshis} satoshis` 
-      });
+      throw new APIError(ErrorTypes.VALIDATION, `Amount too large. Maximum: ${config.lightning.maxPaymentSatoshis} satoshis`, 400);
     }
     
     // インボイスを作成
@@ -144,8 +141,9 @@ router.get('/invoice/:id',
     // インボイス状態を確認
     const invoiceStatus = await lightning.checkInvoice(invoiceId);
     
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!invoiceStatus) {
-      return res.status(404).json({ error: 'Invoice not found' });
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Invoice not found', 404);
     }
     
     res.json({
@@ -336,14 +334,15 @@ router.post('/manual/approve/:id',
     const paymentId = req.params.id;
     const PaymentRepository = require('../../../db/json/PaymentRepository');
     const payment = PaymentRepository.getById(paymentId);
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!payment) {
-      return res.status(404).json({ error: 'Payment not found' });
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Payment not found', 404);
     }
     if (payment.method === 'lightning') {
-      return res.status(400).json({ error: 'Lightning payments cannot be manually approved' });
+      throw new APIError(ErrorTypes.VALIDATION, 'Lightning payments cannot be manually approved', 400);
     }
     if (payment.status === 'paid') {
-      return res.status(400).json({ error: 'Payment already marked as paid' });
+      throw new APIError(ErrorTypes.VALIDATION, 'Payment already marked as paid', 400);
     }
     const updated = PaymentRepository.update(paymentId, {
       ...payment,

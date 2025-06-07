@@ -1,0 +1,20 @@
+# Strawberry OSS公開用 .gitignore
+.env
+.env.*
+node_modules/
+logs/
+data/
+openapi.json
+*.log
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
+dist/
+build/
+.idea/
+.vscode/
+.swp
+*.bak
+*.tmp

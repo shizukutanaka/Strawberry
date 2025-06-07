@@ -351,10 +351,18 @@ const Dashboard = ({ systemStats, localGPUs, activeRentals }) => {
 
   if (!stats) return null;
 
+  // SLA・障害履歴状態
+  const [sla, setSla] = useState({ uptimeRate: 1, up: 0, down: 0, total: 0 });
+  const [anomalies, setAnomalies] = useState([]);
+  useEffect(() => {
+    fetch('/api/sla').then(r => r.json()).then(setSla);
+    fetch('/api/anomalies').then(r => r.json()).then(setAnomalies);
+  }, []);
+
   return (
     <div className="space-y-6">
-      {/* 統計カード */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* 統計カード＋SLA */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <StatCard
           title="Total GPUs"
           value={stats.totalGPUs}
@@ -380,10 +388,17 @@ const Dashboard = ({ systemStats, localGPUs, activeRentals }) => {
           icon={TrendingUp}
           color="purple"
         />
+        <StatCard
+          title="SLA (Uptime)"
+          value={`${(sla.uptimeRate * 100).toFixed(2)}%`}
+          icon={Shield}
+          color={sla.uptimeRate > 0.995 ? 'green' : sla.uptimeRate > 0.98 ? 'yellow' : 'red'}
+          subtitle={`障害: ${sla.down}`}
+        />
       </div>
 
-      {/* GPU状態 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* GPU状態＋障害履歴 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-gray-800 rounded-lg p-6">
           <h3 className="text-lg font-semibold mb-4">GPU Performance</h3>
           <div className="space-y-4">
@@ -404,7 +419,7 @@ const Dashboard = ({ systemStats, localGPUs, activeRentals }) => {
           </div>
         </div>
 
-        <div className="bg-gray-800 rounded-lg p-6">
+        <div className="bg-gray-800 rounded-lg p-6 lg:col-span-1">
           <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
           <div className="space-y-3">
             {activeRentals.slice(0, 5).map((rental, index) => (
@@ -422,6 +437,20 @@ const Dashboard = ({ systemStats, localGPUs, activeRentals }) => {
             {activeRentals.length === 0 && (
               <p className="text-gray-400 text-center py-4">No active rentals</p>
             )}
+          </div>
+        </div>
+
+        <div className="bg-gray-800 rounded-lg p-6 lg:col-span-1">
+          <h3 className="text-lg font-semibold mb-4">障害履歴（直近）</h3>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {anomalies.length === 0 && <p className="text-gray-400">障害履歴なし</p>}
+            {anomalies.slice(0, 10).map((a, i) => (
+              <div key={i} className="flex items-center text-xs border-b border-gray-700 py-1 last:border-0">
+                <AlertCircle className="text-red-400 mr-2" size={16} />
+                <span>{a.type}</span>
+                <span className="ml-2 text-gray-400">{new Date(a.time).toLocaleString()}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -564,18 +593,38 @@ const Marketplace = ({ availableGPUs, onRentGPU }) => {
   const [filters, setFilters] = useState({
     minVRAM: 0,
     maxPrice: 100,
-    gpuModel: ''
+    gpuModel: '',
+    status: 'all',
+    sort: 'price', // 並び替え
   });
   const [selectedGPU, setSelectedGPU] = useState(null);
   const [rentalDuration, setRentalDuration] = useState(1);
+  const [btcToJpy, setBtcToJpy] = useState(null);
 
+  // BTC/JPYレートを取得
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/exchange-rate');
+        const data = await res.json();
+        setBtcToJpy(data.rate || 0);
+      } catch {}
+    })();
+  }, []);
+
+  // 並び替え・フィルタ
   const filteredGPUs = useMemo(() => {
-    return availableGPUs.filter(gpu => {
+    let arr = availableGPUs.filter(gpu => {
       if (filters.minVRAM && gpu.vram < filters.minVRAM) return false;
       if (filters.maxPrice && gpu.pricing?.hourlyRate > filters.maxPrice) return false;
       if (filters.gpuModel && !gpu.name.toLowerCase().includes(filters.gpuModel.toLowerCase())) return false;
+      if (filters.status !== 'all' && gpu.status !== filters.status) return false;
       return true;
     });
+    if (filters.sort === 'price') arr = arr.sort((a,b) => (a.pricing?.hourlyRate||0)-(b.pricing?.hourlyRate||0));
+    if (filters.sort === 'vram') arr = arr.sort((a,b) => (b.vram||0)-(a.vram||0));
+    if (filters.sort === 'latency') arr = arr.sort((a,b) => (a.latency||999)-(b.latency||999));
+    return arr;
   }, [availableGPUs, filters]);
 
   const handleRent = async () => {
@@ -587,11 +636,27 @@ const Marketplace = ({ availableGPUs, onRentGPU }) => {
     }
   };
 
+  // 稼働状況バッジ
+  const renderStatusBadge = (status) => {
+    if (status === 'active') return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-700 text-green-100 mr-2">稼働中</span>;
+    if (status === 'maintenance') return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-700 text-yellow-100 mr-2">メンテ中</span>;
+    if (status === 'error') return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-700 text-red-100 mr-2">障害</span>;
+    return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-700 text-gray-100 mr-2">不明</span>;
+  };
+
+  // 障害履歴アイコン
+  const renderErrorIcon = (gpu) => {
+    if (gpu.errorCount && gpu.errorCount > 0) {
+      return <span title={`過去${gpu.errorCount}回の障害`} className="ml-1 text-red-400"><AlertCircle size={16} /></span>;
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-6">
-      {/* フィルター */}
+      {/* フィルター＋並び替え */}
       <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm text-gray-400 mb-2">Minimum VRAM (GB)</label>
             <input
@@ -624,6 +689,31 @@ const Marketplace = ({ availableGPUs, onRentGPU }) => {
               placeholder="e.g. RTX 4090"
             />
           </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Status</label>
+            <select
+              value={filters.status}
+              onChange={e => setFilters({ ...filters, status: e.target.value })}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white"
+            >
+              <option value="all">全て</option>
+              <option value="active">稼働中</option>
+              <option value="maintenance">メンテ中</option>
+              <option value="error">障害</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-2">Sort</label>
+            <select
+              value={filters.sort}
+              onChange={e => setFilters({ ...filters, sort: e.target.value })}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white"
+            >
+              <option value="price">価格が安い順</option>
+              <option value="vram">VRAMが多い順</option>
+              <option value="latency">遅延が少ない順</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -633,13 +723,23 @@ const Marketplace = ({ availableGPUs, onRentGPU }) => {
           <div key={gpu.id} className="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-pink-500 transition-colors">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold">{gpu.name}</h3>
+                <h3 className="text-lg font-semibold flex items-center">
+                  {renderStatusBadge(gpu.status)}
+                  {gpu.name}
+                  {renderErrorIcon(gpu)}
+                </h3>
                 <p className="text-sm text-gray-400">{(gpu.vram / 1024).toFixed(0)} GB VRAM</p>
               </div>
               <div className="text-right">
                 <p className="text-xl font-bold text-green-500">
                   ${gpu.pricing?.hourlyRate || 0}/hr
                 </p>
+                {btcToJpy && (
+                  <p className="text-xs text-yellow-400 flex items-center justify-end">
+                    <Bitcoin size={14} className="mr-1" />
+                    {(gpu.pricing?.hourlyRate / btcToJpy).toFixed(6)} BTC/hr
+                  </p>
+                )}
                 <p className="text-xs text-gray-400">Min {gpu.pricing?.minimumDuration || 1}h</p>
               </div>
             </div>
@@ -708,6 +808,12 @@ const Marketplace = ({ availableGPUs, onRentGPU }) => {
                   <span className="text-gray-400">Rate</span>
                   <span>${selectedGPU.pricing?.hourlyRate}/hr</span>
                 </div>
+                {btcToJpy && (
+                  <div className="flex justify-between mb-2">
+                    <span className="text-gray-400">Rate (BTC)</span>
+                    <span>{(selectedGPU.pricing?.hourlyRate / btcToJpy).toFixed(6)} BTC/hr</span>
+                  </div>
+                )}
                 <div className="flex justify-between mb-2">
                   <span className="text-gray-400">Duration</span>
                   <span>{rentalDuration} hours</span>
@@ -719,6 +825,12 @@ const Marketplace = ({ availableGPUs, onRentGPU }) => {
                       ${(selectedGPU.pricing?.hourlyRate * rentalDuration).toFixed(2)}
                     </span>
                   </div>
+                  {btcToJpy && (
+                    <div className="flex justify-between font-semibold text-yellow-400 mt-1">
+                      <span>Total (BTC)</span>
+                      <span>{((selectedGPU.pricing?.hourlyRate * rentalDuration) / btcToJpy).toFixed(6)} BTC</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1037,6 +1149,42 @@ const Wallet = ({ api }) => {
 // Settings コンポーネント
 const Settings = ({ settings, onSave }) => {
   const [localSettings, setLocalSettings] = useState(settings);
+  // 通知チャネル設定
+  const [notifSettings, setNotifSettings] = useState({
+    lineToken: '', discordWebhook: '', slackWebhook: '', telegramBotToken: '', telegramChatId: '', email: '', genericWebhook: '', enabled: {}
+  });
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifSaved, setNotifSaved] = useState(false);
+  const userId = settings?.userId || 'default';
+
+  useEffect(() => {
+    // 通知設定初期取得
+    setNotifLoading(true);
+    fetch(`/notification-settings/${userId}`)
+      .then(r => r.json())
+      .then(data => { setNotifSettings({ ...notifSettings, ...data }); setNotifLoading(false); })
+      .catch(() => setNotifLoading(false));
+  }, [userId]);
+
+  const handleNotifChange = (field, value) => {
+    setNotifSettings(s => ({ ...s, [field]: value }));
+  };
+  const handleNotifToggle = (channel) => {
+    setNotifSettings(s => ({ ...s, enabled: { ...s.enabled, [channel]: !s.enabled?.[channel] } }));
+  };
+  const handleNotifSave = () => {
+    setNotifLoading(true);
+    fetch(`/notification-settings/${userId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(notifSettings)
+    })
+      .then(r => r.json())
+      .then(() => { setNotifSaved(true); setNotifLoading(false); setTimeout(()=>setNotifSaved(false), 1500); })
+      .catch(() => setNotifLoading(false));
+  };
+
+  const [localSettings, setLocalSettings] = useState(settings);
 
   const handleSave = () => {
     onSave(localSettings);
@@ -1097,9 +1245,50 @@ const Settings = ({ settings, onSave }) => {
         </div>
       </div>
 
+      <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mt-8">
+        <h3 className="text-lg font-semibold mb-4">通知チャネル設定</h3>
+        <div className="space-y-4">
+          {[
+            { key: 'lineToken', label: 'LINE Notify', type: 'text', enabledKey: 'line' },
+            { key: 'discordWebhook', label: 'Discord Webhook', type: 'text', enabledKey: 'discord' },
+            { key: 'slackWebhook', label: 'Slack Webhook', type: 'text', enabledKey: 'slack' },
+            { key: 'telegramBotToken', label: 'Telegram Bot Token', type: 'text', enabledKey: 'telegram' },
+            { key: 'telegramChatId', label: 'Telegram Chat ID', type: 'text', enabledKey: 'telegram' },
+            { key: 'email', label: '通知用メールアドレス', type: 'email', enabledKey: 'email' },
+            { key: 'genericWebhook', label: '汎用Webhook URL', type: 'text', enabledKey: 'genericWebhook' }
+          ].map(({ key, label, type, enabledKey }) => (
+            <div key={key} className="flex items-center gap-4">
+              <input
+                type="checkbox"
+                checked={!!notifSettings.enabled?.[enabledKey]}
+                onChange={() => handleNotifToggle(enabledKey)}
+                className="accent-pink-600"
+                id={`notif-enable-${enabledKey}`}
+              />
+              <label htmlFor={`notif-enable-${enabledKey}`} className="w-40 font-medium">{label}</label>
+              <input
+                type={type}
+                value={notifSettings[key] || ''}
+                onChange={e => handleNotifChange(key, e.target.value)}
+                className="flex-1 bg-gray-700 text-white rounded px-3 py-2 border border-gray-600 focus:outline-pink-500"
+                placeholder={label}
+                disabled={!notifSettings.enabled?.[enabledKey]}
+              />
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={handleNotifSave}
+          className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg mt-6 transition-colors disabled:opacity-60"
+          disabled={notifLoading}
+        >
+          {notifLoading ? '保存中...' : notifSaved ? '保存しました！' : '通知設定を保存'}
+        </button>
+      </div>
+
       <button
         onClick={handleSave}
-        className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg transition-colors"
+        className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg transition-colors mt-8"
       >
         Save Settings
       </button>

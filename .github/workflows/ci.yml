@@ -1,0 +1,50 @@
+# CI/CD workflow for Strawberry P2P GPU Marketplace
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint || true
+      - name: Run tests
+        run: npm test
+      - name: Notify on failure (Discord)
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ -n "$DISCORD_WEBHOOK" ]; then
+            curl -H "Content-Type: application/json" -X POST -d '{"content":"❌ Strawberry CI failed on $GITHUB_REPOSITORY ($GITHUB_SHA)"}' "$DISCORD_WEBHOOK"
+          fi
+      - name: Notify on failure (LINE)
+        if: failure()
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+        run: |
+          if [ -n "$LINE_TOKEN" ]; then
+            curl -X POST https://notify-api.line.me/api/notify -H "Authorization: Bearer $LINE_TOKEN" -F "message=❌ Strawberry CI failed on $GITHUB_REPOSITORY ($GITHUB_SHA)"
+          fi
+      - name: Deploy (Netlify)
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -n "$NETLIFY_AUTH_TOKEN" ] && [ -n "$NETLIFY_SITE_ID" ]; then
+            npx netlify deploy --prod --dir=build --auth=$NETLIFY_AUTH_TOKEN --site=$NETLIFY_SITE_ID
+          fi

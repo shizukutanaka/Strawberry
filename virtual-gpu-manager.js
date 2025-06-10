@@ -9,6 +9,34 @@ const fs = require('fs').promises;
 const path = require('path');
 
 class VirtualGPUManager extends EventEmitter {
+    /**
+     * サービス死活判定: 初期化・仮想GPU数・プラットフォームごとの稼働状況を総合判定
+     * @returns {Promise<boolean>}
+     */
+    async isHealthy() {
+        // 1. initializedフラグ
+        if (!this.initialized) return false;
+        // 2. 仮想GPUが1つ以上管理されているか
+        if (!this.virtualGPUs || this.virtualGPUs.size === 0) return false;
+        // 3. プラットフォームごとの追加チェック（例: Docker/k8sならAPI応答）
+        if (this.platform === 'docker') {
+            try {
+                await this.docker.ping();
+            } catch (e) {
+                return false;
+            }
+        }
+        if (this.platform === 'kubernetes') {
+            try {
+                if (!this.k8sApi) return false;
+                await this.k8sApi.listPodForAllNamespaces();
+            } catch (e) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     constructor() {
         super();
         this.docker = new Docker();

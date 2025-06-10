@@ -4,43 +4,81 @@ const { APIError, ErrorTypes } = require('./error-handler');
 
 // 共通バリデーションスキーマ
 const schemas = {
+  // Lightningノード情報
+  lightningNode: Joi.object({
+    pubkey: Joi.string().required(),
+    alias: Joi.string().required(),
+    activeChannels: Joi.number().min(0).required(),
+    peers: Joi.number().min(0).required(),
+    blockHeight: Joi.number().min(0).required(),
+    synced: Joi.boolean().required(),
+    version: Joi.string().required(),
+    network: Joi.string().valid('mainnet', 'testnet', 'regtest', 'simnet').required(),
+    uris: Joi.array().items(Joi.string())
+  }),
+  // Lightningチャネル情報
+  lightningChannel: Joi.object({
+    active: Joi.boolean().required(),
+    remotePubkey: Joi.string().required(),
+    channelPoint: Joi.string().required(),
+    chanId: Joi.string().required(),
+    capacity: Joi.number().min(0).required(),
+    localBalance: Joi.number().min(0).required(),
+    remoteBalance: Joi.number().min(0).required(),
+    totalSent: Joi.number().min(0),
+    totalReceived: Joi.number().min(0),
+    unsettledBalance: Joi.number().min(0)
+  }),
   // GPU関連
   gpu: {
     // GPU登録用スキーマ
     register: Joi.object({
-      id: Joi.string().required(),
-      name: Joi.string().required(),
-      vendor: Joi.string().required(),
-      memoryGB: Joi.number().min(1).required(),
-      clockMHz: Joi.number().min(100).required(),
-      powerWatt: Joi.number().min(1).required(),
-      pricePerHour: Joi.number().min(0.00001).required(),
-      availability: Joi.object({
-        startTime: Joi.date().iso(),
-        endTime: Joi.date().iso(),
-        hoursPerDay: Joi.number().min(1).max(24),
-        daysAvailable: Joi.array().items(Joi.number().min(0).max(6))
-      }),
-      features: Joi.object({
-        cudaSupport: Joi.boolean(),
-        openCLSupport: Joi.boolean(),
-        directXSupport: Joi.boolean(),
-        tensorCores: Joi.boolean(),
-        rayTracingCores: Joi.boolean()
-      }),
-      location: Joi.object({
-        country: Joi.string(),
-        region: Joi.string(),
-        city: Joi.string(),
-        latitude: Joi.number().min(-90).max(90),
-        longitude: Joi.number().min(-180).max(180)
-      }),
-      performance: Joi.object({
-        benchmarkScore: Joi.number(),
-        teraflops: Joi.number(),
-        hashrate: Joi.number()
-      })
-    }),
+  id: Joi.string().required(),
+  name: Joi.string().required(),
+  vendor: Joi.string().valid('NVIDIA', 'AMD', 'Intel').required(),
+  model: Joi.string().required(),
+  apiType: Joi.string().valid('CUDA', 'ROCm', 'oneAPI', 'OpenCL').required(),
+  driverVersion: Joi.string().required(),
+  os: Joi.string().required(),
+  arch: Joi.string().valid('x86_64', 'arm64', 'aarch64', 'x86', 'arm').required(),
+  memoryGB: Joi.number().min(1).required(),
+  clockMHz: Joi.number().min(100).required(),
+  powerWatt: Joi.number().min(1).required(),
+  pricePerHour: Joi.number().min(0.00001).required(),
+  availability: Joi.object({
+    startTime: Joi.date().iso(),
+    endTime: Joi.date().iso(),
+    hoursPerDay: Joi.number().min(1).max(24),
+    daysAvailable: Joi.array().items(Joi.number().min(0).max(6))
+  }),
+  features: Joi.object({
+    cudaSupport: Joi.boolean(),
+    openCLSupport: Joi.boolean(),
+    rocmSupport: Joi.boolean(),
+    oneAPISupport: Joi.boolean(),
+    directXSupport: Joi.boolean(),
+    tensorCores: Joi.boolean(),
+    rayTracingCores: Joi.boolean()
+  }),
+  capabilities: Joi.object({
+    cuda: Joi.boolean(),
+    opencl: Joi.boolean(),
+    rocm: Joi.boolean(),
+    oneapi: Joi.boolean()
+  }),
+  location: Joi.object({
+    country: Joi.string(),
+    region: Joi.string(),
+    city: Joi.string(),
+    latitude: Joi.number().min(-90).max(90),
+    longitude: Joi.number().min(-180).max(180)
+  }),
+  performance: Joi.object({
+    benchmarkScore: Joi.number(),
+    teraflops: Joi.number(),
+    hashrate: Joi.number()
+  })
+}),
     
     // GPU検索用スキーマ
     search: Joi.object({

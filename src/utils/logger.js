@@ -2,6 +2,7 @@
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
+const { sanitizeSensitiveFields } = require('./sanitize');
 
 // ログディレクトリ
 const logDir = path.join(__dirname, '../../logs');
@@ -25,17 +26,37 @@ const logger = winston.createLogger({
       format: winston.format.combine(
         winston.format.colorize(),
         winston.format.printf(
-          info => `${info.timestamp} ${info.level}: ${info.message}`
+          info => `${info.timestamp} ${info.level}: ${typeof info.message === 'object' ? JSON.stringify(sanitizeSensitiveFields(info.message)) : info.message}`
         )
       )
     }),
     // ファイル出力
     new winston.transports.File({ 
       filename: path.join(logDir, 'error.log'), 
-      level: 'error' 
+      level: 'error',
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json(),
+        winston.format((info) => {
+          if (typeof info.message === 'object') {
+            info.message = sanitizeSensitiveFields(info.message);
+          }
+          return info;
+        })()
+      )
     }),
     new winston.transports.File({ 
-      filename: path.join(logDir, 'combined.log') 
+      filename: path.join(logDir, 'combined.log'),
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json(),
+        winston.format((info) => {
+          if (typeof info.message === 'object') {
+            info.message = sanitizeSensitiveFields(info.message);
+          }
+          return info;
+        })()
+      )
     })
   ]
 });
@@ -60,20 +81,10 @@ logger.gpuEvent = (event, data) => {
   const logEntry = {
     timestamp,
     event,
-    data
+    data: sanitizeSensitiveFields(data),
   };
-  
-  // 非同期でファイルに追記
-  fs.appendFile(
-    gpuLogPath,
-    JSON.stringify(logEntry) + '\n',
-    (err) => {
-      if (err) {
-        logger.error('Failed to write GPU event log:', err);
-      }
-    }
-  );
-  
+  fs.appendFileSync(gpuLogPath, JSON.stringify(logEntry) + '\n');
+  logger.info(`GPU Event: ${event}`, sanitizeSensitiveFields(data));
   // 通常のログにも記録
   logger.info(`GPU Event: ${event}`, data);
 };

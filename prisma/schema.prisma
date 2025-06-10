@@ -1,0 +1,41 @@
+// Strawberry DB schema for Prisma ORM
+// SQLite3 (default) or PostgreSQL/MySQLに対応
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Feedback {
+  id        Int      @id @default(autoincrement())
+  title     String
+  detail    String
+  priority  String
+  status    String
+  assignee  String?
+  due       DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Task {
+  id        Int      @id @default(autoincrement())
+  title     String
+  status    String
+  assignee  String?
+  due       DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

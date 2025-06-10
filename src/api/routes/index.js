@@ -1,6 +1,8 @@
 // src/api/routes/index.js - APIルートのエントリポイント
 const express = require('express');
 const router = express.Router();
+const jwtAuth = require('../middleware/jwt-auth');
+const rbac = require('../middleware/rbac');
 const cors = require('cors');
 const helmet = require('helmet');
 const { logger } = require('../../utils/logger');
@@ -16,6 +18,7 @@ const { ExtendedGPUDetector } = require('../../core/gpu-detector-extended');
 const { VirtualGPUManager } = require('../../../virtual-gpu-manager');
 const { P2PNetwork } = require('../../../p2p-network');
 const { LightningService } = require('../../../lightning-service');
+const { cacheMiddleware, purgeCache } = require('../middleware/cache');
 
 // シングルトンで1インスタンスずつ生成
 const gpuDetector = new ExtendedGPUDetector();
@@ -59,6 +62,11 @@ router.use(cors({
 // --- レートリミット ---
 const rateLimit = require('../middleware/rate-limit');
 router.use(rateLimit);
+// --- JWT認証を全ルートに適用（/system/info以外） ---
+router.use((req, res, next) => {
+  if (req.path === '/system/info') return next();
+  jwtAuth(req, res, next);
+});
 // --- 監査ログ ---
 const auditLogger = require('../middleware/audit');
 router.use(auditLogger);
@@ -69,8 +77,38 @@ router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 
-// システム情報取得
-router.get('/system/info', asyncHandler(async (req, res) => {
+// Lightningノード情報API
+router.get('/node-info', cacheMiddleware(), async (req, res) => {
+  try {
+    const info = await lightning.getNodeInfo();
+    res.json(info);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to get node info' });
+  }
+});
+
+// Lightningチャネル情報API
+router.get('/channels', cacheMiddleware(), async (req, res) => {
+  try {
+    const channels = Array.from(lightning.channels.values());
+    res.json(channels);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to get channels' });
+  }
+});
+
+// キャッシュ全体パージAPI（管理者のみ）
+router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {
+  try {
+    purgeCache();
+    res.status(200).json({ message: 'Cache purged' });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to purge cache' });
+  }
+});
+
+// システム情報取得（adminのみ許可）
+router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   // システム情報を取得
   const systemInfo = {
     platform: process.platform,

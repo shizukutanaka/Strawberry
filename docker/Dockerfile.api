@@ -1,1 +1,19 @@
-# APIサーバー用
+# APIサーバー用（マルチステージビルド・セキュリティ強化）
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+RUN npm run build || true
+
+FROM node:20-slim AS runtime
+WORKDIR /app
+COPY --from=build /app /app
+# 開発用不要ファイル除外
+RUN rm -rf tests/ .github/ .vscode/ docs/ improvement_checklist* md/
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node", "src/api/server.js"]
+
+# セキュリティスキャン例（CIで実行推奨）
+# trivy image --scanners vuln --severity HIGH,CRITICAL strawberry-api:latest

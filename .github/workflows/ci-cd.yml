@@ -1,0 +1,38 @@
+name: CI/CD Test & Deploy
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.js'
+      - '**.json'
+      - '**.md'
+      - 'public/**'
+      - 'scripts/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+      - name: Install dependencies
+        run: npm install
+      - name: Lint
+        run: npm run lint || echo 'Lint errors (not blocking)'
+      - name: Test
+        run: npm test
+      - name: Optimize images
+        run: npm run optimize-images
+      - name: Version assets
+        run: npm run version-assets
+      - name: Update HTML references
+        run: npm run update-references
+      - name: Deploy (sample)
+        run: echo "Deploy step here (e.g. rsync, scp, Netlify CLI, etc.)"

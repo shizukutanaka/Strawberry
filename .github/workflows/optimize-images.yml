@@ -1,0 +1,29 @@
+name: Optimize Images
+
+on:
+  push:
+    paths:
+      - 'public/images/**'
+      - 'scripts/optimize-images.js'
+      - 'package.json'
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+      - name: Install dependencies
+        run: npm install
+      - name: Optimize images
+        run: npm run optimize-images
+      - name: Commit optimized images
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add public/images
+          git commit -m 'chore: optimize images [ci skip]' || echo 'No changes to commit'
+          git push || echo 'No changes to push'

@@ -1,0 +1,38 @@
+# Jestテスト・カバレッジ自動検証ワークフロー
+name: Test & Coverage
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'package.json'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - run: npm ci
+      - run: npm run test
+      - run: npm run coverage
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(npx jest --coverage --json --outputFile=coverage/coverage-final.json)
+          THRESHOLD=70
+          ACTUAL=$(node -e "console.log(require('./coverage/coverage-summary.json').total.lines.pct)")
+          if (( $(echo "$ACTUAL < $THRESHOLD" | bc -l) )); then
+            echo "::error::Coverage $ACTUAL% is below threshold $THRESHOLD%"; exit 1
+          fi

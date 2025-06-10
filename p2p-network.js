@@ -13,6 +13,25 @@ const { logger } = require('../utils/logger');
 const crypto = require('crypto');
 
 class P2PNetwork extends EventEmitter {
+    /**
+     * サービス死活判定: ノード稼働・ピア接続数・initializedを総合判定
+     * @returns {Promise<boolean>}
+     */
+    async isHealthy() {
+        // 1. initializedフラグ
+        if (!this.initialized) return false;
+        // 2. ノードが存在し、稼働中か
+        if (!this.node || typeof this.node.isStarted !== 'function' || !this.node.isStarted()) return false;
+        // 3. ピアが1つ以上接続されているか
+        try {
+            const peers = (typeof this.node.getPeers === 'function') ? await this.node.getPeers() : this.peers;
+            if (!peers || (peers.size !== undefined ? peers.size : peers.length) === 0) return false;
+        } catch (e) {
+            return false;
+        }
+        return true;
+    }
+
     constructor() {
         super();
         this.node = null;

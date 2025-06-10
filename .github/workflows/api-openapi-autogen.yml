@@ -1,0 +1,29 @@
+# API仕様自動生成・検証ワークフロー（安定運用・高速化）
+name: OpenAPI AutoGen
+on:
+  push:
+    paths:
+      - 'src/utils/validator.js'
+      - 'src/api/openapi-generator.js'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'src/utils/validator.js'
+      - 'src/api/openapi-generator.js'
+      - 'package.json'
+jobs:
+  openapi-gen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+      - run: npm ci
+      - run: npm run openapi-gen
+      - name: Upload OpenAPI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: openapi.json

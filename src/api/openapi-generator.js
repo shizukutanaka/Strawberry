@@ -19,7 +19,17 @@ function generateOpenAPISpec() {
       { url: 'http://localhost:3000/api/v1', description: 'Local Dev' }
     ],
     paths: {},
-    components: { schemas: {} },
+    components: {
+      schemas: {},
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'JWT Bearer 認証'
+        }
+      }
+    },
   };
 
   // schemas構造に応じてOpenAPI componentsを自動生成
@@ -54,14 +64,21 @@ function generateOpenAPISpec() {
       }
       // pathsに追加
       if (!openapi.paths[path]) openapi.paths[path] = {};
+      // RBAC要件例: /system/infoはadminのみ
+      let xRequiredRole = undefined;
+      if (path === '/system/info') xRequiredRole = 'admin';
       openapi.paths[path][method] = {
         summary,
+        security: [{ BearerAuth: [] }],
+        ...(xRequiredRole ? { 'x-required-role': xRequiredRole } : {}),
         requestBody: ['get','delete'].includes(method) ? undefined : {
           content: { 'application/json': { schema: { $ref: `#/components/schemas/${group}_${name}` } } },
           required: true
         },
         responses: { 200: { description: 'OK' } }
       };
+
+
     }
   }
 

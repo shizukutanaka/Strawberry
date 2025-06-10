@@ -17,9 +17,65 @@ const NotifyType = {
 
 // メイン通知送信関数（type, message, options）
 const { sendEmailNotification } = require('./email');
-async function sendNotification(type, message, options = {}) {
+const fs = require('fs');
+const path = require('path');
+
+async function sendNotification(typeOrUserId, message, options = {}) {
+  // typeOrUserIdがユーザーIDの場合、多段通知
+  if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
+    // 設定ファイルから通知設定を取得
+    const userId = typeOrUserId;
+    const settingsPath = path.resolve(__dirname, '../api/notification-settings.json');
+    let settings = {};
+    try {
+      if (fs.existsSync(settingsPath)) {
+        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))[userId] || {};
+      }
+    } catch {}
+    const enabled = settings.enabled || {};
+    const tasks = [];
+    if (enabled.line && settings.lineToken) {
+      tasks.push(sendNotification(NotifyType.LINE, message, { token: settings.lineToken }));
+    }
+    if (enabled.discord && settings.discordWebhook) {
+      tasks.push(sendNotification(NotifyType.DISCORD, message, { webhookUrl: settings.discordWebhook }));
+    }
+    if (enabled.slack && settings.slackWebhook) {
+      tasks.push(sendNotification(NotifyType.SLACK, message, { webhookUrl: settings.slackWebhook }));
+    }
+    if (enabled.telegram && settings.telegramBotToken && settings.telegramChatId) {
+      tasks.push(sendNotification(NotifyType.TELEGRAM, message, { botToken: settings.telegramBotToken, chatId: settings.telegramChatId }));
+    }
+    if (enabled.email && settings.email) {
+      tasks.push(sendNotification(NotifyType.EMAIL, message, { to: settings.email }));
+    }
+    if (enabled.webhook && settings.genericWebhook) {
+      tasks.push(sendNotification(NotifyType.WEBHOOK, message, { webhookUrl: settings.genericWebhook }));
+    }
+    // 柔軟Webhook拡張: webhooks配列
+    if (Array.isArray(settings.webhooks)) {
+      const event = options.event || null;
+      for (const wh of settings.webhooks) {
+        if (wh.enabled !== false && (!event || wh.event === event) && wh.url) {
+          // payloadテンプレートがあれば適用、なければデフォルト
+          let payload = { message };
+          if (wh.payloadTemplate) {
+            try {
+              // テンプレートは ${message} 置換のみサポート
+              payload = JSON.parse(wh.payloadTemplate.replace(/\$\{message\}/g, message));
+            } catch {
+              payload = { message };
+            }
+          }
+          tasks.push(sendNotification(NotifyType.WEBHOOK, message, { webhookUrl: wh.url, payload }));
+        }
+      }
+    }
+    return Promise.all(tasks);
+  }
+  // 既存のtype/message/options送信
   try {
-    switch (type) {
+    switch (typeOrUserId) {
       case NotifyType.LINE:
         return await sendLineNotify(message, options);
       case NotifyType.DISCORD:
@@ -39,10 +95,10 @@ async function sendNotification(type, message, options = {}) {
       case NotifyType.WEBHOOK:
         return await sendWebhookNotify(message, options);
       default:
-        throw new Error(`Unknown notification type: ${type}`);
+        throw new Error(`Unknown notification type: ${typeOrUserId}`);
     }
   } catch (err) {
-    logger.error(`通知送信失敗(${type}): ${err.message}`);
+    logger.error(`通知送信失敗(${typeOrUserId}): ${err.message}`);
     throw err;
   }
 }

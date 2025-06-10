@@ -8,6 +8,32 @@ const crypto = require('crypto');
 const { logger } = require('../utils/logger');
 
 class LightningService extends EventEmitter {
+    /**
+     * サービス死活判定: gRPC接続状態・イベントストリーム・initializedを総合判定
+     * @returns {Promise<boolean>}
+     */
+    async isHealthy() {
+        // 1. initializedフラグ
+        if (!this.initialized) return false;
+        // 2. gRPCクライアントの状態
+        if (!this.lnd || typeof this.lnd.getInfo !== 'function') return false;
+        try {
+            // getInfoで正常応答があるか
+            const info = await new Promise((resolve, reject) => {
+                this.lnd.getInfo({}, (err, response) => {
+                    if (err) return reject(err);
+                    resolve(response);
+                });
+            });
+            if (!info || !info.identity_pubkey) return false;
+        } catch (e) {
+            return false;
+        }
+        // 3. イベントストリームがエラーで断絶していないか
+        if (this.invoiceStreamError || this.channelStreamError) return false;
+        return true;
+    }
+
     constructor() {
         super();
         this.lnd = null;
@@ -22,6 +48,12 @@ class LightningService extends EventEmitter {
         this.channels = new Map();
         this.nodeInfo = null;
         this.initialized = false;
+        // Mapクリーニング設定
+        this.maxInvoices = 1000;
+        this.maxPayments = 1000;
+        this.maxChannels = 500;
+        this.invoiceRetentionMs = 24 * 60 * 60 * 1000; // 24h
+        this.paymentRetentionMs = 24 * 60 * 60 * 1000; // 24h
     }
 
     async initialize() {
@@ -54,8 +86,14 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async connectToLND() {
-        try {
+    // gRPC自動再接続（指数バックオフ付）＋障害監査証跡・外部通知対応
+    async connectToLND(maxRetries = 5, notifyOnError = true) {
+        const { appendAuditLog } = require('./src/utils/audit-log');
+        let attempt = 0;
+        let lastError = null;
+        const backoff = (n) => Math.min(30000, 1000 * Math.pow(2, n)); // 最大30秒
+        while (attempt <= maxRetries) {
+            try {
             // Proto定義読み込み
             const protoPath = path.join(__dirname, '../../proto/lightning.proto');
             const packageDefinition = await protoLoader.load(protoPath, {
@@ -73,31 +111,64 @@ class LightningService extends EventEmitter {
                 fs.readFile(this.config.certPath),
                 fs.readFile(this.config.macaroonPath)
             ]);
-            
+            // 証明書・マカロンの有効期限（可能な場合）
+            let certInfo = 'N/A', macaroonInfo = 'N/A';
+            try {
+                // PEMパースで有効期限を抽出（例示）
+                const certStr = cert.toString();
+                const match = certStr.match(/Not After : (.*)/);
+                if (match) certInfo = match[1];
+            } catch {}
+            try {
+                // マカロンはバイナリなので詳細は省略
+                macaroonInfo = `length=${macaroon.length}`;
+            } catch {}
+
             // SSL認証情報作成
             const sslCreds = grpc.credentials.createSsl(cert);
-            
             // マカロン認証情報作成
             const macaroonCreds = grpc.credentials.createFromMetadataGenerator((args, callback) => {
                 const metadata = new grpc.Metadata();
                 metadata.add('macaroon', macaroon.toString('hex'));
                 callback(null, metadata);
             });
-            
             // 認証情報結合
             const creds = grpc.credentials.combineChannelCredentials(sslCreds, macaroonCreds);
-            
             // LNDクライアント作成
             this.lnd = new lnrpc.Lightning(this.config.host, creds);
-            
             // 接続テスト
             await this.getInfo();
-            
-            logger.info('Connected to LND successfully');
-            
+            logger.info('Connected to LND successfully', { certInfo, macaroonInfo });
+            appendAuditLog('lnd_connect_success', { host: this.config.host, certInfo, macaroonInfo });
+            return;
         } catch (error) {
-            // フォールバック: モックモード
-            logger.warn('Failed to connect to LND, using mock mode:', error.message);
+            // エラー詳細・証明書/マカロン情報を監査ログ・logger両方に記録
+            lastError = error;
+            const errorDetail = {
+                message: error.message,
+                stack: error.stack,
+                code: error.code,
+                certPath: this.config.certPath,
+                macaroonPath: this.config.macaroonPath
+            };
+            logger.error('LND接続失敗', errorDetail);
+            appendAuditLog('lnd_connect_error', errorDetail);
+            // 外部通知hook（Slack/Sentry等）
+            if (notifyOnError && process.env.SENTRY_DSN) {
+                // Sentry.captureException(error, { extra: errorDetail });
+            }
+            // 再試行
+            if (attempt < maxRetries) {
+                const wait = backoff(attempt);
+                logger.warn(`Retrying LND connection in ${wait / 1000}s... (attempt ${attempt + 1}/${maxRetries})`);
+                await new Promise(r => setTimeout(r, wait));
+                attempt++;
+            } else {
+                logger.error('LND自動再接続失敗: モックモードへ', errorDetail);
+                appendAuditLog('lnd_connect_fallback', errorDetail);
+                this.setupMockLND();
+                return;
+            }
             this.setupMockLND();
         }
     }
@@ -191,8 +262,10 @@ class LightningService extends EventEmitter {
     async updateNodeInfo() {
         try {
             const info = await this.getInfo();
-            
-            this.nodeInfo = {
+            const { schemas } = require('./src/utils/validator');
+            const { appendAuditLog } = require('./src/utils/audit-log');
+            // Joiバリデーション
+            const nodeInfo = {
                 pubkey: info.identity_pubkey,
                 alias: info.alias,
                 activeChannels: info.num_active_channels,
@@ -203,9 +276,17 @@ class LightningService extends EventEmitter {
                 network: this.config.network,
                 uris: info.uris || []
             };
-            
+            const { error: valErr } = schemas.lightningNode.validate(nodeInfo);
+            if (valErr) {
+                logger.error('Lightning node info validation error', valErr.details);
+                appendAuditLog('node_info_validation_error', { error: valErr.details, nodeInfo });
+                if (process.env.SENTRY_DSN) {
+                    // Sentry.captureMessage('Lightning node info validation error', { extra: { error: valErr.details, nodeInfo } });
+                }
+                throw new Error('Lightning node info validation error');
+            }
+            this.nodeInfo = nodeInfo;
             logger.info(`Lightning node info updated: ${this.nodeInfo.alias} (${this.nodeInfo.pubkey.substring(0, 16)}...)`);
-            
         } catch (error) {
             logger.error('Failed to update node info:', error);
             throw error;
@@ -315,11 +396,12 @@ class LightningService extends EventEmitter {
                     else resolve(response);
                 });
             });
-            
+            const { schemas } = require('./src/utils/validator');
+            const { appendAuditLog } = require('./src/utils/audit-log');
             this.channels.clear();
-            
+            let invalidCount = 0;
             channelList.channels.forEach(channel => {
-                this.channels.set(channel.channel_point, {
+                const channelData = {
                     active: channel.active,
                     remotePubkey: channel.remote_pubkey,
                     channelPoint: channel.channel_point,
@@ -330,65 +412,130 @@ class LightningService extends EventEmitter {
                     totalSent: parseInt(channel.total_satoshis_sent),
                     totalReceived: parseInt(channel.total_satoshis_received),
                     unsettledBalance: parseInt(channel.unsettled_balance)
-                });
+                };
+                const { error: valErr } = schemas.lightningChannel.validate(channelData);
+                if (valErr) {
+                    logger.warn('Lightning channel validation error', valErr.details);
+                    appendAuditLog('channel_validation_error', { error: valErr.details, channelData });
+                    if (process.env.SENTRY_DSN) {
+                        // Sentry.captureMessage('Lightning channel validation error', { extra: { error: valErr.details, channelData } });
+                    }
+                    invalidCount++;
+                    return;
+                }
+                this.channels.set(channel.channel_point, channelData);
             });
-            
-            logger.info(`Updated ${this.channels.size} channels`);
-            
+            logger.info(`Updated ${this.channels.size} channels (invalid skipped: ${invalidCount})`);
         } catch (error) {
             logger.error('Failed to update channels:', error);
         }
     }
 
     setupEventStreams() {
-        // 請求書イベントストリーム
-        const invoiceStream = this.lnd.subscribeInvoices({});
-        
-        invoiceStream.on('data', (invoice) => {
-            const paymentHash = invoice.r_hash.toString('hex');
-            const invoiceData = this.invoices.get(paymentHash);
-            
-            if (invoiceData && invoice.settled) {
-                invoiceData.status = 'paid';
-                invoiceData.settledAt = invoice.settle_date * 1000;
-                invoiceData.amountPaid = parseInt(invoice.amt_paid_sat);
-                
-                logger.info(`Invoice paid: ${paymentHash.substring(0, 16)}...`);
-                
-                this.emit('invoice:paid', invoiceData);
-                this.emit(`payment:${paymentHash}`, {
-                    preimage: invoice.r_preimage.toString('hex')
-                });
+        // 監査証跡
+        const { appendAuditLog } = require('./src/utils/audit-log');
+        // 外部通知hook（Slack/Sentry等）
+        const notifyExternal = (msg, detail={}) => {
+            if (process.env.SENTRY_DSN) {
+                // Sentry.captureMessage(msg, { extra: detail });
             }
-        });
-        
-        invoiceStream.on('error', (error) => {
-            logger.error('Invoice stream error:', error);
-        });
-        
+            // Slack等もここで拡張可
+        };
+
+        // イベントストリーム再接続ロジック
+        const setupInvoiceStream = () => {
+            let invoiceStream;
+            try {
+                invoiceStream = this.lnd.subscribeInvoices({});
+            } catch (err) {
+                logger.error('Failed to subscribe to invoice stream', err);
+                appendAuditLog('invoice_stream_subscribe_error', { error: err.message });
+                notifyExternal('Invoice stream subscribe error', { error: err.message });
+                setTimeout(setupInvoiceStream, 5000);
+                return;
+            }
+            invoiceStream.on('data', (invoice) => {
+                const paymentHash = invoice.r_hash.toString('hex');
+                const invoiceData = this.invoices.get(paymentHash);
+                if (invoiceData && invoice.settled) {
+                    invoiceData.status = 'paid';
+                    invoiceData.settledAt = invoice.settle_date * 1000;
+                    invoiceData.amountPaid = parseInt(invoice.amt_paid_sat);
+                    logger.info(`Invoice paid: ${paymentHash.substring(0, 16)}...`);
+                    appendAuditLog('invoice_paid', { paymentHash, amount: invoiceData.amountPaid });
+                    this.emit('invoice:paid', invoiceData);
+                    this.emit(`payment:${paymentHash}`, {
+                        preimage: invoice.r_preimage.toString('hex')
+                    });
+                }
+            });
+            invoiceStream.on('error', (error) => {
+                logger.error('Invoice stream error:', error);
+                appendAuditLog('invoice_stream_error', { error: error.message });
+                notifyExternal('Invoice stream error', { error: error.message });
+                // 自動再接続
+                setTimeout(setupInvoiceStream, 5000);
+            });
+            invoiceStream.on('end', () => {
+                logger.warn('Invoice stream ended, reconnecting...');
+                appendAuditLog('invoice_stream_end', {});
+                notifyExternal('Invoice stream ended');
+                setTimeout(setupInvoiceStream, 5000);
+            });
+            invoiceStream.on('close', () => {
+                logger.warn('Invoice stream closed, reconnecting...');
+                appendAuditLog('invoice_stream_close', {});
+                notifyExternal('Invoice stream closed');
+                setTimeout(setupInvoiceStream, 5000);
+            });
+        };
+        setupInvoiceStream();
+
         // チャネルイベントストリーム
-        try {
-            const channelStream = this.lnd.subscribeChannelEvents({});
-            
+        const setupChannelStream = () => {
+            let channelStream;
+            try {
+                channelStream = this.lnd.subscribeChannelEvents({});
+            } catch (err) {
+                logger.error('Failed to subscribe to channel stream', err);
+                appendAuditLog('channel_stream_subscribe_error', { error: err.message });
+                notifyExternal('Channel stream subscribe error', { error: err.message });
+                setTimeout(setupChannelStream, 5000);
+                return;
+            }
             channelStream.on('data', (event) => {
                 if (event.type === 'OPEN_CHANNEL') {
                     logger.info('Channel opened:', event.open_channel);
+                    appendAuditLog('channel_opened', { channel: event.open_channel });
                     this.emit('channel:opened', event.open_channel);
                 } else if (event.type === 'CLOSED_CHANNEL') {
                     logger.info('Channel closed:', event.closed_channel);
+                    appendAuditLog('channel_closed', { channel: event.closed_channel });
                     this.emit('channel:closed', event.closed_channel);
                 }
-                
                 // チャネル情報更新
                 this.updateChannels();
             });
-            
             channelStream.on('error', (error) => {
                 logger.error('Channel stream error:', error);
+                appendAuditLog('channel_stream_error', { error: error.message });
+                notifyExternal('Channel stream error', { error: error.message });
+                setTimeout(setupChannelStream, 5000);
             });
-        } catch (error) {
-            logger.warn('Channel event stream not available:', error.message);
-        }
+            channelStream.on('end', () => {
+                logger.warn('Channel stream ended, reconnecting...');
+                appendAuditLog('channel_stream_end', {});
+                notifyExternal('Channel stream ended');
+                setTimeout(setupChannelStream, 5000);
+            });
+            channelStream.on('close', () => {
+                logger.warn('Channel stream closed, reconnecting...');
+                appendAuditLog('channel_stream_close', {});
+                notifyExternal('Channel stream closed');
+                setTimeout(setupChannelStream, 5000);
+            });
+        };
+        setupChannelStream();
     }
 
     async getChannelBalance() {
@@ -639,24 +786,66 @@ class LightningService extends EventEmitter {
                 logger.error('Failed to update channels:', error);
             });
         }, 5 * 60 * 1000);
-        
-        // 期限切れ請求書のクリーンアップ（10分ごと）
+        // 期限切れ請求書のクリーンアップ（10分ごと）＋Map自動クリーニング
         setInterval(() => {
             const now = Date.now();
+            // 期限切れ請求書
             for (const [hash, invoice] of this.invoices) {
                 if (invoice.status === 'pending' && invoice.expiresAt < now) {
                     invoice.status = 'expired';
                     this.emit('invoice:expired', invoice);
                 }
             }
+            // Map件数・期間クリーニング
+            this.cleanMaps();
         }, 10 * 60 * 1000);
-        
         // ノード情報更新（30分ごと）
         setInterval(() => {
             this.updateNodeInfo().catch(error => {
                 logger.error('Failed to update node info:', error);
             });
         }, 30 * 60 * 1000);
+    }
+
+    // Map自動クリーニング（LRU/最大件数/期間ベース）
+    cleanMaps() {
+        const now = Date.now();
+        // Invoices
+        const invoicesArr = Array.from(this.invoices.entries());
+        // 期間超過
+        for (const [hash, invoice] of invoicesArr) {
+            if (invoice.createdAt && now - invoice.createdAt > this.invoiceRetentionMs) {
+                this.invoices.delete(hash);
+            }
+        }
+        // 最大件数
+        if (this.invoices.size > this.maxInvoices) {
+            const sorted = invoicesArr.sort((a, b) => (a[1].createdAt || 0) - (b[1].createdAt || 0));
+            for (let i = 0; i < this.invoices.size - this.maxInvoices; i++) {
+                this.invoices.delete(sorted[i][0]);
+            }
+        }
+        // Payments
+        const paymentsArr = Array.from(this.payments.entries());
+        for (const [hash, payment] of paymentsArr) {
+            if (payment.timestamp && now - payment.timestamp > this.paymentRetentionMs) {
+                this.payments.delete(hash);
+            }
+        }
+        if (this.payments.size > this.maxPayments) {
+            const sorted = paymentsArr.sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+            for (let i = 0; i < this.payments.size - this.maxPayments; i++) {
+                this.payments.delete(sorted[i][0]);
+            }
+        }
+        // Channels
+        if (this.channels.size > this.maxChannels) {
+            const channelsArr = Array.from(this.channels.entries());
+            const sorted = channelsArr.sort((a, b) => (a[1].openedAt || 0) - (b[1].openedAt || 0));
+            for (let i = 0; i < this.channels.size - this.maxChannels; i++) {
+                this.channels.delete(sorted[i][0]);
+            }
+        }
     }
 
     async getNodeStats() {

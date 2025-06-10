@@ -86,7 +86,10 @@ const { apiKeyAuth } = require('../../middleware/security');
 const { sanitizeObject } = require('../../../utils/sanitize');
 
 // オーダー一覧取得 (認証必須)
+const { cacheMiddleware } = require('../../middleware/cache');
+
 router.get('/', 
+  cacheMiddleware(),
   apiKeyAuth,
   authenticateJWT,
   asyncHandler(async (req, res, next) => {
@@ -113,7 +116,7 @@ router.get('/',
       });
       // リアルタイムBTC/JPY換算
       const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-      const satoshiToJPY = await getBTCtoJPYRate();
+      const { rate: satoshiToJPY, timestamp: exchangeRateTimestamp } = await getBTCtoJPYRate(false, true);
       const ordersWithPricing = orders.map(order => {
         let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
         if (!pricePerHour && order.gpuId) {
@@ -133,13 +136,15 @@ router.get('/',
           pricePerHour,
           pricePer5Min,
           totalPrice,
-          totalPriceJPY
+          totalPriceJPY,
+          exchangeRateTimestamp
         };
       });
       res.json({
         message: 'Fetched orders',
         total: ordersWithPricing.length,
-        orders: ordersWithPricing
+        orders: ordersWithPricing,
+        exchangeRateTimestamp
       });
     } catch (error) {
       next(error);
@@ -202,7 +207,7 @@ router.get('/:id',
       const totalPrice = pricePer5Min * (durationMinutes / 5);
       // 冗長化為替APIで換算（キャッシュ活用）
       const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-      const satoshiToJPY = await getBTCtoJPYRate();
+      const { rate: satoshiToJPY, timestamp: exchangeRateTimestamp } = await getBTCtoJPYRate(false, true);
       const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
       res.json({
         message: 'Fetched order detail',
@@ -211,8 +216,10 @@ router.get('/:id',
           pricePerHour,
           pricePer5Min,
           totalPrice,
-          totalPriceJPY
-        }
+          totalPriceJPY,
+          exchangeRateTimestamp
+        },
+        exchangeRateTimestamp
       });
     } catch (error) {
       next(error);

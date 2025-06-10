@@ -17,6 +17,12 @@ const typeDefs = gql`
     gpus: [GPU]
     gpu(id: ID!): GPU
     btcToJpy: Float
+    exchangeRate(fresh: Boolean): ExchangeRateInfo
+  }
+  type ExchangeRateInfo {
+    rate: Float
+    timestamp: Float
+    isCache: Boolean
   }
   type Order {
     id: ID!
@@ -24,8 +30,10 @@ const typeDefs = gql`
     gpuId: ID!
     pricePerHour: Float
     durationMinutes: Int
+    pricePer5Min: Float
     totalPrice: Float
     totalPriceJPY: Float
+    exchangeRateTimestamp: Float
     status: String
   }
   type User {
@@ -51,8 +59,16 @@ const resolvers = {
     gpus: () => GPURepository.getAll(),
     gpu: (_, { id }) => GPURepository.getById(id),
     btcToJpy: async () => await getBTCtoJPYRate(),
+    exchangeRate: async (_, { fresh }) => {
+      const { rate, timestamp, isCache } = await getBTCtoJPYRate(!!fresh, true);
+      return { rate, timestamp, isCache };
+    },
   },
   Order: {
+    pricePer5Min: (order) => {
+      const pricePerHour = order.pricePerHour || 0;
+      return pricePerHour / 12;
+    },
     totalPrice: (order) => {
       const pricePerHour = order.pricePerHour || 0;
       const pricePer5Min = pricePerHour / 12;
@@ -63,8 +79,16 @@ const resolvers = {
       const pricePerHour = order.pricePerHour || 0;
       const pricePer5Min = pricePerHour / 12;
       const totalPrice = pricePer5Min * ((order.durationMinutes || 0) / 5);
-      const rate = await getBTCtoJPYRate();
+      const { rate, timestamp } = await getBTCtoJPYRate(false, true);
+      // exchangeRateTimestampも返すため、resolverで値をorderに注入
+      order._exchangeRateTimestamp = timestamp;
       return Math.round(totalPrice * rate);
+    },
+    exchangeRateTimestamp: (order) => {
+      // totalPriceJPY解決時に注入されていればそれを返す
+      if (order._exchangeRateTimestamp) return order._exchangeRateTimestamp;
+      // そうでなければ最新取得
+      return getBTCtoJPYRate(false, true).then(({ timestamp }) => timestamp);
     }
   }
 };

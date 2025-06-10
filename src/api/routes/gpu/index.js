@@ -109,12 +109,20 @@ router.post('/',
   validateMiddleware(schemas.gpu.register),
   asyncHandler(async (req, res) => {
     // 入力値サニタイズ
-    const gpuInfo = sanitizeObject(req.validatedBody, ['name']);
-    logger.info(`Registering new GPU: ${gpuInfo.name}`);
-    // 重複登録チェック
+    // 入力値サニタイズ＋クロスベンダー必須項目
+    const gpuInfo = sanitizeObject(req.validatedBody, [
+      'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
+      'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
+      'features', 'capabilities', 'location', 'performance'
+    ]);
+    logger.info(`[GPU登録] ${gpuInfo.vendor} ${gpuInfo.model} (${gpuInfo.apiType}) by ${req.user.id}`);
+
+    // 重複登録チェック（model, vendor, providerId, memoryGB）
     const duplicate = GpuRepository.getAll().find(g =>
       g.name === gpuInfo.name &&
-      g.memory === gpuInfo.memory &&
+      g.model === gpuInfo.model &&
+      g.vendor === gpuInfo.vendor &&
+      g.memoryGB === gpuInfo.memoryGB &&
       g.providerId === req.user.id
     );
     if (duplicate) {
@@ -122,7 +130,13 @@ router.post('/',
     }
     // ユーザーIDを設定
     gpuInfo.providerId = req.user.id;
-    // 出品情報をP2Pネットワーク経由でアナウンス
+    // クロスベンダー用のcapabilities自動補完
+    gpuInfo.capabilities = gpuInfo.capabilities || {};
+    if (gpuInfo.apiType === 'CUDA') gpuInfo.capabilities.cuda = true;
+    if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
+    if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
+    if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
+    // P2Pネットワークへアナウンス
     await p2pNetwork.announceGPU(gpuInfo);
     // ファイル永続化リポジトリに登録
     const registeredGpu = GpuRepository.create(gpuInfo);
@@ -132,8 +146,14 @@ router.post('/',
       provider: req.user.id,
       specs: {
         name: registeredGpu.name,
+        model: registeredGpu.model,
+        vendor: registeredGpu.vendor,
+        apiType: registeredGpu.apiType,
+        driverVersion: registeredGpu.driverVersion,
+        os: registeredGpu.os,
+        arch: registeredGpu.arch,
         memoryGB: registeredGpu.memoryGB,
-        vendor: registeredGpu.vendor
+        capabilities: registeredGpu.capabilities
       }
     });
     // apiKey等の機密情報を除外

@@ -33,7 +33,13 @@ router.post('/notification-settings/:userId', (req, res) => {
     telegramChatId: Joi.string().allow('').optional(),
     email: Joi.string().email().allow('').optional(),
     genericWebhook: Joi.string().uri().allow('').optional(),
-    enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional() // 各チャネルON/OFF
+    enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional(), // 各チャネルON/OFF
+    webhooks: Joi.array().items(Joi.object({
+      event: Joi.string().required(), // 例: 'order_created'
+      url: Joi.string().uri().required(),
+      enabled: Joi.boolean().default(true),
+      payloadTemplate: Joi.string().allow('').optional()
+    })).optional()
   });
   const { error, value } = schema.validate(req.body);
   if (error) return res.status(400).json({ error: error.message });

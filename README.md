@@ -1,10 +1,5 @@
 # Strawberry
 
----
-
-## 🌸 一人運用スタートガイド
-
-このソフトウェアは、パソコン1台でも一人で安全かつ効率的にサービス運用ができるよう設計されています。ITの専門知識がなくても、手順に従って設定・運用を開始できます。
 
 ### 1. 事前準備
 - Node.js（ノードジェイエス）をパソコンにインストールしてください
@@ -39,82 +34,6 @@
 - READMEやFAQで詳細情報を確認できます（日本語・英語対応）
 - 不明点や困ったことがあれば、SlackやLINEなどでご質問・ご相談ください
 
----
-
-## 🌎 English Quick Start Guide
-
-This software is designed so that anyone can safely and efficiently operate the service alone, even without specialized IT knowledge. Please follow the steps below to set up and start operation.
-
-### 1. Preparation
-- Install Node.js on your computer
-- In this folder, run `npm install` to install all required packages
-- Enter your API keys or tokens in the `.env` file (if unsure, ask a trusted adult or administrator)
-
-### 2. Starting the Service
-- Run `npm start` to launch the service
-- Open your browser and access `http://localhost:3000` to check if the UI loads
-- If the page does not appear, try running `npm start` again or check the error messages
-
-### 3. Using Order & Conversion Features
-- Bitcoin (BTC) to Japanese Yen (JPY) conversion is handled automatically
-- You can check your orders and history via the UI or API
-
-### 4. Handling Issues
-- If a failure or abnormal event occurs, notifications are automatically sent to Slack or LINE
-- You can review error details in the `logs/` folder or on the UI
-- Most issues are automatically recovered, but if they persist, consult an administrator or a trusted adult
-
-### 5. Security & Logging
-- All operations and events are recorded in an audit log
-- Passwords and sensitive information are never leaked outside
-- If unauthorized activity occurs, it is immediately recorded and notified
-
-### 6. Automation & Support
-- Currency conversion and incident handling are automated
-- You can run `npm test` to verify that everything works as expected
-- AI features can summarize logs and provide usage guidance
-
-### 7. Further Information & Support
-- Check the README and FAQ for more details (available in Japanese and English)
-- If you have questions or encounter issues, feel free to ask via Slack or LINE
-
----
-
-### 📝 English Q&A for High School Students & Beginners
-
-**Q. The service does not start. What should I do?**
-- Try running `npm start` again
-- Check the `logs/` folder for error messages
-- If you cannot resolve the issue, consult a trusted adult, administrator, or ask in Slack/LINE
-
-**Q. I am not receiving notifications.**
-- Confirm that the Slack/LINE secret keys in your `.env` file are correct
-- Ensure your computer is connected to the internet
-
-**Q. The currency conversion seems incorrect.**
-- Wait a few minutes; the rate should update automatically
-- If the issue persists, seek advice from an administrator or experienced user
-
-**Q. What if there is unauthorized access or a security incident?**
-- All operations are recorded in the audit log, so you can review what happened
-- Any suspicious activity will trigger an immediate notification
-
----
-
-### 🌎 English Flowchart: Typical Solo Operation
-
-```mermaid
-flowchart TD
-  A[Start the Service] --> B[Automatic Monitoring & Currency Conversion]
-  B --> C{Any Issues?}
-  C -- No --> D[Continue Using Safely]
-  C -- Yes --> E[Automatic Notification & Recovery]
-  E --> F{Resolved?}
-  F -- Yes --> D
-  F -- No --> G[Consult an Administrator or Experienced User]
-```
-
----
 
 ### 🎥 動画チュートリアル・参考リンク (Videos & Useful Links)
 
@@ -124,22 +43,6 @@ flowchart TD
 - [How to Use GitHub (English)](https://www.youtube.com/watch?v=w3jLJU7DT5E)
 - [Slackの使い方（日本語）](https://www.youtube.com/watch?v=QpIu5hXzFWA)
 - [How to Use Slack (English)](https://www.youtube.com/watch?v=9RJZMSsH7-g)
-
----
-
-### よくある失敗例・注意点（高校生・初学者向け）
-- `.env` ファイルの記述ミス（APIキーやトークンの間違い）
-- `npm install` を忘れて依存パッケージエラーが発生する
-- インターネット接続を忘れている
-- サービスを複数回同時に起動してしまう
-- 一人で悩まず、早めに相談・質問することが大切です
-
-### Common Mistakes & Tips (For High School Students & Beginners)
-- Mistakes in the `.env` file (wrong API keys or tokens)
-- Forgetting to run `npm install` before starting
-- Not connected to the internet
-- Accidentally running the service multiple times
-- Don’t hesitate to ask questions or seek help early
 
 ---
 
@@ -166,28 +69,7 @@ flowchart TD
   F -- いいえ --> G[大人や先生に相談]
 ```
 
----
 
-### よくあるトラブルと対策Q&A（高校生・初学者向け）
-
-**Q. サービスが起動しない場合は？**
-- もう一度 `npm start` を実行してみてください
-- それでも動かない場合は `logs/` フォルダのエラーメッセージを確認しましょう
-- 解決できない場合は、信頼できる大人や管理者、またはSlack/LINEで相談してください
-
-**Q. 通知（お知らせ）が届かない場合は？**
-- `.env` ファイルのSlackやLINEのトークンが正しいか確認してください
-- インターネット接続も確認しましょう
-
-**Q. 為替レートや金額計算が正しくない場合は？**
-- 数分待つと自動で最新レートに更新されます
-- それでも改善しない場合は管理者や経験者に相談してください
-
-**Q. 不正アクセスやセキュリティ上の問題が発生した場合は？**
-- すべての操作は監査ログに記録されているため、後から確認できます
-- 異常な操作があった場合は自動で通知されます
-
----
 
 ## 📑 Table of Contents
 - [セットアップ手順](#セットアップ手順)

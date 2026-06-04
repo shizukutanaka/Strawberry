@@ -4,9 +4,21 @@ const { v4: uuidv4 } = require('uuid');
 const Docker = require('dockerode');
 const k8s = require('@kubernetes/client-node');
 const { logger } = require('../utils/logger');
-const { exec } = require('child_process').promises;
+// child_process には .promises が存在しないため、util.promisify で exec を生成する
+// (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
+const exec = require('util').promisify(require('child_process').exec);
 const fs = require('fs').promises;
 const path = require('path');
+
+// シェルコマンドへ埋め込む識別子の検証（コマンドインジェクション防止）。
+// 英数字・ハイフン・アンダースコア・ドット・コロンのみ許可。
+function sanitizeId(value) {
+  const s = String(value);
+  if (!/^[A-Za-z0-9_.:-]+$/.test(s)) {
+    throw new Error(`Invalid identifier for shell command: ${s}`);
+  }
+  return s;
+}
 
 class VirtualGPUManager extends EventEmitter {
     /**
@@ -727,7 +739,7 @@ strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
     async releaseNativeAccess(vgpu, allocation) {
         // プロキシプロセス終了
         try {
-            await exec(`pkill -f "strawberry-gpu-proxy.*${vgpu.id}"`);
+            await exec(`pkill -f "strawberry-gpu-proxy.*${sanitizeId(vgpu.id)}"`);
         } catch (error) {
             logger.debug('Failed to kill proxy process:', error);
         }
@@ -771,12 +783,12 @@ strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
             switch (platformData.type) {
                 case 'mig':
                     // MIGインスタンス削除
-                    await exec(`nvidia-smi mig -dgi -gi ${platformData.migId}`);
+                    await exec(`nvidia-smi mig -dgi -gi ${sanitizeId(platformData.migId)}`);
                     break;
-                    
+
                 case 'vgpu':
                     // vGPUインスタンス削除
-                    await exec(`nvidia-smi vgpu -d -v ${vgpu.id}`);
+                    await exec(`nvidia-smi vgpu -d -v ${sanitizeId(vgpu.id)}`);
                     break;
                     
                 case 'mps':

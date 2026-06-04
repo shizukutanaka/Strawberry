@@ -1,7 +1,10 @@
 // AES暗号化・復号化ユーティリティ
 const crypto = require('crypto');
+const { requireSecret } = require('../utils/config');
 
-const KEY = process.env.ENCRYPTION_KEY || 'defaultkeydefaultkeydefaultkey12'; // 32bytes
+// ハードコードされたデフォルト鍵を廃止。ENCRYPTION_KEY を必須化し、
+// sha256 で常に 32byte 鍵へ正規化する(aes-256-cbc 用)。
+const KEY = crypto.createHash('sha256').update(requireSecret('ENCRYPTION_KEY')).digest();
 const IV_LENGTH = 16;
 
 function encrypt(text) {

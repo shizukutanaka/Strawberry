@@ -53,11 +53,18 @@ async function updateLightningMetrics() {
   }
   // 支払い失敗数・再接続回数はLightningService側からインクリメント呼び出しを想定
 }
-setInterval(updateLightningMetrics, 10000); // 10秒ごとに更新
+// 10秒ごとに更新（unref: テスト等でプロセス終了を妨げないように）
+const metricsInterval = setInterval(updateLightningMetrics, 10000);
+if (metricsInterval.unref) metricsInterval.unref();
 
 // Expressアプリケーション初期化
 const app = express();
 const PORT = config.server.port || 3000;
+
+// キャッシュメトリクス統合
+const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./middleware/cache');
+// サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
+const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
 
 // 新規為替レートAPIルート
 app.use('/api/exchange-rate', exchangeRateRouter);
@@ -74,11 +81,6 @@ try {
 } catch (e) {
   logger.warn('Service monitor could not be started:', e);
 }
-
-// キャッシュメトリクス統合
-const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./middleware/cache');
-// サービス死活監視モジュール
-const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
 
 // /metricsエンドポイント
 app.get('/metrics', async (req, res) => {
@@ -108,7 +110,10 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.static(path.join(__dirname, '../../public')));
 
 // マスター認証ルート（/master-auth）
-app.use('/master-auth', masterAuth.router);
+app.use('/master-auth', masterAuthRouter.router);
+
+// 運営利益受取アドレス管理（admin 認証必須。ルータ側で jwtAuth + rbac('admin') を適用）
+app.use('/api/profit-addresses', profitAddressesRouter);
 
 // リクエストロギング
 app.use(responseTime);
@@ -136,20 +141,25 @@ app.use(errorLogger);
 // エラーハンドリング
 app.use(errorMiddleware);
 
-// サーバー起動
-const server = app.listen(PORT, config.server.host || 'localhost', () => {
-  logger.info(`Strawberry API server running on ${config.server.host || 'localhost'}:${PORT}`);
-  logger.info(`API prefix: ${config.server.apiPrefix || '/api/v1'}`);
-  logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-
-// グレースフルシャットダウン
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    logger.info('HTTP server closed');
-    process.exit(0);
+// サーバー起動（このファイルを直接実行した場合のみ listen する。
+// テストから require された場合は listen せず、supertest が app を直接利用する。
+// これにより Jest の並列ワーカーでの EADDRINUSE やオープンハンドルを防ぐ）
+let server = null;
+if (require.main === module) {
+  server = app.listen(PORT, config.server.host || 'localhost', () => {
+    logger.info(`Strawberry API server running on ${config.server.host || 'localhost'}:${PORT}`);
+    logger.info(`API prefix: ${config.server.apiPrefix || '/api/v1'}`);
+    logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
-});
+
+  // グレースフルシャットダウン
+  process.on('SIGTERM', () => {
+    logger.info('SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+      logger.info('HTTP server closed');
+      process.exit(0);
+    });
+  });
+}
 
 module.exports = { app, server };

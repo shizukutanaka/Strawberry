@@ -128,9 +128,10 @@ const authenticateAPIKey = (req, res, next) => {
     ));
   }
   
-  // TODO: APIキーの検証ロジックを実装
-  // 現在は開発用に簡易的に実装
-  if (apiKey === process.env.API_KEY || apiKey === 'dev-api-key') {
+  // API_KEY 環境変数が設定され、かつ一致する場合のみ許可。
+  // ハードコードされた 'dev-api-key' バックドアは廃止。
+  const validApiKey = process.env.API_KEY;
+  if (validApiKey && apiKey === validApiKey) {
     req.apiClient = {
       id: 'system',
       name: 'API Client',
@@ -138,12 +139,26 @@ const authenticateAPIKey = (req, res, next) => {
     };
     return next();
   }
-  
+
   return next(new APIError(
     ErrorTypes.UNAUTHORIZED,
     'Invalid API key',
     401
   ));
+};
+
+// 任意のAPIキー検証ミドルウェア（machine間通信用の補助認証）。
+// x-api-key ヘッダが無ければ後続の認証(JWT等)に委ねる(continue)。
+// 提供された場合のみ検証し、不正なら 401。ハードコードされたキーは持たない。
+const apiKeyAuth = (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+  if (!apiKey) return next();
+  const validApiKey = process.env.API_KEY;
+  if (validApiKey && apiKey === validApiKey) {
+    req.apiClient = { id: 'system', name: 'API Client', role: 'system' };
+    return next();
+  }
+  return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid API key', 401));
 };
 
 // リソース所有者または管理者のみ許可

@@ -1,5 +1,6 @@
 // src/api/middleware/cache.js - LRUキャッシュミドルウェア
-const LRU = require('lru-cache');
+// lru-cache v10 では名前付きエクスポート(LRUCache)を使用する
+const { LRUCache } = require('lru-cache');
 const { logger } = require('../../utils/logger');
 const { appendAuditLog } = require('../../utils/audit-log');
 const client = require('prom-client');
@@ -10,7 +11,7 @@ const cacheMissCounter = new client.Counter({ name: 'api_cache_miss_total', help
 const cachePurgeCounter = new client.Counter({ name: 'api_cache_purge_total', help: 'Total API cache purges' });
 
 // キャッシュ容量・TTLは要件に応じて調整
-const cache = new LRU({
+const cache = new LRUCache({
   max: 1000,
   ttl: 60 * 1000 // 60秒
 });

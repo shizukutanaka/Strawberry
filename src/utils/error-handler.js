@@ -144,6 +144,7 @@ function notFoundMiddleware(req, res, next) {
 module.exports = {
   APIError,
   ErrorTypes,
+  convertToAPIError,
   errorMiddleware,
   asyncHandler,
   createError,

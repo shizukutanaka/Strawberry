@@ -1,6 +1,6 @@
 // Feedback API自動テスト雛形（Jest）
 const request = require('supertest');
-const app = require('../../src/api/server');
+const { app } = require('../../src/api/server');
 
 describe('Feedback API', () => {
   it('POST /api/v1/feedback/create should validate and return 200', async () => {

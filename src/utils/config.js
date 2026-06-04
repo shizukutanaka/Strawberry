@@ -2,10 +2,31 @@
 const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { logger } = require('./logger');
 
 // .envファイルをロード
 dotenv.config();
+
+/**
+ * 必須シークレットを取得する。
+ * - 本番(NODE_ENV=production): env未設定 or 短すぎる場合は起動を失敗させる(fail-fast)。
+ * - 開発/テスト: ランダムな一時シークレットを生成し、警告を出す。
+ *   (プロセス再起動ごとに変わるため、安定運用には .env への設定が必要)
+ * ハードコードされたフォールバック値を排除し、秘密鍵の漏洩を防ぐ。
+ */
+function requireSecret(name, { minLength = 16 } = {}) {
+  const val = process.env[name];
+  if (val && val.length >= minLength) return val;
+  if (process.env.NODE_ENV === 'production') {
+    const msg = `FATAL: required secret "${name}" is not set (or shorter than ${minLength} chars) in production`;
+    logger.error(msg);
+    throw new Error(msg);
+  }
+  const generated = crypto.randomBytes(32).toString('hex');
+  logger.warn(`[security] "${name}" is not set; using an ephemeral dev secret. Set "${name}" in .env for stable sessions/tokens.`);
+  return generated;
+}
 
 // デフォルト設定
 const defaultConfig = {
@@ -53,7 +74,7 @@ const defaultConfig = {
   
   // セキュリティ設定
   security: {
-    jwtSecret: process.env.JWT_SECRET || 'strawberry-dev-jwt-secret',
+    jwtSecret: requireSecret('JWT_SECRET'),
     jwtExpiresIn: '24h',
     bcryptRounds: 10,
     rateLimitEnabled: true,
@@ -162,4 +183,4 @@ function getConfig() {
 const config = getConfig();
 logger.info('Configuration loaded');
 
-module.exports = { config };
+module.exports = { config, requireSecret };

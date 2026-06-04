@@ -3,8 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
 
-// 初期化：ファイルがなければ空配列で作成
-if (!fs.existsSync(ADDR_FILE)) fs.writeFileSync(ADDR_FILE, JSON.stringify([]));
+// 初期化：ディレクトリ・ファイルがなければ作成
+if (!fs.existsSync(ADDR_FILE)) {
+  fs.mkdirSync(path.dirname(ADDR_FILE), { recursive: true });
+  fs.writeFileSync(ADDR_FILE, JSON.stringify([]));
+}
 
 function getProfitAddresses() {
   const arr = JSON.parse(fs.readFileSync(ADDR_FILE));

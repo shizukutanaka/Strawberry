@@ -2,6 +2,13 @@
 const express = require('express');
 const router = express.Router();
 const { getProfitAddresses, addProfitAddress, removeProfitAddress } = require('../utils/profit-addresses');
+const jwtAuth = require('../middleware/jwt-auth');
+const rbac = require('../middleware/rbac');
+
+// 運営利益受取アドレスは資金フローに直結するため、
+// 認証(JWT) + 管理者ロール(admin) を必須とする。
+router.use(jwtAuth);
+router.use(rbac('admin'));
 
 // 一覧取得
 router.get('/', (req, res) => {

@@ -2,7 +2,9 @@
 const { execSync } = require('child_process');
 const path = require('path');
 
-describe('DBマイグレーションロールバック', () => {
+// 実DB・prisma migrate を要するため、明示的に有効化(RUN_DB_TESTS=true)した場合のみ実行
+const maybe = process.env.RUN_DB_TESTS === 'true' ? describe : describe.skip;
+maybe('DBマイグレーションロールバック', () => {
   const dbPath = path.resolve(__dirname, '../../../dev.sqlite3');
 
   it('migrate:up→migrate:downでテーブルが消える', () => {

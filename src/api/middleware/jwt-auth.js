@@ -1,6 +1,9 @@
 // JWT認証ミドルウェア雛形
 const jwt = require('jsonwebtoken');
-const SECRET = process.env.JWT_SECRET || 'dev_secret';
+// 署名(src/api/routes/user/index.js)と同じシークレットを使用。
+// ハードコードされたフォールバックは廃止し、config.requireSecret() に一元化。
+const { config } = require('../../utils/config');
+const SECRET = config.security.jwtSecret;
 
 module.exports = function(req, res, next) {
   const auth = req.headers.authorization;

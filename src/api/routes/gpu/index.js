@@ -2,38 +2,44 @@
 const express = require('express');
 const router = express.Router();
 const { asyncHandler } = require('../../../utils/error-handler');
-const { validateMiddleware, schemas } = require('../../../utils/validator');
+const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
-const { authenticateJWT, checkRole } = require('../../middleware/security');
+const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 
-// GPU検出・管理クラスのインポート
-const { ExtendedGPUDetector } = require('../../../core/gpu-detector-extended');
-const { VirtualGPUManager } = require('../../../../virtual-gpu-manager');
-const { P2PNetwork } = require('../../../../p2p-network');
+// コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
+const { gpuDetector, vgpuManager, p2pNetwork, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const GpuRepository = require('../../../db/json/GpuRepository');
-
-// シングルトンインスタンス
-const gpuDetector = new ExtendedGPUDetector();
-const vgpuManager = new VirtualGPUManager();
-const p2pNetwork = new P2PNetwork();
 
 // 利用可能なGPU一覧を取得
 router.get('/', asyncHandler(async (req, res) => {
   logger.info('Fetching available GPUs');
   // クエリパラメータからフィルタリング条件を取得
+  let parsedFeatures = null;
+  if (req.query.features) {
+    try {
+      parsedFeatures = JSON.parse(req.query.features);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid "features" query: must be valid JSON' });
+    }
+  }
   const filters = {
     minMemoryGB: req.query.minMemoryGB ? parseInt(req.query.minMemoryGB, 10) : 0,
     vendor: req.query.vendor || null,
     maxPrice: req.query.maxPrice ? parseFloat(req.query.maxPrice) : null,
-    features: req.query.features ? JSON.parse(req.query.features) : null,
+    features: parsedFeatures,
   };
   // ファイル永続化されたGPUリストを取得
   let gpus = GpuRepository.getAll();
-  // P2Pネットワークから提供されているGPUも取得
-  const p2pGpus = await p2pNetwork.getAvailableGPUs();
-  // 両方のリストを結合
-  gpus = [...gpus, ...p2pGpus];
+  // P2Pネットワークから提供されているGPUも取得（P2P無効時はスキップ）
+  if (p2pNetwork && typeof p2pNetwork.getAvailableGPUs === 'function') {
+    try {
+      const p2pGpus = await p2pNetwork.getAvailableGPUs();
+      if (Array.isArray(p2pGpus)) gpus = [...gpus, ...p2pGpus];
+    } catch (e) {
+      logger.warn(`P2P GPU fetch failed, returning local GPUs only: ${e.message}`);
+    }
+  }
   // フィルタリング
   if (filters.minMemoryGB > 0) {
     gpus = gpus.filter(gpu => gpu.memoryGB >= filters.minMemoryGB);

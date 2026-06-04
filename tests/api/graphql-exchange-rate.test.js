@@ -1,6 +1,6 @@
 // GraphQL現金換算API（exchangeRateクエリ）の自動テスト
 const request = require('supertest');
-const app = require('../../src/api/server');
+const { app } = require('../../src/api/server');
 
 describe('GraphQL exchangeRate API', () => {
   it('should return rate, timestamp, isCache via exchangeRate query', async () => {

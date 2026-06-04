@@ -1,6 +1,6 @@
 // KPI API自動テスト雛形（Jest）
 const request = require('supertest');
-const app = require('../../src/api/server');
+const { app } = require('../../src/api/server');
 
 describe('KPI API', () => {
   it('POST /api/v1/kpi/report should validate and return 200', async () => {

@@ -67,20 +67,15 @@ setInterval(() => {
 }, 30000);
 
 const { asyncHandler } = require('../../../utils/error-handler');
-const { validateMiddleware, schemas } = require('../../../utils/validator');
+const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
-const { authenticateJWT, checkRole } = require('../../middleware/security');
+const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 
-// 必要なクラスのインポート
-const { P2PNetwork } = require('../../../../p2p-network');
-const { VirtualGPUManager } = require('../../../../virtual-gpu-manager');
+// コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
+const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
-
-// シングルトンインスタンス
-const p2pNetwork = new P2PNetwork();
-const vgpuManager = new VirtualGPUManager();
 
 const { apiKeyAuth } = require('../../middleware/security');
 const { sanitizeObject } = require('../../../utils/sanitize');
@@ -460,9 +455,9 @@ router.post('/:id/match',
 );
 
 // オーダー実行開始 (認証必須)
-const Joi = require('joi');
+// Joi は冒頭の validator から import 済み
 
-router.post('/:id/start', 
+router.post('/:id/start',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {

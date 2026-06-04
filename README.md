@@ -1,5 +1,10 @@
 # Strawberry
 
+> **状態に関する注記（2026-06）**: 本READMEと `improvement_checklist2.md` には、実装より先行した
+> （未実装を含む）記述があります。リポジトリの**実態・既知の制約・このブランチでの修正点**は
+> [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照してください。
+> 現状は Express の Web API + JSON データ層が動作対象で、P2P/Lightning/仮想GPU の各サービスは
+> オプション（未配線）です。秘密鍵は `.env`（`.env.example` 参照）で設定してください。
 
 ### 1. 事前準備
 - Node.js（ノードジェイエス）をパソコンにインストールしてください

@@ -6,37 +6,54 @@ const session = require('express-session');
 const speakeasy = require('speakeasy');
 const { verifyTOTP } = require('../utils/totp');
 const { sendMail } = require('../utils/mailer');
+const { requireSecret } = require('../../utils/config');
 
 const router = express.Router();
 
 // --- Google OAuth2 設定 ---
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: '/master-auth/google/callback',
-}, (accessToken, refreshToken, profile, done) => {
-  // 許可されたGoogleアカウントのみ
-  if (profile.emails[0].value === process.env.MASTER_GOOGLE_EMAIL) {
-    return done(null, profile);
-  } else {
-    return done(null, false, { message: 'Not master account' });
-  }
-}));
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
+// GOOGLE_CLIENT_ID 未設定だと GoogleStrategy のコンストラクタが throw して
+// 起動できないため、env が揃っている場合のみ登録する。
+const googleOAuthEnabled = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+if (googleOAuthEnabled) {
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: '/master-auth/google/callback',
+  }, (accessToken, refreshToken, profile, done) => {
+    // 許可されたGoogleアカウントのみ
+    if (profile.emails[0].value === process.env.MASTER_GOOGLE_EMAIL) {
+      return done(null, profile);
+    } else {
+      return done(null, false, { message: 'Not master account' });
+    }
+  }));
+  passport.serializeUser((user, done) => done(null, user));
+  passport.deserializeUser((obj, done) => done(null, obj));
+}
 
 // --- セッション ---
 router.use(session({
-  secret: process.env.SESSION_SECRET || 'strawberry_master',
+  secret: requireSecret('SESSION_SECRET'),
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  }
 }));
 router.use(passport.initialize());
 router.use(passport.session());
 
 // --- Google認証 ---
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/master-auth/fail' }), (req, res) => {
+const ensureGoogleEnabled = (req, res, next) => {
+  if (!googleOAuthEnabled) {
+    return res.status(503).send('Google OAuth is not configured (set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET)');
+  }
+  next();
+};
+router.get('/google', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next));
+router.get('/google/callback', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { failureRedirect: '/master-auth/fail' })(req, res, next), (req, res) => {
   req.session.googleAuth = true;
   res.redirect('/master-auth/totp');
 });

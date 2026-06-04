@@ -1,6 +1,6 @@
 // /api/exchange-rate REST API自動テスト
 const request = require('supertest');
-const app = require('../../src/api/server');
+const { app } = require('../../src/api/server');
 
 describe('GET /api/exchange-rate', () => {
   it('should return rate, timestamp, isCache', async () => {

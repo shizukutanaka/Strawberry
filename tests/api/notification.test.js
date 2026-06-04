@@ -1,6 +1,6 @@
 // Notification API自動テスト雛形（Jest）
 const request = require('supertest');
-const app = require('../../src/api/server');
+const { app } = require('../../src/api/server');
 
 describe('Notification API', () => {
   it('POST /api/v1/notification/create should validate and return 200', async () => {

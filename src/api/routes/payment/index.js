@@ -7,15 +7,10 @@ const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { config } = require('../../../utils/config');
 
-// Lightning Network関連クラスのインポート
-const { LightningService } = require('../../../../lightning-service');
-const { P2PNetwork } = require('../../../../p2p-network');
+// コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
+const { lightning, p2pNetwork, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const PaymentRepository = require('../../../db/json/PaymentRepository');
-
-// シングルトンインスタンス
-const lightning = new LightningService();
-const p2pNetwork = new P2PNetwork();
 
 // インボイス作成 (認証必須)
 router.post('/invoice', 

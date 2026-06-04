@@ -24,15 +24,15 @@ const { sendLightningPayment } = require('./lightning-api');
 
 // Lightning Network経由でBTC送金（OpenNode/LNbits/BTCPay等）
 async function sendBTC(fromWallet, toWallet, amount) {
-  try {
-    // fromWalletは実際にはLNウォレット管理のため使わない場合もあり
-    const result = await sendLightningPayment(toWallet, amount);
-    return { txid: result.id || result.payment_hash || 'ln-tx', amount, from: fromWallet, to: toWallet };
-  } catch (err) {
-    // fallback: ダミー送金（開発・テスト用）
-    console.log(`[LN Fallback] Send ${amount} BTC from ${fromWallet} to ${toWallet}`);
-    return { txid: 'dummy-txid', amount, from: fromWallet, to: toWallet, error: err.message };
+  // fromWalletは実際にはLNウォレット管理のため使わない場合もあり
+  // 重要: 送金失敗時にダミーtxidを「成功」として返してはならない(資金喪失・二重支払いの原因)。
+  // 失敗は必ず例外として呼び出し側へ伝播させ、決済を成功記録させない。
+  const result = await sendLightningPayment(toWallet, amount);
+  const txid = result && (result.id || result.payment_hash);
+  if (!txid) {
+    throw new Error('Lightning payment did not return a transaction id');
   }
+  return { txid, amount, from: fromWallet, to: toWallet };
 }
 
 // 利益送金先アドレスを取得（ラウンドロビン/ランダムで分散）

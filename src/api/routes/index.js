@@ -13,42 +13,34 @@ const orderRoutes = require('./order');
 const paymentRoutes = require('./payment');
 const userRoutes = require('./user');
 
-// --- core層の主要クラスをインポート ---
-const { ExtendedGPUDetector } = require('../../core/gpu-detector-extended');
-const { VirtualGPUManager } = require('../../../virtual-gpu-manager');
-const { P2PNetwork } = require('../../../p2p-network');
-const { LightningService } = require('../../../lightning-service');
+// --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
+const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../core/services');
+const { asyncHandler } = require('../../utils/error-handler');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
 
-// シングルトンで1インスタンスずつ生成
-const gpuDetector = new ExtendedGPUDetector();
-const vgpuManager = new VirtualGPUManager();
-const p2pNetwork = new P2PNetwork();
-const lightning = new LightningService();
-
-// 初期化処理
+// 初期化処理（各ステップを個別にガード。一部のサービスが未導入でも継続し、
+// Web API 本体は常に起動できるようにする）
 (async () => {
   try {
     logger.info('Initializing core services...');
-    
-    // GPU検出
-    logger.info('Detecting GPUs...');
-    const gpus = await gpuDetector.detectAMDGPUsAdvanced();
-    logger.info(`Detected ${gpus.length} GPUs`);
-    
-    // 仮想GPU管理システム初期化
-    logger.info('Initializing Virtual GPU Manager...');
-    await vgpuManager.initialize(gpus);
-    
-    // P2Pネットワーク起動
-    logger.info('Starting P2P Network...');
-    await p2pNetwork.start();
-    
-    // Lightning Network接続
-    logger.info('Connecting to Lightning Network...');
-    await lightning.initialize();
-    
-    logger.info('All core services initialized successfully');
+    let gpus = [];
+    if (gpuDetector && typeof gpuDetector.detectAMDGPUsAdvanced === 'function') {
+      gpus = await gpuDetector.detectAMDGPUsAdvanced();
+      logger.info(`Detected ${gpus.length} GPUs`);
+    }
+    if (vgpuManager && typeof vgpuManager.initialize === 'function') {
+      logger.info('Initializing Virtual GPU Manager...');
+      await vgpuManager.initialize(gpus);
+    }
+    if (p2pNetwork && typeof p2pNetwork.start === 'function') {
+      logger.info('Starting P2P Network...');
+      await p2pNetwork.start();
+    }
+    if (lightning && typeof lightning.initialize === 'function') {
+      logger.info('Connecting to Lightning Network...');
+      await lightning.initialize();
+    }
+    logger.info('Core services initialization finished');
   } catch (e) {
     logger.error('Failed to initialize core services:', e);
   }
@@ -79,6 +71,7 @@ router.use('/users', userRoutes);
 
 // Lightningノード情報API
 router.get('/node-info', cacheMiddleware(), async (req, res) => {
+  if (!requireService(lightning, res)) return;
   try {
     const info = await lightning.getNodeInfo();
     res.json(info);
@@ -89,6 +82,7 @@ router.get('/node-info', cacheMiddleware(), async (req, res) => {
 
 // Lightningチャネル情報API
 router.get('/channels', cacheMiddleware(), async (req, res) => {
+  if (!requireService(lightning, res)) return;
   try {
     const channels = Array.from(lightning.channels.values());
     res.json(channels);
@@ -126,12 +120,13 @@ router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
 // 将来的に削除予定
 router.get('/gpus', asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /gpus accessed, use /api/v1/gpus instead');
-  const gpus = vgpuManager.physicalGPUs || [];
+  const gpus = (vgpuManager && vgpuManager.physicalGPUs) || [];
   res.json({ gpus });
 }));
 
 router.post('/order', asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /order accessed, use /api/v1/orders instead');
+  if (!requireService(p2pNetwork, res)) return;
   const order = req.body;
   await p2pNetwork.broadcastOrder(order);
   res.status(201).json({ message: 'Order created', order });
@@ -139,12 +134,14 @@ router.post('/order', asyncHandler(async (req, res) => {
 
 router.post('/match', asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /match accessed, use /api/v1/orders/:id/match instead');
+  if (!requireService(p2pNetwork, res)) return;
   const matchResult = await p2pNetwork.matchOrder(req.body);
   res.json({ matched: !!matchResult, detail: matchResult });
 }));
 
 router.post('/payment', asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
+  if (!requireService(lightning, res)) return;
   const { paymentRequest, amount } = req.body;
   const result = await lightning.payInvoice(paymentRequest, amount);
   res.json({ status: 'paid', result });

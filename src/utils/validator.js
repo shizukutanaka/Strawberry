@@ -1,5 +1,6 @@
 // src/utils/validator.js - 入力バリデーションユーティリティ
-const Joi = require('joi');
+// 後段(L249)で uuid 型を拡張した Joi に差し替えるため let で宣言（二重 const 宣言エラーを解消）
+let Joi = require('joi');
 const { APIError, ErrorTypes } = require('./error-handler');
 
 // 共通バリデーションスキーマ
@@ -245,8 +246,8 @@ function isUUID(str) {
   return typeof str === 'string' && uuidRegex.test(str);
 }
 
-// Joi用UUID拡張
-const Joi = require('joi').extend((joi) => ({
+// Joi用UUID拡張（既存の Joi を拡張版へ差し替え）
+Joi = require('joi').extend((joi) => ({
   type: 'uuid',
   base: joi.string(),
   messages: {

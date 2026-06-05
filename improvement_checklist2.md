@@ -17,6 +17,11 @@
 > - **インフラ分離**: libp2p(ESM)/gRPC/dockerode 等に依存するサービスをガード読み込みにし、
 >   未導入でも Web API 本体(JSON データ層)が起動できるようにした。
 >
+> ### 同種ソフト・arXiv ベースの改善点リサーチ
+> 競合（Akash/Render/io.net/Gensyn 等）と arXiv 論文を参照した改善点の洗い出しは
+> [`docs/improvement-research-2026.md`](./docs/improvement-research-2026.md) を参照。
+> 最優先は **計算検証(Proof-of-Compute) / Lightning エスクロー / GPU アテステーション**。
+>
 > ### 既知の未完了（フォローアップ。詳細は `ARCHITECTURE.md`）
 > - virtual-gpu / gpu-detector / Lightning(gRPC) はロード可能に修正済（実機=Docker/k8s/LND が必要）。P2P(libp2p ESM) のみ依然無効。
 > - データ層が JSON / Prisma / pg・knex で三重化。現状は JSON のみ稼働。

@@ -196,3 +196,125 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 - GPU Remote Attestation（Intel Trust Authority） — https://docs.trustauthority.intel.com/main/articles/articles/ita/concept-gpu-attestation.html
 - gossipsub v1.1 spec（libp2p） — https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md
 - 分散 AI 推論市場（Bittensor/Gensyn 比較） — https://blockeden.xyz/blog/2025/07/28/decentralized-ai-inference-markets/
+
+---
+
+# 追補（第2弾 / 2026-06）— 中断耐性・分散学習・検証の落とし穴
+
+第1弾でカバーしなかった領域を、追加の同種ソフト（Vast.ai / Nosana / Spheron / Prime Intellect）と arXiv 論文で深掘りした。
+
+## 9. Spot / 中断可能インスタンスとチェックポイント耐性
+
+**現状**: `virtual-gpu-manager.js` ＋ `src/gpu/gpu-auto-recovery.js` に復旧基盤はあるが、
+**プロバイダ都合の中断（preemption）を前提とした料金ティアもチェックポイント・プロトコルも無い**。
+注文は固定時間枠（`order/index.js`）のみで、安価な空き GPU を中断許容で貸す手段が無い。
+
+**同種ソフト**:
+- **Vast.ai**: interruptible（spot）インスタンスを**入札制で最大 80% 安**く提供。
+- 一般に spot は 60–90% 割引、30 秒〜2 分前通知で中断。
+
+**参考研究**:
+- *Bamboo: Making Preemptible Instances Resilient for Affordable Training of Large DNNs*, arXiv:2204.12013 — 単純チェックポイントだと GPT-2/64 spot で**再起動に 77% の時間**を浪費。冗長計算で耐性を確保。
+- *TierCheck: Tiered Checkpointing for Fault Tolerance in LLM Training*, arXiv:2605.17821 — local/neighbor/remote の三層チェックポイント。
+- *Fault-Tolerant Hybrid-Parallel Training with In-memory Checkpointing*, arXiv:2310.12670。
+- *Modeling The Temporally Constrained Preemptions of Transient Cloud VMs*, arXiv:1911.05160。
+
+**推奨アクション**:
+1. (中期) **中断許容ティア**を価格表に追加（§4 のオークションと統合、Vast.ai 流の入札）。
+2. (中期) 中断前 30 秒通知 → 自動チェックポイント退避（三層, TierCheck 流）→ 別プロバイダへ再スケジュール（`gpu-auto-recovery.js` を拡張）。
+3. SLA（`src/api/sla.js`）に中断率・復旧時間を組み込み、レピュテーション（§5）へ反映。
+
+優先度: **中（コスト競争力に直結）**
+
+## 10. 低通信の分散学習サブストレート化
+
+**現状**: 単一 GPU 貸出のみ。複数プロバイダの GPU を束ねた**分散学習ジョブのオーケストレーションが無い**
+（`p2p-network.js` は無効）。インターネット越し・不安定ノードでの協調学習を扱えない。
+
+**同種ソフト**: **Prime Intellect**（INTELLECT-1 を分散学習で訓練）。
+
+**参考研究**:
+- *INTELLECT-1 Technical Report (PRIME framework)*, arXiv:2412.01152 — **ElasticDeviceMesh** で耐障害なインターネット越し通信＋ノード内 FSDP、DiLoCo ＋ int8 all-reduce で**通信帯域 400× 削減**。
+- *DiLoCoX: Low-Communication Large-Scale Training for Decentralized Cluster*, arXiv:2506.21263。
+- *Beyond A Single AI Cluster: A Survey of Decentralized LLM Training*, arXiv:2503.11023。
+
+**推奨アクション**:
+1. (長期) 帯域制約・中断のある Strawberry の GPU プールを、**DiLoCo 系の低通信分散学習**の実行基盤として位置づけ（§9 の中断耐性が前提）。
+2. ジョブ定義に「分散学習（マルチノード）」型を追加し、ElasticDeviceMesh 風の参加/離脱を許容。
+
+優先度: **低〜中（差別化の上振れ）**
+
+## 11. 検証設計の落とし穴 — Proof-of-Learning は spoof 可能
+
+**注意**: §1 で挙げた計算検証を素朴に実装すると破られる。**Proof-of-Learning(PoL) は現状 spoof 可能**で、
+正直に訓練せずとも検証を通す証明を生成できることが示されている。検証設計時の必読事項。
+
+**参考研究**:
+- *Proof-of-Learning is Currently More Broken Than You Think*, arXiv:2208.03567 — 常に成功する spoof 攻撃を提示。
+- *Optimistic Verifiable Training by Controlling Hardware Nondeterminism*, arXiv:2403.09603 — **HW 非決定性を制御**して楽観的検証（チャレンジ時のみ再計算）を成立させる。
+- *A Survey of Zero-Knowledge Proof Based Verifiable Machine Learning*, arXiv:2502.18535。
+- *VerifiableFL: Verifiable Claims for Federated Learning using Exclaves*, arXiv:2412.10537 — TEE/exclave による検証。
+- PoL + ウォーターマークの**二層防御**（spoof には訓練軌跡と透かしの両方の複製を強制）。
+
+**推奨アクション**:
+1. §1 の検証は **PoL 単体に依存しない**。楽観的検証（チャレンジ＋再計算, arXiv:2403.09603）＋ TEE attestation（§2）＋ ウォーターマークを組み合わせる。
+2. 非決定性制御（固定シード・決定論的カーネル）を検証の前提として `virtual-gpu-manager` の実行環境に組み込む。
+
+優先度: **高（§1 の正しさを担保する前提）**
+
+## 12. 標準ベンチマーク・ホスト信頼性スコア（DLPerf 相当）
+
+**現状**: `src/utils/ai-benchmark.js` はあるが、**機種横断で比較可能な標準スコアやホスト信頼性レーティングが無い**。
+借り手が「どの GPU/ホストが速く・落ちにくいか」を比較できない。
+
+**同種ソフト**: **Vast.ai の DLPerf スコア**（GPU 選定指標）＋ ホスト信頼性メトリクス。**Nosana** は組込みバリデーション。
+
+**推奨アクション**:
+1. (短期) 出品時に標準ベンチを必須化し、**DLPerf 風の正規化スコア**を算出・掲示（§2 のスペック詐称検出と統合）。
+2. (短期) 稼働率・中断率・完了率から**ホスト信頼性スコア**を出し、検索ランキング（`gpu/index.js` のソート）と §5 レピュテーションに反映。
+
+優先度: **中**
+
+## 13. Serverless / オートスケール推論・分課金メータリング
+
+**現状**: 注文は固定時間枠の予約のみ。**サーバーレス（リクエスト課金）やオートスケール推論が無い**。
+課金は 5 分粒度のフラット（`order/index.js`）。
+
+**同種ソフト**: **Vast.ai Serverless**（推論のオートスケール）、**Spheron**（分単位課金・中断なし専有ティア）。
+
+**推奨アクション**: (中期) 推論向けの**サーバーレス/オートスケール**ティアと、§3 の Lightning ストリーミング・マイクロペイメントによる**実消費メータリング課金**を追加。
+
+優先度: **中**
+
+---
+
+## 追補・優先度まとめ
+
+| # | 改善領域 | 優先度 | 根拠（代表） |
+|---|---------|--------|-------------|
+| 11 | 検証の落とし穴対策（楽観的検証＋TEE＋透かし） | 高 | arXiv:2208.03567, 2403.09603, 2502.18535 |
+| 9 | Spot/中断耐性＋三層チェックポイント | 中 | arXiv:2204.12013, 2605.17821; Vast.ai |
+| 12 | 標準ベンチ/ホスト信頼性スコア | 中 | Vast.ai DLPerf; Nosana |
+| 13 | Serverless/オートスケール＋実消費課金 | 中 | Vast.ai Serverless; Spheron |
+| 10 | 低通信の分散学習サブストレート | 低〜中 | arXiv:2412.01152, 2506.21263, 2503.11023 |
+
+## 追補・参考文献（arXiv / 一次情報）
+
+- Bamboo: Making Preemptible Instances Resilient for Affordable Training of Large DNNs — https://arxiv.org/pdf/2204.12013
+- TierCheck: Tiered Checkpointing for Fault Tolerance in LLM Training — https://arxiv.org/html/2605.17821v1
+- Fault-Tolerant Hybrid-Parallel Training with In-memory Checkpointing — https://arxiv.org/pdf/2310.12670
+- Modeling The Temporally Constrained Preemptions of Transient Cloud VMs — https://arxiv.org/pdf/1911.05160
+- INTELLECT-1 Technical Report (PRIME / ElasticDeviceMesh / DiLoCo) — https://arxiv.org/html/2412.01152v1
+- DiLoCoX: Low-Communication Large-Scale Training for Decentralized Cluster — https://arxiv.org/html/2506.21263v1
+- Beyond A Single AI Cluster: A Survey of Decentralized LLM Training — https://arxiv.org/html/2503.11023v1
+- Proof-of-Learning is Currently More Broken Than You Think — https://arxiv.org/pdf/2208.03567
+- Optimistic Verifiable Training by Controlling Hardware Nondeterminism — https://arxiv.org/html/2403.09603v3
+- A Survey of Zero-Knowledge Proof Based Verifiable Machine Learning — https://arxiv.org/abs/2502.18535
+- VerifiableFL: Verifiable Claims for Federated Learning using Exclaves — https://arxiv.org/pdf/2412.10537
+
+### 同種ソフト一次情報（追補）
+- Vast.ai Serverless（オートスケール推論） — https://vast.ai/products/serverless
+- Vast.ai spot/interruptible（AIスタートアップ向け） — https://vast.ai/article/starting-smart-why-spot-gpus-are-ideal-for-ai-startups
+- Nosana GPU workloads（組込みバリデーション） — https://nosana.com/gpu-workloads/
+- Spheron（Vast.ai 代替比較） — https://www.spheron.network/blog/vastai-alternatives/
+- GPU マーケット比較（Shadeform / Prime Intellect / Node AI） — https://aimultiple.com/gpu-marketplace

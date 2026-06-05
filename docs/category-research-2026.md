@@ -9,8 +9,8 @@ Strawberry（P2P GPU マーケットプレイス＋BTC Lightning 決済）を **
 - [x] 2. 決済・エスクロー（Lightning / micropayments / streaming）
 - [x] 3. GPU アテステーション・ハードウェア真正性（TEE / Confidential Computing）
 - [x] 4. 価格・オークション・マッチング機構
-- [ ] 5. レピュテーション・ステーキング・Sybil 耐性
-- [ ] 6. P2P ネットワーク・耐攻撃（libp2p / gossipsub / DHT）
+- [x] 5. レピュテーション・ステーキング・Sybil 耐性
+- [x] 6. P2P ネットワーク・耐攻撃（libp2p / gossipsub / DHT）
 - [ ] 7. スケジューリング・中断耐性・チェックポイント（spot / orchestration）
 - [ ] 8. 推論サービング効率（vLLM / batching / KV cache）
 - [ ] 9. 分散学習・フェデレーテッド・機密性（DiLoCo / secure aggregation / DP）
@@ -121,4 +121,54 @@ Strawberry（P2P GPU マーケットプレイス＋BTC Lightning 決済）を **
 - (中期) **腐敗性財 AMM**（arXiv:2511.16357）で空き GPU 時間を動的値下げ・在庫消化。
 - (中期) 入札・約定ログを §18 の監査アンカリングで改ざん耐性化、§17 のシル入札検知と対で導入。
 
-<!-- 以降 カテゴリ 5〜10 はループの後続イテレーションで追記 -->
+## 5. レピュテーション・ステーキング・Sybil 耐性
+
+**Strawberry の現状**: 参加者登録（`src/db/json/UserRepository.js`）に **stake もレピュテーションも無い**。
+不正プロバイダ抑止が効かず、Sybil で評価を水増し可能。`src/utils/sla-tracker.js`・`src/api/sla.js` の基盤はあるが信頼度評価に未接続。
+
+### 参照（arXiv / GitHub / 一次情報）
+1. arXiv:2603.23793 — AetherWeave: Sybil-Resistant Robust Peer Discovery with Stake — https://arxiv.org/pdf/2603.23793
+2. arXiv:1207.2617 — A Review of Techniques to Mitigate Sybil Attacks — https://arxiv.org/pdf/1207.2617
+3. arXiv:2507.02951 — Bittensor Protocol: The Bitcoin in Decentralized AI（stake 加重信頼/Yuma）— https://arxiv.org/pdf/2507.02951
+4. arXiv:1812.10868 — Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
+5. arXiv:2506.00282 — Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts（動的ペナルティ）— https://arxiv.org/html/2506.00282v1
+6. GitHub: opentensor/bittensor — Yuma 合意・stake 加重信頼・slashing の実装 — https://github.com/opentensor/bittensor
+7. Bittensor 論文 — Incentivizing Intelligence（colluding validator は多数決で penalize）— https://ai-secure.github.io/DMLW2022/assets/papers/6.pdf
+8. GitHub: akash-network/provider — refundable bid deposit（担保で冷やかし抑止）— https://github.com/akash-network/provider
+9. GitHub: gensyn-ai — 検証＋ステーキング前提の分散学習（cross-ref カテゴリ1）— https://github.com/gensyn-ai
+10. libp2p gossipsub peer scoring（ネットワーク層のレピュテーション, cross-ref カテゴリ6）— https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md
+
+### 改善点
+- (中期) プロバイダに**担保ステーク**を要求し、検証不一致（カテゴリ1）/SLA 違反で **slashing**（Bittensor／Akash の bid deposit 流）。
+- (短期) 完了ジョブ・検証結果・SLA（`sla-tracker.js`/`sla.js`）から **stake 加重レピュテーション**を算出し、マッチング（カテゴリ4）の重み付けに使用。
+- (中期) **Sybil 耐性**: stake 連動のピア発見（AetherWeave）＋ Ed25519 peerID と GPU attestation（カテゴリ3）の紐付けで身元コスト化。
+- (中期) **紛争解決を製品化**: 証跡＝カテゴリ1の検証ログ＋attestation＋§18 アンカリング。
+
+---
+
+## 6. P2P ネットワーク・耐攻撃（libp2p / gossipsub / DHT）
+
+**Strawberry の現状**: `p2p-network.js` は **libp2p が ESM 専用で require 不可のため無効**（`ARCHITECTURE.md`）。
+gossip 配信の peer scoring・signed peer records 等のセキュリティ機構が未活用。
+
+### 参照（arXiv / GitHub / 一次情報）
+1. arXiv:2310.09193 — Tikuna: An Ethereum Blockchain Network Security Monitoring System — https://arxiv.org/pdf/2310.09193
+2. arXiv:1207.2617 — A Review of Techniques to Mitigate Sybil Attacks — https://arxiv.org/pdf/1207.2617
+3. GitHub: libp2p/specs — gossipsub v1.1（peer scoring / flood publish / opportunistic graft / outbound quota）— https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md
+4. GitHub: libp2p/go-libp2p — Go 実装 — https://github.com/libp2p/go-libp2p
+5. GitHub: libp2p/js-libp2p — JS 実装（Strawberry は Node なので主候補）— https://github.com/libp2p/js-libp2p
+6. GitHub: libp2p/rust-libp2p — Rust 実装＋security advisory 運用（例: GHSA-gc42-3jg7-rxr2）— https://github.com/libp2p/rust-libp2p
+7. GitHub: libp2p/py-libp2p — Python 実装（gossipsub）— https://github.com/libp2p/py-libp2p
+8. Least Authority — Gossipsub v1.1 Protocol Design + Implementation Security Audit — https://leastauthority.com/static/publications/LeastAuthority-ProtocolLabs-Gossipsubv1.1-Audit-Report.pdf
+9. Protocol Labs — Gossipsub v1.1 Evaluation Report — https://research.protocol.ai/publications/gossipsub-v1.1-evaluation-report/vyzovitis2020.pdf
+10. libp2p docs — Security Considerations（DHT Eclipse 対策＝signed peer records を既定有効）— https://docs.libp2p.io/concepts/security/security-considerations/
+
+### 改善点
+- (中期) **libp2p ESM 対応**（動的 import ラッパ）で `p2p-network.js` を復活（`src/core/services.js` のガードと整合）。Node 向けは js-libp2p。
+- (中期) **gossipsub v1.1 peer scoring** を有効化（Sybil/Eclipse 緩和）→ カテゴリ5 レピュテーションと統合。
+- (短期) **signed peer records** を既定有効化（DHT Eclipse 対策）。
+- (中期) **Tikuna 流の P2P 層攻撃監視**を `src/core/service-monitor.js`/`src/utils/anomaly-detector.js` に追加。依存（rust/go/js-libp2p）の security advisory を追跡。
+
+---
+
+<!-- 以降 カテゴリ 7〜10 はループの後続イテレーションで追記 -->

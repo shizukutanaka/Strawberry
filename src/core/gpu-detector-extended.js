@@ -1,5 +1,6 @@
 // src/core/gpu-detector-extended.js - Extended GPU Detection for AMD/Intel
-const { exec } = require('child_process').promises;
+// child_process には .promises が無いため util.promisify で exec を生成
+const exec = require('util').promisify(require('child_process').exec);
 const fs = require('fs').promises;
 const path = require('path');
 const { logger } = require('../utils/logger');

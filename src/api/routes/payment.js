@@ -26,10 +26,39 @@ router.post('/', async (req, res) => {
 
     // 利益送金先アドレスを選択
     const operatorWallet = getOperatorWallet();
-    // 1. 借り手→運営
-    const tx1 = await sendBTC(borrowerWallet, operatorWallet, total);
-    // 2. 運営→貸し手
-    const tx2 = await sendBTC(operatorWallet, lenderWallet, payout);
+
+    // 1. 借り手→運営（失敗時は資金未移動。安全に失敗を返す）
+    let tx1;
+    try {
+      tx1 = await sendBTC(borrowerWallet, operatorWallet, total);
+    } catch (err) {
+      return res.status(502).json({
+        message: 'Payment failed before any funds were moved',
+        stage: 'borrower_to_operator',
+        error: err.message
+      });
+    }
+
+    // 2. 運営→貸し手（tx1 成立後にここが失敗すると資金が運営に滞留する＝部分決済）
+    let tx2;
+    try {
+      tx2 = await sendBTC(operatorWallet, lenderWallet, payout);
+    } catch (err) {
+      // 重大: 借り手→運営は成立済みだが貸し手への送金が失敗。手動照合が必要。
+      const { appendAuditLog } = require('../../utils/audit-log');
+      appendAuditLog('payment_partial_settlement', {
+        orderId, operatorWallet, lenderWallet, total, payout,
+        txBorrowerToOperator: tx1, error: err.message
+      });
+      console.error('[CRITICAL] Partial settlement: operator received funds but lender payout failed. Manual reconciliation required.', { orderId, tx1: tx1 && tx1.txid });
+      return res.status(500).json({
+        message: 'Partial settlement: operator received funds but payout to lender failed. Manual reconciliation required.',
+        stage: 'operator_to_lender',
+        orderId,
+        txBorrowerToOperator: tx1,
+        error: err.message
+      });
+    }
 
     // 利益記録（DBや監査ログに記録推奨）
     // ここではレスポンスに含める

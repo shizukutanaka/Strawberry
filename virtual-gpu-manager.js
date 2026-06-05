@@ -3,11 +3,12 @@ const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
 const Docker = require('dockerode');
 const k8s = require('@kubernetes/client-node');
-const { logger } = require('../utils/logger');
+const { logger } = require('./src/utils/logger');
 // child_process には .promises が存在しないため、util.promisify で exec を生成する
 // (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
 const exec = require('util').promisify(require('child_process').exec);
 const fs = require('fs').promises;
+const fsSync = require('fs'); // existsSync 等の同期APIは fs.promises に無いため別途参照
 const path = require('path');
 
 // シェルコマンドへ埋め込む識別子の検証（コマンドインジェクション防止）。
@@ -64,7 +65,7 @@ class VirtualGPUManager extends EventEmitter {
         // 実行環境検出
         if (process.env.KUBERNETES_SERVICE_HOST) {
             return 'kubernetes';
-        } else if (process.env.DOCKER_HOST || fs.existsSync('/var/run/docker.sock')) {
+        } else if (process.env.DOCKER_HOST || fsSync.existsSync('/var/run/docker.sock')) {
             return 'docker';
         } else {
             return 'native';

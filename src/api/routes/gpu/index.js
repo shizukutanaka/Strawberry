@@ -104,12 +104,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
   res.json(response);
 }));
 
-const { apiKeyAuth } = require('../../middleware/security');
 const { sanitizeObject } = require('../../../utils/sanitize');
 
 // GPU出品登録 (認証必須)
 router.post('/', 
-  apiKeyAuth,
   authenticateJWT, 
   checkRole(['provider', 'admin']), 
   validateMiddleware(schemas.gpu.register),
@@ -173,7 +171,6 @@ router.post('/',
 
 // GPU情報更新 (認証必須)
 router.put('/:id',
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
@@ -208,7 +205,6 @@ router.put('/:id',
 
 // GPU出品取り下げ (認証必須)
 router.delete('/:id', 
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),

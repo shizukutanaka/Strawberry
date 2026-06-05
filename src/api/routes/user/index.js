@@ -210,12 +210,10 @@ router.put('/me/settings',
   })
 );
 
-const { apiKeyAuth } = require('../../middleware/security');
 const { sanitizeObject } = require('../../../utils/sanitize');
 
 // ユーザー一覧取得 (管理者のみ)
 router.get('/', 
-  apiKeyAuth,
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
@@ -255,7 +253,6 @@ router.get('/:id',
 
 // ユーザー削除 (管理者のみ)
 router.delete('/:id', 
-  apiKeyAuth,
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {

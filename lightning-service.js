@@ -5,7 +5,7 @@ const protoLoader = require('@grpc/proto-loader');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const { logger } = require('../utils/logger');
+const { logger } = require('./src/utils/logger');
 
 class LightningService extends EventEmitter {
     /**
@@ -170,6 +170,7 @@ class LightningService extends EventEmitter {
                 return;
             }
             this.setupMockLND();
+        }
         }
     }
 

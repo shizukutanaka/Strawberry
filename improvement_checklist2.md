@@ -18,7 +18,7 @@
 >   未導入でも Web API 本体(JSON データ層)が起動できるようにした。
 >
 > ### 既知の未完了（フォローアップ。詳細は `ARCHITECTURE.md`）
-> - P2P(libp2p ESM)・Lightning(gRPC)・virtual-gpu の各サービスは未配線/オプション扱い（実機能は未検証）。
+> - virtual-gpu / gpu-detector / Lightning(gRPC) はロード可能に修正済（実機=Docker/k8s/LND が必要）。P2P(libp2p ESM) のみ依然無効。
 > - データ層が JSON / Prisma / pg・knex で三重化。現状は JSON のみ稼働。
 > - 既存テストの一部は未実装エンドポイントや古いAPIを参照しており失敗する（実装との不整合）。
 > - 孤立した `*-fixed.js`、Electron(preload/react-app) は未配線。

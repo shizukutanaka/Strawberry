@@ -77,7 +77,6 @@ const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
 
-const { apiKeyAuth } = require('../../middleware/security');
 const { sanitizeObject } = require('../../../utils/sanitize');
 
 // オーダー一覧取得 (認証必須)
@@ -85,7 +84,6 @@ const { cacheMiddleware } = require('../../middleware/cache');
 
 router.get('/', 
   cacheMiddleware(),
-  apiKeyAuth,
   authenticateJWT,
   asyncHandler(async (req, res, next) => {
     try {
@@ -181,7 +179,6 @@ router.post('/:id/heartbeat',
 
 // オーダー詳細取得 (認証必須)
 router.get('/:id',
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
@@ -224,7 +221,6 @@ router.get('/:id',
 
 // オーダー更新 (認証必須)
 router.put('/:id',
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
@@ -273,7 +269,6 @@ router.delete('/:id',
 
 // オーダー作成 (認証必須)
 router.post('/', 
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(schemas.order.create),
   asyncHandler(async (req, res) => {

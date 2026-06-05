@@ -318,3 +318,110 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 - Nosana GPU workloads（組込みバリデーション） — https://nosana.com/gpu-workloads/
 - Spheron（Vast.ai 代替比較） — https://www.spheron.network/blog/vastai-alternatives/
 - GPU マーケット比較（Shadeform / Prime Intellect / Node AI） — https://aimultiple.com/gpu-marketplace
+
+---
+
+# 追補（第3弾 / 2026-06）— 推論効率・カーボン・機密性・市場健全性
+
+第1・2弾で未カバーの「サービング効率／持続可能性／プライバシー／オークション健全性／監査の対外証明」を追加調査した。
+
+## 14. 推論サービング効率（continuous batching / PagedAttention / 投機的デコード）
+
+**現状**: Strawberry は**素の GPU 時間**を貸すだけ（`virtual-gpu-manager.js`）。推論最適化レイヤが無いため
+$/token 競争力が低い。§13 のサーバーレス推論ティアを作るなら、ここが性能の肝。
+
+**同種ソフト**: Vast.ai Serverless、各種 vLLM ベースの推論プラットフォーム。
+
+**参考研究**:
+- vLLM **PagedAttention**（KV キャッシュ断片化を解消、メモリ near-optimal）、Orca **continuous batching**（実行中バッチに動的にリクエスト投入）。
+- *FairBatching: Fairness-Aware Batch Formation for LLM Inference*, arXiv:2510.14392。
+- *BatchLLM: Global Prefix Sharing + Throughput-oriented Token Batching*, arXiv:2412.03594。
+- *vAttention: Dynamic Memory Management for Serving LLMs without PagedAttention*, arXiv:2405.04437。
+- *Multi-Bin Batching for Increasing LLM Inference Throughput*, arXiv:2412.04504。
+
+**推奨アクション**: (中期) §13 のサーバーレス推論ティアを **vLLM 系（PagedAttention＋continuous batching）**で実装し、トークン単位課金（§3 ストリーミング）と統合。プロバイダ側コンテナイメージに最適化サービングを同梱。
+
+優先度: **中**
+
+## 15. カーボン対応・地理分散スケジューリング
+
+**現状**: P2P で GPU は地理分散だが、配置は需給/価格のみ（§4）。**電力価格・系統カーボン強度を考慮した配置が無い**。コスト・ESG 双方で機会損失。
+
+**参考研究**:
+- *Sustainable Carbon-Aware and Water-Efficient LLM Scheduling in Geo-Distributed Cloud Datacenters (SLIT)*, arXiv:2505.23554 — TTFT・カーボン・水・電力コストを共最適化。
+- *Sustainable AIGC Workload Scheduling (Multi-Agent RL)*, arXiv:2304.07948。
+- *Carbon-Aware Computing with Probabilistic Performance Guarantees*, arXiv:2410.21510。
+- *Task Scheduling in Geo-Distributed Computing: A Survey*, arXiv:2501.15504。
+
+**推奨アクション**:
+1. (中期) プロバイダ・メタデータに地域/電力カーボン強度を持たせ、§4 のマッチングに**carbon-aware な配置スコア**を追加（遅延非依存ジョブは低炭素地域へ）。
+2. 「グリーン実行」をプレミアム属性として価格・検索に露出。
+
+優先度: **中（差別化＋コスト）**
+
+## 16. ワークロード機密性（Secure Aggregation / 差分プライバシー）
+
+**現状**: 借り手のコード・データは**プロバイダ host から丸見え**。`src/security/compliance.js` はあるが、
+分散学習（§10）や複数ノード推論で**個々の更新やデータを host から秘匿する仕組みが無い**。TEE（§2）だけでは多者協調をカバーしきれない。
+
+**参考研究**:
+- *Secure Stateful Aggregation: A Practical Protocol for DP-FL*, arXiv:2410.11368。
+- *On Using Secure Aggregation in DP-FL with Multiple Local Steps*, arXiv:2407.19286。
+- *DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation*, arXiv:2604.07125 — クライアント側 LDP＋加法的秘密分散で個別更新を server/経路から秘匿。
+
+**推奨アクション**: (中期) §10 の分散学習・フェデレーテッド型ジョブに **secure aggregation（秘密分散）＋差分プライバシー**を組み込み、host が個別勾配/データを復元できないようにする。TEE（§2）と多層化。
+
+優先度: **中**
+
+## 17. オークション健全性（談合・シル入札検知）
+
+**注意/現状**: §4 で逆/ダブルオークションを導入すると、**シル入札（価格つり上げ）や複数出品者の談合**が新たなリスクになる。匿名アカウント乱立で検知困難（§5 Sybil と関連）。
+
+**参考研究**:
+- *Detecting Multiple Seller Collusive Shill Bidding*, arXiv:1812.10868 — Shill Score を複数出品者談合へ拡張。
+- *Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts*, arXiv:2506.00282 — スマートコントラクトで**改ざん耐性のあるオークション環境**＋不審行動の**動的ペナルティ**。
+
+**推奨アクション**:
+1. (中期) §4 のオークションに **Shill Score 風の異常検知**（`src/utils/anomaly-detector.js` を拡張）を組み込み、§5 のステーク・スラッシングで動的ペナルティ。
+2. 入札ログを §18 のアンカリングで改ざん耐性化。
+
+優先度: **中（§4 を入れるなら必須の対）**
+
+## 18. 監査ログの対外証明（タイムスタンプ/アンカリング）
+
+**現状**: `src/api/middleware/audit.js` は HMAC 連鎖で tamper-evident だが、**外部アンカーが無い**ため運営自身による改ざん・遡及を第三者が否認できない（自己署名の限界）。
+
+**参考研究**: *Shill Bidding Prevention … Smart Contracts*, arXiv:2506.00282（改ざん耐性・透明性の確保）。一般に OpenTimestamps 等の**公開タイムスタンプ/ブロックチェーン・アンカリング**。
+
+**推奨アクション**: (短期) 監査ログ/入札ログの定期ダイジェスト（Merkle ルート）を**公開タイムスタンプ（OpenTimestamps 等）にアンカー**し、非否認性を確立。BTC を既に扱うため親和性が高い。
+
+優先度: **中**
+
+---
+
+## 追補（第3弾）・優先度まとめ
+
+| # | 改善領域 | 優先度 | 根拠（代表） |
+|---|---------|--------|-------------|
+| 17 | オークション談合/シル入札検知 | 中（§4の対） | arXiv:1812.10868, 2506.00282 |
+| 18 | 監査ログの対外アンカリング | 中 | arXiv:2506.00282; OpenTimestamps |
+| 14 | 推論サービング効率（vLLM系） | 中 | PagedAttention/Orca, arXiv:2510.14392, 2412.03594 |
+| 15 | カーボン対応・地理分散配置 | 中 | arXiv:2505.23554, 2304.07948, 2501.15504 |
+| 16 | ワークロード機密性（secure agg/DP） | 中 | arXiv:2410.11368, 2407.19286, 2604.07125 |
+
+## 追補（第3弾）・参考文献（arXiv / 一次情報）
+
+- FairBatching: Fairness-Aware Batch Formation for LLM Inference — https://arxiv.org/html/2510.14392v1
+- BatchLLM: Optimizing Large Batched LLM Inference (Global Prefix Sharing) — https://arxiv.org/html/2412.03594v1
+- vAttention: Dynamic Memory Management for Serving LLMs — https://arxiv.org/html/2405.04437v2
+- Multi-Bin Batching for Increasing LLM Inference Throughput — https://arxiv.org/pdf/2412.04504
+- Inside vLLM: Anatomy of a High-Throughput LLM Inference System — https://blog.vllm.ai/2025/09/05/anatomy-of-vllm.html
+- Sustainable Carbon-Aware and Water-Efficient LLM Scheduling (SLIT) — https://arxiv.org/abs/2505.23554
+- Sustainable AIGC Workload Scheduling (Multi-Agent RL) — https://arxiv.org/abs/2304.07948
+- Carbon-Aware Computing with Probabilistic Performance Guarantees — https://arxiv.org/html/2410.21510v3
+- Task Scheduling in Geo-Distributed Computing: A Survey — https://arxiv.org/pdf/2501.15504
+- Secure Stateful Aggregation: A Practical Protocol for DP-FL — https://arxiv.org/html/2410.11368v1
+- On Using Secure Aggregation in DP-FL with Multiple Local Steps — https://arxiv.org/abs/2407.19286
+- DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
+- Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
+- Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1

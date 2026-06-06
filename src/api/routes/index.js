@@ -12,6 +12,7 @@ const gpuRoutes = require('./gpu');
 const orderRoutes = require('./order');
 const paymentRoutes = require('./payment');
 const userRoutes = require('./user');
+const marketplaceRoutes = require('./marketplace');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
 const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../core/services');
@@ -68,6 +69,7 @@ router.use('/gpus', gpuRoutes);
 router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
+router.use('/marketplace', marketplaceRoutes);
 
 // Lightningノード情報API
 router.get('/node-info', cacheMiddleware(), async (req, res) => {

@@ -72,7 +72,12 @@ function createMarketplaceService({
     return r;
   }
 
-  return { quoteGpu, rankCandidates, openOrderEscrow, recordPaid, verifyAndSettle, resolveDispute };
+  /** エスクローの現在状態を取得（読み取り）。 */
+  function getEscrow(escrowId) {
+    return escrowService.get(escrowId);
+  }
+
+  return { quoteGpu, rankCandidates, openOrderEscrow, recordPaid, verifyAndSettle, resolveDispute, getEscrow };
 }
 
 module.exports = { createMarketplaceService };

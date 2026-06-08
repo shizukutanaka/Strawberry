@@ -10,6 +10,10 @@ const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middlew
 const { gpuDetector, vgpuManager, p2pNetwork, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const GpuRepository = require('../../../db/json/GpuRepository');
+// GPU アテステーション（申告スペック vs デバイス計測の照合）
+const { createMockAttestationVerifier } = require('../../../security/gpu-attestation-verifier');
+// 開発/テスト時は Mock、本番では実 nvtrust アダプタへ置き換え可能（DI）
+const _attestationVerifier = createMockAttestationVerifier();
 
 // 利用可能なGPU一覧を取得
 router.get('/', asyncHandler(async (req, res) => {
@@ -140,8 +144,36 @@ router.post('/',
     if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
     if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
     if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
+
+    // GPU アテステーション（任意）— リクエストに attestationReport が含まれる場合に検証
+    if (req.body.attestationReport) {
+      try {
+        const attResult = await _attestationVerifier.verify(gpuInfo, req.body.attestationReport);
+        gpuInfo.attestation = {
+          passed: attResult.passed,
+          score: attResult.score,
+          findings: attResult.findings,
+          verifiedAt: new Date().toISOString(),
+        };
+        // レピュテーション記録（DI 済みシングルトン）
+        const { createReputationService } = require('../../../reputation/reputation-service');
+        const repSvc = createReputationService();
+        repSvc.recordAttestation(req.user.id, attResult.passed);
+        if (!attResult.passed) {
+          logger.warn(`[GPU登録] アテステーション失敗: providerId=${req.user.id} score=${attResult.score} findings=${attResult.findings.join('; ')}`);
+        }
+      } catch (attErr) {
+        logger.warn(`[GPU登録] アテステーション検証エラー（スキップ）: ${attErr.message}`);
+        gpuInfo.attestation = { passed: false, score: 0, findings: ['verifier error: ' + attErr.message], verifiedAt: new Date().toISOString() };
+      }
+    } else {
+      gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
+    }
+
     // P2Pネットワークへアナウンス
-    await p2pNetwork.announceGPU(gpuInfo);
+    if (p2pNetwork && typeof p2pNetwork.announceGPU === 'function') {
+      try { await p2pNetwork.announceGPU(gpuInfo); } catch (_) { /* P2P は optional */ }
+    }
     // ファイル永続化リポジトリに登録
     const registeredGpu = GpuRepository.create(gpuInfo);
     // GPUイベントをログに記録
@@ -164,7 +196,8 @@ router.post('/',
     const { apiKey, ...gpuSafe } = registeredGpu;
     res.status(201).json({
       message: 'GPU successfully registered',
-      gpu: gpuSafe
+      gpu: gpuSafe,
+      attestation: gpuSafe.attestation || null,
     });
   })
 );

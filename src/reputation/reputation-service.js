@@ -56,6 +56,20 @@ function createReputationService({ repository } = {}) {
     setStake: (providerId, amount) =>
       mutate(providerId, () => ({ stake: Math.max(0, amount) })),
 
+    /**
+     * GPU アテステーション合否を記録。
+     * 失敗時はスラッシュも加算（申告詐称は最重大のペナルティ）。
+     */
+    recordAttestation: (providerId, passed) =>
+      mutate(providerId, (s) =>
+        passed
+          ? { attestationPasses: (s.attestationPasses || 0) + 1 }
+          : {
+              attestationFails: (s.attestationFails || 0) + 1,
+              slashCount: s.slashCount + 1,
+            },
+      ),
+
     /** SLA 指標の更新。 */
     setSla: (providerId, { slaUptimePct, interruptionRate } = {}) =>
       mutate(providerId, (s) => ({

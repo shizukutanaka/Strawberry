@@ -5,6 +5,7 @@
 // ラッパとして実装すればよい（ルート直書きを避け、テスト可能性を確保）。
 // 各サブサービスは DI（テストはインメモリ repo を注入）。
 const featurePricer = require('../pricing/feature-pricer');
+const { runAuction } = require('./auction-engine');
 
 function createMarketplaceService({
   escrowService,
@@ -25,6 +26,25 @@ function createMarketplaceService({
   /** 候補プロバイダをレピュテーション順に並べる（マッチング）。 */
   function rankCandidates(providerIds, opts = {}) {
     return reputationService.rank(providerIds, opts);
+  }
+
+  /**
+   * 逆オークションでプロバイダを選定する（Akash/Golem 型マッチング）。
+   * 各 bid のレピュテーションは reputationService から自動補完する（bid に
+   * reputationScore があればそれを優先）。価格・レピュテーション・SLA・
+   * アテステーションを統合した効用スコアで勝者を選ぶ。
+   * @param {Array<object>} bids { providerId, pricePerHour, slaUptimePct?, attestationScore?, attestationPassed? }
+   * @param {object} auctionOpts auction-engine の opts（reservePrice/minReputation/weights 等）
+   * @returns {{winner, ranked, rejected}}
+   */
+  function selectProvider(bids, auctionOpts = {}) {
+    if (!Array.isArray(bids)) throw new Error('bids must be an array');
+    const enriched = bids.map((b) => {
+      if (typeof b.reputationScore === 'number') return b;
+      const rep = b.providerId ? reputationService.getScore(b.providerId) : { score: 0 };
+      return { ...b, reputationScore: rep.score };
+    });
+    return runAuction(enriched, auctionOpts);
   }
 
   /**
@@ -77,7 +97,7 @@ function createMarketplaceService({
     return escrowService.get(escrowId);
   }
 
-  return { quoteGpu, rankCandidates, openOrderEscrow, recordPaid, verifyAndSettle, resolveDispute, getEscrow };
+  return { quoteGpu, rankCandidates, selectProvider, openOrderEscrow, recordPaid, verifyAndSettle, resolveDispute, getEscrow };
 }
 
 module.exports = { createMarketplaceService };

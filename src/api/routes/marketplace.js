@@ -36,6 +36,20 @@ router.post('/rank', (req, res) => {
   }
 });
 
+// 逆オークションでプロバイダを選定（Akash/Golem 型マッチング）
+// bid に reputationScore が無ければ reputationService から自動補完される
+router.post('/auction', (req, res) => {
+  const { bids, opts } = req.body || {};
+  if (!Array.isArray(bids)) {
+    return res.status(400).json({ error: 'bids array is required' });
+  }
+  try {
+    return res.json(marketplace.selectProvider(bids, opts && typeof opts === 'object' ? opts : {}));
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+});
+
 // --- エスクロー・ライフサイクル（admin 限定）---
 
 // 注文に価格を確定し hold-invoice エスクローを開く（PENDING）

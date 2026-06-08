@@ -88,4 +88,25 @@ describe('marketplace-service', () => {
     const ranked = mkt.rankCandidates(['weak', 'strong']);
     expect(ranked[0].id).toBe('strong');
   });
+
+  it('selectProvider runs a reverse auction, auto-filling reputation from the service', () => {
+    const { mkt, reputationService } = build();
+    // strong provider: many successes + stake; weak: a failure
+    for (let i = 0; i < 100; i++) reputationService.recordJobResult('strong', true);
+    reputationService.addStake('strong', 5_000_000);
+    reputationService.recordJobResult('weak', false);
+
+    // weak bids slightly cheaper but should lose under balanced weights
+    const { winner, ranked, rejected } = mkt.selectProvider([
+      { providerId: 'strong', pricePerHour: 160, slaUptimePct: 100 },
+      { providerId: 'weak', pricePerHour: 150, slaUptimePct: 95 },
+    ]);
+    expect(winner.providerId).toBe('strong');
+    expect(ranked).toHaveLength(2);
+    expect(rejected).toHaveLength(0);
+    // reputation was auto-filled (not provided in the bids)
+    expect(ranked.find((r) => r.providerId === 'strong').components.reputation).toBeGreaterThan(
+      ranked.find((r) => r.providerId === 'weak').components.reputation,
+    );
+  });
 });

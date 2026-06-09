@@ -25,6 +25,7 @@ function loadUsers() {
 }
 
 function saveUsers(users) {
+  fs.mkdirSync(path.dirname(USERS_PATH), { recursive: true }); // data/ 不在時の ENOENT を防止
   fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 2), 'utf-8');
 }
 

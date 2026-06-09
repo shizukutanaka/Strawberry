@@ -76,6 +76,8 @@ const { p2pNetwork, vgpuManager, requireService } = require('../../../core/servi
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
+// 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
+const { isValidOrderTransition } = require('../../../utils/state-checker');
 
 const { sanitizeObject } = require('../../../utils/sanitize');
 

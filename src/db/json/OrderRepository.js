@@ -16,6 +16,7 @@ function loadOrders() {
 }
 
 function saveOrders(orders) {
+  fs.mkdirSync(path.dirname(ORDERS_PATH), { recursive: true }); // data/ 不在時の ENOENT を防止
   fs.writeFileSync(ORDERS_PATH, JSON.stringify(orders, null, 2), 'utf-8');
 }
 

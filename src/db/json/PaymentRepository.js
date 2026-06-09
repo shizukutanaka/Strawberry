@@ -16,6 +16,7 @@ function loadPayments() {
 }
 
 function savePayments(payments) {
+  fs.mkdirSync(path.dirname(PAYMENTS_PATH), { recursive: true }); // data/ 不在時の ENOENT を防止
   fs.writeFileSync(PAYMENTS_PATH, JSON.stringify(payments, null, 2), 'utf-8');
 }
 

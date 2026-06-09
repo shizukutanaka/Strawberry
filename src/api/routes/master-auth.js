@@ -1,5 +1,6 @@
 // マスターアカウント3重認証API
 const express = require('express');
+const crypto = require('crypto');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const session = require('express-session');
@@ -9,6 +10,17 @@ const { sendMail } = require('../utils/mailer');
 const { requireSecret } = require('../../utils/config');
 
 const router = express.Router();
+
+// メール認証コードの有効期限（10分）
+const MAIL_CODE_TTL_MS = 10 * 60 * 1000;
+
+// タイミング攻撃耐性のある文字列比較（長さが違えば false、同長なら定時間比較）
+function timingSafeStrEqual(a, b) {
+  const ab = Buffer.from(String(a == null ? '' : a));
+  const bb = Buffer.from(String(b == null ? '' : b));
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
 
 // --- Google OAuth2 設定 ---
 // GOOGLE_CLIENT_ID 未設定だと GoogleStrategy のコンストラクタが throw して
@@ -63,19 +75,26 @@ router.get('/totp', (req, res) => {
   if (!req.session.googleAuth) return res.status(401).send('Google認証未完了');
   res.send('<form method="POST"><input name="token" maxlength="6"><button>認証</button></form>');
 });
-router.post('/totp', (req, res) => {
+router.post('/totp', async (req, res) => {
   if (!req.session.googleAuth) return res.status(401).send('Google認証未完了');
   const valid = verifyTOTP(process.env.MASTER_TOTP_SECRET, req.body.token);
-  if (valid) {
-    req.session.totpAuth = true;
-    // メール認証コード発行
-    const mailCode = Math.floor(100000 + Math.random() * 900000).toString();
-    req.session.mailCode = mailCode;
-    sendMail(process.env.MASTER_GOOGLE_EMAIL, 'Strawberry マスター認証コード', `<b>認証コード: ${mailCode}</b>`);
-    res.redirect('/master-auth/mail');
-  } else {
-    res.send('TOTP認証失敗');
+  if (!valid) {
+    return res.send('TOTP認証失敗');
   }
+  req.session.totpAuth = true;
+  // メール認証コード発行（暗号論的乱数。Math.random は予測可能で不可）
+  const mailCode = crypto.randomInt(100000, 1000000).toString();
+  req.session.mailCode = mailCode;
+  req.session.mailCodeExpires = Date.now() + MAIL_CODE_TTL_MS;
+  // 送信失敗を握りつぶさない（await＋例外処理）。失敗時はコードを無効化して再試行を促す。
+  try {
+    await sendMail(process.env.MASTER_GOOGLE_EMAIL, 'Strawberry マスター認証コード', `<b>認証コード: ${mailCode}</b>`);
+  } catch (e) {
+    req.session.mailCode = null;
+    req.session.mailCodeExpires = null;
+    return res.status(502).send('認証コードの送信に失敗しました。再試行してください。');
+  }
+  res.redirect('/master-auth/mail');
 });
 
 // --- メール認証 ---
@@ -85,7 +104,18 @@ router.get('/mail', (req, res) => {
 });
 router.post('/mail', (req, res) => {
   if (!req.session.totpAuth) return res.status(401).send('TOTP認証未完了');
-  if (req.body.code === req.session.mailCode) {
+  // 期限切れ/未発行を拒否
+  if (!req.session.mailCode || !req.session.mailCodeExpires || Date.now() > req.session.mailCodeExpires) {
+    req.session.mailCode = null;
+    req.session.mailCodeExpires = null;
+    return res.status(401).send('認証コードの有効期限が切れています。再発行してください。');
+  }
+  // タイミング攻撃耐性のある比較
+  const ok = timingSafeStrEqual(req.body.code, req.session.mailCode);
+  // 成否に関わらずコードは単回限り（リプレイ/総当たり防止）
+  req.session.mailCode = null;
+  req.session.mailCodeExpires = null;
+  if (ok) {
     req.session.masterAuth = true;
     res.send('マスター認証完了！');
   } else {

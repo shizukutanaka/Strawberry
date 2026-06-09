@@ -67,4 +67,66 @@ describe('API Integration', () => {
       expect(res.text).toMatch(/# HELP/);
     });
   });
+
+  // 注文作成→状態遷移の実フロー。スキーマ/ハンドラ不整合で注文作成が常に 400 だったバグと、
+  // PUT /:id の status 変更で isValidOrderTransition 未 import の ReferenceError(500) だったバグの回帰。
+  describe('Order create + status transition (regression)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    let token;
+    let gpuId;
+
+    beforeAll(async () => {
+      // ユーザー登録→ログインでトークン取得
+      const u = `ord${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' });
+      token = login.body.token;
+      // 注文対象の GPU をシード（リポジトリ直挿入）
+      const gpu = GpuRepository.create({
+        name: 'IT Test GPU', vendor: 'NVIDIA', model: 'RTX-IT', memoryGB: 24, pricePerHour: 0.5,
+      });
+      gpuId = gpu.id;
+    });
+
+    it('creates an order (201) with the handler contract (gpuId + durationMinutes)', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60 });
+      expect(res.statusCode).toBe(201);
+      expect(res.body.order).toHaveProperty('id');
+      expect(res.body.order.status).toBe('pending');
+    });
+
+    it('rejects an invalid status transition with 400 (not a 500 ReferenceError)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60 });
+      const orderId = create.body.order.id;
+      // pending -> completed は不正遷移（pending は matched/cancelled のみ許可）
+      const res = await request(app)
+        .put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'completed' });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toMatch(/transition/i);
+    });
+
+    it('allows a valid status transition pending -> cancelled', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60 });
+      const orderId = create.body.order.id;
+      const res = await request(app)
+        .put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status: 'cancelled' });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.order.status).toBe('cancelled');
+    });
+  });
 });

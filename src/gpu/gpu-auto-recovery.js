@@ -1,8 +1,10 @@
 // GPU障害時の自動停止・返金・補償フロー自動化モジュール
 const { logger } = require('../utils/logger');
 const { sendNotification, NotifyType } = require('../utils/notifier');
-const { OrderRepository } = require('../db/json/OrderRepository');
-const { PaymentRepository } = require('../db/json/PaymentRepository');
+// これらのリポジトリはメソッド集合を直接 module.exports する（{ OrderRepository } で
+// 分割代入すると undefined になり実行時クラッシュする）。デフォルト import で受ける。
+const OrderRepository = require('../db/json/OrderRepository');
+const PaymentRepository = require('../db/json/PaymentRepository');
 
 async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
   // 1. オーダー自動停止

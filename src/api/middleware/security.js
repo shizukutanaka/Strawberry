@@ -23,13 +23,15 @@ const securityHeaders = helmet({
 });
 
 // CORS設定
+// 重要: CORS 仕様上、origin が '*'（ワイルドカード）のとき credentials:true は不正で、
+// ブラウザはレスポンスを拒否する（Cookie/Authorization を伴うリクエストが全滅）。
+// ワイルドカード時は credentials を無効化し、特定オリジン許可時のみ credentials を有効にする。
+const corsWildcard = config.server.corsOrigins === '*';
 const corsOptions = {
-  origin: config.server.corsOrigins === '*' 
-    ? '*' 
-    : config.server.corsOrigins.split(','),
+  origin: corsWildcard ? '*' : config.server.corsOrigins.split(','),
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
+  credentials: !corsWildcard,
   maxAge: 86400, // 24時間
 };
 

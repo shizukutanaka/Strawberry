@@ -4,6 +4,7 @@
 // 検証結果(work-verifier)による解放判断もここで適用する。
 // repository は DI 可能（既定は JSON リポジトリ、テストはインメモリ fake を注入）。
 const { initial, transition, applyDecision } = require('./escrow-state-machine');
+const { computeSettlement } = require('./settlement-calculator');
 
 function createEscrowService({ repository } = {}) {
   // 遅延 require: テスト時は repository を注入し、JSON 層を読み込まない
@@ -78,6 +79,38 @@ function createEscrowService({ repository } = {}) {
       }
       const saved = persist(escrow, { state: decision.state, actions: decision.actions }, decision.event);
       return { escrow: saved, actions: decision.actions, event: decision.event };
+    },
+
+    /**
+     * 実使用量・SLA に応じた精算内訳を計算して永続化する（従量按分）。
+     * 状態は変えず、settlement フィールドと history に記録する。SETTLED への遷移後、
+     * action-executor が payout_provider/refund_renter を実行する際の金額根拠になる。
+     * @param {string} escrowId
+     * @param {object} usage { deliveredRatio, slaUptimePct }
+     * @param {object} opts settlement-calculator のポリシー上書き
+     * @returns {{escrow, settlement}}
+     */
+    settle(escrowId, usage = {}, opts = {}) {
+      const escrow = getOrThrow(escrowId);
+      const settlement = computeSettlement(
+        {
+          totalSats: escrow.amountSats,
+          deliveredRatio: usage.deliveredRatio,
+          slaUptimePct: usage.slaUptimePct,
+          feeRate: escrow.feeRate || 0,
+        },
+        opts,
+      );
+      const now = new Date().toISOString();
+      const saved = repo.update(escrow.id, {
+        settlement,
+        updatedAt: now,
+        history: [
+          ...(escrow.history || []),
+          { event: 'SETTLEMENT_COMPUTED', settlement, state: escrow.state, at: now },
+        ],
+      });
+      return { escrow: saved, settlement };
     },
 
     apply,

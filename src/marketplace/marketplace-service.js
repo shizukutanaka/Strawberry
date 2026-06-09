@@ -92,12 +92,21 @@ function createMarketplaceService({
     return r;
   }
 
+  /**
+   * 実使用量・SLA に応じた従量按分の精算内訳を計算・記録する。
+   * heartbeat で計測した accumulatedSeconds と予約時間から deliveredRatio を求めて渡す。
+   * @returns {{escrow, settlement}}
+   */
+  function settleByUsage(escrowId, usage = {}, opts = {}) {
+    return escrowService.settle(escrowId, usage, opts);
+  }
+
   /** エスクローの現在状態を取得（読み取り）。 */
   function getEscrow(escrowId) {
     return escrowService.get(escrowId);
   }
 
-  return { quoteGpu, rankCandidates, selectProvider, openOrderEscrow, recordPaid, verifyAndSettle, resolveDispute, getEscrow };
+  return { quoteGpu, rankCandidates, selectProvider, openOrderEscrow, recordPaid, verifyAndSettle, settleByUsage, resolveDispute, getEscrow };
 }
 
 module.exports = { createMarketplaceService };

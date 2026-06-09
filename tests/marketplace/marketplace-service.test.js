@@ -89,6 +89,17 @@ describe('marketplace-service', () => {
     expect(ranked[0].id).toBe('strong');
   });
 
+  it('settleByUsage prorates the escrow by delivered usage', () => {
+    const { mkt } = build();
+    const { escrow, amountSats } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 120 });
+    mkt.recordPaid(escrow.id);
+    // delivered only 25% of the reserved time
+    const { settlement } = mkt.settleByUsage(escrow.id, { deliveredRatio: 0.25, slaUptimePct: 100 });
+    expect(settlement.chargedSats).toBe(Math.round(amountSats * 0.25));
+    expect(settlement.renterRefundSats).toBe(amountSats - settlement.chargedSats);
+    expect(settlement.providerPayoutSats + settlement.operatorFeeSats).toBe(settlement.chargedSats);
+  });
+
   it('selectProvider runs a reverse auction, auto-filling reputation from the service', () => {
     const { mkt, reputationService } = build();
     // strong provider: many successes + stake; weak: a failure

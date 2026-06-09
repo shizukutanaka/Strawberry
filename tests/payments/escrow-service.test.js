@@ -94,6 +94,20 @@ describe('escrow-service', () => {
     expect(() => s.apply(e.id, 'DELIVER_OK')).toThrow(/invalid transition/);
   });
 
+  it('settle computes a prorated split and records it without changing state', () => {
+    const s = svc();
+    const e = s.create({ orderId: 'o', amountSats: 10000, feeRate: 0.02 });
+    s.markPaid(e.id);
+    const { escrow, settlement } = s.settle(e.id, { deliveredRatio: 0.5, slaUptimePct: 100 });
+    expect(settlement.chargedSats).toBe(5000);
+    expect(settlement.renterRefundSats).toBe(5000);
+    expect(settlement.providerPayoutSats + settlement.operatorFeeSats).toBe(5000);
+    // state unchanged; settlement persisted + history appended
+    expect(escrow.state).toBe(STATES.HELD);
+    expect(escrow.settlement).toEqual(settlement);
+    expect(escrow.history.map((h) => h.event)).toContain('SETTLEMENT_COMPUTED');
+  });
+
   it('records a full audit trail in history', () => {
     const s = svc();
     const e = s.create({ orderId: 'o', amountSats: 1 });

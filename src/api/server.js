@@ -127,6 +127,23 @@ if (process.env.NODE_ENV === 'development') {
 // APIルート
 app.use(config.server.apiPrefix || '/api/v1', routes);
 
+// GraphQL エンドポイント（/graphql）。Apollo の start() は非同期だが、SPA キャッチオール
+// より前に必ず配置する必要があるため、サブアプリを同期的にここへ mount してスロットを予約し、
+// Apollo は非同期でそのサブアプリへ後付けする。失敗してもサーバ本体は起動を継続（guard）。
+const graphqlApp = express();
+app.use(graphqlApp);
+const graphqlReady = (async () => {
+  try {
+    const { setupGraphQL } = require('./graphql');
+    await setupGraphQL(graphqlApp);
+    logger.info('GraphQL endpoint mounted at /graphql');
+    return true;
+  } catch (e) {
+    logger.warn(`GraphQL endpoint disabled: ${e.message}`);
+    return false;
+  }
+})();
+
 // フロントエンドルート（SPA対応）
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../../public/index.html'));
@@ -162,4 +179,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, server };
+module.exports = { app, server, graphqlReady };

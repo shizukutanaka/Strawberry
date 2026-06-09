@@ -1,8 +1,13 @@
 // GraphQL現金換算API（exchangeRateクエリ）の自動テスト
 const request = require('supertest');
-const { app } = require('../../src/api/server');
+const { app, graphqlReady } = require('../../src/api/server');
 
 describe('GraphQL exchangeRate API', () => {
+  // Apollo の start() は非同期。マウント完了を待ってから検証する。
+  beforeAll(async () => {
+    await graphqlReady;
+  });
+
   it('should return rate, timestamp, isCache via exchangeRate query', async () => {
     const query = `query { exchangeRate { rate timestamp isCache } }`;
     const res = await request(app)

@@ -95,7 +95,8 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
       exchangeRateSuccessCounter.inc();
       endTimer();
       if (withTimestamp) {
-        return { rate, timestamp: cache.timestamp };
+        // 新規取得（キャッシュ非由来）。isCache は常に boolean で返す契約。
+        return { rate, timestamp: cache.timestamp, isCache: false };
       }
       return rate;
     } catch (err) {
@@ -111,7 +112,8 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
   try { await notifyExternalAlert('exchange_rate_fallback', { fallback: DEFAULT_RATE }); } catch {}
   endTimer();
   if (withTimestamp) {
-    return { rate: DEFAULT_RATE, timestamp: Date.now() };
+    // フォールバック既定値も新規算出でありキャッシュ由来ではない。
+    return { rate: DEFAULT_RATE, timestamp: Date.now(), isCache: false };
   }
   return DEFAULT_RATE;
 }

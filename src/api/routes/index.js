@@ -55,9 +55,17 @@ router.use(cors({
 // --- レートリミット ---
 const rateLimit = require('../middleware/rate-limit');
 router.use(rateLimit);
-// --- JWT認証を全ルートに適用（/system/info以外） ---
+// --- JWT認証を全ルートに適用（公開エンドポイントは除外） ---
+// 重要: 認証情報を取得する前にアクセスする必要があるエンドポイント（新規登録・ログイン）は
+// 必ず除外する。これらを保護下に置くと「トークンを得るためにトークンが要る」という
+// 鶏卵問題でログイン/登録が一切不可能になる（実際にそうなっていた既存バグ）。
+const PUBLIC_PATHS = new Set([
+  '/system/info',      // 後続で rbac('admin') により保護
+  '/users/register',   // 新規登録（公開）
+  '/users/login',      // ログイン（公開, トークン発行元）
+]);
 router.use((req, res, next) => {
-  if (req.path === '/system/info') return next();
+  if (PUBLIC_PATHS.has(req.path)) return next();
   jwtAuth(req, res, next);
 });
 // --- 監査ログ ---

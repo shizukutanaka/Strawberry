@@ -1,6 +1,8 @@
 // src/core/service-monitor.js - サービス死活監視・自動復旧
 const { logger } = require('../utils/logger');
-const { appendAuditLog } = require('../utils/audit-log');
+// モジュール参照で保持して呼び出す（destructure で const に束縛するとテストの
+// jest.spyOn が効かず、監査記録の検証ができないため）。
+const auditLog = require('../utils/audit-log');
 const client = require('prom-client');
 
 // Prometheusメトリクス
@@ -70,26 +72,26 @@ async function monitorServices() {
       const healthy = await isServiceHealthy(name, svc);
       if (!healthy) {
         logger.error(`[Monitor] ${name} unhealthy. Attempting restart.`);
-        appendAuditLog('service_down', { service: name });
+        auditLog.appendAuditLog('service_down', { service: name });
         serviceDownCounter.inc({ service: name });
         await notifyExternalAlert('service_down', { service: name });
         try {
           if (typeof svc.initialize === 'function') {
             await svc.initialize();
             logger.info(`[Monitor] ${name} restarted successfully.`);
-            appendAuditLog('service_restart', { service: name });
+            auditLog.appendAuditLog('service_restart', { service: name });
             serviceRestartCounter.inc({ service: name });
             await notifyExternalAlert('service_restart', { service: name });
           } else if (typeof svc.start === 'function') {
             await svc.start();
             logger.info(`[Monitor] ${name} started successfully.`);
-            appendAuditLog('service_restart', { service: name });
+            auditLog.appendAuditLog('service_restart', { service: name });
             serviceRestartCounter.inc({ service: name });
             await notifyExternalAlert('service_restart', { service: name });
           }
         } catch (e) {
           logger.error(`[Monitor] ${name} restart failed:`, e);
-          appendAuditLog('service_restart_failed', { service: name, error: e.message });
+          auditLog.appendAuditLog('service_restart_failed', { service: name, error: e.message });
           await notifyExternalAlert('service_restart_failed', { service: name, error: e.message });
         }
       }
@@ -106,4 +108,12 @@ function startMonitor() {
   logger.info(`[Monitor] Service monitor started (interval=${interval}ms)`);
 }
 
-module.exports = { setServices, startMonitor, serviceRestartCounter, serviceDownCounter };
+module.exports = {
+  setServices,
+  startMonitor,
+  monitorServices,
+  isServiceHealthy,
+  notifyExternalAlert,
+  serviceRestartCounter,
+  serviceDownCounter,
+};

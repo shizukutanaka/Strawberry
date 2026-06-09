@@ -46,9 +46,9 @@ router.post('/register',
     // レスポンス用にパスワードを削除
     const userResponse = { ...newUser };
     delete userResponse.password;
-    // ユーザー登録をログに記録
-    logger.info(`User registered: ${userId}`, {
-      userId,
+    // ユーザー登録をログに記録（既存バグ: 未定義の userId を参照し登録毎にクラッシュしていた）
+    logger.info(`User registered: ${newUser.id}`, {
+      userId: newUser.id,
       username,
       role: newUser.role
     });
@@ -262,29 +262,23 @@ router.delete('/:id',
     if (userId === req.user.id) {
       return res.status(403).json({ error: 'You cannot delete yourself' });
     }
+    // 対象ユーザーを取得（最低1人の管理者を維持するため）
+    const target = UserRepository.getById(userId);
+    if (!target) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    // 最低1人管理者維持
+    if (target.role === 'admin') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: 'At least one admin must remain' });
+      }
+    }
     // ユーザー削除（永続化対応）
     const deleted = UserRepository.delete(userId);
     if (!deleted) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ message: 'User deleted successfully' });
-    if (userId === req.user.id) {
-      return res.status(400).json({ error: 'You cannot delete your own account as admin' });
-    }
-    // ユーザーを検索
-    const userIndex = users.findIndex(user => user.id === userId);
-    if (userIndex === -1) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    // 最低1人管理者維持
-    if (users[userIndex].role === 'admin') {
-      const adminCount = users.filter(u => u.role === 'admin').length;
-      if (adminCount <= 1) {
-        return res.status(400).json({ error: 'At least one admin must remain' });
-      }
-    }
-    // ユーザーを削除
-    users.splice(userIndex, 1);
     logger.info(`User deleted: ${userId}`, { deletedBy: req.user.id });
     res.json({ message: 'User deleted successfully' });
   })
@@ -305,21 +299,23 @@ router.put('/:id/role',
     if (userId === req.user.id && role !== 'admin') {
       return res.status(400).json({ error: 'You cannot remove your own admin role' });
     }
-    // ユーザーを検索
-    const userIndex = users.findIndex(user => user.id === userId);
-    if (userIndex === -1) {
+    // ユーザーを検索（既存バグ: 存在しない in-memory `users` 配列を参照し常に 500 だった）
+    const target = UserRepository.getById(userId);
+    if (!target) {
       return res.status(404).json({ error: 'User not found' });
     }
     // 最低1人管理者維持
-    if (users[userIndex].role === 'admin' && role !== 'admin') {
-      const adminCount = users.filter(u => u.role === 'admin').length;
+    if (target.role === 'admin' && role !== 'admin') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin').length;
       if (adminCount <= 1) {
         return res.status(400).json({ error: 'At least one admin must remain' });
       }
     }
-    // ロールを更新
-    users[userIndex].role = role;
-    users[userIndex].updatedAt = new Date().toISOString();
+    // ロールを更新（永続化対応）
+    const updated = UserRepository.update(userId, {
+      role,
+      updatedAt: new Date().toISOString()
+    });
     logger.info(`Role changed for user: ${userId}`, {
       userId,
       newRole: role,
@@ -328,9 +324,9 @@ router.put('/:id/role',
     res.json({
       message: 'User role updated successfully',
       user: {
-        id: users[userIndex].id,
-        username: users[userIndex].username,
-        role: users[userIndex].role
+        id: updated.id,
+        username: updated.username,
+        role: updated.role
       }
     });
   })

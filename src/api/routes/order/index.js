@@ -389,65 +389,46 @@ router.post('/',
 );
 
 // マッチング要求 (認証必須)
-router.post('/:id/match', 
+router.post('/:id/match',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Requesting matching for order: ${orderId}`);
-    
-    // オーダー情報を取得
-    const order = await p2pNetwork.getOrderById(orderId);
-    
+
+    // ローカルリポジトリから取得（ソースオブトゥルース）
+    const order = OrderRepository.getById(orderId);
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
-    
-    // オーダーの所有者確認
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
       return res.status(403).json({ error: 'You do not have permission to match this order' });
     }
-    
-    // オーダーがpending状態であることを確認
     if (order.status !== 'pending') {
-      return res.status(400).json({ 
-        error: 'Order cannot be matched',
-        details: `Current status: ${order.status}`
-      });
+      return res.status(400).json({ error: 'Order cannot be matched', details: `Current status: ${order.status}` });
     }
-    
-    // P2Pネットワークでマッチング実行
+
+    // P2Pマッチングはネットワークサービスが必要
+    if (!requireService(p2pNetwork, res)) return;
     const matchResult = await p2pNetwork.matchOrder(orderId);
-    
+
     if (!matchResult || !matchResult.matched) {
-      return res.json({ 
-        matched: false,
-        message: 'No suitable GPU found for this order'
-      });
+      return res.json({ matched: false, message: 'No suitable GPU found for this order' });
     }
-    
-    // マッチング成功
-    // オーダーステータスを更新
-    await p2pNetwork.updateOrder(orderId, { 
+
+    const updateData = {
       status: 'matched',
       gpuId: matchResult.gpu.id,
       providerId: matchResult.gpu.providerId,
       matchedAt: new Date().toISOString()
-    });
-    
-    // マッチングイベントをログに記録
-    logger.info(`Order matched: ${orderId}`, {
-      orderId,
-      userId: req.user.id,
-      gpuId: matchResult.gpu.id,
-      providerId: matchResult.gpu.providerId
-    });
-    
-    res.json({
-      matched: true,
-      message: 'Order successfully matched with GPU',
-      matchResult
-    });
+    };
+    OrderRepository.update(orderId, { ...order, ...updateData });
+    if (typeof p2pNetwork.updateOrder === 'function') {
+      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+    }
+
+    logger.info(`Order matched: ${orderId}`, { orderId, userId: req.user.id, gpuId: matchResult.gpu.id });
+    res.json({ matched: true, message: 'Order successfully matched with GPU', matchResult });
   })
 );
 
@@ -460,97 +441,79 @@ router.post('/:id/start',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Starting order execution: ${orderId}`);
-    
-    // オーダー情報を取得
-    const order = await p2pNetwork.getOrderById(orderId);
-    
     const { APIError, ErrorTypes } = require('../../../utils/error-handler');
+
+    // ローカルリポジトリから取得（ソースオブトゥルース）
+    const order = OrderRepository.getById(orderId);
     if (!order) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
-    
-    // オーダーの所有者確認
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to start this order', 403);
     }
-    
-    // オーダーがmatched状態であることを確認
     if (order.status !== 'matched') {
-      return res.status(400).json({ 
-        error: 'Order cannot be started',
-        details: `Current status: ${order.status}`
-      });
+      return res.status(400).json({ error: 'Order cannot be started', details: `Current status: ${order.status}` });
     }
-    
-    // GPUを割り当て
+
+    // GPU割り当てには vgpuManager が必要
+    if (!requireService(vgpuManager, res)) return;
     const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
-    
-    if (!allocation.success) {
-      throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation.message });
+    if (!allocation || !allocation.success) {
+      throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation && allocation.message });
     }
-    
-    // オーダーステータスを更新
-    await p2pNetwork.updateOrder(orderId, { 
-      status: 'active',
-      startedAt: new Date().toISOString(),
-      allocationDetails: allocation
-    });
-    
-    res.json({
-      message: 'Order execution started successfully',
-      allocationDetails: allocation
-    });
+
+    const updateData = { status: 'active', startedAt: new Date().toISOString(), allocationDetails: allocation };
+    OrderRepository.update(orderId, { ...order, ...updateData });
+    if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
+      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+    }
+
+    res.json({ message: 'Order execution started successfully', allocationDetails: allocation });
   })
 );
 
 // オーダー実行終了 (認証必須)
-router.post('/:id/stop', 
+router.post('/:id/stop',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
-    
-    // オーダー情報を取得
-    const order = await p2pNetwork.getOrderById(orderId);
-    
     const { APIError, ErrorTypes } = require('../../../utils/error-handler');
+
+    // ローカルリポジトリから取得（ソースオブトゥルース）
+    const order = OrderRepository.getById(orderId);
     if (!order) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
-    
-    // オーダーの所有者確認
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
     }
-    
-    // オーダーがactive状態であることを確認
     if (order.status !== 'active') {
-      throw new APIError(
-        ErrorTypes.VALIDATION,
-        'Order cannot be stopped',
-        400,
-        { details: `Current status: ${order.status}` }
-      );
+      throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
     }
-    
-    // GPUを解放
-    const release = await vgpuManager.releaseGPU(order.gpuId, orderId);
-    
-    // 使用統計を取得
-    const usageStats = await vgpuManager.getGPUUsageStats(order.gpuId, orderId);
-    
-    // オーダーステータスを更新
-    await p2pNetwork.updateOrder(orderId, { 
-      status: 'completed',
-      stoppedAt: new Date().toISOString(),
-      usageStats
-    });
-    
-    res.json({
-      message: 'Order execution stopped successfully',
-      usageStats
-    });
+
+    // GPU解放（vgpuManager が利用可能な場合のみ）
+    let usageStats = null;
+    if (vgpuManager) {
+      try {
+        await vgpuManager.releaseGPU(order.gpuId, orderId);
+        usageStats = await vgpuManager.getGPUUsageStats(order.gpuId, orderId).catch(() => null);
+      } catch (e) {
+        logger.warn(`GPU release failed for order ${orderId}: ${e.message}`);
+      }
+    }
+
+    // ハートビートセッションを削除（メモリリーク防止）
+    usageSessions.delete(orderId);
+
+    const updateData = { status: 'completed', stoppedAt: new Date().toISOString(), usageStats };
+    OrderRepository.update(orderId, { ...order, ...updateData });
+    if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
+      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+    }
+
+    res.json({ message: 'Order execution stopped successfully', usageStats });
   })
 );
 

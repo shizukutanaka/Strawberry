@@ -214,29 +214,45 @@ router.post('/order/:id',
       });
       return;
     }
-    // Lightning払い（デフォルト）
-    // ...既存Lightning決済処理（ダミー/実装済み部分を流用）...
+    // Lightning払い（デフォルト）— サービス未導入時は 503
+    // 重要: ダミーtxidで「支払い済み」を捏造してはならない（資金喪失の原因）。
+    // 実インボイスを発行し、ステータスは pending（ウォレットでの支払い完了を待つ）。
+    if (!requireService(lightning, res)) return;
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
+    const invoice = await lightning.createInvoice({
+      value: totalPrice,
+      memo: `GPU rental order ${orderId}`,
+      expiry: config.lightning.invoiceExpirySeconds
+    });
+    if (!invoice || !invoice.paymentRequest) {
+      throw new APIError(ErrorTypes.LIGHTNING_ERROR, 'Failed to create Lightning invoice', 502);
+    }
+    const expiresAt = new Date(Date.now() + (config.lightning.invoiceExpirySeconds || 3600) * 1000).toISOString();
     const paymentRecord = PaymentRepository.create({
       orderId,
       userId: req.user.id,
       providerId: null,
       amount: totalPrice,
-      status: 'paid',
-      paymentHash: 'dummy',
-      paidAt: new Date().toISOString(),
-      method: 'lightning'
+      status: 'pending',
+      paymentHash: invoice.id,
+      paymentRequest: invoice.paymentRequest,
+      paidAt: null,
+      method: 'lightning',
+      invoiceExpiresAt: expiresAt
     });
-    res.json({
-      status: paymentRecord.status,
-      paymentHash: paymentRecord.paymentHash,
-      amountPaid: totalPrice,
+    res.status(201).json({
+      status: 'pending',
+      paymentRequest: invoice.paymentRequest,
+      invoiceId: invoice.id,
+      amountSats: totalPrice,
       amountPaidJPY: totalPriceJPY,
       paymentMethod: 'lightning',
       paymentId: paymentRecord.id,
       pricePerHour,
       pricePer5Min,
       durationMinutes,
-      message: 'Payment successful (recorded in PaymentRepository)'
+      expiresAt,
+      message: 'Lightning invoice created. Pay using your Lightning wallet.'
     });
   })
 );

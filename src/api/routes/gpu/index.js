@@ -84,26 +84,22 @@ router.get('/:id', asyncHandler(async (req, res) => {
   logger.info(`Fetching GPU detail: ${gpuId}`);
   // ファイル永続化GPUリポジトリから取得
   let gpu = GpuRepository.getById(gpuId);
-  if (!gpu) {
-    // P2Pネットワークからも検索
-    gpu = await p2pNetwork.getGPUById(gpuId);
+  if (!gpu && p2pNetwork && typeof p2pNetwork.getGPUById === 'function') {
+    // P2Pネットワークからも検索（P2P無効時はスキップ）
+    try { gpu = await p2pNetwork.getGPUById(gpuId); } catch (_) {}
   }
   if (!gpu) {
     return res.status(404).json({ error: 'GPU not found' });
   }
-  // 詳細情報取得
-  const details = await vgpuManager.getGPUDetails(gpuId);
-  const usageStats = await vgpuManager.getGPUUsageStats(gpuId);
+  // 詳細情報取得（vgpuManager 未導入時は null）
+  const details = vgpuManager ? await vgpuManager.getGPUDetails(gpuId).catch(() => null) : null;
+  const usageStats = vgpuManager ? await vgpuManager.getGPUUsageStats(gpuId).catch(() => null) : null;
+  const availability = vgpuManager ? await vgpuManager.getGPUAvailability(gpuId).catch(() => null) : null;
   // レスポンスを構築（apiKey等除外）
   const { apiKey, ...gpuSafe } = gpu;
   const response = {
     message: 'Fetched GPU detail',
-    gpu: {
-      ...gpuSafe,
-      details,
-      usageStats,
-      availability: await vgpuManager.getGPUAvailability(gpuId)
-    }
+    gpu: { ...gpuSafe, details, usageStats, availability }
   };
   res.json(response);
 }));
@@ -249,8 +245,10 @@ router.delete('/:id',
     if (!deleted) {
       return res.status(404).json({ error: 'GPU not found' });
     }
-    // P2Pネットワークに削除を通知
-    await p2pNetwork.removeGPU(gpuId);
+    // P2Pネットワークに削除を通知（P2P無効時はスキップ）
+    if (p2pNetwork && typeof p2pNetwork.removeGPU === 'function') {
+      try { await p2pNetwork.removeGPU(gpuId); } catch (_) {}
+    }
     // GPUイベントをログに記録
     logger.gpuEvent('gpu_removed', {
       gpuId: gpuId,
@@ -261,86 +259,70 @@ router.delete('/:id',
 );
 
 // システムが検出したGPUの一覧を取得 (認証必須)
-router.get('/system/detected', 
+router.get('/system/detected',
   authenticateJWT,
   asyncHandler(async (req, res) => {
+    if (!requireService(gpuDetector, res)) return;
     logger.info('Detecting system GPUs');
-    
-    // GPUを検出
     const detectedGPUs = await gpuDetector.detectAllGPUs();
-    
-    res.json({ 
+    res.json({
       message: 'System GPUs detected',
       count: detectedGPUs.length,
-      gpus: detectedGPUs 
+      gpus: detectedGPUs
     });
   })
 );
 
 // AMD GPUの詳細検出 (認証必須)
-router.get('/system/amd', 
+router.get('/system/amd',
   authenticateJWT,
   asyncHandler(async (req, res) => {
+    if (!requireService(gpuDetector, res)) return;
     logger.info('Detecting AMD GPUs with advanced details');
-    
-    // AMD GPUを詳細検出
     const amdGPUs = await gpuDetector.detectAMDGPUsAdvanced();
-    
-    res.json({ 
+    res.json({
       message: 'AMD GPUs detected',
       count: amdGPUs.length,
-      gpus: amdGPUs 
+      gpus: amdGPUs
     });
   })
 );
 
 // GPU使用状況の取得
 router.get('/:id/usage', asyncHandler(async (req, res) => {
+  if (!requireService(vgpuManager, res)) return;
   const gpuId = req.params.id;
   logger.info(`Fetching usage stats for GPU: ${gpuId}`);
-  
-  // GPU使用状況を取得
   const usageStats = await vgpuManager.getGPUUsageStats(gpuId);
-  
   if (!usageStats) {
     return res.status(404).json({ error: 'GPU usage stats not found' });
   }
-  
-  res.json({
-    message: 'Fetched GPU usage stats',
-    gpuId,
-    usageStats
-  });
+  res.json({ message: 'Fetched GPU usage stats', gpuId, usageStats });
 }));
 
 // GPUのベンチマーク結果を取得
 router.get('/:id/benchmark', asyncHandler(async (req, res) => {
+  if (!requireService(vgpuManager, res)) return;
   const gpuId = req.params.id;
   logger.info(`Fetching benchmark results for GPU: ${gpuId}`);
-  
-  // ベンチマーク結果を取得
   const benchmarkResults = await vgpuManager.getGPUBenchmarkResults(gpuId);
-  
   if (!benchmarkResults) {
     return res.status(404).json({ error: 'GPU benchmark results not found' });
   }
-  
   res.json(benchmarkResults);
 }));
 
 // GPUのベンチマークを実行 (認証必須)
-router.post('/:id/benchmark', 
+router.post('/:id/benchmark',
   authenticateJWT,
   asyncHandler(async (req, res) => {
+    if (!requireService(vgpuManager, res)) return;
     const gpuId = req.params.id;
     const benchmarkType = req.body.type || 'standard';
     logger.info(`Running ${benchmarkType} benchmark on GPU: ${gpuId}`);
-    
-    // ベンチマークを実行
     const benchmarkJob = await vgpuManager.runGPUBenchmark(gpuId, benchmarkType);
-    
-    res.json({ 
-      message: 'Benchmark started', 
+    res.json({
+      message: 'Benchmark started',
       jobId: benchmarkJob.id,
       estimatedCompletionTime: benchmarkJob.estimatedCompletionTime
     });

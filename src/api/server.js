@@ -82,8 +82,8 @@ try {
   logger.warn('Service monitor could not be started:', e);
 }
 
-// /metricsエンドポイント
-app.get('/metrics', async (req, res) => {
+// /metricsエンドポイント（apiLimiter はまだ未マウントのためルートに直接適用しスクレイプDoSを防ぐ）
+app.get('/metrics', apiLimiter, async (req, res) => {
   await updateLightningMetrics();
   // cacheHitCounter, cacheMissCounter, cachePurgeCounterはprom-clientに自動登録されている
   res.set('Content-Type', client.register.contentType);

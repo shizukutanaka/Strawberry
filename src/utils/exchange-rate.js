@@ -23,8 +23,12 @@ try {
 let cache = { rate: null, timestamp: 0 };
 const CACHE_MS = 5 * 60 * 1000;
 
-// デフォルトレート（障害時フォールバック）
-const DEFAULT_RATE = 0.0001; // 1satoshi=0.0001JPY
+// デフォルトレート（全API障害かつキャッシュ皆無時の最終フォールバック）。
+// 単位はライブ取得値と同じ「1 BTC あたりの JPY」。検証レンジ [100000, 15000000] の
+// 範囲内に置く。旧値 0.0001 は単位（JPY/satoshi）が混在しており、障害時に注文の
+// JPY 表示がほぼ 0 に潰れる重大バグだったため是正。なお下の取得ロジックは、まず
+// 期限切れキャッシュ（直近の実レート）を優先し、本定数は本当に最後の手段とする。
+const DEFAULT_RATE = 10000000; // 1 BTC = 10,000,000 JPY（粗いアウテージ用フォールバック）
 
 // 外部為替APIエンドポイント（冗長化）
 const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=jpy';
@@ -107,7 +111,19 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
       try { await notifyExternalAlert('exchange_rate_fetch_failure', { error: err.message }); } catch {}
     }
   }
-  logger.warn('All exchange rate APIs failed, using default rate');
+  // stale-while-error: 期限切れでも直近の実レートがあれば、捏造した定数より優先する。
+  // 5分古い実レートの方が、単位の異なる固定値より遥かに安全（金額表示の妥当性を保つ）。
+  if (cache.rate) {
+    logger.warn('All exchange rate APIs failed, serving stale cached rate');
+    appendAuditLog('exchange_rate_stale_cache', { rate: cache.rate, ageMs: Date.now() - cache.timestamp });
+    try { await notifyExternalAlert('exchange_rate_stale_cache', { rate: cache.rate }); } catch {}
+    endTimer();
+    if (withTimestamp) {
+      return { rate: cache.rate, timestamp: cache.timestamp, isCache: true };
+    }
+    return cache.rate;
+  }
+  logger.warn('All exchange rate APIs failed and no cache; using default rate');
   appendAuditLog('exchange_rate_fallback', { fallback: DEFAULT_RATE });
   try { await notifyExternalAlert('exchange_rate_fallback', { fallback: DEFAULT_RATE }); } catch {}
   endTimer();

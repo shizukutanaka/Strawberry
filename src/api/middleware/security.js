@@ -75,7 +75,9 @@ const authenticateJWT = (req, res, next) => {
   const token = tokenParts[1];
   
   try {
-    const decoded = jwt.verify(token, config.security.jwtSecret);
+    // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ。
+    // 署名は HS256（文字列シークレットの jwt.sign 既定）で行っている。
+    const decoded = jwt.verify(token, config.security.jwtSecret, { algorithms: ['HS256'] });
     req.user = decoded;
     next();
   } catch (error) {

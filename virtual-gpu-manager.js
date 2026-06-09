@@ -518,41 +518,104 @@ nvidia-cuda-mps-control -d
         if (!vgpu) {
             throw new Error('Virtual GPU not found');
         }
-        
+
         if (vgpu.status !== 'available') {
             throw new Error(`Virtual GPU is ${vgpu.status}`);
         }
-        
-        // 割り当て作成
-        const allocation = {
-            id: `alloc-${uuidv4()}`,
-            vgpuId: vgpuId,
-            rentalId: rentalId,
-            startTime: Date.now(),
-            status: 'active',
-            accessInfo: await this.generateAccessInfo(vgpu)
-        };
-        
-        // プラットフォーム別のアクセス設定
-        switch (this.platform) {
-            case 'kubernetes':
-                allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
-                break;
-            case 'docker':
-                allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
-                break;
-            case 'native':
-                allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
-                break;
+
+        // TOCTOU 対策: 最初の await の前に同期的に 'allocating' へ遷移させ、
+        // 並行リクエストが同一 GPU を二重確保するのを防ぐ。失敗時は available に戻す。
+        vgpu.status = 'allocating';
+        try {
+            // 割り当て作成
+            const allocation = {
+                id: `alloc-${uuidv4()}`,
+                vgpuId: vgpuId,
+                rentalId: rentalId,
+                startTime: Date.now(),
+                status: 'active',
+                accessInfo: await this.generateAccessInfo(vgpu)
+            };
+
+            // プラットフォーム別のアクセス設定
+            switch (this.platform) {
+                case 'kubernetes':
+                    allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
+                    break;
+                case 'docker':
+                    allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
+                    break;
+                case 'native':
+                    allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
+                    break;
+            }
+
+            this.allocations.set(allocation.id, allocation);
+            vgpu.status = 'allocated';
+            vgpu.allocationId = allocation.id;
+
+            this.emit('vgpu:allocated', { vgpuId, allocationId: allocation.id });
+
+            return allocation;
+        } catch (e) {
+            // 確保処理途中で失敗したら利用可能状態へロールバック
+            vgpu.status = 'available';
+            throw e;
         }
-        
-        this.allocations.set(allocation.id, allocation);
-        vgpu.status = 'allocated';
-        vgpu.allocationId = allocation.id;
-        
-        this.emit('vgpu:allocated', { vgpuId, allocationId: allocation.id });
-        
-        return allocation;
+    }
+
+    // ── ルート互換 API（呼び出し規約アダプタ）─────────────────────────────
+    // src/api/routes/{gpu,order} は allocateGPU/releaseGPU/getGPU* を呼ぶが、
+    // クラス本来の API は allocateVirtualGPU/releaseVirtualGPU/getVirtualGPUStats。
+    // 名前・シグネチャの差異により vgpu 有効時は必ず TypeError になっていた。
+    // ここで薄いアダプタを提供し、呼び出し側の規約（{success} 返却・gpuId 起点の解放）を吸収する。
+    async allocateGPU(gpuId, rentalId) {
+        try {
+            const allocation = await this.allocateVirtualGPU(gpuId, rentalId);
+            return { success: true, allocationId: allocation.id, ...allocation };
+        } catch (e) {
+            return { success: false, message: e.message };
+        }
+    }
+
+    async releaseGPU(gpuId, rentalId) {
+        const vgpu = this.virtualGPUs.get(gpuId);
+        let allocationId = vgpu && vgpu.allocationId;
+        if (!allocationId) {
+            // gpuId から特定できなければ rentalId でアクティブな割り当てを逆引き
+            for (const [id, a] of this.allocations) {
+                if (a.rentalId === rentalId && a.status === 'active') { allocationId = id; break; }
+            }
+        }
+        if (!allocationId) {
+            throw new Error('Active allocation not found for GPU');
+        }
+        return this.releaseVirtualGPU(allocationId);
+    }
+
+    async getGPUUsageStats(gpuId) {
+        if (!this.virtualGPUs.has(gpuId)) return null;
+        return this.getVirtualGPUStats(gpuId);
+    }
+
+    async getGPUDetails(gpuId) {
+        return this.virtualGPUs.get(gpuId) || null;
+    }
+
+    async getGPUAvailability(gpuId) {
+        const vgpu = this.virtualGPUs.get(gpuId);
+        if (!vgpu) return null;
+        return { status: vgpu.status, available: vgpu.status === 'available' };
+    }
+
+    async getGPUBenchmarkResults(gpuId) {
+        // ベンチマーク結果の永続化は未実装。結果なしを正直に返す（ルートは null→404）。
+        return null;
+    }
+
+    async runGPUBenchmark(gpuId, type) {
+        // ベンチマーク実行は未実装。捏造ジョブを返さず明示的に失敗させる。
+        throw new Error('GPU benchmarking is not implemented');
     }
 
     async releaseVirtualGPU(allocationId) {
@@ -690,33 +753,42 @@ nvidia-cuda-mps-control -d
     async setupNativeAccess(vgpu, allocation) {
         // ネイティブアクセス設定
         const accessPort = 8080 + Math.floor(Math.random() * 1000);
-        
+
+        // 生成したトークンは下のレスポンスでも返す（旧コードは process.env.ACCESS_TOKEN を
+        // 返しており、クライアントへ無効な認証情報を渡していた）。
+        const accessToken = this.generateAccessToken();
+        // シェルスクリプトへ埋め込む識別子はインジェクション防止のため検証する。
+        const safeVgpuId = sanitizeId(vgpu.id);
+        const gpuIndex = this.getGPUIndex(vgpu.physicalGPUId);
+
         // アクセスプロキシ起動
         const proxyScript = `#!/bin/bash
-export CUDA_VISIBLE_DEVICES=${this.getGPUIndex(vgpu.physicalGPUId)}
-export VGPU_ID=${vgpu.id}
-export ACCESS_TOKEN=${this.generateAccessToken()}
+export CUDA_VISIBLE_DEVICES=${gpuIndex}
+export VGPU_ID=${safeVgpuId}
+export ACCESS_TOKEN=${accessToken}
 
-strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
+strawberry-gpu-proxy --port ${accessPort} --vgpu ${safeVgpuId}
 `;
-        
-        const proxyPath = `/var/lib/strawberry/proxy/${allocation.id}`;
+
+        const proxyPath = `/var/lib/strawberry/proxy/${sanitizeId(allocation.id)}`;
         await fs.mkdir(proxyPath, { recursive: true });
         await fs.writeFile(`${proxyPath}/start-proxy.sh`, proxyScript, { mode: 0o755 });
-        
-        // プロキシ起動
+
+        // プロキシ起動。PID を allocation に保持し、解放時に確実に kill できるようにする
+        // （旧コードはハンドルを捨てており、パターンマッチ kill に依存してゾンビ化していた）。
         const { spawn } = require('child_process');
         const proxy = spawn(`${proxyPath}/start-proxy.sh`, [], {
             detached: true,
             stdio: 'ignore'
         });
         proxy.unref();
-        
+        allocation.proxyPid = proxy.pid;
+
         return {
             type: 'native',
             endpoint: `http://localhost:${accessPort}`,
             credentials: {
-                token: process.env.ACCESS_TOKEN
+                token: accessToken
             }
         };
     }
@@ -1020,16 +1092,18 @@ strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
             const { stdout } = await exec(
                 `nvidia-smi --id=${this.getGPUIndex(vgpu.physicalGPUId)} --query-gpu=utilization.gpu,utilization.memory,temperature.gpu --format=csv,noheader,nounits`
             );
-            
-            const [utilization, memoryUtil, temperature] = stdout.trim().split(', ');
-            
-            return {
-                gpu: {
-                    utilization: parseFloat(utilization),
-                    memory: parseFloat(memoryUtil),
-                    temperature: parseFloat(temperature)
-                }
-            };
+
+            // 出力形式が想定外（区切り・欠損）だと undefined→NaN が統計へ混入するため検証する。
+            const parts = stdout.trim().split(',').map(p => p.trim());
+            if (parts.length < 3) {
+                throw new Error(`Unexpected nvidia-smi output: "${stdout.trim()}"`);
+            }
+            const [utilization, memory, temperature] = parts.map(p => parseFloat(p));
+            if ([utilization, memory, temperature].some(v => Number.isNaN(v))) {
+                throw new Error(`Failed to parse GPU metrics: "${stdout.trim()}"`);
+            }
+
+            return { gpu: { utilization, memory, temperature } };
         } catch (error) {
             logger.error('Failed to get native vGPU stats:', error);
             return null;

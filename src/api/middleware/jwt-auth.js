@@ -18,7 +18,8 @@ module.exports = function(req, res, next) {
   }
   const token = auth.slice(7);
   try {
-    const payload = jwt.verify(token, resolveSecret());
+    // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ（署名は HS256）。
+    const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
     req.user = payload;
     next();
   } catch (e) {

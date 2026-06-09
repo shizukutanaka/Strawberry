@@ -1,4 +1,4 @@
-// ロギングユーティリティの自動テスト雛形（Jest）
+// ロギングユーティリティの自動テスト（Jest）
 const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../src/utils/logger');
@@ -7,27 +7,42 @@ const logDir = path.join(__dirname, '../../logs');
 const combinedLog = path.join(logDir, 'combined.log');
 const errorLog = path.join(logDir, 'error.log');
 
+// winston の File トランスポートはストリームを開いたまま保持するため、
+// テストでファイルを unlink するとログは削除済み inode へ書かれ、パス上のファイルには
+// 反映されない（旧テストの flakiness の原因）。代わりに「一意なマーカー」を毎回生成し、
+// ファイル末尾に出現するまで短くポーリングする（unlink しない）。
+function waitForMatch(file, marker, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      try {
+        if (fs.existsSync(file) && fs.readFileSync(file, 'utf-8').includes(marker)) {
+          return resolve(true);
+        }
+      } catch (_) { /* 書込み途中の読取りは無視 */ }
+      if (Date.now() - start > timeoutMs) return reject(new Error(`marker not found in ${path.basename(file)}: ${marker}`));
+      setTimeout(tick, 25);
+    };
+    tick();
+  });
+}
+
 describe('logger', () => {
-  beforeEach(() => {
-    if (fs.existsSync(combinedLog)) fs.unlinkSync(combinedLog);
-    if (fs.existsSync(errorLog)) fs.unlinkSync(errorLog);
+  it('infoログがcombined.logに出力される', async () => {
+    const marker = `info-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    logger.info(marker);
+    await expect(waitForMatch(combinedLog, marker)).resolves.toBe(true);
   });
 
-  it('infoログがcombined.logに出力される', done => {
-    logger.info('test info log');
-    setTimeout(() => {
-      const content = fs.readFileSync(combinedLog, 'utf-8');
-      expect(content).toMatch(/test info log/);
-      done();
-    }, 100);
+  it('errorログがerror.logに出力される', async () => {
+    const marker = `error-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    logger.error(marker);
+    await expect(waitForMatch(errorLog, marker)).resolves.toBe(true);
   });
 
-  it('errorログがerror.logに出力される', done => {
-    logger.error('test error log');
-    setTimeout(() => {
-      const content = fs.readFileSync(errorLog, 'utf-8');
-      expect(content).toMatch(/test error log/);
-      done();
-    }, 100);
+  it('errorログはcombined.logにも複製される', async () => {
+    const marker = `dual-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    logger.error(marker);
+    await expect(waitForMatch(combinedLog, marker)).resolves.toBe(true);
   });
 });

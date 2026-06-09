@@ -3,10 +3,17 @@ const { schemas, validate, isUUID } = require('../../src/utils/validator');
 
 describe('validator', () => {
   it('GPU登録スキーマ: 正常系', () => {
+    // クロスベンダー対応でスキーマが拡張されたため、必須項目
+    // (model/apiType/driverVersion/os/arch) を含む完全なレコードを用いる。
     const data = {
       id: 'gpu-123',
       name: 'RTX 3090',
       vendor: 'NVIDIA',
+      model: 'GeForce RTX 3090',
+      apiType: 'CUDA',
+      driverVersion: '535.104.05',
+      os: 'Linux',
+      arch: 'x86_64',
       memoryGB: 24,
       clockMHz: 1700,
       powerWatt: 350,

@@ -258,6 +258,28 @@ router.post('/order/:id',
 );
 
 
+// 支払いステータス確認（クライアントポーリング用）
+router.get('/:id/status',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const payment = PaymentRepository.getById(req.params.id);
+    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
+    if (!payment) throw new APIError(ErrorTypes.NOT_FOUND, 'Payment not found', 404);
+    if (payment.userId !== req.user.id && req.user.role !== 'admin') {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
+    }
+    res.json({
+      id: payment.id,
+      orderId: payment.orderId,
+      status: payment.status,
+      amount: payment.amount,
+      method: payment.method,
+      paidAt: payment.paidAt || null,
+      invoiceExpiresAt: payment.invoiceExpiresAt || null
+    });
+  })
+);
+
 // ライトニングノード情報取得
 router.get('/node-info', 
   authenticateJWT,

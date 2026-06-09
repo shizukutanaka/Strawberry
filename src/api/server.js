@@ -82,6 +82,15 @@ try {
   logger.warn('Service monitor could not be started:', e);
 }
 
+// Lightningインボイス入金確認ループ（15秒間隔でポーリング、Lightning未導入時は無効）
+try {
+  const invoicePoller = require('../core/invoice-poller');
+  const { lightning: lightningForPoller } = require('../core/services');
+  invoicePoller.start(lightningForPoller);
+} catch (e) {
+  logger.warn(`invoice-poller: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（apiLimiter はまだ未マウントのためルートに直接適用しスクレイプDoSを防ぐ）
 app.get('/metrics', apiLimiter, async (req, res) => {
   await updateLightningMetrics();

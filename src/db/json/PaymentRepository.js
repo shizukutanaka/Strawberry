@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { atomicWriteJSON } = require('./atomicWrite');
 
 const PAYMENTS_PATH = path.resolve(__dirname, '../../../data/payments.json');
 
@@ -16,8 +17,7 @@ function loadPayments() {
 }
 
 function savePayments(payments) {
-  fs.mkdirSync(path.dirname(PAYMENTS_PATH), { recursive: true }); // data/ 不在時の ENOENT を防止
-  fs.writeFileSync(PAYMENTS_PATH, JSON.stringify(payments, null, 2), 'utf-8');
+  atomicWriteJSON(PAYMENTS_PATH, payments);
 }
 
 module.exports = {

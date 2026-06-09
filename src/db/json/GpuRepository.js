@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { atomicWriteJSON } = require('./atomicWrite');
 
 const GPUS_PATH = path.resolve(__dirname, '../../../data/gpus.json');
 
@@ -16,8 +17,7 @@ function loadGpus() {
 }
 
 function saveGpus(gpus) {
-  fs.mkdirSync(path.dirname(GPUS_PATH), { recursive: true }); // data/ 不在時の ENOENT を防止
-  fs.writeFileSync(GPUS_PATH, JSON.stringify(gpus, null, 2), 'utf-8');
+  atomicWriteJSON(GPUS_PATH, gpus);
 }
 
 module.exports = {

@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { atomicWriteJSON } = require('./atomicWrite');
 
 const AUDIT_LOG_PATH = path.resolve(__dirname, '../../../logs/db-access.log');
 function writeAuditLog(action, detail) {
@@ -25,8 +26,7 @@ function loadUsers() {
 }
 
 function saveUsers(users) {
-  fs.mkdirSync(path.dirname(USERS_PATH), { recursive: true }); // data/ 不在時の ENOENT を防止
-  fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 2), 'utf-8');
+  atomicWriteJSON(USERS_PATH, users);
 }
 
 module.exports = {

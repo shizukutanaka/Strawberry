@@ -1,1 +1,101 @@
-[]
+[
+  {
+    "gpuId": "e48d25df-4384-49b2-8fcc-833c2816477f",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "23657052-eb85-41b1-afd4-1c908284fe7d",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "5e209094-a3b5-4743-9b9e-c6e9545fe8f8",
+    "createdAt": "2026-06-09T22:49:08.680Z"
+  },
+  {
+    "gpuId": "e48d25df-4384-49b2-8fcc-833c2816477f",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "23657052-eb85-41b1-afd4-1c908284fe7d",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "a7a9180c-c27e-4f2b-bd48-d6d321b85f83",
+    "createdAt": "2026-06-09T22:49:08.894Z"
+  },
+  {
+    "gpuId": "e48d25df-4384-49b2-8fcc-833c2816477f",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "23657052-eb85-41b1-afd4-1c908284fe7d",
+    "status": "cancelled",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "3e901456-a7ad-448c-a2ba-26bbbc814faf",
+    "createdAt": "2026-06-09T22:49:09.109Z"
+  },
+  {
+    "gpuId": "6cc500ae-c493-4fdd-bec8-a9b96c89ea7b",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "4d802e2c-6c3d-430d-91a5-01b30f1bb14a",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "3bdf6739-0207-447d-b858-80f66971a6eb",
+    "createdAt": "2026-06-09T23:10:09.639Z"
+  },
+  {
+    "gpuId": "6cc500ae-c493-4fdd-bec8-a9b96c89ea7b",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "4d802e2c-6c3d-430d-91a5-01b30f1bb14a",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "d75f54d8-718c-4026-b4c6-5b0aff901dba",
+    "createdAt": "2026-06-09T23:10:09.831Z"
+  },
+  {
+    "gpuId": "6cc500ae-c493-4fdd-bec8-a9b96c89ea7b",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "4d802e2c-6c3d-430d-91a5-01b30f1bb14a",
+    "status": "cancelled",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "29cd7bcc-0989-4ecb-aa31-a6221fa01949",
+    "createdAt": "2026-06-09T23:10:10.017Z"
+  },
+  {
+    "gpuId": "df439c8d-1ebd-48c8-83fd-13446703a4ea",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "98851ea1-1082-442a-a707-d42b71edd49d",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "9ba743a8-1cde-44c0-8ec0-5f5d95bdb200",
+    "createdAt": "2026-06-09T23:10:16.821Z"
+  },
+  {
+    "gpuId": "df439c8d-1ebd-48c8-83fd-13446703a4ea",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "98851ea1-1082-442a-a707-d42b71edd49d",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "269e4f95-2134-47d2-8c90-85744007aadc",
+    "createdAt": "2026-06-09T23:10:17.015Z"
+  },
+  {
+    "gpuId": "df439c8d-1ebd-48c8-83fd-13446703a4ea",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "98851ea1-1082-442a-a707-d42b71edd49d",
+    "status": "cancelled",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "eaf09e72-735b-4a40-b68a-badc0bc6c863",
+    "createdAt": "2026-06-09T23:10:17.212Z"
+  }
+]

@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "e48d25df-4384-49b2-8fcc-833c2816477f",
+    "createdAt": "2026-06-09T22:49:08.344Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "6cc500ae-c493-4fdd-bec8-a9b96c89ea7b",
+    "createdAt": "2026-06-09T23:10:09.301Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "df439c8d-1ebd-48c8-83fd-13446703a4ea",
+    "createdAt": "2026-06-09T23:10:16.570Z"
+  }
+]

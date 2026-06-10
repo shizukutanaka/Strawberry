@@ -1,6 +1,7 @@
 // SLA（稼働率保証）自動集計・表示ユーティリティ
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { logger } = require('./logger');
 const { resilientNotify } = require('./resilient-notify');
 
@@ -12,7 +13,7 @@ function loadSLA() {
   return JSON.parse(fs.readFileSync(SLA_PATH, 'utf-8'));
 }
 function saveSLA(sla) {
-  fs.writeFileSync(SLA_PATH, JSON.stringify(sla, null, 2));
+  atomicWriteJSON(SLA_PATH, sla);
 }
 
 async function checkAlive() {

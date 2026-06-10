@@ -1,6 +1,7 @@
 // 不正利用・異常検知自動化ユーティリティ
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { logger } = require('./logger');
 const { resilientNotify } = require('./resilient-notify');
 const { appendAuditLog } = require('./audit-log');
@@ -22,7 +23,7 @@ function reportAnomaly(type, detail = {}) {
   }
   history.push(entry);
   if (history.length > 1000) history.shift();
-  fs.writeFileSync(ANOMALY_HISTORY_PATH, JSON.stringify(history, null, 2));
+  atomicWriteJSON(ANOMALY_HISTORY_PATH, history);
   logger.warn('[Anomaly] 異常検知', entry);
   resilientNotify(`[Strawberry] 異常検知: ${type}\n${JSON.stringify(detail)}`).catch(()=>{});
   appendAuditLog('anomaly_detected', { type, detail });

@@ -11,7 +11,12 @@ router.use(authenticateJWT);
 // [POST] /api/v1/users/peerid/link - ピアID紐付け
 router.post('/link', asyncHandler(async (req, res) => {
   const { peerId } = req.body;
-  if (!peerId) throw new APIError(ErrorTypes.VALIDATION, 'peerId is required', 400);
+  if (!peerId || typeof peerId !== 'string') throw new APIError(ErrorTypes.VALIDATION, 'peerId is required', 400);
+  if (peerId.length > 256) throw new APIError(ErrorTypes.VALIDATION, 'peerId is too long', 400);
+  // libp2p PeerID は Base58 または CIDv1 形式 (英数字・+/-/=)
+  if (!/^[A-Za-z0-9+/=_:-]{1,256}$/.test(peerId)) {
+    throw new APIError(ErrorTypes.VALIDATION, 'Invalid peerId format', 400);
+  }
   const user = UserRepository.getById(req.user.id);
   if (!user) throw new APIError(ErrorTypes.NOT_FOUND, 'User not found', 404);
   UserRepository.update(user.id, { ...user, peerId });

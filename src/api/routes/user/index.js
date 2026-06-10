@@ -194,11 +194,19 @@ router.put('/me/password',
   })
 );
 
+// 許可された設定キーのみ受け付ける（任意キーの書き込みを防ぐ）
+const ALLOWED_SETTINGS_KEYS = new Set(['notifications', 'theme', 'language', 'timezone', 'currency']);
+
 // ユーザー設定更新 (認証必須)
-router.put('/me/settings', 
+router.put('/me/settings',
   authenticateJWT,
   asyncHandler(async (req, res) => {
-    const settings = req.body;
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Settings must be an object' });
+    }
+    const settings = Object.fromEntries(
+      Object.entries(req.body).filter(([k]) => ALLOWED_SETTINGS_KEYS.has(k))
+    );
     logger.info(`Updating settings for user: ${req.user.id}`);
     
     // ユーザーを検索（永続化対応）

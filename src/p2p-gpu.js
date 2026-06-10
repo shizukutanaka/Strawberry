@@ -2,11 +2,12 @@
 const { createNode, signMessage, verifyMessage } = require('./p2p-node');
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('./db/json/atomicWrite');
 
 const GPUS_FILE = path.join(__dirname, 'gpus.json');
 
 function saveGpus(gpus) {
-  fs.writeFileSync(GPUS_FILE, JSON.stringify(gpus, null, 2));
+  atomicWriteJSON(GPUS_FILE, gpus);
 }
 function loadGpus() {
   if (!fs.existsSync(GPUS_FILE)) return [];

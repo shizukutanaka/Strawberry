@@ -7,6 +7,10 @@ const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 
+const isProd = process.env.NODE_ENV === 'production';
+const clientError = (e) => e.message || 'Invalid request';
+const serverError = (e) => isProd ? 'Internal server error' : (e.message || 'Internal server error');
+
 // エスクロー操作は資金フローに直結するため admin 限定
 const adminOnly = rbac('admin');
 
@@ -19,7 +23,7 @@ router.post('/quote', (req, res) => {
   try {
     return res.json(marketplace.quoteGpu(gpu, market && typeof market === 'object' ? market : {}));
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -32,7 +36,7 @@ router.post('/rank', (req, res) => {
   try {
     return res.json({ ranked: marketplace.rankCandidates(providerIds, opts && typeof opts === 'object' ? opts : {}) });
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -46,7 +50,7 @@ router.post('/auction', (req, res) => {
   try {
     return res.json(marketplace.selectProvider(bids, opts && typeof opts === 'object' ? opts : {}));
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -70,7 +74,7 @@ router.post('/escrow/open', adminOnly, (req, res) => {
     });
     return res.status(201).json(result);
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -86,7 +90,7 @@ router.post('/escrow/:id/pay', adminOnly, (req, res) => {
   try {
     return res.json(marketplace.recordPaid(req.params.id));
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -106,7 +110,7 @@ router.post('/escrow/:id/verify', adminOnly, (req, res) => {
     });
     return res.json(result);
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -119,7 +123,7 @@ router.post('/escrow/:id/resolve', adminOnly, (req, res) => {
   try {
     return res.json(marketplace.resolveDispute(req.params.id, decision, providerId || null));
   } catch (e) {
-    return res.status(400).json({ error: e.message });
+    return res.status(400).json({ error: clientError(e) });
   }
 });
 

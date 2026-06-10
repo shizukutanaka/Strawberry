@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { atomicWriteString } = require('../db/json/atomicWrite');
 
 const AUDIT_LOG_PATH = path.join(__dirname, '../../logs/audit.log');
 const HASH_CHAIN_PATH = path.join(__dirname, '../../logs/audit.hash');
@@ -23,7 +24,7 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     prevHash = fs.readFileSync(HASH_CHAIN_PATH, 'utf-8').trim();
   }
   const hash = crypto.createHash('sha256').update(prevHash + entryStr).digest('hex');
-  fs.writeFileSync(HASH_CHAIN_PATH, hash);
+  atomicWriteString(HASH_CHAIN_PATH, hash);
 }
 
 /**

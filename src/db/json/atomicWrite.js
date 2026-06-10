@@ -12,4 +12,12 @@ function atomicWriteJSON(filePath, data) {
   fs.renameSync(tmp, filePath);
 }
 
-module.exports = { atomicWriteJSON };
+function atomicWriteString(filePath, content) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content, 'utf-8');
+  fs.renameSync(tmp, filePath);
+}
+
+module.exports = { atomicWriteJSON, atomicWriteString };

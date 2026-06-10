@@ -2,11 +2,12 @@
 const { createNode } = require('./p2p-node');
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('./db/json/atomicWrite');
 
 const HEALTH_FILE = path.join(__dirname, 'health.json');
 
 function saveHealth(health) {
-  fs.writeFileSync(HEALTH_FILE, JSON.stringify(health, null, 2));
+  atomicWriteJSON(HEALTH_FILE, health);
 }
 function loadHealth() {
   if (!fs.existsSync(HEALTH_FILE)) return {};

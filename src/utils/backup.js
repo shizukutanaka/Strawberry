@@ -6,6 +6,7 @@ const fs = require('fs');
 const { uploadToS3, uploadToGoogleDrive, uploadToDropbox } = require('./cloud-storage');
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
+const { appendAuditLog } = require('./audit-log');
 
 // バックアップ対象ファイルリスト
 const DATA_DIR = path.resolve(__dirname, '../../db/json');
@@ -56,9 +57,11 @@ async function backupAll() {
       logger.error(`ローカルバックアップ失敗: ${file}`, { error: e.message });
     }
     try {
+      let success = false;
+      const errors = [];
       if (process.env.AWS_S3_BUCKET) {
         try {
-          await uploadToS3(backupFilePath, `backup/${file}`);
+          await uploadToS3(filePath, `backup/${file}`);
           success = true;
         } catch (e) {
           errors.push({ type: 'S3', error: e.message });
@@ -67,7 +70,7 @@ async function backupAll() {
       }
       if (process.env.DROPBOX_ACCESS_TOKEN) {
         try {
-          await uploadToDropbox(backupFilePath, `/backup/${file}`);
+          await uploadToDropbox(filePath, `/backup/${file}`);
           success = true;
         } catch (e) {
           errors.push({ type: 'Dropbox', error: e.message });
@@ -76,7 +79,7 @@ async function backupAll() {
       }
       if (process.env.GDRIVE_OAUTH_TOKEN) {
         try {
-          await uploadToGDrive(backupFilePath, `backup/${file}`);
+          await uploadToGoogleDrive(filePath, `backup/${file}`);
           success = true;
         } catch (e) {
           errors.push({ type: 'GDrive', error: e.message });
@@ -119,4 +122,5 @@ if (require.main === module) {
 
 module.exports = {
   backupAll,
+  restoreFromLatestBackup,
 };

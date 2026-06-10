@@ -1,6 +1,7 @@
 // OpenAPI仕様自動生成スクリプト（Joiスキーマ→OpenAPI）
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const j2s = require('joi-to-swagger');
 const Joi = require('joi');
 const { schemas } = require('../utils/validator');
@@ -113,7 +114,7 @@ function generateOpenAPISpec() {
     },
   };
 
-  fs.writeFileSync(OPENAPI_PATH, JSON.stringify(openapi, null, 2));
+  atomicWriteJSON(OPENAPI_PATH, openapi);
   console.log('OpenAPI仕様書を自動生成しました:', OPENAPI_PATH);
   return openapi;
 }

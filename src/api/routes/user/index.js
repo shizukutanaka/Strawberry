@@ -154,7 +154,8 @@ router.put('/me',
 );
 
 // パスワード変更 (認証必須)
-router.put('/me/password', 
+router.put('/me/password',
+  authLimiter,
   authenticateJWT,
   validateMiddleware(Joi.object({
     currentPassword: Joi.string().required(),

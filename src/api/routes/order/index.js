@@ -87,9 +87,9 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 
 const { sanitizeObject } = require('../../../utils/sanitize');
+const { cacheMiddleware } = require('../../middleware/cache');
 
 // オーダー一覧取得 (認証必須)
-const { cacheMiddleware } = require('../../middleware/cache');
 
 router.get('/', 
   cacheMiddleware(),

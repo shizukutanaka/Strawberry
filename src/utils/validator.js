@@ -34,13 +34,13 @@ const schemas = {
   gpu: {
     // GPU登録用スキーマ
     register: Joi.object({
-  id: Joi.string().required(),
-  name: Joi.string().required(),
+  id: Joi.string().max(64).required(),
+  name: Joi.string().max(128).required(),
   vendor: Joi.string().valid('NVIDIA', 'AMD', 'Intel').required(),
-  model: Joi.string().required(),
+  model: Joi.string().max(128).required(),
   apiType: Joi.string().valid('CUDA', 'ROCm', 'oneAPI', 'OpenCL').required(),
-  driverVersion: Joi.string().required(),
-  os: Joi.string().required(),
+  driverVersion: Joi.string().max(64).required(),
+  os: Joi.string().max(64).required(),
   arch: Joi.string().valid('x86_64', 'arm64', 'aarch64', 'x86', 'arm').required(),
   memoryGB: Joi.number().min(1).required(),
   clockMHz: Joi.number().min(100).required(),

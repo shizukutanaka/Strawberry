@@ -319,7 +319,11 @@ router.post('/:id/benchmark',
   asyncHandler(async (req, res) => {
     if (!requireService(vgpuManager, res)) return;
     const gpuId = req.params.id;
+    const VALID_BENCHMARK_TYPES = new Set(['standard', 'compute', 'memory', 'render']);
     const benchmarkType = req.body.type || 'standard';
+    if (!VALID_BENCHMARK_TYPES.has(benchmarkType)) {
+      return res.status(400).json({ error: `Invalid benchmark type. Allowed: ${[...VALID_BENCHMARK_TYPES].join(', ')}` });
+    }
     logger.info(`Running ${benchmarkType} benchmark on GPU: ${gpuId}`);
     const benchmarkJob = await vgpuManager.runGPUBenchmark(gpuId, benchmarkType);
     res.json({

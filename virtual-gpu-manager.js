@@ -480,7 +480,7 @@ class VirtualGPUManager extends EventEmitter {
     async createMPSInstance(physicalGPU, config, vgpuId) {
         // CUDA MPS (Multi-Process Service) 設定
         try {
-            const mpsDir = `/var/lib/strawberry/mps/${vgpuId}`;
+            const mpsDir = `/var/lib/strawberry/mps/${sanitizeId(vgpuId)}`;
             await fs.mkdir(mpsDir, { recursive: true });
             
             // MPSサーバー起動スクリプト作成

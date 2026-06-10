@@ -1,30 +1,43 @@
 // 通知チャネル設定API（ユーザーごとにLINE/Discord/Slack等の通知先を管理）
 const express = require('express');
 const router = express.Router();
-const fs = require('fs');
 const path = require('path');
 const Joi = require('joi');
+const { authenticateJWT } = require('./middleware/security');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
 
 const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
 
 function loadSettings() {
-  if (!fs.existsSync(SETTINGS_PATH)) return {};
-  return JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
-}
-function saveSettings(settings) {
-  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+  try {
+    return require('fs').existsSync(SETTINGS_PATH)
+      ? JSON.parse(require('fs').readFileSync(SETTINGS_PATH, 'utf-8'))
+      : {};
+  } catch (_) {
+    return {};
+  }
 }
 
-// 通知設定取得
-router.get('/notification-settings/:userId', (req, res) => {
+// 全エンドポイントに JWT 認証を要求
+router.use(authenticateJWT);
+
+// 通知設定取得（自分のみ、管理者は任意ユーザー）
+router.get('/notification-settings/:userId', asyncHandler(async (req, res) => {
   const userId = req.params.userId;
+  if (req.user.id !== userId && req.user.role !== 'admin') {
+    throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
+  }
   const settings = loadSettings();
   res.json(settings[userId] || {});
-});
+}));
 
-// 通知設定保存/更新
-router.post('/notification-settings/:userId', (req, res) => {
+// 通知設定保存/更新（自分のみ、管理者は任意ユーザー）
+router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
   const userId = req.params.userId;
+  if (req.user.id !== userId && req.user.role !== 'admin') {
+    throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
+  }
   const schema = Joi.object({
     lineToken: Joi.string().allow('').optional(),
     discordWebhook: Joi.string().uri().allow('').optional(),
@@ -45,8 +58,8 @@ router.post('/notification-settings/:userId', (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
   const settings = loadSettings();
   settings[userId] = value;
-  saveSettings(settings);
+  atomicWriteJSON(SETTINGS_PATH, settings);
   res.json({ success: true });
-});
+}));
 
 module.exports = { router };

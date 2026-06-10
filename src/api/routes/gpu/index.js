@@ -14,6 +14,8 @@ const GpuRepository = require('../../../db/json/GpuRepository');
 const { createMockAttestationVerifier } = require('../../../security/gpu-attestation-verifier');
 // 開発/テスト時は Mock、本番では実 nvtrust アダプタへ置き換え可能（DI）
 const _attestationVerifier = createMockAttestationVerifier();
+// プロバイダ・レピュテーション記録（アテステーション結果の反映）
+const { createReputationService } = require('../../../reputation/reputation-service');
 
 // 利用可能なGPU一覧を取得
 router.get('/', asyncHandler(async (req, res) => {
@@ -152,7 +154,6 @@ router.post('/',
           verifiedAt: new Date().toISOString(),
         };
         // レピュテーション記録（DI 済みシングルトン）
-        const { createReputationService } = require('../../../reputation/reputation-service');
         const repSvc = createReputationService();
         repSvc.recordAttestation(req.user.id, attResult.passed);
         if (!attResult.passed) {

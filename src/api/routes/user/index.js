@@ -9,6 +9,9 @@ const { validateMiddleware, schemas, Joi } = require('../../../utils/validator')
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { config } = require('../../../utils/config');
+// 署名鍵は検証側（jwt-auth/security）と同一の resolveSecret で解決する。
+// 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
+const { resolveSecret } = require('../../middleware/jwt-auth');
 
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
@@ -78,7 +81,7 @@ router.post('/login',
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // JWTトークン生成
-    const token = jwt.sign({ id: user.id, role: user.role }, config.security.jwtSecret, { expiresIn: config.security.jwtExpiresIn });
+    const token = jwt.sign({ id: user.id, role: user.role }, resolveSecret(), { expiresIn: config.security.jwtExpiresIn });
     user.lastLogin = new Date().toISOString();
     logger.info(`Login success: ${email}`);
     // パスワードやAPIキーは絶対にレスポンス・ログに含めない

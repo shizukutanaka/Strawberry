@@ -104,7 +104,9 @@ async function monitorServices() {
 // 10秒ごとに監視
 function startMonitor() {
   const interval = parseInt(process.env.SERVICE_MONITOR_INTERVAL_MS, 10) || 10000;
-  setInterval(monitorServices, interval);
+  // unref: テスト等でプロセス終了を妨げない
+  const timer = setInterval(monitorServices, interval);
+  if (timer.unref) timer.unref();
   logger.info(`[Monitor] Service monitor started (interval=${interval}ms)`);
 }
 

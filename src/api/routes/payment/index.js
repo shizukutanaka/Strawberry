@@ -168,6 +168,9 @@ router.post('/order/:id',
     if (!order) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
+    if (order.userId !== req.user.id && req.user.role !== 'admin') {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to pay for this order', 403);
+    }
     const rateInfo = await fetchRateInfo();
     const { pricePerHour, pricePer5Min, durationMinutes, totalPrice, totalPriceJPY } =
       computeOrderPricing(order, rateInfo);

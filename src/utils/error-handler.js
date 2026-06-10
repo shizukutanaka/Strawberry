@@ -31,14 +31,16 @@ class APIError extends Error {
   }
   
   // エラーレスポンス用のJSONオブジェクトを生成
-  toJSON() {
+  // maskInternal=true（本番）では 5xx の詳細をクライアントに漏らさない
+  toJSON(maskInternal = false) {
+    const masked = maskInternal && this.statusCode >= 500;
     return {
       error: {
         type: this.type,
-        message: this.message,
+        message: masked ? 'Internal server error' : this.message,
         statusCode: this.statusCode,
         timestamp: this.timestamp,
-        details: this.details
+        details: masked ? null : this.details
       }
     };
   }
@@ -117,8 +119,9 @@ function errorMiddleware(err, req, res, next) {
     });
   }
   
-  // クライアントにレスポンスを返す
-  res.status(apiError.statusCode).json(apiError.toJSON());
+  // クライアントにレスポンスを返す（本番では 5xx 詳細をマスク）
+  const maskInternal = process.env.NODE_ENV === 'production';
+  res.status(apiError.statusCode).json(apiError.toJSON(maskInternal));
 }
 
 // 非同期ルートハンドラのラッパー

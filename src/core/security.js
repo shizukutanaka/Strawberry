@@ -217,28 +217,32 @@ class SecurityManager {
     // データ暗号化
     encrypt(data, password = null) {
         try {
-            const key = password ? 
-                this.deriveKey(password) : 
-                Buffer.from(this.encryptionKey, 'hex');
-            
+            let key, salt;
+            if (password) {
+                ({ key, salt } = this.deriveKey(password));
+            } else {
+                key = Buffer.from(this.encryptionKey, 'hex');
+            }
+
             const iv = crypto.randomBytes(this.config.encryption.ivLength);
             const cipher = crypto.createCipheriv(
                 this.config.encryption.algorithm,
                 key,
                 iv
             );
-            
+
             const encrypted = Buffer.concat([
                 cipher.update(JSON.stringify(data), 'utf8'),
                 cipher.final()
             ]);
-            
+
             const tag = cipher.getAuthTag();
-            
+
             return {
                 encrypted: encrypted.toString('base64'),
                 iv: iv.toString('base64'),
-                tag: tag.toString('base64')
+                tag: tag.toString('base64'),
+                ...(salt ? { salt: salt.toString('base64') } : {})
             };
             
         } catch (error) {
@@ -250,9 +254,13 @@ class SecurityManager {
     // データ復号化
     decrypt(encryptedData, password = null) {
         try {
-            const key = password ? 
-                this.deriveKey(password) : 
-                Buffer.from(this.encryptionKey, 'hex');
+            let key;
+            if (password) {
+                const salt = encryptedData.salt ? Buffer.from(encryptedData.salt, 'base64') : null;
+                ({ key } = this.deriveKey(password, salt));
+            } else {
+                key = Buffer.from(this.encryptionKey, 'hex');
+            }
             
             const decipher = crypto.createDecipheriv(
                 this.config.encryption.algorithm,
@@ -275,16 +283,17 @@ class SecurityManager {
         }
     }
 
-    // 鍵導出
-    deriveKey(password) {
-        const salt = crypto.randomBytes(this.config.encryption.saltLength);
-        return crypto.pbkdf2Sync(
+    // 鍵導出（salt は呼び出し側が管理して保存すること）
+    deriveKey(password, salt = null) {
+        const usedSalt = salt || crypto.randomBytes(this.config.encryption.saltLength);
+        const key = crypto.pbkdf2Sync(
             password,
-            salt,
+            usedSalt,
             this.config.encryption.iterations,
             32,
             'sha256'
         );
+        return { key, salt: usedSalt };
     }
 
     // ===== レート制限 =====

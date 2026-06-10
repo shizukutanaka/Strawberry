@@ -458,4 +458,202 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(404);
     });
   });
+
+  // プロバイダによる注文拒否 + レビューシステム
+  describe('Provider order rejection + review system', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+
+    let renterToken, providerToken, otherToken;
+    let gpuId;
+
+    // GPU を provider ユーザーが所有するようにセットアップ
+    beforeAll(async () => {
+      // renter 登録
+      const r = `rv${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+
+      // provider 登録（role=provider）
+      const p = `pv${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      const providerLogin = await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' });
+      providerToken = providerLogin.body.token;
+      const providerId = providerLogin.body.user?.id || UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      // GPU をプロバイダの所有として DB に直接登録
+      const gpu = GpuRepository.create({
+        name: 'Review Test GPU', vendor: 'NVIDIA', model: 'RTX-REV', memoryGB: 16, pricePerHour: 0.5,
+        providerId,
+      });
+      gpuId = gpu.id;
+
+      // 無関係ユーザー
+      const o = `ov${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: o, email: `${o}@example.com`, password: 'Test1234!' });
+      otherToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${o}@example.com`, password: 'Test1234!' })).body.token;
+    });
+
+    it('provider can reject a pending order on their GPU (→ cancelled)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+
+      const reject = await request(app)
+        .post(`/api/v1/orders/${orderId}/reject`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ reason: 'GPU undergoing maintenance' });
+      expect(reject.statusCode).toBe(200);
+
+      const order = OrderRepository.getById(orderId);
+      expect(order.status).toBe('cancelled');
+      expect(order.cancelReason).toBe('provider_rejected');
+      expect(order.cancelNote).toBe('GPU undergoing maintenance');
+    });
+
+    it('non-provider cannot reject someone else\'s GPU order (403)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+
+      const reject = await request(app)
+        .post(`/api/v1/orders/${orderId}/reject`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({});
+      expect(reject.statusCode).toBe(403);
+
+      // clean up so it doesn't interfere
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('provider cannot reject a non-pending order (400)', async () => {
+      // Create an order and cancel it via the standard path first
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      // manually transition to cancelled
+      await request(app).put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ status: 'cancelled' });
+
+      const reject = await request(app)
+        .post(`/api/v1/orders/${orderId}/reject`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({});
+      expect(reject.statusCode).toBe(400);
+    });
+
+    it('user can submit a review for a completed order (201)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      // force to completed
+      OrderRepository.update(orderId, { status: 'completed' });
+
+      const review = await request(app)
+        .post(`/api/v1/orders/${orderId}/review`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ rating: 5, comment: 'Excellent GPU!' });
+      expect(review.statusCode).toBe(201);
+      expect(review.body.review.rating).toBe(5);
+      expect(review.body.review.comment).toBe('Excellent GPU!');
+    });
+
+    it('cannot review a non-completed order (400)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+
+      const review = await request(app)
+        .post(`/api/v1/orders/${orderId}/review`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ rating: 3 });
+      expect(review.statusCode).toBe(400);
+
+      // clean up
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('cannot submit a duplicate review (409)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'completed' });
+
+      await request(app).post(`/api/v1/orders/${orderId}/review`)
+        .set('Authorization', `Bearer ${renterToken}`).send({ rating: 4 });
+      const dup = await request(app)
+        .post(`/api/v1/orders/${orderId}/review`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ rating: 2 });
+      expect(dup.statusCode).toBe(409);
+    });
+
+    it('GET /gpus/:id/reviews returns review list with aggregate (public)', async () => {
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/reviews`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('reviews');
+      expect(res.body).toHaveProperty('ratingAverage');
+      expect(res.body).toHaveProperty('total');
+      expect(Array.isArray(res.body.reviews)).toBe(true);
+      expect(res.body.reviews.length).toBeGreaterThanOrEqual(1);
+      const r = res.body.reviews[0];
+      expect(r).toHaveProperty('rating');
+      expect(r).toHaveProperty('orderId');
+    });
+
+    it('GET /gpus/:id includes rating aggregate', async () => {
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpu).toHaveProperty('rating');
+      expect(res.body.gpu.rating).toHaveProperty('average');
+      expect(res.body.gpu.rating).toHaveProperty('count');
+      expect(res.body.gpu.rating.count).toBeGreaterThanOrEqual(1);
+    });
+
+    it('invalid rating value is rejected with 400', async () => {
+      // Fresh GPU to avoid any time-slot state from the shared gpuId
+      const freshGpuId = GpuRepository.create({
+        name: 'Bad Rating GPU', vendor: 'NVIDIA', model: 'RTX-400', memoryGB: 8, pricePerHour: 0.5,
+      }).id;
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId: freshGpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'completed' });
+
+      const bad = await request(app)
+        .post(`/api/v1/orders/${orderId}/review`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ rating: 6 });
+      expect(bad.statusCode).toBe(400);
+    });
+  });
 });

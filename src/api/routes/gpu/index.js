@@ -114,7 +114,7 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json(response);
 }));
 
-// 特定のGPUの詳細情報を取得
+// 特定のGPUの詳細情報を取得（レーティング集計を含む）
 router.get('/:id', asyncHandler(async (req, res) => {
   const gpuId = req.params.id;
   logger.info(`Fetching GPU detail: ${gpuId}`);
@@ -131,13 +131,46 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const details = vgpuManager ? await vgpuManager.getGPUDetails(gpuId).catch(() => null) : null;
   const usageStats = vgpuManager ? await vgpuManager.getGPUUsageStats(gpuId).catch(() => null) : null;
   const availability = vgpuManager ? await vgpuManager.getGPUAvailability(gpuId).catch(() => null) : null;
+  // レーティング集計（レビュー付き完了注文から on-the-fly 計算）
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const reviewOrders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && o.review);
+  const ratingCount = reviewOrders.length;
+  const ratingAverage = ratingCount > 0
+    ? Math.round((reviewOrders.reduce((s, o) => s + o.review.rating, 0) / ratingCount) * 10) / 10
+    : null;
   // レスポンスを構築（apiKey等除外）
   const { apiKey, ...gpuSafe } = gpu;
   const response = {
     message: 'Fetched GPU detail',
-    gpu: { ...gpuSafe, details, usageStats, availability }
+    gpu: { ...gpuSafe, details, usageStats, availability, rating: { average: ratingAverage, count: ratingCount } }
   };
   res.json(response);
+}));
+
+// GPU レビュー一覧（認証不要 — マーケットプレイスブラウジングと同等）
+router.get('/:id/reviews', asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const limitRaw = parseInt(req.query.limit, 10);
+  const offsetRaw = parseInt(req.query.offset, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+
+  const reviews = OrderRepository.getAll()
+    .filter(o => o.gpuId === gpuId && o.review)
+    .sort((a, b) => b.review.reviewedAt.localeCompare(a.review.reviewedAt))
+    .map(o => ({ orderId: o.id, ...o.review }));
+
+  const total = reviews.length;
+  const page = reviews.slice(offset, offset + limit);
+  const ratingAverage = total > 0
+    ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / total) * 10) / 10
+    : null;
+
+  res.json({ gpuId, total, limit, offset, ratingAverage, reviews: page });
 }));
 
 // GPU出品登録 (認証必須)

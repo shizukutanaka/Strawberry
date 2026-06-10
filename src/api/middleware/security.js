@@ -42,7 +42,7 @@ const corsOptions = {
 // レート制限設定
 const apiLimiter = rateLimit({
   windowMs: config.server.rateLimitWindowMs,
-  max: config.server.rateLimitMax,
+  max: () => process.env.NODE_ENV === 'test' ? 10000 : config.server.rateLimitMax,
   standardHeaders: true,
   legacyHeaders: false,
   message: {

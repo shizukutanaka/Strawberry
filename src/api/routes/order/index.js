@@ -344,6 +344,8 @@ router.post('/',
 
     // ユーザーIDを設定
     orderData.userId = req.user.id;
+    // GPU プロバイダ ID を注文に記録（allowOwnerOrAdmin でプロバイダが自分の GPU 上の注文を管理できるようにする）
+    orderData.providerId = gpu.providerId || null;
     // オーダーステータスを設定
     orderData.status = 'pending';
     // 予約時間帯を確定（scheduledStartAt 未指定 = 即時）
@@ -430,6 +432,80 @@ router.post('/',
         totalPriceJPY
       }
     });
+  })
+);
+
+// プロバイダによる注文拒否（GPU 所有者専用 — pending のみ許可）
+// POST /orders/:id/reject { reason?: string }
+router.post('/:id/reject',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    // プロバイダまたは admin のみ許可
+    const gpu = GpuRepository.getById(order.gpuId);
+    const isProvider = gpu && gpu.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can reject an order', 403);
+    }
+    if (order.status !== 'pending') {
+      throw new APIError(ErrorTypes.VALIDATION, `Cannot reject order in '${order.status}' state (only pending orders can be rejected)`, 400);
+    }
+    const cancelNote = req.body.reason ? String(req.body.reason).slice(0, 500) : '';
+    OrderRepository.update(order.id, {
+      status: 'cancelled',
+      cancelReason: 'provider_rejected',
+      cancelNote,
+      cancelledAt: new Date().toISOString(),
+    });
+    // 借り手（レンター）へ通知
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpuName = gpu ? gpu.name : order.gpuId;
+    notifyUser(order.userId, 'order_rejected',
+      `【Strawberry】プロバイダがあなたの注文を拒否しました\n注文: #${order.id}\nGPU: ${gpuName}${cancelNote ? `\n理由: ${cancelNote}` : ''}`,
+      { subject: `【Strawberry】注文 #${order.id} が拒否されました` });
+    logger.info(`Order rejected by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id, cancelNote });
+    res.json({ message: 'Order rejected', orderId: order.id });
+  })
+);
+
+// 注文レビュー投稿（完了済み注文の借り手のみ、1 注文 1 回のみ）
+// POST /orders/:id/review { rating: 1-5, comment?: string }
+router.post('/:id/review',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (order.userId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order owner can submit a review', 403);
+    }
+    if (order.status !== 'completed') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
+    }
+    if (order.review) {
+      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a review', 409);
+    }
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
+    }
+    const comment = req.body.comment ? String(req.body.comment).slice(0, 500) : '';
+    const review = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
+    OrderRepository.update(order.id, { review });
+    // プロバイダへレビュー通知
+    if (order.providerId) {
+      const { notifyUser } = require('../../../utils/user-notify');
+      const gpu = GpuRepository.getById(order.gpuId);
+      const gpuName = gpu ? gpu.name : order.gpuId;
+      notifyUser(order.providerId, 'order_reviewed',
+        `【Strawberry】あなたの GPU にレビューが投稿されました ★${rating}/5\nGPU: ${gpuName}\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
+        { subject: `【Strawberry】GPU「${gpuName}」にレビュー ★${rating}/5` });
+    }
+    logger.info(`Review submitted for order: ${order.id}`, { orderId: order.id, rating });
+    res.status(201).json({ message: 'Review submitted', review });
   })
 );
 

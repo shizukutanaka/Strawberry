@@ -68,6 +68,8 @@
 | 13 | 管理統計 API（GMV・注文状況・GPU 稼働率） | 低 | ✅ 実装済み（`GET /admin/stats`、admin 限定） |
 | 14 | SQLite/Postgres への移行 | 中（スケール時） | ⏳ フォローアップ |
 | 15 | E2E 決済テスト（regtest LND） | 中 | ⏳ フォローアップ |
+| 16 | プロバイダによる注文拒否 | 中（GPU 貸し手が不適切な注文を断れなかった） | ✅ 実装済み（`POST /orders/:id/reject`、provider/admin 限定） |
+| 17 | レビュー・評価システム | 中（GPU の品質評価・貸し手の評判管理が不可能だった） | ✅ 実装済み（`POST /orders/:id/review`・`GET /gpus/:id/reviews`・GPU 詳細の rating 集計） |
 
 - **GPU 時間帯予約**: 注文作成時に `scheduledStartAt`（ISO 8601）を指定可能。未指定は即時（`now`）扱い。`scheduledEndAt = scheduledStartAt + durationMinutes` を自動計算して保存。二重予約チェックをステータスベースから**時間帯重複チェック**（[A,B) ∩ [C,D) ≠ ∅）に変更し、同一 GPU でも時間帯が重ならなければ複数の先行予約を受け付ける。`GET /gpus/:id/schedule?from=ISO&to=ISO`（認証不要）で空き状況をカレンダー形式で照会可能。未来の `scheduledStartAt` を持つ pending 注文は支払タイムアウト失効の対象外（事前予約の保護）。
 
@@ -85,4 +87,7 @@
 
 ## 総評
 
-土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 15 件中 13 件が実装済み（251/253 テスト通過）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 17 件中 15 件が実装済み（40/40 統合テスト通過）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+
+- **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
+- **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。

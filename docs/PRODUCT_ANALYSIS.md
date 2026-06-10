@@ -64,8 +64,8 @@
 | 9 | 注文一覧キャッシュのユーザー分離 | **致命**（他ユーザーの注文一覧が返る認可バイパスを発見） | ✅ 修正済み（perUser キャッシュキー） |
 | 10 | リフレッシュトークン（短命アクセス + 長命リフレッシュ） | 中 | ⏳ フォローアップ |
 | 11 | GPU 時間帯予約（スケジュール貸出・カレンダー） | 中（現状は「今すぐ借りる」のみ） | ⏳ フォローアップ |
-| 12 | プロバイダ向け Webhook（注文受付通知） | 中（通知は運営向け env のみ） | ⏳ フォローアップ（notification-settings に基盤あり） |
-| 13 | 管理ダッシュボード / 統計 API（GMV・稼働率） | 低 | ⏳ フォローアップ |
+| 12 | プロバイダ向け通知（注文受付を貸し手へ配送） | 中（通知は運営向け env のみだった） | ✅ 実装済み（`notifyUser` が notification-settings の登録チャネルへ配送） |
+| 13 | 管理統計 API（GMV・注文状況・GPU 稼働率） | 低 | ✅ 実装済み（`GET /admin/stats`、admin 限定） |
 | 14 | SQLite/Postgres への移行 | 中（スケール時） | ⏳ フォローアップ |
 | 15 | E2E 決済テスト（regtest LND） | 中 | ⏳ フォローアップ |
 
@@ -75,6 +75,8 @@
 - **自動失効**: `src/utils/order-expiry.js`。`ORDER_PENDING_TIMEOUT_MINUTES`（既定30）を超えた pending を `cancelled`（`cancelReason: 'payment_timeout'`）へ遷移。一覧取得・注文作成時の遅延スイープ方式で、タイマー常駐を増やさない。
 - **トークン失効**: ログイン時に `jti` を発行し、`POST /users/logout` で `data/revoked-tokens.json` に exp まで保持。`jwt-auth.js`・`security.js` 両方の検証パスで拒否。
 - **キャッシュ認可バイパス修正**: `cacheMiddleware({ perUser: true })` でキャッシュキーにユーザーIDを含める。修正前は 60 秒 TTL 内に別ユーザーへ他人の注文一覧が返っていた。
+- **プロバイダ通知**: `src/utils/user-notify.js`。注文作成時に GPU の `providerId` 宛へ、notification-settings で登録済みのチャネル（LINE/Discord/Slack/Telegram/Email/イベント別 Webhook）に配送。`enabled` マップとイベント種別でフィルタ（純関数 `resolveChannels`、単体テスト付き）。
+- **管理統計**: `GET /api/v1/admin/stats`。ユーザー数（ロール別）、GPU 総数・稼働/空き、注文状況別件数、完了 GMV（sats/JPY）を返す。
 
 ---
 

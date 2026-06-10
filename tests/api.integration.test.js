@@ -241,6 +241,34 @@ describe('API Integration', () => {
       expect(denied.statusCode).toBe(403);
     });
 
+    it('GET /admin/stats → 200 for admin with marketplace aggregates, 403 for user', async () => {
+      const UserRepository = require('../src/db/json/UserRepository');
+      // admin はレポ直更新で昇格（自己登録では admin を取得できない仕様のため）
+      const u = `st${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const created = UserRepository.getByEmail(`${u}@example.com`);
+      UserRepository.update(created.id, { role: 'admin' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' });
+      const adminToken = login.body.token;
+
+      const ok = await request(app)
+        .get('/api/v1/admin/stats')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(ok.statusCode).toBe(200);
+      expect(ok.body.users.total).toBeGreaterThanOrEqual(1);
+      expect(ok.body.orders).toHaveProperty('byStatus');
+      expect(ok.body.gmv).toHaveProperty('completedSats');
+      expect(ok.body.gpus).toHaveProperty('available');
+
+      const userToken = await registerAndLogin('ns');
+      const denied = await request(app)
+        .get('/api/v1/admin/stats')
+        .set('Authorization', `Bearer ${userToken}`);
+      expect(denied.statusCode).toBe(403);
+    });
+
     it('auto-expires stale pending orders (payment timeout)', async () => {
       const token = await registerAndLogin('ex');
       const create = await request(app)

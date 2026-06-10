@@ -351,6 +351,13 @@ router.post('/',
     const createdOrder = OrderRepository.create(orderData);
     // 通知サービス呼び出し
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;
+    // GPU 提供者（プロバイダ）へ通知（notification-settings で登録したチャネルへ）
+    if (gpu.providerId) {
+      const { notifyUser } = require('../../../utils/user-notify');
+      notifyUser(gpu.providerId, 'order_created',
+        `【Strawberry】あなたの GPU に注文が入りました\n注文: #${createdOrder.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n報酬: ${totalPrice} sat (${totalPriceJPY}円)`,
+        { subject: `【Strawberry】新規注文 #${createdOrder.id}（${gpu.name}）` });
+    }
     // メール通知（ユーザーのメールアドレスが取得できる場合のみ）
     if (req.user.email) {
       sendNotification(NotifyType.EMAIL, notifyMsg, {

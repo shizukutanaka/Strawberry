@@ -114,6 +114,46 @@ router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {
   }
 });
 
+// マーケットプレイス統計API（管理者のみ）— GMV・注文状況・GPU 稼働の俯瞰
+router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const UserRepository = require('../../db/json/UserRepository');
+  const GpuRepository = require('../../db/json/GpuRepository');
+  const OrderRepository = require('../../db/json/OrderRepository');
+
+  const users = UserRepository.getAll();
+  const gpus = GpuRepository.getAll();
+  const orders = OrderRepository.getAll();
+
+  const usersByRole = {};
+  for (const u of users) usersByRole[u.role || 'user'] = (usersByRole[u.role || 'user'] || 0) + 1;
+
+  const ordersByStatus = {};
+  let gmvSats = 0;
+  let gmvJPY = 0;
+  for (const o of orders) {
+    ordersByStatus[o.status] = (ordersByStatus[o.status] || 0) + 1;
+    if (o.status === 'completed') {
+      gmvSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
+      gmvJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
+    }
+  }
+
+  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const occupiedGpuIds = new Set(orders.filter(o => BLOCKING.has(o.status)).map(o => o.gpuId));
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    users: { total: users.length, byRole: usersByRole },
+    gpus: {
+      total: gpus.length,
+      occupied: gpus.filter(g => occupiedGpuIds.has(g.id)).length,
+      available: gpus.filter(g => !occupiedGpuIds.has(g.id)).length,
+    },
+    orders: { total: orders.length, byStatus: ordersByStatus },
+    gmv: { completedSats: gmvSats, completedJPY: gmvJPY },
+  });
+}));
+
 // システム情報取得（adminのみ許可）
 router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   // システム情報を取得

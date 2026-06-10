@@ -99,7 +99,7 @@ router.post('/pay',
         res.status(400).json({
           message: 'Payment failed',
           status: 'failed',
-          error: error.message,
+          error: process.env.NODE_ENV === 'production' ? 'Lightning payment failed' : error.message,
           paymentMethod: 'lightning'
         });
       }

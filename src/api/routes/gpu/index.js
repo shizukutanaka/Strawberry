@@ -16,6 +16,7 @@ const { createMockAttestationVerifier } = require('../../../security/gpu-attesta
 const _attestationVerifier = createMockAttestationVerifier();
 // プロバイダ・レピュテーション記録（アテステーション結果の反映）
 const { createReputationService } = require('../../../reputation/reputation-service');
+const { sanitizeObject } = require('../../../utils/sanitize');
 
 // 利用可能なGPU一覧を取得
 router.get('/', asyncHandler(async (req, res) => {
@@ -111,8 +112,6 @@ router.get('/:id', asyncHandler(async (req, res) => {
   };
   res.json(response);
 }));
-
-const { sanitizeObject } = require('../../../utils/sanitize');
 
 // GPU出品登録 (認証必須)
 router.post('/', 

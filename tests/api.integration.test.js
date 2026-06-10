@@ -41,6 +41,23 @@ describe('API Integration', () => {
         .send({ username: 'a', email: 'bad', password: '' });
       expect(res.statusCode).toBe(400);
     });
+
+    it('prevents self-registration with admin role (privilege escalation)', async () => {
+      const res = await request(app)
+        .post('/api/v1/users/register')
+        .send({
+          username: `adm${unique}`.slice(0, 28),
+          email: `adm_${unique}@example.com`,
+          password: 'Test1234!',
+          role: 'admin'
+        });
+      // 400 (schema rejects 'admin') または 201 でも role が 'user' か 'provider' であること
+      if (res.statusCode === 201) {
+        expect(['user', 'provider']).toContain(res.body.user.role);
+      } else {
+        expect(res.statusCode).toBe(400);
+      }
+    });
   });
 
   describe('Protected resources require auth', () => {

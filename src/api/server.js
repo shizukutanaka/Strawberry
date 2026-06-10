@@ -100,6 +100,32 @@ app.get('/metrics', apiLimiter, async (req, res) => {
   res.end(await client.register.metrics());
 });
 
+// /health — 死活監視エンドポイント（LB/k8s probe・sla-tracker が参照）。
+// レート制限より前に定義し、高頻度ポーリングでも 429 にならないようにする。
+const serverStartedAt = Date.now();
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// /openapi.json — API 仕様の HTTP 公開（初回アクセス時に生成しキャッシュ）
+let openapiSpecCache = null;
+app.get('/openapi.json', apiLimiter, (req, res) => {
+  if (!openapiSpecCache) {
+    try {
+      const { generateOpenAPISpec } = require('./openapi-generator');
+      openapiSpecCache = generateOpenAPISpec();
+    } catch (e) {
+      logger.error('OpenAPI spec generation failed:', e);
+      return res.status(500).json({ error: 'Failed to generate OpenAPI spec' });
+    }
+  }
+  res.json(openapiSpecCache);
+});
+
 // リクエストID生成（ロギング用）
 app.use(requestId);
 

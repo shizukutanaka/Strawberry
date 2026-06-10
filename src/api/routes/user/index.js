@@ -90,8 +90,8 @@ router.post('/login',
       logger.warn(`Login failed: wrong password (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    // JWTトークン生成
-    const token = jwt.sign({ id: user.id, role: user.role }, resolveSecret(), { expiresIn: config.security.jwtExpiresIn });
+    // JWTトークン生成（jti は logout 時の失効に使用）
+    const token = jwt.sign({ id: user.id, role: user.role, jti: uuidv4() }, resolveSecret(), { expiresIn: config.security.jwtExpiresIn });
     user.lastLogin = new Date().toISOString();
     logger.info(`Login success: ${email}`);
     // パスワードやAPIキーは絶対にレスポンス・ログに含めない
@@ -102,8 +102,24 @@ router.post('/login',
   })
 );
 
+// ログアウト（トークン失効。認証必須）
+router.post('/logout',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const { revoke } = require('../../middleware/token-denylist');
+    if (req.user.jti) {
+      // exp（秒）をミリ秒に変換して保持期限とする。それ以降は自然失効するため保持不要。
+      revoke(req.user.jti, (req.user.exp || 0) * 1000);
+      logger.info(`User logged out (token revoked): ${req.user.id}`);
+      return res.json({ message: 'Logged out successfully' });
+    }
+    // jti の無い旧トークンは失効リストに載せられない（exp までは有効なまま）
+    res.json({ message: 'Logged out (token issued before revocation support; it will expire naturally)' });
+  })
+);
+
 // 現在のユーザー情報取得 (認証必須)
-router.get('/me', 
+router.get('/me',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     logger.info(`Fetching user profile: ${req.user.id}`);

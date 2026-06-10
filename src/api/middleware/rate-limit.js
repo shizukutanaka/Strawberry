@@ -9,10 +9,14 @@ const message = {
   }
 };
 
+// テスト時は緩和（統合テストが多数の register/login を行うため）。
+// max は関数を渡すとリクエスト毎に評価され、env での動的変更が可能。
+const isTest = () => process.env.NODE_ENV === 'test';
+
 // 全エンドポイント共通: 1分間60リクエスト
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: () => (isTest() ? 10000 : Number(process.env.RATE_LIMIT_MAX) || 60),
   standardHeaders: true,
   legacyHeaders: false,
   message
@@ -21,7 +25,7 @@ const limiter = rateLimit({
 // 認証エンドポイント専用: 15分間10リクエスト（ブルートフォース対策）
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: () => (isTest() ? 10000 : Number(process.env.AUTH_RATE_LIMIT_MAX) || 10),
   standardHeaders: true,
   legacyHeaders: false,
   message

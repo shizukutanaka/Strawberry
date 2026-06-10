@@ -17,10 +17,15 @@ const cache = new LRUCache({
 });
 
 // キャッシュミドルウェア生成
+// perUser: true の場合、キャッシュキーにユーザーIDを含める。
+// ユーザー毎に内容が異なるレスポンス（注文一覧等）を URL のみでキャッシュすると
+// 他ユーザーのデータが返る（認可バイパス）ため、per-user データでは必須。
 function cacheMiddleware(options = {}) {
   return (req, res, next) => {
     if (req.method !== 'GET') return next();
-    const key = req.originalUrl;
+    const key = options.perUser
+      ? `${(req.user && req.user.id) || 'anon'}:${req.originalUrl}`
+      : req.originalUrl;
     const cached = cache.get(key);
     if (cached) {
       logger.info(`Cache hit: ${key}`);

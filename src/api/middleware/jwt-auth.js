@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 // シークレットは「リクエスト時」に解決する（モジュール読込時に固定すると鍵ローテーション
 // 不可・テスト不能になり、security.js の authenticateJWT と挙動が食い違うため）。
 const { config } = require('../../utils/config');
+// logout で失効済みのトークン(jti)を拒否する
+const { isRevoked } = require('./token-denylist');
 
 function resolveSecret() {
   // 明示的に設定された JWT_SECRET を優先し、無ければ config の解決値にフォールバック
@@ -20,6 +22,9 @@ module.exports = function(req, res, next) {
   try {
     // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ（署名は HS256）。
     const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+    if (payload.jti && isRevoked(payload.jti)) {
+      return res.status(401).json({ error: '無効なトークン' });
+    }
     req.user = payload;
     next();
   } catch (e) {

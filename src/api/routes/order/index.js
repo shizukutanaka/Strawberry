@@ -85,18 +85,26 @@ const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pri
 const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
+// 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
+const { expireStaleOrders } = require('../../../utils/order-expiry');
+// GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
+const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
 const { sanitizeObject } = require('../../../utils/sanitize');
 const { cacheMiddleware } = require('../../middleware/cache');
 
 // オーダー一覧取得 (認証必須)
+// キャッシュは perUser 必須: URL のみをキーにすると先行ユーザーの注文一覧が
+// 他ユーザーに返る（認可バイパス）ため、ユーザーIDをキーに含める。
 
-router.get('/', 
-  cacheMiddleware(),
+router.get('/',
+  cacheMiddleware({ perUser: true }),
   authenticateJWT,
   asyncHandler(async (req, res, next) => {
     try {
       logger.info('Fetching orders');
+      // 期限切れ pending 注文を失効させてから一覧を返す（遅延スイープ）
+      expireStaleOrders();
       let orders;
       if (req.user.role === 'admin') {
         orders = OrderRepository.getAll();
@@ -117,6 +125,13 @@ router.get('/',
         if (a[sortBy] > b[sortBy]) return 1 * sortDir;
         return 0;
       });
+      // ページネーション（limit: 1..200 既定50 / offset: 0..）
+      const total = orders.length;
+      const limitRaw = parseInt(req.query.limit, 10);
+      const offsetRaw = parseInt(req.query.offset, 10);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+      const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+      orders = orders.slice(offset, offset + limit);
       // リアルタイムBTC/JPY換算（レートは一覧全体で1回だけ取得して使い回す）
       const rateInfo = await fetchRateInfo();
       const ordersWithPricing = orders.map(order => ({
@@ -125,13 +140,49 @@ router.get('/',
       }));
       res.json({
         message: 'Fetched orders',
-        total: ordersWithPricing.length,
+        total,
+        limit,
+        offset,
         orders: ordersWithPricing,
         exchangeRateTimestamp: rateInfo.timestamp
       });
     } catch (error) {
       next(error);
     }
+  })
+);
+
+// プロバイダ収益サマリ (認証必須, provider/admin)
+// 自身が providerId の注文を集計し、完了済み収益と進行中の見込み額を返す。
+router.get('/provider/earnings',
+  authenticateJWT,
+  checkRole(['provider', 'admin']),
+  asyncHandler(async (req, res) => {
+    const providerId = req.user.id;
+    const orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+    const summary = {
+      providerId,
+      completedCount: 0,
+      completedSats: 0,
+      completedJPY: 0,
+      activeCount: 0,
+      activeSats: 0,
+      cancelledCount: 0,
+    };
+    for (const o of orders) {
+      const sats = typeof o.totalPrice === 'number' ? o.totalPrice : 0;
+      if (o.status === 'completed') {
+        summary.completedCount++;
+        summary.completedSats += sats;
+        summary.completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
+      } else if (o.status === 'active') {
+        summary.activeCount++;
+        summary.activeSats += sats;
+      } else if (o.status === 'cancelled') {
+        summary.cancelledCount++;
+      }
+    }
+    res.json({ message: 'Provider earnings summary', earnings: summary });
   })
 );
 
@@ -264,6 +315,19 @@ router.post('/',
     const gpu = GpuRepository.getById(orderData.gpuId);
     if (!gpu) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Specified GPU not found', 404);
+    }
+    // 二重予約チェック: 期限切れ pending を先に失効させ、それでも同一 GPU に
+    // 占有中（pending/matched/active）の注文が残っていれば 409 を返す。
+    expireStaleOrders();
+    const blocking = OrderRepository.getAll().find(
+      o => o.gpuId === orderData.gpuId && BLOCKING_ORDER_STATUSES.has(o.status)
+    );
+    if (blocking) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `GPU is not available: an order in '${blocking.status}' state already exists for this GPU`,
+        409
+      );
     }
     // 料金計算: GPUのpricePerHour必須
     let pricePerHour = gpu.pricePerHour;

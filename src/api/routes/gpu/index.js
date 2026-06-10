@@ -75,12 +75,33 @@ router.get('/', asyncHandler(async (req, res) => {
       return true;
     });
   }
+  // 占有状況の注釈: pending/matched/active の注文がある GPU は available=false。
+  // 二重予約は注文作成時に 409 で拒否されるため、ここは閲覧時のヒント表示。
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const occupiedGpuIds = new Set(
+    OrderRepository.getAll().filter(o => BLOCKING.has(o.status)).map(o => o.gpuId)
+  );
+  gpus = gpus.map(gpu => ({ ...gpu, available: !occupiedGpuIds.has(gpu.id) }));
+  // ?available=true で空き GPU のみに絞り込み
+  if (req.query.available === 'true') {
+    gpus = gpus.filter(gpu => gpu.available);
+  }
   // 価格順にソート
   gpus.sort((a, b) => a.pricePerHour - b.pricePerHour);
+  // ページネーション（limit: 1..200 既定50 / offset: 0..）
+  const totalCount = gpus.length;
+  const limitRaw = parseInt(req.query.limit, 10);
+  const offsetRaw = parseInt(req.query.offset, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+  gpus = gpus.slice(offset, offset + limit);
   // レスポンスに追加情報を含める
   const response = {
     message: 'Fetched available GPUs',
-    total: gpus.length,
+    total: totalCount,
+    limit,
+    offset,
     gpus: gpus.map(({ apiKey, ...gpu }) => gpu), // apiKeyなどの漏洩防止
     timestamp: new Date().toISOString()
   };

@@ -21,9 +21,10 @@ function saveSLA(sla) {
 }
 
 async function checkAlive() {
-  // HTTP/DB/主要プロセス等の死活監視（ここではHTTP 200を簡易例）
+  // HTTP/DB/主要プロセス等の死活監視（server.js の /health を参照）
   try {
-    const res = await fetch('http://localhost:3000/health');
+    const port = process.env.PORT || 3000;
+    const res = await fetch(`http://localhost:${port}/health`);
     return res.ok;
   } catch {
     return false;

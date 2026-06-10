@@ -16,13 +16,14 @@ const OrderRepository = require('../../../db/json/OrderRepository');
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 
 // インボイス作成 (認証必須)
-router.post('/invoice', 
+router.post('/invoice',
   authenticateJWT,
   validateMiddleware(schemas.payment.createInvoice),
   asyncHandler(async (req, res) => {
+    if (!requireService(lightning, res)) return;
     const { amount, description, expiry } = req.validatedBody;
     logger.info(`Creating invoice for ${amount} satoshis`);
-    
+
     // 金額の範囲をチェック
     if (amount < config.lightning.minPaymentSatoshis) {
       throw new APIError(ErrorTypes.VALIDATION, `Amount too small. Minimum: ${config.lightning.minPaymentSatoshis} satoshis`, 400);
@@ -68,6 +69,7 @@ router.post('/pay',
     // Lightning or manual (現金/銀行振込) 支払い対応
     if (paymentMethod === 'lightning' || (!paymentMethod && paymentRequest)) {
       // Lightning Network 支払い
+      if (!requireService(lightning, res)) return;
       try {
         const paymentResult = await lightning.payInvoice(paymentRequest, amount, maxFeePercent);
         logger.info(`Payment successful: ${paymentResult.paymentHash.substring(0, 10)}...`, {
@@ -129,12 +131,13 @@ router.post('/pay',
 );
 
 // インボイス状態確認
-router.get('/invoice/:id', 
+router.get('/invoice/:id',
   authenticateJWT,
   asyncHandler(async (req, res) => {
+    if (!requireService(lightning, res)) return;
     const invoiceId = req.params.id;
     logger.info(`Checking invoice status: ${invoiceId}`);
-    
+
     // インボイス状態を確認
     const invoiceStatus = await lightning.checkInvoice(invoiceId);
     
@@ -266,12 +269,13 @@ router.get('/:id/status',
 );
 
 // ライトニングノード情報取得
-router.get('/node-info', 
+router.get('/node-info',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
+    if (!requireService(lightning, res)) return;
     logger.info('Fetching Lightning node info');
-    
+
     // ノード情報を取得
     const nodeInfo = await lightning.getNodeInfo();
     
@@ -291,12 +295,13 @@ router.get('/node-info',
 );
 
 // チャネル一覧取得
-router.get('/channels', 
+router.get('/channels',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
+    if (!requireService(lightning, res)) return;
     logger.info('Fetching Lightning channels');
-    
+
     // チャネル一覧を取得
     const channels = await lightning.listChannels();
     

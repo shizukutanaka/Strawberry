@@ -5,11 +5,12 @@ const jwt = require('jsonwebtoken');
 const UserRepository = require('../../../db/json/UserRepository');
 const { APIError, ErrorTypes, asyncHandler } = require('../../../utils/error-handler');
 const { resolveSecret } = require('../../middleware/jwt-auth');
+const { authLimiter } = require('../../middleware/rate-limit');
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 // POST /api/v1/auth/google { idToken }
-router.post('/', asyncHandler(async (req, res) => {
+router.post('/', authLimiter, asyncHandler(async (req, res) => {
   if (!GOOGLE_CLIENT_ID) {
     throw new APIError(ErrorTypes.EXTERNAL_SERVICE, 'Google OAuth is not configured', 503);
   }

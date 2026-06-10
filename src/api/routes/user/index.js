@@ -15,13 +15,16 @@ const { resolveSecret } = require('../../middleware/jwt-auth');
 
 const { sanitizeObject } = require('../../../utils/sanitize');
 
+const { authLimiter } = require('../../middleware/rate-limit');
+
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
 // ピアID管理サブルート
 const peeridRouter = require('./peerid');
 
 // ユーザー登録
-router.post('/register', 
+router.post('/register',
+  authLimiter,
   validateMiddleware(schemas.user.register),
   asyncHandler(async (req, res) => {
     // 入力値サニタイズ
@@ -67,7 +70,8 @@ router.post('/register',
 );
 
 // ログイン
-router.post('/login', 
+router.post('/login',
+  authLimiter,
   validateMiddleware(schemas.user.login),
   asyncHandler(async (req, res) => {
     const { email, password } = req.validatedBody;

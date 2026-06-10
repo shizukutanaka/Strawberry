@@ -313,7 +313,7 @@ router.post('/',
         chatId: process.env.TELEGRAM_CHAT_ID
       }).catch(() => {});
     }
-    // Googleカレンダー連携（非同期で実行、失敗はログのみ）
+    // Googleカレンダー連携（非同期で実行、失敗はログのみ。googleapis は optional）
     try {
       const { addEventToCalendar } = require('../../../utils/google-calendar');
       const startDate = new Date();

@@ -463,7 +463,8 @@ class ExtendedGPUDetector {
         try {
             // ROCm経由で詳細情報取得
             if (gpu.capabilities.rocm) {
-                const { stdout } = await exec(`rocm-smi -d ${gpu.uuid.split('-').pop()} --showproductname`);
+                const deviceIndex = gpu.uuid.split('-').pop().replace(/[^0-9a-fA-F]/g, '');
+                const { stdout } = await exec(`rocm-smi -d ${deviceIndex} --showproductname`);
                 // 詳細解析
             }
         } catch {}

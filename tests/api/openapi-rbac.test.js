@@ -21,8 +21,8 @@ describe('OpenAPI RBAC要件', () => {
   });
 
   it('全APIにBearer認証が付与されている', () => {
-    for (const [path, methods] of Object.entries(openapi.paths)) {
-      for (const [method, def] of Object.entries(methods)) {
+    for (const [, methods] of Object.entries(openapi.paths)) {
+      for (const [, def] of Object.entries(methods)) {
         expect(def.security).toBeDefined();
         expect(def.security[0]).toHaveProperty('BearerAuth');
       }

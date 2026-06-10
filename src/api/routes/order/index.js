@@ -201,7 +201,7 @@ router.put('/:id',
     const sanitized = sanitizeObject(req.body, ['description']);
     // 状態遷移チェック
     if (sanitized.status && sanitized.status !== order.status) {
-      if (!isValidOrderTransition(order.status, req.body.status)) {
+      if (!isValidOrderTransition(order.status, sanitized.status)) {
         return res.status(400).json({ error: `Invalid status transition from ${order.status} to ${req.body.status}` });
       }
     }

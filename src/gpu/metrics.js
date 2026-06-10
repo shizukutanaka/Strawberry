@@ -36,19 +36,19 @@ class MetricsCollector {
                 help: 'GPU utilization percentage',
                 labelNames: ['gpu_model']
             }),
-            
+
             gpuTemperature: new promClient.Gauge({
                 name: 'strawberry_gpu_temperature_celsius',
                 help: 'GPU temperature in Celsius',
                 labelNames: ['gpu_model']
             }),
-            
+
             gpuMemoryUsed: new promClient.Gauge({
                 name: 'strawberry_gpu_memory_used_bytes',
                 help: 'GPU memory used in bytes',
                 labelNames: ['gpu_model']
             }),
-            
+
             gpuPowerDraw: new promClient.Gauge({
                 name: 'strawberry_gpu_power_draw_watts',
                 help: 'GPU power draw in watts',

@@ -68,6 +68,7 @@ async function isServiceHealthy(name, svc) {
 // サービスの死活監視・自動復旧
 async function monitorServices() {
   for (const [name, svc] of Object.entries(services)) {
+    if (!svc || typeof svc !== 'object') continue;
     try {
       const healthy = await isServiceHealthy(name, svc);
       if (!healthy) {

@@ -8,17 +8,17 @@ const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
-const { 
-  securityHeaders, 
-  corsMiddleware, 
-  apiLimiter 
+const {
+  securityHeaders,
+  corsMiddleware,
+  apiLimiter
 } = require('./middleware/security');
-const { 
-  requestId, 
-  requestLogger, 
-  devRequestLogger, 
-  responseTime, 
-  errorLogger 
+const {
+  requestId,
+  requestLogger,
+  devRequestLogger,
+  responseTime,
+  errorLogger
 } = require('./middleware/logger');
 
 // Prometheusメトリクス
@@ -70,13 +70,15 @@ app.use('/api/exchange-rate', exchangeRateRouter);
 
 // コアサービス参照のセットと監視起動
 try {
-  // 既存のコアサービス参照を取得
-  const routes = require('./routes');
-  const lightning = routes.lightning || (routes.default && routes.default.lightning);
-  const p2pNetwork = routes.p2pNetwork || (routes.default && routes.default.p2pNetwork);
-  const vgpuManager = routes.vgpuManager || (routes.default && routes.default.vgpuManager);
-  setServices({ LightningService: lightning, P2PNetwork: p2pNetwork, VirtualGPUManager: vgpuManager });
-  startMonitor();
+  const { lightning, p2pNetwork, vgpuManager } = require('../core/services');
+  const svcRefs = {};
+  if (lightning) svcRefs.LightningService = lightning;
+  if (p2pNetwork) svcRefs.P2PNetwork = p2pNetwork;
+  if (vgpuManager) svcRefs.VirtualGPUManager = vgpuManager;
+  if (Object.keys(svcRefs).length > 0) {
+    setServices(svcRefs);
+    startMonitor();
+  }
 } catch (e) {
   logger.warn('Service monitor could not be started:', e);
 }

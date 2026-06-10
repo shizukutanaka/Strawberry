@@ -115,6 +115,7 @@ function generateOpenAPISpec() {
 
   fs.writeFileSync(OPENAPI_PATH, JSON.stringify(openapi, null, 2));
   console.log('OpenAPI仕様書を自動生成しました:', OPENAPI_PATH);
+  return openapi;
 }
 
 if (require.main === module) {

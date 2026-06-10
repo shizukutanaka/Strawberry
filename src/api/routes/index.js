@@ -59,6 +59,7 @@ const PUBLIC_PATHS = new Set([
   '/system/info',      // 後続で rbac('admin') により保護
   '/users/register',   // 新規登録（公開）
   '/users/login',      // ログイン（公開, トークン発行元）
+  '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
 router.use((req, res, next) => {
   if (PUBLIC_PATHS.has(req.path)) return next();

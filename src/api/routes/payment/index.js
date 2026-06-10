@@ -11,6 +11,9 @@ const { config } = require('../../../utils/config');
 const { lightning, p2pNetwork, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const PaymentRepository = require('../../../db/json/PaymentRepository');
+const OrderRepository = require('../../../db/json/OrderRepository');
+// 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
+const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 
 // インボイス作成 (認証必須)
 router.post('/invoice', 
@@ -157,28 +160,14 @@ router.post('/order/:id',
     const { paymentMethod, amount } = req.body;
     logger.info(`Processing payment for order: ${orderId} (method: ${paymentMethod || 'lightning'})`);
 
-    // 注文情報から金額自動取得
-    const OrderRepository = require('../../../db/json/OrderRepository');
+    // 注文情報から金額自動取得（存在しない注文への 0 sats 請求書発行を防ぐ）
     const order = OrderRepository.getById(orderId);
-    let pricePerHour = 0;
-    let durationMinutes = 0;
-    if (order) {
-      pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-      durationMinutes = order.durationMinutes || 0;
-      if (!pricePerHour && order.gpuId) {
-        try {
-          const GpuRepository = require('../../../db/json/GpuRepository');
-          const gpu = GpuRepository.getById(order.gpuId);
-          if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-        } catch {}
-      }
+    if (!order) {
+      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     }
-    const pricePer5Min = pricePerHour / 12;
-    const totalPrice = pricePer5Min * (durationMinutes / 5);
-    // リアルタイムBTC/JPY換算
-    const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-    const satoshiToJPY = await getBTCtoJPYRate();
-    const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+    const rateInfo = await fetchRateInfo();
+    const { pricePerHour, pricePer5Min, durationMinutes, totalPrice, totalPriceJPY } =
+      computeOrderPricing(order, rateInfo);
     // Lightning以外も選択可能
     if (paymentMethod && paymentMethod !== 'lightning') {
       // 現金/銀行振込など
@@ -361,7 +350,6 @@ router.post('/manual/approve/:id',
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
     const paymentId = req.params.id;
-    const PaymentRepository = require('../../../db/json/PaymentRepository');
     const payment = PaymentRepository.getById(paymentId);
     if (!payment) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Payment not found', 404);

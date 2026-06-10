@@ -78,6 +78,8 @@ const { p2pNetwork, vgpuManager, requireService } = require('../../../core/servi
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
+// 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
+const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 
@@ -111,37 +113,17 @@ router.get('/',
         if (a[sortBy] > b[sortBy]) return 1 * sortDir;
         return 0;
       });
-      // リアルタイムBTC/JPY換算
-      const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-      const { rate: satoshiToJPY, timestamp: exchangeRateTimestamp } = await getBTCtoJPYRate(false, true);
-      const ordersWithPricing = orders.map(order => {
-        let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-        if (!pricePerHour && order.gpuId) {
-          try {
-            const GpuRepository = require('../../../db/json/GpuRepository');
-            const gpu = GpuRepository.getById(order.gpuId);
-            if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-          } catch {}
-        }
-        const durationMinutes = order.durationMinutes || 0;
-        const pricePer5Min = pricePerHour / 12;
-        const totalPrice = pricePer5Min * (durationMinutes / 5);
-        // 冗長化為替APIで換算（キャッシュ活用）
-        const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
-        return {
-          ...order,
-          pricePerHour,
-          pricePer5Min,
-          totalPrice,
-          totalPriceJPY,
-          exchangeRateTimestamp
-        };
-      });
+      // リアルタイムBTC/JPY換算（レートは一覧全体で1回だけ取得して使い回す）
+      const rateInfo = await fetchRateInfo();
+      const ordersWithPricing = orders.map(order => ({
+        ...order,
+        ...computeOrderPricing(order, rateInfo)
+      }));
       res.json({
         message: 'Fetched orders',
         total: ordersWithPricing.length,
         orders: ordersWithPricing,
-        exchangeRateTimestamp
+        exchangeRateTimestamp: rateInfo.timestamp
       });
     } catch (error) {
       next(error);
@@ -189,32 +171,14 @@ router.get('/:id',
     try {
       logger.info(`Fetching order detail: ${req.params.id}`);
       const order = req.resource;
-      let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-      if (!pricePerHour && order.gpuId) {
-        try {
-          const GpuRepository = require('../../../db/json/GpuRepository');
-          const gpu = GpuRepository.getById(order.gpuId);
-          if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-        } catch {}
-      }
-      const durationMinutes = order.durationMinutes || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * (durationMinutes / 5);
-      // 冗長化為替APIで換算（キャッシュ活用）
-      const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-      const { rate: satoshiToJPY, timestamp: exchangeRateTimestamp } = await getBTCtoJPYRate(false, true);
-      const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+      const rateInfo = await fetchRateInfo();
       res.json({
         message: 'Fetched order detail',
         order: {
           ...order,
-          pricePerHour,
-          pricePer5Min,
-          totalPrice,
-          totalPriceJPY,
-          exchangeRateTimestamp
+          ...computeOrderPricing(order, rateInfo)
         },
-        exchangeRateTimestamp
+        exchangeRateTimestamp: rateInfo.timestamp
       });
     } catch (error) {
       next(error);

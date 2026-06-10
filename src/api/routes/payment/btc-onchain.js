@@ -1,10 +1,10 @@
 // 支払い・受取API（BTC差益自動控除）
 const express = require('express');
 const router = express.Router();
-const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC } = require('../utils/btc-payment');
+const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC } = require('../../utils/btc-payment');
 
 // 運営ウォレットアドレス（複数管理・分散送金）
-const { getOperatorWallet } = require('../utils/btc-payment');
+const { getOperatorWallet } = require('../../utils/btc-payment');
 
 /**
  * POST /payment
@@ -45,7 +45,7 @@ router.post('/', async (req, res) => {
       tx2 = await sendBTC(operatorWallet, lenderWallet, payout);
     } catch (err) {
       // 重大: 借り手→運営は成立済みだが貸し手への送金が失敗。手動照合が必要。
-      const { appendAuditLog } = require('../../utils/audit-log');
+      const { appendAuditLog } = require('../../../utils/audit-log');
       appendAuditLog('payment_partial_settlement', {
         orderId, operatorWallet, lenderWallet, total, payout,
         txBorrowerToOperator: tx1, error: err.message

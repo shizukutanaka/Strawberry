@@ -78,8 +78,11 @@ const { p2pNetwork, vgpuManager, requireService } = require('../../../core/servi
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
+const GpuRepository = require('../../../db/json/GpuRepository');
 // 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+// 注文イベント通知（メール/LINE/Discord/Slack/Webhook/Telegram）
+const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 
@@ -257,7 +260,6 @@ router.post('/',
     }
 
     // GPUの存在チェック
-    const GpuRepository = require('../../../db/json/GpuRepository');
     const gpu = GpuRepository.getById(orderData.gpuId);
     if (!gpu) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Specified GPU not found', 404);
@@ -276,15 +278,13 @@ router.post('/',
     const pricePer5Min = pricePerHour / 12;
     const totalPrice = pricePer5Min * (durationMinutes / 5);
     // 冗長化為替APIで換算（キャッシュ活用）
-    const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-    const satoshiToJPY = await getBTCtoJPYRate();
+    const { rate: satoshiToJPY } = await fetchRateInfo();
     const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
     // ファイル永続化リポジトリで作成
     orderData.totalPrice = totalPrice;
     orderData.totalPriceJPY = totalPriceJPY;
     const createdOrder = OrderRepository.create(orderData);
     // 通知サービス呼び出し
-    const { sendNotification, NotifyType } = require('../../../utils/notifier');
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;
     // メール通知（ユーザーのメールアドレスが取得できる場合のみ）
     if (req.user.email) {

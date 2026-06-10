@@ -3,7 +3,6 @@ const express = require('express');
 const path = require('path');
 const routes = require('./routes');
 const masterAuthRouter = require('./routes/master-auth');
-const paymentRouter = require('./routes/payment');
 const profitAddressesRouter = require('./routes/profit-addresses');
 const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');

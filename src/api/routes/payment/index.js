@@ -344,6 +344,12 @@ router.get('/history',
   })
 );
 
+// オンチェーンBTC決済（運営手数料控除）。
+// 旧 routes/payment.js がディレクトリ解決を遮蔽（payment.js が payment/index.js より
+// 優先）し、本ファイルの Lightning 決済API全体が未マウントになっていたため、
+// /btc 配下のサブルートとして取り込んだ。グローバルJWTゲートの保護下にある。
+router.use('/btc', require('./btc-onchain'));
+
 // 管理者による手動支払い承認API
 router.post('/manual/approve/:id',
   authenticateJWT,

@@ -43,5 +43,14 @@
     "pricePerHour": 0.5,
     "id": "d005e904-9346-4d0b-9f6e-07d5d1946362",
     "createdAt": "2026-06-10T00:22:14.855Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "ffd8d038-eec8-4f35-b333-2f7de1a921e5",
+    "createdAt": "2026-06-10T00:36:23.608Z"
   }
 ]

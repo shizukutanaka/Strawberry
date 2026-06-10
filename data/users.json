@@ -193,5 +193,44 @@
     },
     "id": "10b395bd-8c0d-4ffd-9c50-2d2ad3f243d4",
     "createdAt": "2026-06-10T00:22:14.779Z"
+  },
+  {
+    "username": "itmq7c8va4rso7en",
+    "email": "it_mq7c8va4rso7en@example.com",
+    "password": "$2b$10$PXdbHJjqm1diYrH67keLNOUYcvr3EQIlD2TnOrzUjYHiXrWSxG8Lu",
+    "role": "user",
+    "lastLogin": null,
+    "settings": {
+      "notifications": true,
+      "theme": "light"
+    },
+    "id": "009b4b04-62b0-4484-8dc1-798ea3c8d884",
+    "createdAt": "2026-06-10T00:36:23.354Z"
+  },
+  {
+    "username": "dumq7c8va4rso7en",
+    "email": "dup_mq7c8va4rso7en@example.com",
+    "password": "$2b$10$zJnw/TWC7g5R6Z0G/Vvj8utbWQsLPGf0nyqBbw0Yjve8tCq2scHLC",
+    "role": "user",
+    "lastLogin": null,
+    "settings": {
+      "notifications": true,
+      "theme": "light"
+    },
+    "id": "c029ac30-a5ca-45c4-8aec-ca4f7047e7d1",
+    "createdAt": "2026-06-10T00:36:23.428Z"
+  },
+  {
+    "username": "ordmq7c8va4rso7en",
+    "email": "ordmq7c8va4rso7en@example.com",
+    "password": "$2b$10$bZoNRwvtQHcw7tAtX.OxvulE3CjtoeD5Gm/ezCe3oRt6B3Zl0Xfw2",
+    "role": "user",
+    "lastLogin": null,
+    "settings": {
+      "notifications": true,
+      "theme": "light"
+    },
+    "id": "575f430f-829a-4c92-bc47-8cf1fabc233d",
+    "createdAt": "2026-06-10T00:36:23.533Z"
   }
 ]

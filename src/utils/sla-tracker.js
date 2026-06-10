@@ -10,7 +10,11 @@ const CHECK_INTERVAL = 60 * 1000; // 1分
 
 function loadSLA() {
   if (!fs.existsSync(SLA_PATH)) return { total: 0, up: 0, down: 0, history: [] };
-  return JSON.parse(fs.readFileSync(SLA_PATH, 'utf-8'));
+  try {
+    return JSON.parse(fs.readFileSync(SLA_PATH, 'utf-8'));
+  } catch (_) {
+    return { total: 0, up: 0, down: 0, history: [] };
+  }
 }
 function saveSLA(sla) {
   atomicWriteJSON(SLA_PATH, sla);

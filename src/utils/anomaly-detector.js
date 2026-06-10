@@ -19,7 +19,11 @@ function reportAnomaly(type, detail = {}) {
   fs.appendFileSync(ANOMALY_LOG_PATH, JSON.stringify(entry) + '\n');
   let history = [];
   if (fs.existsSync(ANOMALY_HISTORY_PATH)) {
-    history = JSON.parse(fs.readFileSync(ANOMALY_HISTORY_PATH, 'utf-8'));
+    try {
+      history = JSON.parse(fs.readFileSync(ANOMALY_HISTORY_PATH, 'utf-8'));
+    } catch (_) {
+      history = [];
+    }
   }
   history.push(entry);
   if (history.length > 1000) history.shift();

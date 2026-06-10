@@ -17,6 +17,8 @@ const { sanitizeObject } = require('../../../utils/sanitize');
 
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
+// ピアID管理サブルート
+const peeridRouter = require('./peerid');
 
 // ユーザー登録
 router.post('/register', 
@@ -334,5 +336,8 @@ router.put('/:id/role',
     });
   })
 );
+
+// ピアID管理 /api/v1/users/peerid/*
+router.use('/peerid', peeridRouter);
 
 module.exports = router;

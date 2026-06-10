@@ -185,7 +185,7 @@ const schemas = {
           'string.pattern.name': 'Password must include at least one {#name} character',
           'string.min': 'Password must be at least 8 characters long'
         }),
-      role: Joi.string().valid('user', 'provider', 'admin').optional()
+      role: Joi.string().valid('user', 'provider').optional()
     }),
     
     // ログイン用スキーマ

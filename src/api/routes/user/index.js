@@ -30,6 +30,8 @@ router.post('/register',
     // 入力値サニタイズ
     const sanitized = sanitizeObject(req.validatedBody, ['username', 'email']);
     const { username, email, password, role } = sanitized;
+    // 自己登録では 'user' または 'provider' のみ許可（admin への昇格は管理者が行う）
+    const assignedRole = (role === 'provider') ? 'provider' : 'user';
     logger.info(`Registering new user: ${username}`);
     // メールアドレス・ユーザー名の重複チェック
     if (UserRepository.getByEmail(email)) {
@@ -46,7 +48,7 @@ router.post('/register',
       username,
       email,
       password: hashedPassword,
-      role: role || 'user',
+      role: assignedRole,
       lastLogin: null,
       settings: {
         notifications: true,

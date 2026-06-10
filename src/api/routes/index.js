@@ -11,6 +11,7 @@ const orderRoutes = require('./order');
 const paymentRoutes = require('./payment');
 const userRoutes = require('./user');
 const marketplaceRoutes = require('./marketplace');
+const authRoutes = require('./auth');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
 const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../core/services');
@@ -61,8 +62,12 @@ const PUBLIC_PATHS = new Set([
   '/users/login',      // ログイン（公開, トークン発行元）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
+// /auth/* は全てトークン不要（OAuth フロー・Google ID Token 認証の入口）
+function isPublicPath(path) {
+  return PUBLIC_PATHS.has(path) || path.startsWith('/auth/');
+}
 router.use((req, res, next) => {
-  if (PUBLIC_PATHS.has(req.path)) return next();
+  if (isPublicPath(req.path)) return next();
   jwtAuth(req, res, next);
 });
 // --- 監査ログ ---
@@ -75,6 +80,7 @@ router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
+router.use('/auth', authRoutes);
 
 // Lightningノード情報API
 router.get('/node-info', cacheMiddleware(), async (req, res) => {

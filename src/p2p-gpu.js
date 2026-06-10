@@ -11,7 +11,7 @@ function saveGpus(gpus) {
 }
 function loadGpus() {
   if (!fs.existsSync(GPUS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(GPUS_FILE));
+  try { return JSON.parse(fs.readFileSync(GPUS_FILE)); } catch (_) { return []; }
 }
 
 async function handleGpuEvent(msg) {

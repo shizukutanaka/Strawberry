@@ -13,14 +13,14 @@ function saveOrders(orders) {
 }
 function loadOrders() {
   if (!fs.existsSync(ORDERS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(ORDERS_FILE));
+  try { return JSON.parse(fs.readFileSync(ORDERS_FILE)); } catch (_) { return []; }
 }
 function savePayments(payments) {
   atomicWriteJSON(PAYMENTS_FILE, payments);
 }
 function loadPayments() {
   if (!fs.existsSync(PAYMENTS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(PAYMENTS_FILE));
+  try { return JSON.parse(fs.readFileSync(PAYMENTS_FILE)); } catch (_) { return []; }
 }
 
 // P2Pイベントハンドラ

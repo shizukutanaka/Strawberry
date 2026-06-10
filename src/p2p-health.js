@@ -11,7 +11,7 @@ function saveHealth(health) {
 }
 function loadHealth() {
   if (!fs.existsSync(HEALTH_FILE)) return {};
-  return JSON.parse(fs.readFileSync(HEALTH_FILE));
+  try { return JSON.parse(fs.readFileSync(HEALTH_FILE)); } catch (_) { return {}; }
 }
 
 async function main() {

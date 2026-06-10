@@ -29,7 +29,12 @@ function logAudit(event) {
 
 async function checkHealthFile() {
   if (!fs.existsSync(HEALTH_FILE)) return;
-  const health = JSON.parse(fs.readFileSync(HEALTH_FILE));
+  let health;
+  try {
+    health = JSON.parse(fs.readFileSync(HEALTH_FILE));
+  } catch (_) {
+    return;
+  }
   if (health.peerCount === 0) {
     const msg = `【P2Pノード障害検知】\nピア接続がありません（${health.peerId}）\n${new Date(health.timestamp).toLocaleString()}`;
     await notifyAll(msg, 'NODE_DOWN');

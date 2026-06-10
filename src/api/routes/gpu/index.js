@@ -29,9 +29,15 @@ router.get('/', asyncHandler(async (req, res) => {
       return res.status(400).json({ error: 'Invalid "features" query: must be valid JSON' });
     }
   }
+  if (req.query.minMemoryGB && isNaN(parseInt(req.query.minMemoryGB, 10))) {
+    return res.status(400).json({ error: 'minMemoryGB must be a number' });
+  }
+  if (req.query.maxPrice && isNaN(parseFloat(req.query.maxPrice))) {
+    return res.status(400).json({ error: 'maxPrice must be a number' });
+  }
   const filters = {
     minMemoryGB: req.query.minMemoryGB ? parseInt(req.query.minMemoryGB, 10) : 0,
-    vendor: req.query.vendor || null,
+    vendor: req.query.vendor ? String(req.query.vendor).slice(0, 64) : null,
     maxPrice: req.query.maxPrice ? parseFloat(req.query.maxPrice) : null,
     features: parsedFeatures,
   };

@@ -167,14 +167,15 @@ describe('API Integration', () => {
       name: 'Gap Test GPU', vendor: 'NVIDIA', model: 'RTX-GAP', memoryGB: 24, pricePerHour: 0.5,
     }).id;
 
-    const registerAndLogin = async (prefix, role) => {
+    const loginFull = async (prefix, role) => {
       const u = `${prefix}${unique}`.slice(0, 28);
       await request(app).post('/api/v1/users/register')
         .send({ username: u, email: `${u}@example.com`, password: 'Test1234!', ...(role ? { role } : {}) });
       const login = await request(app).post('/api/v1/users/login')
         .send({ email: `${u}@example.com`, password: 'Test1234!' });
-      return login.body.token;
+      return login.body; // { token, refreshToken }
     };
+    const registerAndLogin = async (prefix, role) => (await loginFull(prefix, role)).token;
 
     it('GET /health → 200 with status ok (no auth, no rate limit)', async () => {
       const res = await request(app).get('/health');
@@ -201,6 +202,55 @@ describe('API Integration', () => {
       const after = await request(app).get('/api/v1/users/me')
         .set('Authorization', `Bearer ${token}`);
       expect(after.statusCode).toBe(401);
+    });
+
+    it('login returns both an access token and a refresh token', async () => {
+      const body = await loginFull('rf1');
+      expect(body).toHaveProperty('token');
+      expect(body).toHaveProperty('refreshToken');
+      expect(typeof body.refreshToken).toBe('string');
+    });
+
+    it('POST /users/refresh issues a new working access token', async () => {
+      const { refreshToken } = await loginFull('rf2');
+      const refresh = await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken });
+      expect(refresh.statusCode).toBe(200);
+      expect(refresh.body).toHaveProperty('token');
+      // the new access token works against a protected route
+      const me = await request(app).get('/api/v1/users/me')
+        .set('Authorization', `Bearer ${refresh.body.token}`);
+      expect(me.statusCode).toBe(200);
+    });
+
+    it('a refresh token cannot be used as an access token (type separation)', async () => {
+      const { refreshToken } = await loginFull('rf3');
+      const me = await request(app).get('/api/v1/users/me')
+        .set('Authorization', `Bearer ${refreshToken}`);
+      expect(me.statusCode).toBe(401);
+    });
+
+    it('an access token cannot be used to refresh (wrong type → 401)', async () => {
+      const { token } = await loginFull('rf4');
+      const refresh = await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken: token });
+      expect(refresh.statusCode).toBe(401);
+    });
+
+    it('logout with the refresh token revokes it (subsequent refresh → 401)', async () => {
+      const { token, refreshToken } = await loginFull('rf5');
+      const logout = await request(app).post('/api/v1/users/logout')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ refreshToken });
+      expect(logout.statusCode).toBe(200);
+      const refresh = await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken });
+      expect(refresh.statusCode).toBe(401);
+    });
+
+    it('POST /users/refresh without a refresh token → 400', async () => {
+      const res = await request(app).post('/api/v1/users/refresh').send({});
+      expect(res.statusCode).toBe(400);
     });
 
     it('GET /orders supports limit/offset pagination', async () => {

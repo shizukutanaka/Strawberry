@@ -76,6 +76,8 @@ const defaultConfig = {
   security: {
     jwtSecret: requireSecret('JWT_SECRET'),
     jwtExpiresIn: '24h',
+    // リフレッシュトークンの有効期限（短命アクセストークン + 長命リフレッシュの構成）
+    jwtRefreshExpiresIn: '7d',
     bcryptRounds: 10,
     rateLimitEnabled: true,
     corsEnabled: true,
@@ -138,6 +140,7 @@ function loadFromEnv() {
   // セキュリティ設定
   if (process.env.JWT_SECRET) config.security.jwtSecret = process.env.JWT_SECRET;
   if (process.env.JWT_EXPIRES_IN) config.security.jwtExpiresIn = process.env.JWT_EXPIRES_IN;
+  if (process.env.JWT_REFRESH_EXPIRES_IN) config.security.jwtRefreshExpiresIn = process.env.JWT_REFRESH_EXPIRES_IN;
   if (process.env.BCRYPT_ROUNDS) {
     config.security.bcryptRounds = parseInt(process.env.BCRYPT_ROUNDS, 10);
   }

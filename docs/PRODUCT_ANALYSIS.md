@@ -62,7 +62,7 @@
 | 7 | プロバイダ収益サマリ | 中（貸し手が収益を確認できなかった） | ✅ 実装済み（`GET /orders/provider/earnings`） |
 | 8 | OpenAPI 仕様の HTTP 公開 | 中 | ✅ 実装済み（`GET /openapi.json`） |
 | 9 | 注文一覧キャッシュのユーザー分離 | **致命**（他ユーザーの注文一覧が返る認可バイパスを発見） | ✅ 修正済み（perUser キャッシュキー） |
-| 10 | リフレッシュトークン（短命アクセス + 長命リフレッシュ） | 中 | ⏳ フォローアップ |
+| 10 | リフレッシュトークン（短命アクセス + 長命リフレッシュ） | 中 | ✅ 実装済み（`POST /users/refresh`、type 厳密分離・失効連動） |
 | 11 | GPU 時間帯予約（スケジュール貸出・カレンダー） | 中（現状は「今すぐ借りる」のみ） | ⏳ フォローアップ |
 | 12 | プロバイダ向け通知（注文受付を貸し手へ配送） | 中（通知は運営向け env のみだった） | ✅ 実装済み（`notifyUser` が notification-settings の登録チャネルへ配送） |
 | 13 | 管理統計 API（GMV・注文状況・GPU 稼働率） | 低 | ✅ 実装済み（`GET /admin/stats`、admin 限定） |
@@ -77,6 +77,7 @@
 - **キャッシュ認可バイパス修正**: `cacheMiddleware({ perUser: true })` でキャッシュキーにユーザーIDを含める。修正前は 60 秒 TTL 内に別ユーザーへ他人の注文一覧が返っていた。
 - **プロバイダ通知**: `src/utils/user-notify.js`。注文作成時に GPU の `providerId` 宛へ、notification-settings で登録済みのチャネル（LINE/Discord/Slack/Telegram/Email/イベント別 Webhook）に配送。`enabled` マップとイベント種別でフィルタ（純関数 `resolveChannels`、単体テスト付き）。
 - **管理統計**: `GET /api/v1/admin/stats`。ユーザー数（ロール別）、GPU 総数・稼働/空き、注文状況別件数、完了 GMV（sats/JPY）を返す。
+- **リフレッシュトークン**: ログインで短命アクセストークン + 長命リフレッシュトークンを発行（`src/api/utils/tokens.js`）。`POST /users/refresh` でリフレッシュトークンから新アクセストークンを得る。`type: 'access'|'refresh'` で厳密分離し、リフレッシュトークンをアクセストークンとして使うと 401、アクセストークンで更新しようとしても 401。logout 時に body の `refreshToken` も失効リストへ。アクセストークンを短命化（`JWT_EXPIRES_IN`）すれば漏洩時の被害窓が縮小する。
 
 ---
 

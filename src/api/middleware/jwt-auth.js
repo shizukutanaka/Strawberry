@@ -22,6 +22,11 @@ module.exports = function(req, res, next) {
   try {
     // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ（署名は HS256）。
     const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+    // リフレッシュトークンをアクセストークンとして使わせない（type 厳密分離）。
+    // type 無しトークンは旧アクセストークンとして許可（後方互換）。
+    if (payload.type === 'refresh') {
+      return res.status(401).json({ error: '無効なトークン' });
+    }
     if (payload.jti && isRevoked(payload.jti)) {
       return res.status(401).json({ error: '無効なトークン' });
     }

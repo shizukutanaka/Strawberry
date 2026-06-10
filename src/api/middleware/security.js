@@ -82,6 +82,10 @@ const authenticateJWT = (req, res, next) => {
     // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ。
     // 署名は HS256（文字列シークレットの jwt.sign 既定）で行っている。
     const decoded = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+    // リフレッシュトークンをアクセストークンとして使わせない（jwt-auth.js と同一ポリシー）
+    if (decoded.type === 'refresh') {
+      return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
+    }
     // logout で失効済みのトークン(jti)を拒否（jwt-auth.js と同一ポリシー）
     const { isRevoked } = require('./token-denylist');
     if (decoded.jti && isRevoked(decoded.jti)) {

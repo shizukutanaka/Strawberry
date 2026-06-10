@@ -60,6 +60,7 @@ const PUBLIC_PATHS = new Set([
   '/system/info',      // 後続で rbac('admin') により保護
   '/users/register',   // 新規登録（公開）
   '/users/login',      // ログイン（公開, トークン発行元）
+  '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
 // /auth/* は全てトークン不要（OAuth フロー・Google ID Token 認証の入口）

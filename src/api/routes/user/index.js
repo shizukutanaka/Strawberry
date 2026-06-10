@@ -90,15 +90,54 @@ router.post('/login',
       logger.warn(`Login failed: wrong password (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    // JWTトークン生成（jti は logout 時の失効に使用）
-    const token = jwt.sign({ id: user.id, role: user.role, jti: uuidv4() }, resolveSecret(), { expiresIn: config.security.jwtExpiresIn });
+    // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。
+    // jti は logout 時の失効に使用。type で両者を厳密分離。
+    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
+    const token = signAccessToken(user);
+    const refreshToken = signRefreshToken(user);
     user.lastLogin = new Date().toISOString();
     logger.info(`Login success: ${email}`);
     // パスワードやAPIキーは絶対にレスポンス・ログに含めない
     res.json({
       message: 'Login successful',
-      token
+      token,
+      refreshToken
     });
+  })
+);
+
+// アクセストークンの更新（リフレッシュトークンから新しいアクセストークンを発行）
+router.post('/refresh',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken || typeof refreshToken !== 'string') {
+      return res.status(400).json({ error: 'refreshToken is required' });
+    }
+    let payload;
+    try {
+      payload = jwt.verify(refreshToken, resolveSecret(), { algorithms: ['HS256'] });
+    } catch (_) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // リフレッシュトークン以外（アクセストークン等）では更新不可
+    if (payload.type !== 'refresh') {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // logout で失効済みのリフレッシュトークンは拒否
+    const { isRevoked } = require('../../middleware/token-denylist');
+    if (payload.jti && isRevoked(payload.jti)) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // ユーザーが削除されていないか確認（最新のロールも反映）
+    const user = UserRepository.getById(payload.id);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    const { signAccessToken } = require('../../utils/tokens');
+    const token = signAccessToken(user);
+    logger.info(`Access token refreshed for user: ${user.id}`);
+    res.json({ message: 'Token refreshed', token });
   })
 );
 
@@ -107,6 +146,16 @@ router.post('/logout',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     const { revoke } = require('../../middleware/token-denylist');
+    // リフレッシュトークンが提供されていれば併せて失効（漏洩リフレッシュの無効化）
+    const { refreshToken } = req.body || {};
+    if (refreshToken && typeof refreshToken === 'string') {
+      try {
+        const rp = jwt.verify(refreshToken, resolveSecret(), { algorithms: ['HS256'] });
+        if (rp.type === 'refresh' && rp.jti) {
+          revoke(rp.jti, (rp.exp || 0) * 1000);
+        }
+      } catch (_) { /* 無効なリフレッシュトークンは無視（logout は冪等に成功させる） */ }
+    }
     if (req.user.jti) {
       // exp（秒）をミリ秒に変換して保持期限とする。それ以降は自然失効するため保持不要。
       revoke(req.user.jti, (req.user.exp || 0) * 1000);

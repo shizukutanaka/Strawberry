@@ -48,11 +48,11 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
     genericWebhook: Joi.string().uri().allow('').optional(),
     enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional(), // 各チャネルON/OFF
     webhooks: Joi.array().items(Joi.object({
-      event: Joi.string().required(), // 例: 'order_created'
-      url: Joi.string().uri().required(),
+      event: Joi.string().max(64).required(),
+      url: Joi.string().uri().max(2048).required(),
       enabled: Joi.boolean().default(true),
-      payloadTemplate: Joi.string().allow('').optional()
-    })).optional()
+      payloadTemplate: Joi.string().max(4096).allow('').optional()
+    })).max(20).optional()
   });
   const { error, value } = schema.validate(req.body);
   if (error) return res.status(400).json({ error: error.message });

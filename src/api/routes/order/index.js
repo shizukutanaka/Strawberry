@@ -109,7 +109,8 @@ router.get('/',
       if (status) {
         orders = orders.filter(order => order.status === status);
       }
-      const sortBy = req.query.sortBy || 'createdAt';
+      const SORTABLE_FIELDS = new Set(['createdAt', 'updatedAt', 'status', 'totalPrice', 'durationMinutes']);
+      const sortBy = SORTABLE_FIELDS.has(req.query.sortBy) ? req.query.sortBy : 'createdAt';
       const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
       orders.sort((a, b) => {
         if (a[sortBy] < b[sortBy]) return -1 * sortDir;

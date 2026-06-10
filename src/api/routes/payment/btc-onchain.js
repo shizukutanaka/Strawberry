@@ -1,10 +1,9 @@
 // 支払い・受取API（BTC差益自動控除）
 const express = require('express');
 const router = express.Router();
-const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC } = require('../../utils/btc-payment');
-
-// 運営ウォレットアドレス（複数管理・分散送金）
-const { getOperatorWallet } = require('../../utils/btc-payment');
+const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC, getOperatorWallet } = require('../../utils/btc-payment');
+const { appendAuditLog } = require('../../../utils/audit-log');
+const { logger } = require('../../../utils/logger');
 
 /**
  * POST /payment
@@ -45,12 +44,11 @@ router.post('/', async (req, res) => {
       tx2 = await sendBTC(operatorWallet, lenderWallet, payout);
     } catch (err) {
       // 重大: 借り手→運営は成立済みだが貸し手への送金が失敗。手動照合が必要。
-      const { appendAuditLog } = require('../../../utils/audit-log');
       appendAuditLog('payment_partial_settlement', {
         orderId, operatorWallet, lenderWallet, total, payout,
         txBorrowerToOperator: tx1, error: err.message
       });
-      console.error('[CRITICAL] Partial settlement: operator received funds but lender payout failed. Manual reconciliation required.', { orderId, tx1: tx1 && tx1.txid });
+      logger.error('[CRITICAL] Partial settlement: operator received funds but lender payout failed. Manual reconciliation required.', { orderId, txid: tx1 && tx1.txid });
       return res.status(500).json({
         message: 'Partial settlement: operator received funds but payout to lender failed. Manual reconciliation required.',
         stage: 'operator_to_lender',
@@ -72,7 +70,7 @@ router.post('/', async (req, res) => {
       txOperatorToLender: tx2
     });
   } catch (err) {
-    console.error(err);
+    logger.error('BTC on-chain payment error:', err);
     return res.status(500).json({ message: 'Payment processing failed', error: err.message });
   }
 });

@@ -205,7 +205,6 @@ router.post('/order/:id',
     // 重要: ダミーtxidで「支払い済み」を捏造してはならない（資金喪失の原因）。
     // 実インボイスを発行し、ステータスは pending（ウォレットでの支払い完了を待つ）。
     if (!requireService(lightning, res)) return;
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     const invoice = await lightning.createInvoice({
       value: totalPrice,
       memo: `GPU rental order ${orderId}`,

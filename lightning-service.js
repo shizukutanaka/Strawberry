@@ -87,7 +87,7 @@ class LightningService extends EventEmitter {
     }
 
     // gRPC自動再接続（指数バックオフ付）＋障害監査証跡・外部通知対応
-    async connectToLND(maxRetries = 5, notifyOnError = true) {
+    async connectToLND(maxRetries = process.env.NODE_ENV === 'test' ? 0 : 5, notifyOnError = true) {
         const { appendAuditLog } = require('./src/utils/audit-log');
         let attempt = 0;
         let lastError = null;
@@ -161,7 +161,7 @@ class LightningService extends EventEmitter {
             if (attempt < maxRetries) {
                 const wait = backoff(attempt);
                 logger.warn(`Retrying LND connection in ${wait / 1000}s... (attempt ${attempt + 1}/${maxRetries})`);
-                await new Promise(r => setTimeout(r, wait));
+                await new Promise(r => { const t = setTimeout(r, wait); if (t.unref) t.unref(); });
                 attempt++;
             } else {
                 logger.error('LND自動再接続失敗: モックモードへ', errorDetail);

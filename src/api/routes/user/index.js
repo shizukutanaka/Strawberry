@@ -13,6 +13,8 @@ const { config } = require('../../../utils/config');
 // 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
 const { resolveSecret } = require('../../middleware/jwt-auth');
 
+const { sanitizeObject } = require('../../../utils/sanitize');
+
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
 
@@ -212,8 +214,6 @@ router.put('/me/settings',
     });
   })
 );
-
-const { sanitizeObject } = require('../../../utils/sanitize');
 
 // ユーザー一覧取得 (管理者のみ)
 router.get('/', 

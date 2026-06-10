@@ -3,9 +3,10 @@ const request = require('supertest');
 const { app, graphqlReady } = require('../../src/api/server');
 
 describe('GraphQL exchangeRate API', () => {
+  let graphqlAvailable = false;
   // Apollo の start() は非同期。マウント完了を待ってから検証する。
   beforeAll(async () => {
-    await graphqlReady;
+    graphqlAvailable = await graphqlReady;
   });
 
   it('should return rate, timestamp, isCache via exchangeRate query', async () => {

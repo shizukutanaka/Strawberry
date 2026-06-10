@@ -12,7 +12,8 @@ describe('API基本テスト', () => {
   });
 
   it('保護された API は未認証だと 401 を返す', async () => {
-    const res = await request(app).get('/api/v1/gpus');
+    // /gpus は公開（マーケットプレイスブラウジング用）。/orders は認証必須。
+    const res = await request(app).post('/api/v1/orders').send({});
     expect(res.statusCode).toBe(401);
   });
 });

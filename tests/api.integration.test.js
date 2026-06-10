@@ -44,9 +44,9 @@ describe('API Integration', () => {
   });
 
   describe('Protected resources require auth', () => {
-    it('GET /api/v1/gpus without a token → 401', async () => {
+    it('GET /api/v1/gpus without a token → 200 (public browse)', async () => {
       const res = await request(app).get('/api/v1/gpus');
-      expect(res.statusCode).toBe(401);
+      expect(res.statusCode).toBe(200);
     });
 
     it('POST /api/v1/orders without a token → 401', async () => {

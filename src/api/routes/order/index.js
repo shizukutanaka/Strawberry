@@ -60,13 +60,15 @@ class OrderUsageSession {
 }
 
 // 全セッションのタイムアウト監視（30秒ごと）
-setInterval(() => {
+// unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
+const sessionTimeoutInterval = setInterval(() => {
   for (const session of usageSessions.values()) {
     session.checkTimeouts();
   }
 }, 30000);
+if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 
-const { asyncHandler } = require('../../../utils/error-handler');
+const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
@@ -154,7 +156,6 @@ router.post('/:id/heartbeat',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     const { role } = req.body;
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!['lender', 'renter'].includes(role)) {
       throw new APIError(ErrorTypes.VALIDATION, 'role must be lender or renter', 400);
     }
@@ -256,7 +257,6 @@ router.delete('/:id',
     const order = req.resource;
     logger.info(`Deleting order: ${order.id}`);
     // 状態チェック
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!['pending', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
     }
@@ -279,7 +279,6 @@ router.post('/',
     logger.info('Creating new order');
     // durationMinutes必須・5の倍数・整数のみ許可
     const durationMinutes = Number(orderData.durationMinutes);
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes % 5 !== 0) {
       throw new APIError(ErrorTypes.VALIDATION, 'durationMinutes must be a positive integer and a multiple of 5 (minutes)', 400);
     }
@@ -441,7 +440,6 @@ router.post('/:id/start',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Starting order execution: ${orderId}`);
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
 
     // ローカルリポジトリから取得（ソースオブトゥルース）
     const order = OrderRepository.getById(orderId);
@@ -479,7 +477,6 @@ router.post('/:id/stop',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
 
     // ローカルリポジトリから取得（ソースオブトゥルース）
     const order = OrderRepository.getById(orderId);

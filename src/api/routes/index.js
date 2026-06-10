@@ -3,8 +3,6 @@ const express = require('express');
 const router = express.Router();
 const jwtAuth = require('../middleware/jwt-auth');
 const rbac = require('../middleware/rbac');
-const cors = require('cors');
-const helmet = require('helmet');
 const { logger } = require('../../utils/logger');
 
 // 各ルートモジュールをインポート
@@ -47,11 +45,9 @@ const { cacheMiddleware, purgeCache } = require('../middleware/cache');
   }
 })();
 
-// --- セキュリティ・CORS ---
-router.use(helmet());
-router.use(cors({
-  origin: '*', // 必要に応じて許可ドメインを限定
-}));
+// セキュリティヘッダ(helmet)とCORSは server.js で一元適用する。
+// ここで cors({origin:'*'}) を重ねると後勝ちで Access-Control-Allow-Origin が '*' に
+// 上書きされ、security.js の corsOrigins 許可リスト設定が無効化されるため適用しない。
 // --- レートリミット ---
 const rateLimit = require('../middleware/rate-limit');
 router.use(rateLimit);
@@ -128,12 +124,8 @@ router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
 
 // 後方互換性のための古いエンドポイント（非推奨）
 // 将来的に削除予定
-router.get('/gpus', asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /gpus accessed, use /api/v1/gpus instead');
-  const gpus = (vgpuManager && vgpuManager.physicalGPUs) || [];
-  res.json({ gpus });
-}));
-
+// 注: 旧 GET /gpus はここより前に gpuRoutes（router.use('/gpus')）が必ず応答するため
+// 到達不能となっており削除済み。
 router.post('/order', asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /order accessed, use /api/v1/orders instead');
   if (!requireService(p2pNetwork, res)) return;

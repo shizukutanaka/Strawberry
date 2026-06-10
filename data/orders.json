@@ -97,5 +97,38 @@
     "totalPriceJPY": 5000000,
     "id": "eaf09e72-735b-4a40-b68a-badc0bc6c863",
     "createdAt": "2026-06-09T23:10:17.212Z"
+  },
+  {
+    "gpuId": "470c88a3-be0e-41cb-9ae4-0ac433143cd7",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "ce975ba5-a544-4d64-815d-1512893e259f",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "0ac803ca-3078-4bf7-8c15-dde63b371f05",
+    "createdAt": "2026-06-10T00:19:09.341Z"
+  },
+  {
+    "gpuId": "470c88a3-be0e-41cb-9ae4-0ac433143cd7",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "ce975ba5-a544-4d64-815d-1512893e259f",
+    "status": "pending",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "bcedd7c6-5c42-4d43-a2f6-42d5fd35ac70",
+    "createdAt": "2026-06-10T00:19:09.534Z"
+  },
+  {
+    "gpuId": "470c88a3-be0e-41cb-9ae4-0ac433143cd7",
+    "durationMinutes": 60,
+    "priority": "price",
+    "userId": "ce975ba5-a544-4d64-815d-1512893e259f",
+    "status": "cancelled",
+    "totalPrice": 0.5,
+    "totalPriceJPY": 5000000,
+    "id": "dc3635ab-0fde-445b-a80a-91bc8cf747e9",
+    "createdAt": "2026-06-10T00:19:09.714Z"
   }
 ]

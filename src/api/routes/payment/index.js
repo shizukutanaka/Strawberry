@@ -1,7 +1,7 @@
 // src/api/routes/payment/index.js - 決済関連APIルート
 const express = require('express');
 const router = express.Router();
-const { asyncHandler } = require('../../../utils/error-handler');
+const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
@@ -21,7 +21,6 @@ router.post('/invoice',
     logger.info(`Creating invoice for ${amount} satoshis`);
     
     // 金額の範囲をチェック
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (amount < config.lightning.minPaymentSatoshis) {
       throw new APIError(ErrorTypes.VALIDATION, `Amount too small. Minimum: ${config.lightning.minPaymentSatoshis} satoshis`, 400);
     }
@@ -136,7 +135,6 @@ router.get('/invoice/:id',
     // インボイス状態を確認
     const invoiceStatus = await lightning.checkInvoice(invoiceId);
     
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!invoiceStatus) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Invoice not found', 404);
     }
@@ -218,7 +216,6 @@ router.post('/order/:id',
     // 重要: ダミーtxidで「支払い済み」を捏造してはならない（資金喪失の原因）。
     // 実インボイスを発行し、ステータスは pending（ウォレットでの支払い完了を待つ）。
     if (!requireService(lightning, res)) return;
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     const invoice = await lightning.createInvoice({
       value: totalPrice,
       memo: `GPU rental order ${orderId}`,
@@ -263,7 +260,6 @@ router.get('/:id/status',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     const payment = PaymentRepository.getById(req.params.id);
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!payment) throw new APIError(ErrorTypes.NOT_FOUND, 'Payment not found', 404);
     if (payment.userId !== req.user.id && req.user.role !== 'admin') {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
@@ -367,7 +363,6 @@ router.post('/manual/approve/:id',
     const paymentId = req.params.id;
     const PaymentRepository = require('../../../db/json/PaymentRepository');
     const payment = PaymentRepository.getById(paymentId);
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!payment) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Payment not found', 404);
     }

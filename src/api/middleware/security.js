@@ -139,13 +139,15 @@ const authenticateAPIKey = (req, res, next) => {
   // API_KEY 環境変数が設定され、かつ一致する場合のみ許可。
   // ハードコードされた 'dev-api-key' バックドアは廃止。
   const validApiKey = process.env.API_KEY;
-  if (validApiKey && apiKey === validApiKey) {
-    req.apiClient = {
-      id: 'system',
-      name: 'API Client',
-      role: 'system'
-    };
-    return next();
+  // crypto.timingSafeEqual でタイミング攻撃を防止
+  const { timingSafeEqual } = require('crypto');
+  if (validApiKey) {
+    const a = Buffer.from(apiKey);
+    const b = Buffer.from(validApiKey);
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      req.apiClient = { id: 'system', name: 'API Client', role: 'system' };
+      return next();
+    }
   }
 
   return next(new APIError(
@@ -158,13 +160,18 @@ const authenticateAPIKey = (req, res, next) => {
 // 任意のAPIキー検証ミドルウェア（machine間通信用の補助認証）。
 // x-api-key ヘッダが無ければ後続の認証(JWT等)に委ねる(continue)。
 // 提供された場合のみ検証し、不正なら 401。ハードコードされたキーは持たない。
+const { timingSafeEqual } = require('crypto');
 const apiKeyAuth = (req, res, next) => {
   const apiKey = req.headers['x-api-key'];
   if (!apiKey) return next();
   const validApiKey = process.env.API_KEY;
-  if (validApiKey && apiKey === validApiKey) {
-    req.apiClient = { id: 'system', name: 'API Client', role: 'system' };
-    return next();
+  if (validApiKey) {
+    const a = Buffer.from(apiKey);
+    const b = Buffer.from(validApiKey);
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      req.apiClient = { id: 'system', name: 'API Client', role: 'system' };
+      return next();
+    }
   }
   return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid API key', 401));
 };

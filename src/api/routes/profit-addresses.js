@@ -4,11 +4,17 @@ const router = express.Router();
 const { getProfitAddresses, addProfitAddress, removeProfitAddress } = require('../utils/profit-addresses');
 const jwtAuth = require('../middleware/jwt-auth');
 const rbac = require('../middleware/rbac');
+const { logger } = require('../../utils/logger');
 
 // 運営利益受取アドレスは資金フローに直結するため、
 // 認証(JWT) + 管理者ロール(admin) を必須とする。
 router.use(jwtAuth);
 router.use(rbac('admin'));
+
+const maskError = (e, msg) => {
+  logger.error(msg, e);
+  return process.env.NODE_ENV === 'production' ? msg : e.message;
+};
 
 // 一覧取得
 router.get('/', (req, res) => {
@@ -16,7 +22,7 @@ router.get('/', (req, res) => {
     const addrs = getProfitAddresses();
     res.json({ addresses: addrs });
   } catch (e) {
-    res.status(500).json({ message: 'Failed to load addresses', error: e.message });
+    res.status(500).json({ message: 'Failed to load addresses', error: maskError(e, 'Failed to load addresses') });
   }
 });
 
@@ -28,7 +34,7 @@ router.post('/', (req, res) => {
     addProfitAddress(address);
     res.json({ message: 'Added', address });
   } catch (e) {
-    res.status(500).json({ message: 'Failed to add address', error: e.message });
+    res.status(500).json({ message: 'Failed to add address', error: maskError(e, 'Failed to add address') });
   }
 });
 
@@ -40,7 +46,7 @@ router.delete('/', (req, res) => {
     removeProfitAddress(address);
     res.json({ message: 'Removed', address });
   } catch (e) {
-    res.status(500).json({ message: 'Failed to remove address', error: e.message });
+    res.status(500).json({ message: 'Failed to remove address', error: maskError(e, 'Failed to remove address') });
   }
 });
 

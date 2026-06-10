@@ -16,7 +16,7 @@ router.get('/', async (req, res) => {
       isCache: !!isCache
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Failed to fetch exchange rate' : err.message });
   }
 });
 

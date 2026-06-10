@@ -27,6 +27,7 @@ router.post('/', async (req, res) => {
     const operatorWallet = getOperatorWallet();
 
     // 1. 借り手→運営（失敗時は資金未移動。安全に失敗を返す）
+    const isProd = process.env.NODE_ENV === 'production';
     let tx1;
     try {
       tx1 = await sendBTC(borrowerWallet, operatorWallet, total);
@@ -34,7 +35,7 @@ router.post('/', async (req, res) => {
       return res.status(502).json({
         message: 'Payment failed before any funds were moved',
         stage: 'borrower_to_operator',
-        error: err.message
+        error: isProd ? 'Lightning payment failed' : err.message
       });
     }
 
@@ -54,7 +55,7 @@ router.post('/', async (req, res) => {
         stage: 'operator_to_lender',
         orderId,
         txBorrowerToOperator: tx1,
-        error: err.message
+        error: isProd ? 'Payout failed — see audit log for details' : err.message
       });
     }
 
@@ -71,7 +72,7 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     logger.error('BTC on-chain payment error:', err);
-    return res.status(500).json({ message: 'Payment processing failed', error: err.message });
+    return res.status(500).json({ message: 'Payment processing failed', error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message });
   }
 });
 

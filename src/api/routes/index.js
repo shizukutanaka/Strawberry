@@ -63,9 +63,11 @@ const PUBLIC_PATHS = new Set([
   '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
-// /auth/* は全てトークン不要（OAuth フロー・Google ID Token 認証の入口）
+// /auth/* と /gpus/* は全てトークン不要（GPU 詳細・スケジュール照会も公開閲覧対象）
 function isPublicPath(path) {
-  return PUBLIC_PATHS.has(path) || path.startsWith('/auth/');
+  return PUBLIC_PATHS.has(path)
+    || path.startsWith('/auth/')
+    || path.startsWith('/gpus/');
 }
 router.use((req, res, next) => {
   if (isPublicPath(req.path)) return next();

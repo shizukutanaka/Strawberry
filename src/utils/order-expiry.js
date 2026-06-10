@@ -16,16 +16,23 @@ function resolveTimeoutMinutes() {
 
 /**
  * 期限切れの pending 注文を cancelled に遷移させる（pending→cancelled は正規遷移）。
+ * scheduledStartAt が未来の注文（事前予約）はタイムアウト対象外。
  * @returns {number} 失効させた件数
  */
 function expireStaleOrders() {
   const timeoutMs = resolveTimeoutMinutes() * 60 * 1000;
   const cutoff = Date.now() - timeoutMs;
+  const now = Date.now();
   let expired = 0;
   for (const order of OrderRepository.getAll()) {
     if (order.status !== 'pending') continue;
     const createdMs = Date.parse(order.createdAt);
     if (!Number.isFinite(createdMs) || createdMs > cutoff) continue;
+    // 事前予約（scheduledStartAt が未来）はタイムアウト失効させない
+    if (order.scheduledStartAt) {
+      const scheduledMs = Date.parse(order.scheduledStartAt);
+      if (Number.isFinite(scheduledMs) && scheduledMs > now) continue;
+    }
     OrderRepository.update(order.id, {
       status: 'cancelled',
       cancelReason: 'payment_timeout',

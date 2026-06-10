@@ -75,12 +75,18 @@ router.get('/', asyncHandler(async (req, res) => {
       return true;
     });
   }
-  // 占有状況の注釈: pending/matched/active の注文がある GPU は available=false。
+  // 占有状況の注釈: 現時刻と時間帯が重複する BLOCKING 注文がある GPU は available=false。
   // 二重予約は注文作成時に 409 で拒否されるため、ここは閲覧時のヒント表示。
   const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const nowMs = Date.now();
   const occupiedGpuIds = new Set(
-    OrderRepository.getAll().filter(o => BLOCKING.has(o.status)).map(o => o.gpuId)
+    OrderRepository.getAll().filter(o => {
+      if (!BLOCKING.has(o.status)) return false;
+      const slotStart = new Date(o.scheduledStartAt || o.createdAt).getTime();
+      const slotEnd = slotStart + (o.durationMinutes || 0) * 60 * 1000;
+      return slotStart <= nowMs && slotEnd > nowMs;
+    }).map(o => o.gpuId)
   );
   gpus = gpus.map(gpu => ({ ...gpu, available: !occupiedGpuIds.has(gpu.id) }));
   // ?available=true で空き GPU のみに絞り込み
@@ -284,6 +290,45 @@ router.delete('/:id',
     res.json({ message: 'GPU removed successfully', gpuId });
   })
 );
+
+// GPU の予約カレンダー（空き時間帯の照会）
+// GET /gpus/:id/schedule?from=ISO&to=ISO
+// 認証不要（マーケットプレイスブラウジングと同等）
+router.get('/:id/schedule', asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+
+  const nowMs = Date.now();
+  const defaultTo = new Date(nowMs + 7 * 24 * 60 * 60 * 1000);
+
+  const from = req.query.from ? new Date(req.query.from) : new Date(nowMs);
+  const to = req.query.to ? new Date(req.query.to) : defaultTo;
+
+  if (isNaN(from.getTime())) return res.status(400).json({ error: 'Invalid "from" date' });
+  if (isNaN(to.getTime())) return res.status(400).json({ error: 'Invalid "to" date' });
+  if (from >= to) return res.status(400).json({ error: '"from" must be before "to"' });
+
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const BLOCKING = new Set(['pending', 'matched', 'active']);
+
+  const blockedSlots = OrderRepository.getAll()
+    .filter(o => o.gpuId === gpuId && BLOCKING.has(o.status))
+    .map(o => {
+      const slotStart = new Date(o.scheduledStartAt || o.createdAt);
+      const slotEnd = new Date(slotStart.getTime() + (o.durationMinutes || 0) * 60 * 1000);
+      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), orderId: o.id, status: o.status };
+    })
+    .filter(slot => new Date(slot.from) < to && new Date(slot.to) > from)
+    .sort((a, b) => a.from.localeCompare(b.from));
+
+  res.json({
+    gpuId,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    blockedSlots,
+  });
+}));
 
 // システムが検出したGPUの一覧を取得 (認証必須)
 router.get('/system/detected',

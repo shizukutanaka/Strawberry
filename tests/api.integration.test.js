@@ -345,4 +345,117 @@ describe('API Integration', () => {
       }
     });
   });
+
+  // GPU 時間帯予約（スケジュール貸出・カレンダー）- 不足機能 #11
+  describe('GPU time-slot reservations', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const seedGpu = () => GpuRepository.create({
+      name: 'Slot Test GPU', vendor: 'NVIDIA', model: 'RTX-SLOT', memoryGB: 16, pricePerHour: 0.5,
+    }).id;
+
+    let token;
+    beforeAll(async () => {
+      const u = `sl${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' });
+      token = login.body.token;
+    });
+
+    it('order stores scheduledStartAt and scheduledEndAt when provided', async () => {
+      const start = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // +2h
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId: seedGpu(), durationMinutes: 60, scheduledStartAt: start });
+      expect(res.statusCode).toBe(201);
+      expect(res.body.order.scheduledStartAt).toBe(start);
+      expect(res.body.order).toHaveProperty('scheduledEndAt');
+      const endMs = new Date(res.body.order.scheduledEndAt).getTime();
+      const startMs = new Date(start).getTime();
+      expect(endMs - startMs).toBe(60 * 60 * 1000);
+    });
+
+    it('non-overlapping time slots on the same GPU are both accepted (201)', async () => {
+      const gpuId = seedGpu();
+      const slot1Start = new Date(Date.now() + 1 * 60 * 60 * 1000).toISOString(); // +1h
+      const slot2Start = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(); // +3h (no overlap with +1h..+2h)
+      const first = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60, scheduledStartAt: slot1Start });
+      expect(first.statusCode).toBe(201);
+      const second = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60, scheduledStartAt: slot2Start });
+      expect(second.statusCode).toBe(201);
+    });
+
+    it('overlapping time slots on the same GPU are rejected with 409', async () => {
+      const gpuId = seedGpu();
+      const slot1Start = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(); // +4h
+      const slot2Start = new Date(Date.now() + 4 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(); // +4.5h (overlaps)
+      const first = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60, scheduledStartAt: slot1Start });
+      expect(first.statusCode).toBe(201);
+      const second = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60, scheduledStartAt: slot2Start });
+      expect(second.statusCode).toBe(409);
+    });
+
+    it('future-scheduled pending order is not auto-expired by timeout sweep', async () => {
+      const start = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // +24h
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId: seedGpu(), durationMinutes: 60, scheduledStartAt: start });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      const prevTimeout = process.env.ORDER_PENDING_TIMEOUT_MINUTES;
+      process.env.ORDER_PENDING_TIMEOUT_MINUTES = '0';
+      try {
+        await new Promise(r => setTimeout(r, 10));
+        await request(app).get('/api/v1/orders?status=pending&limit=1')
+          .set('Authorization', `Bearer ${token}`);
+        const after = await request(app)
+          .get(`/api/v1/orders/${orderId}`)
+          .set('Authorization', `Bearer ${token}`);
+        // 未来予約は失効しない
+        expect(after.body.order ? after.body.order.status : after.body.status).toBe('pending');
+      } finally {
+        if (prevTimeout === undefined) delete process.env.ORDER_PENDING_TIMEOUT_MINUTES;
+        else process.env.ORDER_PENDING_TIMEOUT_MINUTES = prevTimeout;
+      }
+    });
+
+    it('GET /gpus/:id/schedule returns blocked slots (public, no auth)', async () => {
+      const gpuId = seedGpu();
+      const start = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(); // +6h
+      await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60, scheduledStartAt: start });
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/schedule`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('blockedSlots');
+      expect(Array.isArray(res.body.blockedSlots)).toBe(true);
+      expect(res.body.blockedSlots.length).toBeGreaterThanOrEqual(1);
+      const slot = res.body.blockedSlots[0];
+      expect(slot).toHaveProperty('from');
+      expect(slot).toHaveProperty('to');
+      expect(slot).toHaveProperty('orderId');
+      expect(slot).toHaveProperty('status');
+    });
+
+    it('GET /gpus/:id/schedule returns 404 for unknown GPU', async () => {
+      const res = await request(app).get('/api/v1/gpus/00000000-0000-4000-8000-000000000000/schedule');
+      expect(res.statusCode).toBe(404);
+    });
+  });
 });

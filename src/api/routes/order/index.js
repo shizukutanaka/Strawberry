@@ -316,16 +316,23 @@ router.post('/',
     if (!gpu) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Specified GPU not found', 404);
     }
-    // 二重予約チェック: 期限切れ pending を先に失効させ、それでも同一 GPU に
-    // 占有中（pending/matched/active）の注文が残っていれば 409 を返す。
+    // 二重予約チェック: 期限切れ pending を先に失効させ、時間帯の重複を確認する。
+    // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
+    // 指定がない場合は即時予約として全 BLOCKING 注文と重複とみなす。
     expireStaleOrders();
-    const blocking = OrderRepository.getAll().find(
-      o => o.gpuId === orderData.gpuId && BLOCKING_ORDER_STATUSES.has(o.status)
-    );
+    const newStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
+    const newEnd = newStart + durationMinutes * 60 * 1000;
+    const blocking = OrderRepository.getAll().find(o => {
+      if (o.gpuId !== orderData.gpuId) return false;
+      if (!BLOCKING_ORDER_STATUSES.has(o.status)) return false;
+      const existingStart = new Date(o.scheduledStartAt || o.createdAt).getTime();
+      const existingEnd = existingStart + (o.durationMinutes || 0) * 60 * 1000;
+      return newStart < existingEnd && newEnd > existingStart;
+    });
     if (blocking) {
       throw new APIError(
         ErrorTypes.CONFLICT,
-        `GPU is not available: an order in '${blocking.status}' state already exists for this GPU`,
+        `GPU is not available: an order in '${blocking.status}' state already exists for this GPU at the requested time`,
         409
       );
     }
@@ -339,6 +346,9 @@ router.post('/',
     orderData.userId = req.user.id;
     // オーダーステータスを設定
     orderData.status = 'pending';
+    // 予約時間帯を確定（scheduledStartAt 未指定 = 即時）
+    orderData.scheduledStartAt = orderData.scheduledStartAt || new Date().toISOString();
+    orderData.scheduledEndAt = new Date(new Date(orderData.scheduledStartAt).getTime() + durationMinutes * 60 * 1000).toISOString();
     // 5分単価
     const pricePer5Min = pricePerHour / 12;
     const totalPrice = pricePer5Min * (durationMinutes / 5);

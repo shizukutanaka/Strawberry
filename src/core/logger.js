@@ -341,25 +341,20 @@ logger.searchLogs = async (criteria) => {
                 'utf8'
             );
             
-            const lines = content.split('\n').filter(line => {
-                if (!line) return false;
-                
+            for (const line of content.split('\n')) {
+                if (!line) continue;
                 try {
                     const log = JSON.parse(line);
                     const logDate = new Date(log.timestamp);
-                    
-                    if (startDate && logDate < startDate) return false;
-                    if (endDate && logDate > endDate) return false;
-                    if (level && log.level !== level) return false;
-                    if (keyword && !JSON.stringify(log).includes(keyword)) return false;
-                    
-                    return true;
+                    if (startDate && logDate < startDate) continue;
+                    if (endDate && logDate > endDate) continue;
+                    if (level && log.level !== level) continue;
+                    if (keyword && !JSON.stringify(log).includes(keyword)) continue;
+                    results.push(log);
                 } catch {
-                    return false;
+                    // skip unparseable lines
                 }
-            });
-            
-            results.push(...lines.map(line => JSON.parse(line)));
+            }
         }
         
         return results;

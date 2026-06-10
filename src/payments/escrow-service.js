@@ -39,10 +39,16 @@ function createEscrowService({ repository } = {}) {
     /** 注文に対するエスクローを生成（PENDING）。hold invoice 情報は invoice に格納。 */
     create({ orderId, amountSats, feeRate = 0, deadlineAt = null, invoice = null }) {
       if (!orderId) throw new Error('orderId required');
+      if (typeof amountSats !== 'number' || !Number.isFinite(amountSats) || amountSats <= 0) {
+        throw new Error('amountSats must be a positive finite number');
+      }
+      const clampedFeeRate = typeof feeRate === 'number' && Number.isFinite(feeRate)
+        ? Math.max(0, Math.min(0.99, feeRate))
+        : 0;
       return repo.create({
         orderId,
         amountSats,
-        feeRate,
+        feeRate: clampedFeeRate,
         deadlineAt,
         invoice,
         state: initial(),

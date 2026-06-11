@@ -67,7 +67,9 @@ const PUBLIC_PATHS = new Set([
 function isPublicPath(path) {
   return PUBLIC_PATHS.has(path)
     || path.startsWith('/auth/')
-    || path.startsWith('/gpus/');
+    || path.startsWith('/gpus/')
+    // プロバイダ公開レピュテーション照会（閲覧はマーケット信頼判断のため公開、GETのみ）
+    || /^\/users\/[^/]+\/reputation$/.test(path);
 }
 router.use((req, res, next) => {
   if (isPublicPath(req.path)) return next();

@@ -317,8 +317,46 @@ router.get('/',
   })
 );
 
+// プロバイダ公開レピュテーション (認証不要 — マーケットプレイスの信頼判断材料)。
+// reputation-scorer の score/tier（完了/失敗/監査/SLA/スラッシュ由来）に加え、
+// 当該プロバイダの全 GPU に対するレビュー集計（平均★・件数）と取引実績を返す。
+router.get('/:id/reputation', asyncHandler(async (req, res) => {
+  const providerId = req.params.id;
+  const user = UserRepository.getById(providerId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const { createReputationService } = require('../../../reputation/reputation-service');
+  const repSvc = createReputationService();
+  const { score, tier, components } = repSvc.getScore(providerId);
+  const stats = repSvc.getStats(providerId);
+
+  // 当該プロバイダのオーダーからレビュー★と取引実績を集計
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+  const reviewed = orders.filter(o => o.review);
+  const reviewCount = reviewed.length;
+  const ratingAverage = reviewCount > 0
+    ? Math.round((reviewed.reduce((s, o) => s + o.review.rating, 0) / reviewCount) * 10) / 10
+    : null;
+  const completedOrders = orders.filter(o => o.status === 'completed').length;
+  const rejectedOrders = orders.filter(o => o.cancelReason === 'provider_rejected').length;
+
+  res.json({
+    providerId,
+    score,
+    tier,
+    components,
+    stats,
+    ratingAverage,
+    reviewCount,
+    completedOrders,
+    rejectedOrders,
+    memberSince: user.createdAt || null,
+  });
+}));
+
 // 特定ユーザーの情報取得 (管理者のみ)
-router.get('/:id', 
+router.get('/:id',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {

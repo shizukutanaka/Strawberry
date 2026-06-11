@@ -466,7 +466,7 @@ describe('API Integration', () => {
     const OrderRepository = require('../src/db/json/OrderRepository');
 
     let renterToken, providerToken, otherToken;
-    let gpuId;
+    let gpuId, providerId;
 
     // GPU を provider ユーザーが所有するようにセットアップ
     beforeAll(async () => {
@@ -484,7 +484,7 @@ describe('API Integration', () => {
       const providerLogin = await request(app).post('/api/v1/users/login')
         .send({ email: `${p}@example.com`, password: 'Test1234!' });
       providerToken = providerLogin.body.token;
-      const providerId = providerLogin.body.user?.id || UserRepository.getByEmail(`${p}@example.com`)?.id;
+      providerId = providerLogin.body.user?.id || UserRepository.getByEmail(`${p}@example.com`)?.id;
 
       // GPU をプロバイダの所有として DB に直接登録
       const gpu = GpuRepository.create({
@@ -654,6 +654,49 @@ describe('API Integration', () => {
         .set('Authorization', `Bearer ${renterToken}`)
         .send({ rating: 6 });
       expect(bad.statusCode).toBe(400);
+    });
+
+    it('GET /users/:id/reputation returns provider trust profile (public, no auth)', async () => {
+      const res = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.providerId).toBe(providerId);
+      expect(res.body).toHaveProperty('score');
+      expect(res.body).toHaveProperty('tier');
+      expect(res.body).toHaveProperty('stats');
+      // 先行テストで★5レビューが1件付いている
+      expect(res.body.reviewCount).toBeGreaterThanOrEqual(1);
+      expect(res.body.ratingAverage).toBeGreaterThanOrEqual(1);
+      expect(typeof res.body.completedOrders).toBe('number');
+      expect(typeof res.body.rejectedOrders).toBe('number');
+    });
+
+    it('GET /users/:id/reputation → 404 for unknown user', async () => {
+      const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/reputation');
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('completing an order records a provider job result in reputation', async () => {
+      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const beforeCompleted = before.body.stats.completedJobs;
+
+      // pending → active → stop(completed) の主要フローを辿る
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      // stop ハンドラは active 状態を要求するので直接遷移させる
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      const stop = await request(app)
+        .post(`/api/v1/orders/${orderId}/stop`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({});
+      expect(stop.statusCode).toBe(200);
+
+      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
     });
   });
 });

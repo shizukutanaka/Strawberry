@@ -632,6 +632,17 @@ router.post('/:id/stop',
       try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
     }
 
+    // プロバイダ・レピュテーションへ完了を記録（マーケットの主要フロー→評判を接続）。
+    // 失敗してもオーダー完了は妨げない（評判記録はベストエフォート）。
+    if (order.providerId) {
+      try {
+        const { createReputationService } = require('../../../reputation/reputation-service');
+        createReputationService().recordJobResult(order.providerId, true);
+      } catch (e) {
+        logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
+      }
+    }
+
     res.json({ message: 'Order execution stopped successfully', usageStats });
   })
 );

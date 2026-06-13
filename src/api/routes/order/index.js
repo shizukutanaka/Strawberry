@@ -518,6 +518,18 @@ router.post('/:id/dispute',
     if (!['active', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot dispute an order in '${order.status}' state (only active or matched orders can be disputed)`, 400);
     }
+    // 連続グリーフィング防止: 棄却された係争が閾値（既定3, MAX_DENIED_DISPUTES）以上の
+    // 申請者は新規係争を起こせない（管理者は対象外）。対称性: プロバイダが係争で減点される一方、
+    // 申請者は無償で active 注文を凍結し続けられる、という非対称を是正する。
+    if (req.user.role !== 'admin') {
+      const MAX_DENIED = Number(process.env.MAX_DENIED_DISPUTES) || 3;
+      const UserRepository = require('../../../db/json/UserRepository');
+      const me = UserRepository.getById(req.user.id);
+      if (me && (me.deniedDisputeCount || 0) >= MAX_DENIED) {
+        throw new APIError(ErrorTypes.FORBIDDEN,
+          `Too many of your disputes have been denied (${me.deniedDisputeCount}); contact support to raise further disputes`, 403);
+      }
+    }
     const reason = req.body.reason ? String(req.body.reason).slice(0, 1000) : '';
     const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
     OrderRepository.update(order.id, { status: 'disputed', dispute });
@@ -616,6 +628,21 @@ router.post('/:id/dispute/resolve',
           createReputationService().recordJobResult(order.providerId, true);
         } catch (e) {
           logger.warn(`reputation credit on dispute uphold failed (order=${order.id}): ${e.message}`);
+        }
+      }
+      // 係争棄却 = 申請者の主張は不当。申請者(raisedBy)に「棄却された係争」を加算する。
+      // 係争は active 注文を凍結しプロバイダの完了・支払・評判加点をブロックするため、
+      // 無償の連続係争はグリーフィング(DoS)になる。申請者にコストを課して対称性を回復する。
+      const raiser = order.dispute && order.dispute.raisedBy;
+      if (raiser) {
+        try {
+          const UserRepository = require('../../../db/json/UserRepository');
+          const u = UserRepository.getById(raiser);
+          if (u) {
+            UserRepository.update(raiser, { deniedDisputeCount: (u.deniedDisputeCount || 0) + 1 });
+          }
+        } catch (e) {
+          logger.warn(`denied-dispute accounting failed (raiser=${raiser}): ${e.message}`);
         }
       }
     }

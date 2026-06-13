@@ -1195,4 +1195,83 @@ describe('API Integration', () => {
       expect(res.body.error.message || res.body.error).toMatch(/own GPU/i);
     });
   });
+
+  describe('Frivolous dispute accountability (symmetric griefing guard)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let adminToken, renterToken, renterId, providerId, gpuId;
+
+    beforeAll(async () => {
+      const adm = `fda${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
+      UserRepository.update(UserRepository.getByEmail(`${adm}@example.com`).id, { role: 'admin' });
+      adminToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
+
+      const rn = `fdr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: rn, email: `${rn}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${rn}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${rn}@example.com`)?.id;
+
+      const p = `fdp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      gpuId = GpuRepository.create({
+        name: 'Frivolous Dispute GPU', vendor: 'NVIDIA', model: 'RTX-FD', memoryGB: 16, pricePerHour: 0.5,
+        providerId,
+      }).id;
+    });
+
+    async function disputeAndResolve(decision) {
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+      await request(app).post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`).send({ reason: 'x' });
+      await request(app).post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`).send({ decision });
+      return orderId;
+    }
+
+    it('an upheld (denied) dispute increments the raiser deniedDisputeCount', async () => {
+      const before = UserRepository.getById(renterId).deniedDisputeCount || 0;
+      await disputeAndResolve('uphold');
+      const after = UserRepository.getById(renterId).deniedDisputeCount || 0;
+      expect(after).toBe(before + 1);
+    });
+
+    it('a refund (vindicated) dispute does NOT penalize the raiser', async () => {
+      const before = UserRepository.getById(renterId).deniedDisputeCount || 0;
+      await disputeAndResolve('refund');
+      const after = UserRepository.getById(renterId).deniedDisputeCount || 0;
+      expect(after).toBe(before);
+    });
+
+    it('a renter over the denied-dispute threshold is blocked from raising new disputes (403)', async () => {
+      // Force the renter over the default threshold (3)
+      UserRepository.update(renterId, { deniedDisputeCount: 3 });
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      const dispute = await request(app).post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`).send({ reason: 'blocked?' });
+      expect(dispute.statusCode).toBe(403);
+      expect(dispute.body.error.message || dispute.body.error).toMatch(/denied/i);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+      // reset for isolation
+      UserRepository.update(renterId, { deniedDisputeCount: 0 });
+    });
+  });
 });

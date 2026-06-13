@@ -1,12 +1,13 @@
 // src/utils/state-checker.js - 状態遷移チェックヘルパー
-const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled'];
+const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed'];
 const GPU_STATES = ['available', 'allocated', 'maintenance', 'offline'];
 
 function isValidOrderTransition(from, to) {
   const allowed = {
     pending: ['matched', 'cancelled'],
-    matched: ['active', 'cancelled'],
-    active: ['completed', 'cancelled'],
+    matched: ['active', 'cancelled', 'disputed'],
+    active: ['completed', 'cancelled', 'disputed'],
+    disputed: ['completed', 'cancelled'],
     completed: [],
     cancelled: []
   };

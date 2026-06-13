@@ -699,4 +699,185 @@ describe('API Integration', () => {
       expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
     });
   });
+
+  describe('Notification settings CRUD', () => {
+    let userToken, userId;
+    beforeAll(async () => {
+      const UserRepository = require('../src/db/json/UserRepository');
+      const ns = `ns${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: ns, email: `${ns}@example.com`, password: 'Test1234!' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${ns}@example.com`, password: 'Test1234!' });
+      userToken = login.body.token;
+      userId = UserRepository.getByEmail(`${ns}@example.com`)?.id;
+    });
+
+    it('GET /notification-settings/:userId returns empty object when not configured', async () => {
+      const res = await request(app)
+        .get(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${userToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(typeof res.body).toBe('object');
+    });
+
+    it('POST /notification-settings/:userId saves channel configuration', async () => {
+      const res = await request(app)
+        .post(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ email: 'notify@example.com', enabled: { order_matched: true } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it('GET after POST returns saved settings', async () => {
+      const res = await request(app)
+        .get(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${userToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.email).toBe('notify@example.com');
+    });
+
+    it('accessing another user settings without auth → 401, with wrong user → 403', async () => {
+      const res401 = await request(app).get(`/api/v1/notification-settings/${userId}`);
+      expect(res401.statusCode).toBe(401);
+
+      const other = `no${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: other, email: `${other}@example.com`, password: 'Test1234!' });
+      const otherLogin = await request(app).post('/api/v1/users/login')
+        .send({ email: `${other}@example.com`, password: 'Test1234!' });
+      const otherToken = otherLogin.body.token;
+      const res403 = await request(app)
+        .get(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${otherToken}`);
+      expect(res403.statusCode).toBe(403);
+    });
+  });
+
+  describe('GPU minRating filter + order dispute', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let renterToken, providerToken, gpuId, providerId;
+
+    beforeAll(async () => {
+      const r = `dr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+
+      const p = `dp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      const providerLogin = await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' });
+      providerToken = providerLogin.body.token;
+      providerId = providerLogin.body.user?.id || UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      // GPU with a ★4 review so minRating filter can find it
+      const gpu = GpuRepository.create({
+        name: 'Dispute/Rating GPU', vendor: 'NVIDIA', model: 'RTX-DR', memoryGB: 24, pricePerHour: 1.2,
+        providerId,
+      });
+      gpuId = gpu.id;
+      // Seed a completed order with a ★4 review
+      const seedOrder = OrderRepository.create({
+        gpuId, userId: 'seed-user', providerId, durationMinutes: 60,
+        status: 'completed', totalPrice: 100, createdAt: new Date().toISOString(),
+        review: { rating: 4, comment: 'Good', reviewerId: 'seed-user', reviewedAt: new Date().toISOString() }
+      });
+    });
+
+    it('GET /gpus?minRating=3 returns GPUs with avg rating ≥ 3', async () => {
+      const res = await request(app).get('/api/v1/gpus?minRating=3');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.some(g => g.id === gpuId)).toBe(true);
+    });
+
+    it('GET /gpus?minRating=5 excludes GPU with avg 4 stars', async () => {
+      const res = await request(app).get('/api/v1/gpus?minRating=5');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.some(g => g.id === gpuId)).toBe(false);
+    });
+
+    it('POST /orders/:id/dispute raises a dispute on an active order (201)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      const dispute = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ reason: 'GPU was not responsive' });
+      expect(dispute.statusCode).toBe(201);
+      expect(dispute.body.dispute.reason).toBe('GPU was not responsive');
+      expect(OrderRepository.getById(orderId).status).toBe('disputed');
+    });
+
+    it('second dispute on same order → 409', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ reason: 'first' });
+      const dup = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ reason: 'duplicate' });
+      expect(dup.statusCode).toBe(409);
+    });
+
+    it('disputing a pending order → 400', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      // status is still 'pending'
+      const dispute = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ reason: 'premature' });
+      expect(dispute.statusCode).toBe(400);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('unrelated user cannot dispute (403)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      const outsider = `os${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: outsider, email: `${outsider}@example.com`, password: 'Test1234!' });
+      const outsiderToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${outsider}@example.com`, password: 'Test1234!' })).body.token;
+
+      const dispute = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${outsiderToken}`)
+        .send({ reason: 'unauthorized' });
+      expect(dispute.statusCode).toBe(403);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+  });
 });

@@ -279,6 +279,24 @@ router.delete('/:id',
     if (!['pending', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
     }
+    // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const escrows = EscrowRepository.getByOrderId(order.id);
+      if (Array.isArray(escrows) && escrows.length > 0) {
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        for (const escrow of escrows) {
+          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
+            try { escrowSvc.cancel(escrow.id); } catch (e) {
+              logger.warn(`Escrow cancel failed for ${escrow.id}: ${e.message}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Escrow lookup on order delete failed (order=${order.id}): ${e.message}`);
+    }
     const deleted = OrderRepository.delete(order.id);
     if (!deleted) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -468,6 +486,48 @@ router.post('/:id/reject',
       { subject: `【Strawberry】注文 #${order.id} が拒否されました` });
     logger.info(`Order rejected by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id, cancelNote });
     res.json({ message: 'Order rejected', orderId: order.id });
+  })
+);
+
+// 係争申請（active/matched 注文の当事者〈借り手 or プロバイダ〉が管理者介入を要求）
+// POST /orders/:id/dispute { reason: string }
+// 管理者は別途 POST /api/v1/marketplace/escrow/:id/resolve で決済する。
+router.post('/:id/dispute',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    const isOwner = order.userId === req.user.id;
+    const isProvider = order.providerId && order.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isOwner && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order owner, GPU provider, or admin can raise a dispute', 403);
+    }
+    if (order.dispute) {
+      throw new APIError(ErrorTypes.CONFLICT, 'A dispute has already been raised for this order', 409);
+    }
+    if (!['active', 'matched'].includes(order.status)) {
+      throw new APIError(ErrorTypes.VALIDATION, `Cannot dispute an order in '${order.status}' state (only active or matched orders can be disputed)`, 400);
+    }
+    const reason = req.body.reason ? String(req.body.reason).slice(0, 1000) : '';
+    const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
+    OrderRepository.update(order.id, { status: 'disputed', dispute });
+
+    // 管理者・運営側へ通知（ユーザー通知設定経由）
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpu = GpuRepository.getById(order.gpuId);
+    const gpuName = gpu ? gpu.name : order.gpuId;
+    notifyUser(order.userId, 'order_dispute_raised',
+      `【Strawberry】注文 #${order.id} に係争が申請されました。\nGPU: ${gpuName}${reason ? `\n理由: ${reason}` : ''}`,
+      { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
+    if (order.providerId && order.providerId !== req.user.id) {
+      notifyUser(order.providerId, 'order_dispute_raised',
+        `【Strawberry】あなたの GPU 注文に係争が申請されました。\n注文: #${order.id}\nGPU: ${gpuName}`,
+        { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
+    }
+    logger.info(`Dispute raised for order: ${order.id}`, { orderId: order.id, raisedBy: req.user.id });
+    res.status(201).json({ message: 'Dispute raised', orderId: order.id, dispute });
   })
 );
 

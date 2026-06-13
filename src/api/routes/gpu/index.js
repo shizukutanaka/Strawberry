@@ -93,6 +93,24 @@ router.get('/', asyncHandler(async (req, res) => {
   if (req.query.available === 'true') {
     gpus = gpus.filter(gpu => gpu.available);
   }
+  // ?minRating=N (1–5) で平均評価が N 以上の GPU のみに絞り込み（レビューなし GPU は除外）
+  const minRatingRaw = parseFloat(req.query.minRating);
+  if (!isNaN(minRatingRaw) && minRatingRaw > 0) {
+    const reviewMap = new Map(); // gpuId → { sum, count }
+    for (const o of OrderRepository.getAll()) {
+      if (o.review && o.gpuId) {
+        const cur = reviewMap.get(o.gpuId) || { sum: 0, count: 0 };
+        cur.sum += o.review.rating;
+        cur.count++;
+        reviewMap.set(o.gpuId, cur);
+      }
+    }
+    gpus = gpus.filter(gpu => {
+      const r = reviewMap.get(gpu.id);
+      if (!r || r.count === 0) return false;
+      return (r.sum / r.count) >= minRatingRaw;
+    });
+  }
   // 価格順にソート
   gpus.sort((a, b) => a.pricePerHour - b.pricePerHour);
   // ページネーション（limit: 1..200 既定50 / offset: 0..）

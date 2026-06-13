@@ -71,6 +71,10 @@
 | 16 | プロバイダによる注文拒否 | 中（GPU 貸し手が不適切な注文を断れなかった） | ✅ 実装済み（`POST /orders/:id/reject`、provider/admin 限定） |
 | 17 | レビュー・評価システム | 中（GPU の品質評価・貸し手の評判管理が不可能だった） | ✅ 実装済み（`POST /orders/:id/review`・`GET /gpus/:id/reviews`・GPU 詳細の rating 集計） |
 | 18 | プロバイダ・レピュテーション公開 + 取引完了の評判連動 | 中（評判算出基盤はあるが主要オーダーフローが評判を更新せず、閲覧手段も無かった） | ✅ 実装済み（`GET /users/:id/reputation`・オーダー完了→`recordJobResult` 接続） |
+| 19a | 通知設定 CRUD の HTTP 公開 | 中（notification-settings モジュールは実装済みだがルートに未マウント、ユーザーが通知チャネルを設定不可） | ✅ 実装済み（`GET/POST /notification-settings/:userId`・JWT認証・自他分離） |
+| 19b | 注文キャンセル時のエスクロー返金 | 高（pending/matched 注文削除時にエスクローがあれば資金が宙ぶらりになっていた） | ✅ 実装済み（`DELETE /orders/:id` でエスクロー `CANCEL` イベントを発火、ベストエフォート） |
+| 19c | セルフサービス係争申請 | 中（係争解決は管理者のみで、当事者が申請する手段が無かった） | ✅ 実装済み（`POST /orders/:id/dispute`、active/matched 注文の当事者が申請、状態 `disputed` 追加） |
+| 19d | GPU 一覧の評価フィルタ | 中（renter が評価順で GPU を絞り込む手段がなかった） | ✅ 実装済み（`GET /gpus?minRating=N` で平均評価 N 以上に絞り込み） |
 
 - **GPU 時間帯予約**: 注文作成時に `scheduledStartAt`（ISO 8601）を指定可能。未指定は即時（`now`）扱い。`scheduledEndAt = scheduledStartAt + durationMinutes` を自動計算して保存。二重予約チェックをステータスベースから**時間帯重複チェック**（[A,B) ∩ [C,D) ≠ ∅）に変更し、同一 GPU でも時間帯が重ならなければ複数の先行予約を受け付ける。`GET /gpus/:id/schedule?from=ISO&to=ISO`（認証不要）で空き状況をカレンダー形式で照会可能。未来の `scheduledStartAt` を持つ pending 注文は支払タイムアウト失効の対象外（事前予約の保護）。
 
@@ -88,7 +92,7 @@
 
 ## 総評
 
-土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 18 件中 16 件が実装済み（263/265 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 22 件中 20 件が実装済み（273/275 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
 
 - **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
 - **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。

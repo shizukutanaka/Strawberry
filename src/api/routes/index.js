@@ -86,6 +86,8 @@ router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
 router.use('/auth', authRoutes);
+// 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
+router.use(require('../notification-settings').router);
 
 // Lightningノード情報API
 router.get('/node-info', cacheMiddleware(), async (req, res) => {

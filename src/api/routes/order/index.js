@@ -486,9 +486,20 @@ router.post('/',
       throw new APIError(ErrorTypes.VALIDATION,
         `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${Math.round(renterRatingAverage * 10) / 10})`, 422);
     }
+    // 料金計算: GPUのpricePerHour必須
+    let pricePerHour = gpu.pricePerHour;
+    if (!pricePerHour || typeof pricePerHour !== 'number' || pricePerHour <= 0) {
+      throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
+    }
+    // 冗長化為替APIで換算（キャッシュ活用）— await を競合チェックの前に移動して
+    // チェック→作成の間にイベントループの yield が発生しないようにし、二重予約レースを防ぐ。
+    const { rate: satoshiToJPY } = await fetchRateInfo();
+
     // 二重予約チェック: 期限切れ pending を先に失効させ、時間帯の重複を確認する。
     // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
     // 指定がない場合は即時予約として全 BLOCKING 注文と重複とみなす。
+    // 重要: このチェックから OrderRepository.create() までの間に await を置かないこと。
+    // Node.js のシングルスレッドモデルにより、同期処理は割り込みなしに実行される。
     expireStaleOrders();
     expireStaleMatchedOrders();
     const newStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
@@ -507,11 +518,6 @@ router.post('/',
         409
       );
     }
-    // 料金計算: GPUのpricePerHour必須
-    let pricePerHour = gpu.pricePerHour;
-    if (!pricePerHour || typeof pricePerHour !== 'number' || pricePerHour <= 0) {
-      throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
-    }
 
     // ユーザーIDを設定
     orderData.userId = req.user.id;
@@ -525,8 +531,6 @@ router.post('/',
     // 5分単価
     const pricePer5Min = pricePerHour / 12;
     const totalPrice = pricePer5Min * (durationMinutes / 5);
-    // 冗長化為替APIで換算（キャッシュ活用）
-    const { rate: satoshiToJPY } = await fetchRateInfo();
     const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
     // ファイル永続化リポジトリで作成
     orderData.totalPrice = totalPrice;

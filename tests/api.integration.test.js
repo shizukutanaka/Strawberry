@@ -2149,4 +2149,70 @@ describe('API Integration', () => {
         .set('Authorization', `Bearer ${providerToken}`);
     });
   });
+
+  describe('GPU text search ?search= (#43)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+
+    beforeAll(() => {
+      GpuRepository.create({ name: 'RTX Turbo Beast', vendor: 'NVIDIA', model: 'RTX-9090', memoryGB: 24, pricePerHour: 2.0, providerId: 'srch-p1' });
+      GpuRepository.create({ name: 'Radeon RX Pro',  vendor: 'AMD',    model: 'RX-9800XT', memoryGB: 16, pricePerHour: 1.0, providerId: 'srch-p2' });
+    });
+
+    it('?search=turbo matches GPU by name (case-insensitive)', async () => {
+      const res = await request(app).get('/api/v1/gpus?search=turbo&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.some(g => g.name === 'RTX Turbo Beast')).toBe(true);
+      expect(res.body.gpus.some(g => g.name === 'Radeon RX Pro')).toBe(false);
+    });
+
+    it('?search=rx-9800 matches by model substring', async () => {
+      const res = await request(app).get('/api/v1/gpus?search=rx-9800&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.some(g => g.model === 'RX-9800XT')).toBe(true);
+    });
+
+    it('?search=amd matches by vendor', async () => {
+      const res = await request(app).get('/api/v1/gpus?search=amd&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.some(g => g.vendor === 'AMD')).toBe(true);
+    });
+
+    it('?search=zzznomatch returns empty results', async () => {
+      const res = await request(app).get('/api/v1/gpus?search=zzznomatch&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.length).toBe(0);
+    });
+  });
+
+  describe('Refresh token single-use enforcement (#44)', () => {
+    let firstRefreshToken;
+
+    beforeAll(async () => {
+      const u = `rtsu${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' });
+      firstRefreshToken = login.body.refreshToken;
+    });
+
+    it('POST /users/refresh returns both a new access token and a new refresh token', async () => {
+      const res = await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken: firstRefreshToken });
+      expect(res.statusCode).toBe(200);
+      expect(typeof res.body.token).toBe('string');
+      expect(typeof res.body.refreshToken).toBe('string');
+      expect(res.body.refreshToken).not.toBe(firstRefreshToken);
+    });
+
+    it('reusing the same refresh token a second time → 401 (single-use)', async () => {
+      // consume the token once
+      await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken: firstRefreshToken });
+      // second attempt must fail
+      const res = await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken: firstRefreshToken });
+      expect(res.statusCode).toBe(401);
+    });
+  });
 });

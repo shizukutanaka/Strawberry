@@ -129,8 +129,8 @@ router.post('/refresh',
     if (payload.type !== 'refresh') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
-    // logout で失効済みのリフレッシュトークンは拒否
-    const { isRevoked } = require('../../middleware/token-denylist');
+    // logout で失効済み、または既に一度使用済みのリフレッシュトークンは拒否
+    const { isRevoked, revoke } = require('../../middleware/token-denylist');
     if (payload.jti && isRevoked(payload.jti)) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
@@ -139,10 +139,16 @@ router.post('/refresh',
     if (!user || user.status === 'deactivated') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
-    const { signAccessToken } = require('../../utils/tokens');
+    // 使い切り（single-use）: 使用済みリフレッシュトークンの jti を失効させることで
+    // 同じトークンを再利用したリプレイアタックを防ぐ。
+    if (payload.jti) {
+      revoke(payload.jti, (payload.exp || 0) * 1000);
+    }
+    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
     const token = signAccessToken(user);
+    const newRefreshToken = signRefreshToken(user);
     logger.info(`Access token refreshed for user: ${user.id}`);
-    res.json({ message: 'Token refreshed', token });
+    res.json({ message: 'Token refreshed', token, refreshToken: newRefreshToken });
   })
 );
 

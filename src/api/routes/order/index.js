@@ -1088,7 +1088,7 @@ router.post('/:id/match',
       providerId: matchResult.gpu.providerId,
       matchedAt: new Date().toISOString()
     };
-    OrderRepository.update(orderId, { ...order, ...updateData });
+    OrderRepository.update(orderId, updateData);
     if (typeof p2pNetwork.updateOrder === 'function') {
       try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
     }
@@ -1128,7 +1128,7 @@ router.post('/:id/start',
     }
 
     const updateData = { status: 'active', startedAt: new Date().toISOString(), allocationDetails: allocation };
-    OrderRepository.update(orderId, { ...order, ...updateData });
+    OrderRepository.update(orderId, updateData);
     if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
       try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
     }
@@ -1179,7 +1179,7 @@ router.post('/:id/stop',
     usageSessions.delete(orderId);
 
     const updateData = { status: 'completed', stoppedAt: new Date().toISOString(), usageStats };
-    OrderRepository.update(orderId, { ...order, ...updateData });
+    OrderRepository.update(orderId, updateData);
     if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
       try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
     }

@@ -225,7 +225,7 @@ router.post('/',
     const gpuInfo = sanitizeObject(req.validatedBody, [
       'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
       'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
-      'features', 'capabilities', 'location', 'performance'
+      'features', 'capabilities', 'location', 'performance', 'minRenterRating'
     ]);
     logger.info(`[GPU登録] ${gpuInfo.vendor} ${gpuInfo.model} (${gpuInfo.apiType}) by ${req.user.id}`);
 
@@ -316,7 +316,7 @@ router.put('/:id',
     const gpuId = gpu.id;
     logger.info(`Updating GPU: ${gpuId}`);
     // 入力値サニタイズ
-    const sanitized = sanitizeObject(req.body, ['name']);
+    const sanitized = sanitizeObject(req.body, ['name', 'pricePerHour', 'availability', 'minRenterRating']);
     // 重複スペック登録防止
     const duplicate = GpuRepository.getAll().find(g =>
       g.id !== gpuId &&

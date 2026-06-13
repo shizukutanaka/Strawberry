@@ -78,9 +78,10 @@ const schemas = {
     benchmarkScore: Joi.number(),
     teraflops: Joi.number(),
     hashrate: Joi.number()
-  })
+  }),
+  minRenterRating: Joi.number().min(1).max(5).optional()
 }),
-    
+
     // GPU検索用スキーマ
     search: Joi.object({
       minMemoryGB: Joi.number().min(1),

@@ -159,9 +159,22 @@ router.get('/provider/earnings',
   checkRole(['provider', 'admin']),
   asyncHandler(async (req, res) => {
     const providerId = req.user.id;
-    const orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+    // 任意の日付範囲フィルタ（from=ISO&to=ISO）
+    const fromMs = req.query.from ? Date.parse(req.query.from) : null;
+    const toMs = req.query.to ? Date.parse(req.query.to) : null;
+    if (req.query.from && isNaN(fromMs)) {
+      return res.status(400).json({ error: 'Invalid from date' });
+    }
+    if (req.query.to && isNaN(toMs)) {
+      return res.status(400).json({ error: 'Invalid to date' });
+    }
+    let orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+    if (fromMs) orders = orders.filter(o => Date.parse(o.createdAt) >= fromMs);
+    if (toMs) orders = orders.filter(o => Date.parse(o.createdAt) <= toMs);
     const summary = {
       providerId,
+      from: req.query.from || null,
+      to: req.query.to || null,
       completedCount: 0,
       completedSats: 0,
       completedJPY: 0,
@@ -227,11 +240,18 @@ router.get('/:id',
       logger.info(`Fetching order detail: ${req.params.id}`);
       const order = req.resource;
       const rateInfo = await fetchRateInfo();
+      // 借り手プロフィール（プロバイダが承認/拒否判断に使えるよう注文詳細に同梱）
+      const renterOrders = OrderRepository.getAll().filter(o => o.userId === order.userId && o.renterReview);
+      const renterReviewCount = renterOrders.length;
+      const renterRatingAverage = renterReviewCount > 0
+        ? Math.round((renterOrders.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount) * 10) / 10
+        : null;
       res.json({
         message: 'Fetched order detail',
         order: {
           ...order,
-          ...computeOrderPricing(order, rateInfo)
+          ...computeOrderPricing(order, rateInfo),
+          renterProfile: { ratingAverage: renterRatingAverage, reviewCount: renterReviewCount }
         },
         exchangeRateTimestamp: rateInfo.timestamp
       });
@@ -342,6 +362,17 @@ router.delete('/:id',
       cancelReason: 'user_cancelled',
       cancelledAt: new Date().toISOString(),
     });
+    // プロバイダへキャンセル通知（予約した GPU が開放されたことを即時連絡）
+    if (order.providerId) {
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        const cancelledGpu = GpuRepository.getById(order.gpuId);
+        const gpuLabel = cancelledGpu ? cancelledGpu.name : order.gpuId;
+        notifyUser(order.providerId, 'order_cancelled',
+          `【Strawberry】注文がキャンセルされました\n注文: #${order.id}\nGPU: ${gpuLabel}`,
+          { subject: `【Strawberry】注文 #${order.id} キャンセル通知` });
+      } catch (_) { /* 通知失敗はキャンセル処理を妨げない */ }
+    }
     logger.info(`Order cancelled (soft-delete): ${order.id}`);
     res.json({ message: 'Order cancelled', orderId: order.id });
   })
@@ -380,6 +411,18 @@ router.post('/',
     // 自己レビューで自分の GPU 評価を、いずれも無から捏造できてしまう（信頼層の偽造）。
     if (gpu.providerId && gpu.providerId === req.user.id) {
       throw new APIError(ErrorTypes.VALIDATION, 'You cannot order your own GPU', 400);
+    }
+    // 借り手レーティングフロア: GPU に minRenterRating が設定されている場合、
+    // 十分なレビュー実績を持つ借り手はその平均評価が floor を下回ると 422 で拒否される。
+    // レビュー実績がない新規借り手は通過させる（初回拒絶ループ防止）。
+    const renterOrders = OrderRepository.getAll().filter(o => o.userId === req.user.id && o.renterReview);
+    const renterReviewCount = renterOrders.length;
+    const renterRatingAverage = renterReviewCount > 0
+      ? renterOrders.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount
+      : null;
+    if (gpu.minRenterRating && renterRatingAverage !== null && renterRatingAverage < gpu.minRenterRating) {
+      throw new APIError(ErrorTypes.VALIDATION,
+        `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${Math.round(renterRatingAverage * 10) / 10})`, 422);
     }
     // 二重予約チェック: 期限切れ pending を先に失効させ、時間帯の重複を確認する。
     // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
@@ -431,8 +474,11 @@ router.post('/',
     // GPU 提供者（プロバイダ）へ通知（notification-settings で登録したチャネルへ）
     if (gpu.providerId) {
       const { notifyUser } = require('../../../utils/user-notify');
+      const renterRatingStr = renterRatingAverage !== null
+        ? `借り手評価: ★${Math.round(renterRatingAverage * 10) / 10}（${renterReviewCount}件）\n`
+        : '借り手評価: 未評価（新規）\n';
       notifyUser(gpu.providerId, 'order_created',
-        `【Strawberry】あなたの GPU に注文が入りました\n注文: #${createdOrder.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n報酬: ${totalPrice} sat (${totalPriceJPY}円)`,
+        `【Strawberry】あなたの GPU に注文が入りました\n注文: #${createdOrder.id}\nGPU: ${gpu.name}\n${renterRatingStr}時間: ${durationMinutes}分\n報酬: ${totalPrice} sat (${totalPriceJPY}円)`,
         { subject: `【Strawberry】新規注文 #${createdOrder.id}（${gpu.name}）` });
     }
     // メール通知（ユーザーのメールアドレスが取得できる場合のみ）

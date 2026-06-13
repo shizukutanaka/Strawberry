@@ -1524,4 +1524,169 @@ describe('API Integration', () => {
       expect(res.body.renterRatingAverage).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('Renter rating floor policy + public renter profile (#29, #32)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, renterToken, renterId, lowRaterToken, lowRaterId;
+
+    beforeAll(async () => {
+      // Provider
+      const p = `rfp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      // Normal renter (no reviews yet)
+      const r = `rfr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+
+      // Low-rated renter (average ★2 from existing renter reviews)
+      const l = `rfl${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: l, email: `${l}@example.com`, password: 'Test1234!' });
+      lowRaterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${l}@example.com`, password: 'Test1234!' })).body.token;
+      lowRaterId = UserRepository.getByEmail(`${l}@example.com`)?.id;
+      // Seed low renter reviews for this renter
+      const seedGpu = GpuRepository.create({ name: 'Seed GPU', vendor: 'AMD', model: 'RX-SEED', memoryGB: 4, pricePerHour: 0.1, providerId });
+      OrderRepository.create({ gpuId: seedGpu.id, userId: lowRaterId, status: 'completed', durationMinutes: 30, totalPrice: 5, createdAt: new Date().toISOString(),
+        renterReview: { rating: 2, comment: 'late payer', reviewerId: providerId, reviewedAt: new Date().toISOString() } });
+      OrderRepository.create({ gpuId: seedGpu.id, userId: lowRaterId, status: 'completed', durationMinutes: 30, totalPrice: 5, createdAt: new Date().toISOString(),
+        renterReview: { rating: 2, comment: 'again late', reviewerId: providerId, reviewedAt: new Date().toISOString() } });
+    });
+
+    it('GPU with minRenterRating=4 allows new renter with no reviews (201)', async () => {
+      const gpu = GpuRepository.create({
+        name: 'Floor GPU', vendor: 'NVIDIA', model: 'RTX-FLOOR', memoryGB: 8, pricePerHour: 0.2,
+        providerId, minRenterRating: 4,
+      });
+      const res = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId: gpu.id, durationMinutes: 30 });
+      expect(res.statusCode).toBe(201);
+      OrderRepository.update(res.body.order.id, { status: 'cancelled' });
+    });
+
+    it('GPU with minRenterRating=4 rejects a renter with average ★2 (422)', async () => {
+      const gpu = GpuRepository.create({
+        name: 'Floor GPU 2', vendor: 'NVIDIA', model: 'RTX-FLOOR2', memoryGB: 8, pricePerHour: 0.2,
+        providerId, minRenterRating: 4,
+      });
+      const res = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${lowRaterToken}`)
+        .send({ gpuId: gpu.id, durationMinutes: 30 });
+      expect(res.statusCode).toBe(422);
+      expect(res.body.error.message || res.body.error).toMatch(/rating/i);
+    });
+
+    it('GPU with no floor policy allows low-rated renter (201)', async () => {
+      const gpu = GpuRepository.create({
+        name: 'No Floor GPU', vendor: 'AMD', model: 'RX-NOFLOOR', memoryGB: 8, pricePerHour: 0.2,
+        providerId,
+      });
+      const res = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${lowRaterToken}`)
+        .send({ gpuId: gpu.id, durationMinutes: 30 });
+      expect(res.statusCode).toBe(201);
+      OrderRepository.update(res.body.order.id, { status: 'cancelled' });
+    });
+
+    it('GET /orders/:id includes renterProfile in response', async () => {
+      const gpu = GpuRepository.create({
+        name: 'Profile GPU', vendor: 'AMD', model: 'RX-PROF', memoryGB: 8, pricePerHour: 0.15, providerId,
+      });
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId: gpu.id, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+
+      const res = await request(app).get(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.order).toHaveProperty('renterProfile');
+      expect(res.body.order.renterProfile).toHaveProperty('reviewCount');
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('GET /users/:id/renter-profile is public (no auth needed)', async () => {
+      const res = await request(app).get(`/api/v1/users/${lowRaterId}/renter-profile`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.userId).toBe(lowRaterId);
+      expect(res.body.reviewCount).toBeGreaterThanOrEqual(2);
+      expect(res.body.ratingAverage).toBe(2); // avg of two ★2 reviews
+      expect(Array.isArray(res.body.recentReviews)).toBe(true);
+    });
+
+    it('GET /users/:id/renter-profile for unknown user → 404', async () => {
+      const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/renter-profile');
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('Provider earnings date range filter (#30)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId;
+
+    beforeAll(async () => {
+      const p = `erp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+      const gpu = GpuRepository.create({ name: 'Earn GPU', vendor: 'AMD', model: 'RX-EARN', memoryGB: 8, pricePerHour: 0.1, providerId });
+      // Create one completed order in the past, one recent
+      OrderRepository.create({ gpuId: gpu.id, providerId, userId: 'earn-seed', status: 'completed',
+        durationMinutes: 60, totalPrice: 100, totalPriceJPY: 50000, createdAt: '2025-01-15T12:00:00.000Z' });
+      OrderRepository.create({ gpuId: gpu.id, providerId, userId: 'earn-seed2', status: 'completed',
+        durationMinutes: 60, totalPrice: 200, totalPriceJPY: 100000, createdAt: '2026-06-01T12:00:00.000Z' });
+    });
+
+    it('GET /orders/provider/earnings returns all-time totals (no filter)', async () => {
+      const res = await request(app).get('/api/v1/orders/provider/earnings')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.earnings.completedCount).toBeGreaterThanOrEqual(2);
+      expect(res.body.earnings.from).toBeNull();
+      expect(res.body.earnings.to).toBeNull();
+    });
+
+    it('GET /orders/provider/earnings?from=2026-01-01 filters to recent orders only', async () => {
+      const res = await request(app).get('/api/v1/orders/provider/earnings?from=2026-01-01')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      // Only the 2026-06-01 order should match
+      expect(res.body.earnings.completedCount).toBeGreaterThanOrEqual(1);
+      expect(res.body.earnings.completedSats).toBeGreaterThanOrEqual(200);
+      expect(res.body.earnings.from).toBe('2026-01-01');
+    });
+
+    it('GET /orders/provider/earnings?to=2025-12-31 filters to old orders only', async () => {
+      const res = await request(app).get('/api/v1/orders/provider/earnings?to=2025-12-31')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      // Only the 2025-01-15 order should match
+      const sats = res.body.earnings.completedSats;
+      expect(sats).toBeLessThan(200); // 2026 order excluded
+    });
+
+    it('invalid from date → 400', async () => {
+      const res = await request(app).get('/api/v1/orders/provider/earnings?from=not-a-date')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(400);
+    });
+  });
 });

@@ -413,6 +413,40 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
   });
 }));
 
+// 借り手公開プロフィール（認証不要 — プロバイダが注文受付前に借り手を調査できる）。
+// 受領したプロバイダ→借り手レビューの集計（平均★・件数）と取引実績を返す。
+// 無効化済みユーザーは 404 で応答し PII を漏洩しない。
+router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
+  const userId = req.params.id;
+  const user = UserRepository.getById(userId);
+  if (!user || user.status === 'deactivated') {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview);
+  const reviewCount = renterOrders.length;
+  const ratingAverage = reviewCount > 0
+    ? Math.round((renterOrders.reduce((s, o) => s + o.renterReview.rating, 0) / reviewCount) * 10) / 10
+    : null;
+  // 直近5件のレビュー（最新順）
+  const recentReviews = renterOrders
+    .sort((a, b) => (b.renterReview.reviewedAt || '').localeCompare(a.renterReview.reviewedAt || ''))
+    .slice(0, 5)
+    .map(o => ({ orderId: o.id, rating: o.renterReview.rating, comment: o.renterReview.comment || null, reviewedAt: o.renterReview.reviewedAt }));
+
+  const completedOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.status === 'completed').length;
+
+  res.json({
+    userId,
+    ratingAverage,
+    reviewCount,
+    completedOrders,
+    recentReviews,
+    memberSince: user.createdAt || null,
+  });
+}));
+
 // 特定ユーザーの情報取得 (管理者のみ)
 router.get('/:id',
   authenticateJWT,

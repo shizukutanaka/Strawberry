@@ -328,16 +328,23 @@ router.get('/channels',
   })
 );
 
-// 支払い履歴取得
-router.get('/history', 
+// 支払い履歴取得（ページネーション対応: ?limit=N&offset=M、新しい順）
+router.get('/history',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     logger.info('Fetching payment history');
-    
-    // PaymentRepositoryから取得
-    const history = PaymentRepository.getByUserId(req.user.id);
-    // 必要な情報のみマスク・整形
-    const sanitizedPayments = history.map(payment => ({
+
+    const raw = PaymentRepository.getByUserId(req.user.id) || [];
+    // 新しい順
+    const sorted = [...raw].sort((a, b) =>
+      (b.paidAt || b.createdAt || '').localeCompare(a.paidAt || a.createdAt || ''));
+    const total = sorted.length;
+    const limitRaw = parseInt(req.query.limit, 10);
+    const offsetRaw = parseInt(req.query.offset, 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    const page = sorted.slice(offset, offset + limit);
+    const payments = page.map(payment => ({
       id: payment.id,
       orderId: payment.orderId,
       amount: payment.amount,
@@ -345,10 +352,7 @@ router.get('/history',
       paymentHash: payment.paymentHash,
       paidAt: payment.paidAt
     }));
-    res.json({
-      total: sanitizedPayments.length,
-      payments: sanitizedPayments
-    });
+    res.json({ total, limit, offset, payments });
   })
 );
 

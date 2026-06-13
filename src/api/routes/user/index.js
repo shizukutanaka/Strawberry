@@ -607,11 +607,12 @@ router.delete('/:id',
     if (!target) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // 最低1人管理者維持
-    if (target.role === 'admin') {
-      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin').length;
+    // 最低1人アクティブ管理者維持: アクティブな管理者を削除すると 0 になる場合だけブロック。
+    // 非アクティブ（deactivated）な管理者の削除はカウントに影響しないため許可する。
+    if (target.role === 'admin' && target.status !== 'deactivated') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin' && u.status !== 'deactivated').length;
       if (adminCount <= 1) {
-        return res.status(400).json({ error: 'At least one admin must remain' });
+        return res.status(400).json({ error: 'At least one active admin must remain' });
       }
     }
     // ユーザー削除（永続化対応）
@@ -644,11 +645,11 @@ router.put('/:id/role',
     if (!target) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // 最低1人管理者維持
+    // 最低1人アクティブ管理者維持（非アクティブ管理者はカウント外）
     if (target.role === 'admin' && role !== 'admin') {
-      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin').length;
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin' && u.status !== 'deactivated').length;
       if (adminCount <= 1) {
-        return res.status(400).json({ error: 'At least one admin must remain' });
+        return res.status(400).json({ error: 'At least one active admin must remain' });
       }
     }
     // ロールを更新（永続化対応）

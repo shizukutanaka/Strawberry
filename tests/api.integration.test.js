@@ -3686,4 +3686,108 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(401);
     });
   });
+
+  describe('Admin count ignores deactivated admins on delete and role-change (#74)', () => {
+    const UserRepository = require('../src/db/json/UserRepository');
+    let adminToken;
+    let adminId;
+    let otherAdminId;
+
+    beforeAll(async () => {
+      const u = `c74${Date.now().toString(36)}`.slice(0, 18);
+      // Admin A (active, holds adminToken)
+      await request(app).post('/api/v1/users/register')
+        .send({ username: `${u}a`, email: `${u}a@example.com`, password: 'Test1234!' });
+      const adminUser = UserRepository.getByEmail(`${u}a@example.com`);
+      adminId = adminUser.id;
+      UserRepository.update(adminId, { role: 'admin' });
+      adminToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}a@example.com`, password: 'Test1234!' })).body.token;
+
+      // Admin B (will be promoted, then deactivated)
+      await request(app).post('/api/v1/users/register')
+        .send({ username: `${u}b`, email: `${u}b@example.com`, password: 'Test1234!' });
+      const otherUser = UserRepository.getByEmail(`${u}b@example.com`);
+      otherAdminId = otherUser.id;
+      UserRepository.update(otherAdminId, { role: 'admin' });
+    });
+
+    it('can delete a deactivated admin even when only 1 active admin remains', async () => {
+      // Deactivate otherAdmin → A is the sole active admin
+      UserRepository.update(otherAdminId, { status: 'deactivated' });
+
+      // Deleting a deactivated admin should succeed (200), not be blocked (400)
+      const res = await request(app).delete(`/api/v1/users/${otherAdminId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('cannot demote the last active admin via role-change', async () => {
+      // Only A remains; self-demotion is blocked
+      const res = await request(app).put(`/api/v1/users/${adminId}/role`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ role: 'user' });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toMatch(/admin/i);
+    });
+
+    it('can demote admin when 2+ active admins exist', async () => {
+      // Create and promote a second active admin
+      const u2 = `c74z${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u2, email: `${u2}@example.com`, password: 'Test1234!' });
+      const secondUser = UserRepository.getByEmail(`${u2}@example.com`);
+      UserRepository.update(secondUser.id, { role: 'admin' });
+
+      // Now demoting secondUser should succeed (2 active admins → 1 after demotion)
+      const res = await request(app).put(`/api/v1/users/${secondUser.id}/role`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ role: 'user' });
+      expect(res.statusCode).toBe(200);
+    });
+  });
+
+  describe('Payment history pagination (#75)', () => {
+    let userToken;
+
+    beforeAll(async () => {
+      const u = `p75${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      userToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
+    });
+
+    it('GET /payments/history requires authentication', async () => {
+      const res = await request(app).get('/api/v1/payments/history');
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('GET /payments/history returns total/limit/offset/payments structure', async () => {
+      const res = await request(app).get('/api/v1/payments/history')
+        .set('Authorization', `Bearer ${userToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('total');
+      expect(res.body).toHaveProperty('limit');
+      expect(res.body).toHaveProperty('offset');
+      expect(res.body).toHaveProperty('payments');
+      expect(Array.isArray(res.body.payments)).toBe(true);
+    });
+
+    it('?limit=1 caps result at 1 item', async () => {
+      const res = await request(app).get('/api/v1/payments/history?limit=1')
+        .set('Authorization', `Bearer ${userToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.limit).toBe(1);
+      expect(res.body.payments.length).toBeLessThanOrEqual(1);
+    });
+
+    it('?offset=9999 returns empty payments array but preserves total', async () => {
+      const res = await request(app).get('/api/v1/payments/history?offset=9999')
+        .set('Authorization', `Bearer ${userToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.payments).toHaveLength(0);
+      expect(typeof res.body.total).toBe('number');
+    });
+  });
 });

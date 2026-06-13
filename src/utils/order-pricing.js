@@ -27,7 +27,9 @@ function computeOrderPricing(order, rateInfo = null) {
   const pricePerHour = resolvePricePerHour(order);
   const durationMinutes = order.durationMinutes || 0;
   const pricePer5Min = pricePerHour / 12;
-  const totalPrice = pricePer5Min * (durationMinutes / 5);
+  // Round totalPrice to whole satoshis to prevent floating-point drift when the
+  // value is used for actual payment amounts (e.g. 100 sats/h × 30 min = 49.999…).
+  const totalPrice = Math.round(pricePer5Min * (durationMinutes / 5));
   const pricing = { pricePerHour, pricePer5Min, durationMinutes, totalPrice };
   if (rateInfo) {
     pricing.totalPriceJPY = Math.round(totalPrice * rateInfo.rate);

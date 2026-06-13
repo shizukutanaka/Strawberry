@@ -2922,6 +2922,68 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Admin manual order expiry POST /admin/expire-orders (#68)', () => {
+    let adminToken;
+    const UserRepository = require('../src/db/json/UserRepository');
+    beforeAll(async () => {
+      const adm = `exp68adm${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
+      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
+      UserRepository.update(admUser.id, { role: 'admin' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' });
+      adminToken = login.body.token;
+    });
+
+    it('requires admin role (403 for regular user)', async () => {
+      const u = `exp68u${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' });
+      const res = await request(app).post('/api/v1/admin/expire-orders')
+        .set('Authorization', `Bearer ${login.body.token}`)
+        .send({});
+      expect([401, 403]).toContain(res.statusCode);
+    });
+
+    it('requires authentication (401 without token)', async () => {
+      const res = await request(app).post('/api/v1/admin/expire-orders').send({});
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('returns expiry counts for all types by default', async () => {
+      if (!adminToken) return;
+      const res = await request(app).post('/api/v1/admin/expire-orders')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('pendingExpired');
+      expect(res.body).toHaveProperty('matchedExpired');
+      expect(res.body).toHaveProperty('disputedResolved');
+      expect(typeof res.body.pendingExpired).toBe('number');
+    });
+
+    it('accepts specific types subset', async () => {
+      if (!adminToken) return;
+      const res = await request(app).post('/api/v1/admin/expire-orders')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ types: ['pending'] });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('pendingExpired');
+      expect(res.body).not.toHaveProperty('matchedExpired');
+    });
+
+    it('rejects invalid type values with 400', async () => {
+      if (!adminToken) return;
+      const res = await request(app).post('/api/v1/admin/expire-orders')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ types: ['invalid_type'] });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
   describe('Webhook retry logic withRetry (#45)', () => {
     const { withRetry } = require('../src/utils/notifier');
     const http = require('http');

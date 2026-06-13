@@ -212,6 +212,23 @@ router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res
   res.json({ total, limit, offset, escrows: page });
 }));
 
+// 期限切れ注文の手動スイープ（管理者のみ）— インシデント対応・テストで使用。
+// POST /admin/expire-orders { types?: ['pending','matched','disputed'] }
+router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders } = require('../../utils/order-expiry');
+  const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed'];
+  const VALID = new Set(['pending', 'matched', 'disputed']);
+  const invalid = types.filter(t => !VALID.has(t));
+  if (invalid.length > 0) {
+    return res.status(400).json({ error: `Invalid types: ${invalid.join(', ')}. Valid: ${[...VALID].join(', ')}` });
+  }
+  const result = {};
+  if (types.includes('pending'))   result.pendingExpired   = expireStaleOrders();
+  if (types.includes('matched'))   result.matchedExpired   = expireStaleMatchedOrders();
+  if (types.includes('disputed'))  result.disputedResolved = expireStaleDisputedOrders();
+  res.json({ message: 'Order expiry sweep completed', ...result });
+}));
+
 // システム情報取得（adminのみ許可）
 router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   // システム情報を取得

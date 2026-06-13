@@ -16,6 +16,13 @@ router.post('/', async (req, res) => {
     if (!orderId || !lenderWallet || !borrowerWallet || !priceBTC) {
       return res.status(400).json({ message: 'orderId, lenderWallet, borrowerWallet, priceBTC are required' });
     }
+    // 注文の所有者確認（認証ユーザーが借り手または管理者であることを確認）
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const order = OrderRepository.getById(orderId);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (req.user && req.user.role !== 'admin' && order.userId !== req.user.id) {
+      return res.status(403).json({ message: 'You do not have permission to pay for this order' });
+    }
     // 借り手が支払う総額
     const total = calcTotalWithFee(priceBTC);
     // 運営利益

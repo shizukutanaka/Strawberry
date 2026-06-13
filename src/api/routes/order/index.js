@@ -108,6 +108,9 @@ router.get('/',
       let orders;
       if (req.user.role === 'admin') {
         orders = OrderRepository.getAll();
+        // 管理者はユーザーIDやプロバイダIDで絞り込み可能（サポートワークフロー）
+        if (req.query.userId) orders = orders.filter(o => o.userId === req.query.userId);
+        if (req.query.providerId) orders = orders.filter(o => o.providerId === req.query.providerId);
       } else if (req.user.role === 'provider') {
         orders = OrderRepository.getAll().filter(o => o.providerId === req.user.id);
       } else {
@@ -246,12 +249,22 @@ router.get('/:id',
       const renterRatingAverage = renterReviewCount > 0
         ? Math.round((renterOrders.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount) * 10) / 10
         : null;
+      // ステータス変遷タイムライン（既存タイムスタンプを時系列に整列）
+      const timeline = [
+        { status: 'pending',   at: order.createdAt || null },
+        { status: 'matched',   at: order.matchedAt || null },
+        { status: 'active',    at: order.startedAt || null },
+        { status: 'completed', at: order.completedAt || null },
+        { status: 'cancelled', at: order.cancelledAt || null },
+        { status: 'disputed',  at: order.dispute ? order.dispute.raisedAt : null },
+      ].filter(e => e.at).sort((a, b) => a.at.localeCompare(b.at));
       res.json({
         message: 'Fetched order detail',
         order: {
           ...order,
           ...computeOrderPricing(order, rateInfo),
-          renterProfile: { ratingAverage: renterRatingAverage, reviewCount: renterReviewCount }
+          renterProfile: { ratingAverage: renterRatingAverage, reviewCount: renterReviewCount },
+          timeline,
         },
         exchangeRateTimestamp: rateInfo.timestamp
       });
@@ -317,8 +330,24 @@ router.put('/:id',
       }
     }
     // オーダーを更新
+    const prevStatus = order.status;
     const updatedOrder = OrderRepository.update(order.id, { ...order, ...sanitized });
     logger.info(`Order updated: ${order.id}`);
+    // ステータスが matched または active に変わった場合は借り手へ通知
+    if (sanitized.status && sanitized.status !== prevStatus) {
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        if (sanitized.status === 'matched') {
+          notifyUser(order.userId, 'order_matched',
+            `【Strawberry】注文がマッチしました\n注文: #${order.id}\nまもなく利用を開始できます`,
+            { subject: `【Strawberry】注文 #${order.id} マッチング完了` });
+        } else if (sanitized.status === 'active') {
+          notifyUser(order.userId, 'order_started',
+            `【Strawberry】GPU の利用が開始されました\n注文: #${order.id}`,
+            { subject: `【Strawberry】注文 #${order.id} 利用開始` });
+        }
+      } catch (_) { /* 通知失敗は更新を妨げない */ }
+    }
     res.json({
       message: 'Order updated successfully',
       order: updatedOrder
@@ -926,6 +955,13 @@ router.post('/:id/start',
     if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
       try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
     }
+    // 借り手へ利用開始通知
+    try {
+      const { notifyUser } = require('../../../utils/user-notify');
+      notifyUser(order.userId, 'order_started',
+        `【Strawberry】GPU の利用が開始されました\n注文: #${orderId}`,
+        { subject: `【Strawberry】注文 #${orderId} 利用開始` });
+    } catch (_) { /* 通知失敗は起動を妨げない */ }
 
     res.json({ message: 'Order execution started successfully', allocationDetails: allocation });
   })

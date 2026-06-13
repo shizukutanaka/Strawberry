@@ -41,6 +41,8 @@ router.get('/', asyncHandler(async (req, res) => {
     vendor: req.query.vendor ? String(req.query.vendor).slice(0, 64) : null,
     maxPrice: req.query.maxPrice ? parseFloat(req.query.maxPrice) : null,
     features: parsedFeatures,
+    country: req.query.country ? String(req.query.country).slice(0, 4).toUpperCase() : null,
+    apiType: req.query.apiType ? String(req.query.apiType).slice(0, 16) : null,
   };
   // ファイル永続化されたGPUリストを取得
   let gpus = GpuRepository.getAll();
@@ -74,6 +76,14 @@ router.get('/', asyncHandler(async (req, res) => {
       }
       return true;
     });
+  }
+  if (filters.country) {
+    gpus = gpus.filter(gpu => gpu.location && gpu.location.country &&
+      gpu.location.country.toUpperCase() === filters.country);
+  }
+  if (filters.apiType) {
+    const api = filters.apiType.toUpperCase();
+    gpus = gpus.filter(gpu => gpu.apiType && gpu.apiType.toUpperCase() === api);
   }
   // 占有状況の注釈: 現時刻と時間帯が重複する BLOCKING 注文がある GPU は available=false。
   // 二重予約は注文作成時に 409 で拒否されるため、ここは閲覧時のヒント表示。

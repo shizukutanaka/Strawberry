@@ -1689,4 +1689,153 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(400);
     });
   });
+
+  describe('Admin order filters by userId/providerId (#33)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let adminToken, targetUserId, targetProviderId;
+
+    beforeAll(async () => {
+      const adm = `aof${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
+      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
+      UserRepository.update(admUser.id, { role: 'admin' });
+      adminToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
+
+      const u = `aou${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      targetUserId = UserRepository.getByEmail(`${u}@example.com`)?.id;
+      targetProviderId = admUser.id; // reuse admin as provider for simplicity
+
+      const gpu = GpuRepository.create({ name: 'Admin Filter GPU', vendor: 'AMD', model: 'RX-AF', memoryGB: 4, pricePerHour: 0.05, providerId: targetProviderId });
+      OrderRepository.create({ gpuId: gpu.id, userId: targetUserId, providerId: targetProviderId,
+        status: 'pending', durationMinutes: 30, totalPrice: 2, createdAt: new Date().toISOString() });
+    });
+
+    it('admin GET /orders?userId=X returns only that users orders', async () => {
+      const res = await request(app)
+        .get(`/api/v1/orders?userId=${targetUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.body.orders)).toBe(true);
+      expect(res.body.orders.every(o => o.userId === targetUserId)).toBe(true);
+    });
+
+    it('admin GET /orders?providerId=X returns only that providers orders', async () => {
+      const res = await request(app)
+        .get(`/api/v1/orders?providerId=${targetProviderId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.body.orders)).toBe(true);
+      expect(res.body.orders.every(o => o.providerId === targetProviderId)).toBe(true);
+    });
+
+    it('non-admin GET /orders ignores userId filter (only sees own orders)', async () => {
+      const r = `aor${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      const rToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      const rId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+      // Even passing someone else's userId, only own orders come back
+      const res = await request(app)
+        .get(`/api/v1/orders?userId=${targetUserId}`)
+        .set('Authorization', `Bearer ${rToken}`);
+      expect(res.statusCode).toBe(200);
+      // Must not see targetUser's orders (filter ignored for non-admin)
+      expect(res.body.orders.every(o => o.userId === rId || o.userId !== targetUserId)).toBe(true);
+    });
+  });
+
+  describe('Order timeline in GET /orders/:id (#35)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let renterToken, gpuId;
+
+    beforeAll(async () => {
+      const r = `tl${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      gpuId = GpuRepository.create({ name: 'Timeline GPU', vendor: 'AMD', model: 'RX-TL', memoryGB: 8, pricePerHour: 0.1 }).id;
+    });
+
+    it('GET /orders/:id includes a timeline array with at least the pending entry', async () => {
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+
+      const res = await request(app).get(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.body.order.timeline)).toBe(true);
+      expect(res.body.order.timeline.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.order.timeline[0].status).toBe('pending');
+      expect(typeof res.body.order.timeline[0].at).toBe('string');
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('completed order timeline includes pending + completed entries', async () => {
+      const renterId = UserRepository.getAll().find(u => u.username?.startsWith('tl'))?.id;
+      const gpuObj = GpuRepository.getById(gpuId);
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, status: 'completed', durationMinutes: 30, totalPrice: 3,
+        createdAt: '2026-06-01T10:00:00.000Z',
+        completedAt: '2026-06-01T10:30:00.000Z',
+      });
+      const res = await request(app).get(`/api/v1/orders/${order.id}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      const tl = res.body.order.timeline;
+      expect(tl.some(e => e.status === 'pending')).toBe(true);
+      expect(tl.some(e => e.status === 'completed')).toBe(true);
+      // Timeline is sorted chronologically
+      expect(tl[0].at <= tl[tl.length - 1].at).toBe(true);
+    });
+  });
+
+  describe('GPU country and apiType filters (#36)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+
+    beforeAll(() => {
+      GpuRepository.create({
+        name: 'JP GPU', vendor: 'NVIDIA', model: 'A100-JP', memoryGB: 40, pricePerHour: 2.0,
+        apiType: 'CUDA', location: { country: 'JP', city: 'Tokyo' },
+      });
+      GpuRepository.create({
+        name: 'US GPU', vendor: 'AMD', model: 'MI300-US', memoryGB: 64, pricePerHour: 3.0,
+        apiType: 'ROCm', location: { country: 'US', city: 'Seattle' },
+      });
+    });
+
+    it('GET /gpus?country=JP returns only GPUs in Japan', async () => {
+      const res = await request(app).get('/api/v1/gpus?country=JP&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.gpus.every(g => !g.location || g.location.country === 'JP')).toBe(true);
+    });
+
+    it('GET /gpus?apiType=ROCm returns only ROCm GPUs', async () => {
+      const res = await request(app).get('/api/v1/gpus?apiType=ROCm&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.gpus.every(g => !g.apiType || g.apiType === 'ROCm')).toBe(true);
+    });
+
+    it('GET /gpus?country=DE returns empty list (no German GPUs)', async () => {
+      const res = await request(app).get('/api/v1/gpus?country=DE');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.length).toBe(0);
+    });
+  });
 });

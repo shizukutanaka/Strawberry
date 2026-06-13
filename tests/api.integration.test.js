@@ -784,9 +784,11 @@ describe('API Integration', () => {
       providerToken = providerLogin.body.token;
       providerId = providerLogin.body.user?.id || UserRepository.getByEmail(`${p}@example.com`)?.id;
 
-      // GPU with a ★4 review so minRating filter can find it
+      // GPU with a ★4 review so minRating filter can find it.
+      // Use a very low pricePerHour (sort is price asc) to guarantee this GPU appears
+      // in the first result page even if the data files have accumulated many rated GPUs.
       const gpu = GpuRepository.create({
-        name: 'Dispute/Rating GPU', vendor: 'NVIDIA', model: 'RTX-DR', memoryGB: 24, pricePerHour: 1.2,
+        name: 'Dispute/Rating GPU', vendor: 'NVIDIA', model: 'RTX-DR', memoryGB: 24, pricePerHour: 0.00001,
         providerId,
       });
       gpuId = gpu.id;
@@ -2917,6 +2919,87 @@ describe('API Integration', () => {
       const res = await request(app).get('/api/v1/marketplace/stats');
       expect(Array.isArray(res.body.topGpusByCompletedOrders)).toBe(true);
       expect(res.body.topGpusByCompletedOrders.length).toBeLessThanOrEqual(10);
+    });
+  });
+
+  describe('Provider can see their renter-side orders in GET /orders (#70)', () => {
+    // Two-provider setup: providerA registers GPU, providerB orders it (acting as renter)
+    let tokenA, tokenB, gpuId, renterOrderId;
+    const u70a = `p70a${unique}`.slice(0, 28);
+    const u70b = `p70b${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u70a, email: `${u70a}@example.com`, password: 'Test1234!', role: 'provider' });
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u70b, email: `${u70b}@example.com`, password: 'Test1234!', role: 'provider' });
+      tokenA = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u70a}@example.com`, password: 'Test1234!' })).body.token;
+      tokenB = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u70b}@example.com`, password: 'Test1234!' })).body.token;
+
+      // Provider A registers a GPU
+      const gpuRes = await request(app).post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          id: `p70agpu${unique}`.slice(0, 64),
+          name: 'ProvA70 GPU',
+          vendor: 'NVIDIA',
+          model: 'RTX-P70A',
+          apiType: 'CUDA',
+          driverVersion: '525.0',
+          os: 'linux',
+          arch: 'x86_64',
+          memoryGB: 8,
+          clockMHz: 1500,
+          powerWatt: 200,
+          pricePerHour: 0.5,
+        });
+      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+
+      // Provider B orders the GPU from Provider A (B acting as renter)
+      if (gpuId) {
+        const orderRes = await request(app).post('/api/v1/orders')
+          .set('Authorization', `Bearer ${tokenB}`)
+          .send({ gpuId, durationMinutes: 5 });
+        renterOrderId = orderRes.body.order && orderRes.body.order.id;
+      }
+    });
+
+    it('provider B can see renter-side orders in GET /orders', async () => {
+      if (!renterOrderId) return;
+      const res = await request(app).get('/api/v1/orders')
+        .set('Authorization', `Bearer ${tokenB}`);
+      expect(res.statusCode).toBe(200);
+      const renterOrder = res.body.orders.find(o => o.id === renterOrderId);
+      expect(renterOrder).toBeTruthy();
+    });
+
+    it('?role=renter shows only renter-side orders for provider B', async () => {
+      if (!renterOrderId) return;
+      const res = await request(app).get('/api/v1/orders?role=renter')
+        .set('Authorization', `Bearer ${tokenB}`);
+      expect(res.statusCode).toBe(200);
+      const renterOrder = res.body.orders.find(o => o.id === renterOrderId);
+      expect(renterOrder).toBeTruthy();
+    });
+
+    it('?role=provider for provider B shows 0 orders (B has no GPUs)', async () => {
+      const res = await request(app).get('/api/v1/orders?role=provider')
+        .set('Authorization', `Bearer ${tokenB}`);
+      expect(res.statusCode).toBe(200);
+      // B is only a renter in this test; none of these orders have B as provider
+      const bProviderOrder = res.body.orders.find(o => o.id === renterOrderId);
+      expect(bProviderOrder).toBeFalsy();
+    });
+
+    it('?role=provider for provider A shows order where A is provider', async () => {
+      if (!renterOrderId) return;
+      const res = await request(app).get('/api/v1/orders?role=provider')
+        .set('Authorization', `Bearer ${tokenA}`);
+      expect(res.statusCode).toBe(200);
+      const aProviderOrder = res.body.orders.find(o => o.id === renterOrderId);
+      expect(aProviderOrder).toBeTruthy();
     });
   });
 

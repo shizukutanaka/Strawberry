@@ -114,7 +114,18 @@ router.get('/',
         if (req.query.userId) orders = orders.filter(o => o.userId === req.query.userId);
         if (req.query.providerId) orders = orders.filter(o => o.providerId === req.query.providerId);
       } else if (req.user.role === 'provider') {
-        orders = OrderRepository.getAll().filter(o => o.providerId === req.user.id);
+        // プロバイダは自分が提供側の注文に加え、自分が借り手側の注文も閲覧できる。
+        // ?role=provider でプロバイダ側のみ、?role=renter で借り手側のみ絞り込み可能。
+        const allOrders = OrderRepository.getAll();
+        if (req.query.role === 'provider') {
+          orders = allOrders.filter(o => o.providerId === req.user.id);
+        } else if (req.query.role === 'renter') {
+          orders = allOrders.filter(o => o.userId === req.user.id);
+        } else {
+          const providerSet = new Set(allOrders.filter(o => o.providerId === req.user.id).map(o => o.id));
+          const renterOrders = allOrders.filter(o => o.userId === req.user.id && !providerSet.has(o.id));
+          orders = [...allOrders.filter(o => providerSet.has(o.id)), ...renterOrders];
+        }
       } else {
         orders = OrderRepository.getByUserId(req.user.id);
       }

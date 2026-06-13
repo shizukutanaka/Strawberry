@@ -56,5 +56,26 @@ function purgeCache() {
   appendAuditLog('api_cache_purge', {});
 }
 
-module.exports = { cacheMiddleware, cache, purgeCache, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
+// ユーザー固有キャッシュの無効化。注文作成・更新後に呼ぶことで
+// 60 秒の TTL を待たずに最新データが返るようにする。
+function invalidateUserCache(userId) {
+  if (!userId) return;
+  const prefix = `${userId}:`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+    }
+  }
+}
+
+// 特定 URL パターンのキャッシュを削除（管理者・GPU 操作後の全ユーザーキャッシュ無効化）
+function invalidateByUrlPattern(pattern) {
+  for (const key of cache.keys()) {
+    if (key.includes(pattern)) {
+      cache.delete(key);
+    }
+  }
+}
+
+module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, invalidateByUrlPattern, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
 

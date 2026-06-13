@@ -91,7 +91,7 @@ const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders }
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
 const { sanitizeObject } = require('../../../utils/sanitize');
-const { cacheMiddleware } = require('../../middleware/cache');
+const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
 
 // オーダー一覧取得 (認証必須)
 // キャッシュは perUser 必須: URL のみをキーにすると先行ユーザーの注文一覧が
@@ -439,6 +439,8 @@ router.put('/:id',
     const prevStatus = order.status;
     const updatedOrder = OrderRepository.update(order.id, { ...order, ...sanitized });
     logger.info(`Order updated: ${order.id}`);
+    invalidateUserCache(req.user.id);
+    if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
     // ステータスが matched または active に変わった場合は借り手へ通知
     if (sanitized.status && sanitized.status !== prevStatus) {
       try {
@@ -509,6 +511,8 @@ router.delete('/:id',
       } catch (_) { /* 通知失敗はキャンセル処理を妨げない */ }
     }
     logger.info(`Order cancelled (soft-delete): ${order.id}`);
+    invalidateUserCache(req.user.id);
+    if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
     res.json({ message: 'Order cancelled', orderId: order.id });
   })
 );
@@ -672,6 +676,8 @@ router.post('/',
       totalPrice,
       totalPriceJPY
     });
+    // 注文作成後に借り手のキャッシュを即時無効化（60秒 TTL を待たず最新一覧が見える）
+    invalidateUserCache(req.user.id);
     res.status(201).json({
       message: 'Order created successfully',
       orderId: createdOrder.id,
@@ -736,6 +742,8 @@ router.post('/:id/reject',
       `【Strawberry】プロバイダがあなたの注文を拒否しました\n注文: #${order.id}\nGPU: ${gpuName}${cancelNote ? `\n理由: ${cancelNote}` : ''}`,
       { subject: `【Strawberry】注文 #${order.id} が拒否されました` });
     logger.info(`Order rejected by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id, cancelNote });
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
     res.json({ message: 'Order rejected', orderId: order.id });
   })
 );
@@ -770,6 +778,8 @@ router.post('/:id/accept',
       `【Strawberry】プロバイダがあなたの注文を承認しました\nGPU: ${gpuName}\n注文: #${order.id}`,
       { subject: `【Strawberry】注文 #${order.id} が承認されました` });
     logger.info(`Order accepted by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id });
+    invalidateUserCache(order.userId);
+    invalidateUserCache(req.user.id);
     res.json({ message: 'Order accepted', orderId: order.id, status: 'matched' });
   })
 );
@@ -829,6 +839,8 @@ router.post('/:id/dispute',
         { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
     }
     logger.info(`Dispute raised for order: ${order.id}`, { orderId: order.id, raisedBy: req.user.id });
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
     res.status(201).json({ message: 'Dispute raised', orderId: order.id, dispute });
   })
 );
@@ -954,6 +966,8 @@ router.post('/:id/dispute/resolve',
       }
     }
     logger.info(`Dispute resolved for order: ${order.id}`, { orderId: order.id, decision, resolvedBy: req.user.id });
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
     res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
   })
 );
@@ -1210,6 +1224,8 @@ router.post('/:id/stop',
         { subject: `【Strawberry】注文 #${orderId} 完了` });
     } catch (_) { /* 通知失敗は完了処理を妨げない */ }
 
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
     res.json({ message: 'Order execution stopped successfully', usageStats });
   })
 );

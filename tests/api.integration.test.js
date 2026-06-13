@@ -2979,6 +2979,134 @@ describe('API Integration', () => {
     });
   });
 
+  describe('User activity feed GET /users/me/activity (#65)', () => {
+    let token, userId, gpuId, orderId;
+    const u65 = `act65${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u65, email: `${u65}@example.com`, password: 'Test1234!', role: 'provider' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u65}@example.com`, password: 'Test1234!' });
+      token = login.body.token;
+
+      // Register a GPU so gpu_registered events exist
+      const gpuRes = await request(app).post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          id: `act65gpu${unique}`.slice(0, 64),
+          name: 'Activity GPU',
+          vendor: 'NVIDIA',
+          model: 'RTX-ACT',
+          apiType: 'CUDA',
+          driverVersion: '525.0',
+          os: 'linux',
+          arch: 'x86_64',
+          memoryGB: 8,
+          clockMHz: 1500,
+          powerWatt: 200,
+          pricePerHour: 0.5,
+        });
+      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+
+      // Create an order as renter
+      if (gpuId) {
+        const orderRes = await request(app).post('/api/v1/orders')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ gpuId, durationMinutes: 5 });
+        orderId = orderRes.body.order && orderRes.body.order.id;
+      }
+    });
+
+    it('requires authentication', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity');
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('returns activity feed with total/limit/offset/events', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('total');
+      expect(res.body).toHaveProperty('limit');
+      expect(res.body).toHaveProperty('offset');
+      expect(Array.isArray(res.body.events)).toBe(true);
+    });
+
+    it('events include gpu_registered event for registered GPU', async () => {
+      if (!gpuId) return;
+      const res = await request(app).get('/api/v1/users/me/activity')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      const gpuEvent = res.body.events.find(e => e.type === 'gpu_registered' && e.gpuId === gpuId);
+      expect(gpuEvent).toBeTruthy();
+      expect(gpuEvent).toHaveProperty('name');
+      expect(gpuEvent).toHaveProperty('vendor');
+    });
+
+    it('events include order event for created order', async () => {
+      if (!orderId) return;
+      const res = await request(app).get('/api/v1/users/me/activity')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      const orderEvent = res.body.events.find(e => e.orderId === orderId);
+      expect(orderEvent).toBeTruthy();
+      expect(orderEvent).toHaveProperty('status');
+    });
+
+    it('events are sorted newest first (descending timestamp)', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      const timestamps = res.body.events.map(e => e.timestamp || '');
+      for (let i = 1; i < timestamps.length; i++) {
+        expect(timestamps[i - 1] >= timestamps[i]).toBe(true);
+      }
+    });
+
+    it('?type=gpu_registered filters to only gpu events', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity?type=gpu_registered')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      for (const ev of res.body.events) {
+        expect(ev.type).toBe('gpu_registered');
+      }
+    });
+
+    it('?type=order_renter filters to only renter order events', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity?type=order_renter')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      for (const ev of res.body.events) {
+        expect(ev.type).toBe('order_renter');
+      }
+    });
+
+    it('?type=invalid_type returns 400', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity?type=invalid_type')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('?limit=1 returns at most 1 event', async () => {
+      const res = await request(app).get('/api/v1/users/me/activity?limit=1')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.events.length).toBeLessThanOrEqual(1);
+      expect(res.body.limit).toBe(1);
+    });
+
+    it('?offset skips events correctly', async () => {
+      const all = await request(app).get('/api/v1/users/me/activity')
+        .set('Authorization', `Bearer ${token}`);
+      const total = all.body.total;
+      const res = await request(app).get(`/api/v1/users/me/activity?offset=${total}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.events.length).toBe(0);
+    });
+  });
+
   describe('Refresh token single-use enforcement (#44)', () => {
     let firstRefreshToken;
 

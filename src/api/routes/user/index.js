@@ -356,8 +356,106 @@ router.put('/me/settings',
   })
 );
 
+// 自分のアクティビティフィード (認証必須)
+// 注文（借り手・提供者）、GPU登録、レビュー受領を単一タイムラインに統合して返す。
+// クエリ: ?limit=N (1-100, default 20) ?offset=N ?type=order_renter|order_provider|gpu_registered|review_received
+router.get('/me/activity',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const typeFilter = req.query.type || null;
+    const VALID_TYPES = new Set(['order_renter', 'order_provider', 'gpu_registered', 'review_received']);
+    if (typeFilter && !VALID_TYPES.has(typeFilter)) {
+      return res.status(400).json({ error: `Invalid type filter. Valid values: ${[...VALID_TYPES].join(', ')}` });
+    }
+
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const allOrders = OrderRepository.getAll();
+
+    const events = [];
+
+    if (!typeFilter || typeFilter === 'order_renter') {
+      for (const order of allOrders.filter(o => o.userId === userId)) {
+        events.push({
+          type: 'order_renter',
+          timestamp: order.createdAt,
+          orderId: order.id,
+          gpuId: order.gpuId || null,
+          status: order.status,
+          durationMinutes: order.durationMinutes,
+          totalPrice: order.totalPrice || null,
+        });
+      }
+    }
+
+    if (!typeFilter || typeFilter === 'order_provider') {
+      for (const order of allOrders.filter(o => o.providerId === userId)) {
+        events.push({
+          type: 'order_provider',
+          timestamp: order.createdAt,
+          orderId: order.id,
+          gpuId: order.gpuId || null,
+          status: order.status,
+          durationMinutes: order.durationMinutes,
+          totalPrice: order.totalPrice || null,
+        });
+      }
+    }
+
+    if (!typeFilter || typeFilter === 'gpu_registered') {
+      for (const gpu of GpuRepository.getAll().filter(g => g.providerId === userId)) {
+        events.push({
+          type: 'gpu_registered',
+          timestamp: gpu.createdAt,
+          gpuId: gpu.id,
+          name: gpu.name,
+          model: gpu.model,
+          vendor: gpu.vendor,
+        });
+      }
+    }
+
+    if (!typeFilter || typeFilter === 'review_received') {
+      for (const order of allOrders) {
+        // 借り手として受けたレビュー（提供者→借り手）
+        if (order.userId === userId && order.renterReview) {
+          events.push({
+            type: 'review_received',
+            timestamp: order.renterReview.reviewedAt || order.updatedAt || order.createdAt,
+            orderId: order.id,
+            rating: order.renterReview.rating,
+            comment: order.renterReview.comment || null,
+            reviewedBy: order.providerId || null,
+          });
+        }
+        // 提供者として受けたレビュー（借り手→提供者）
+        if (order.providerId === userId && order.review) {
+          events.push({
+            type: 'review_received',
+            timestamp: order.review.reviewedAt || order.updatedAt || order.createdAt,
+            orderId: order.id,
+            rating: order.review.rating,
+            comment: order.review.comment || null,
+            reviewedBy: order.userId || null,
+          });
+        }
+      }
+    }
+
+    // 新しい順にソートしてページネーション
+    events.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+    const total = events.length;
+    const page = events.slice(offset, offset + limit);
+
+    res.json({ total, limit, offset, events: page });
+  })
+);
+
 // ユーザー一覧取得 (管理者のみ)
-router.get('/', 
+router.get('/',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {

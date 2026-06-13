@@ -202,6 +202,23 @@ router.get('/provider/earnings',
         summary.cancelledCount++;
       }
     }
+    // GPU別収益内訳
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const byGpu = {};
+    for (const o of orders) {
+      if (o.status !== 'completed') continue;
+      const gid = o.gpuId;
+      if (!byGpu[gid]) byGpu[gid] = { gpuId: gid, gpuName: null, completedCount: 0, completedSats: 0, completedJPY: 0 };
+      byGpu[gid].completedCount++;
+      byGpu[gid].completedSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
+      byGpu[gid].completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
+    }
+    for (const entry of Object.values(byGpu)) {
+      const gpu = GpuRepository.getById(entry.gpuId);
+      entry.gpuName = gpu ? gpu.name : null;
+    }
+    summary.byGpu = Object.values(byGpu).sort((a, b) => b.completedSats - a.completedSats);
+
     res.json({ message: 'Provider earnings summary', earnings: summary });
   })
 );

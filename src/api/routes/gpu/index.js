@@ -380,6 +380,18 @@ router.delete('/:id',
   asyncHandler(async (req, res) => {
     const gpuId = req.params.id;
     logger.info(`Removing GPU: ${gpuId}`);
+
+    // アクティブな注文がある場合は削除を拒否（孤立注文を防ぐ）
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const BLOCKING = new Set(['pending', 'matched', 'active']);
+    const activeOrders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && BLOCKING.has(o.status));
+    if (activeOrders.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete GPU with active orders. Cancel or complete all orders first.',
+        activeOrderCount: activeOrders.length,
+      });
+    }
+
     // GPU登録を削除（ファイル永続化）
     const deleted = GpuRepository.delete(gpuId);
     if (!deleted) {

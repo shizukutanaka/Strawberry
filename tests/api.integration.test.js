@@ -2184,6 +2184,140 @@ describe('API Integration', () => {
     });
   });
 
+  describe('GPU delete cascade protection (#46)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, gpuId, orderId;
+
+    beforeAll(async () => {
+      const p = `cdp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+      gpuId = GpuRepository.create({
+        name: 'Cascade GPU', vendor: 'NVIDIA', model: 'RTX-CDL', memoryGB: 8, pricePerHour: 0.1, providerId,
+      }).id;
+      // create a pending order on this GPU
+      orderId = OrderRepository.create({
+        gpuId, userId: 'some-renter', providerId, durationMinutes: 30, status: 'pending',
+        createdAt: new Date().toISOString(),
+      }).id;
+    });
+
+    it('DELETE /gpus/:id returns 409 when active orders exist', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/gpus/${gpuId}`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(409);
+      expect(res.body.activeOrderCount).toBeGreaterThan(0);
+      expect(GpuRepository.getById(gpuId)).toBeDefined();
+    });
+
+    it('DELETE /gpus/:id succeeds after orders are completed/cancelled', async () => {
+      OrderRepository.update(orderId, { status: 'cancelled' });
+      const res = await request(app)
+        .delete(`/api/v1/gpus/${gpuId}`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(GpuRepository.getById(gpuId)).toBeFalsy();
+    });
+  });
+
+  describe('Provider earnings per-GPU breakdown (#47)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, gpu1Id, gpu2Id;
+
+    beforeAll(async () => {
+      const p = `egp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      gpu1Id = GpuRepository.create({ name: 'Earn GPU 1', vendor: 'NVIDIA', model: 'RTX-E1', memoryGB: 8, pricePerHour: 1.0, providerId }).id;
+      gpu2Id = GpuRepository.create({ name: 'Earn GPU 2', vendor: 'AMD',    model: 'RX-E2',  memoryGB: 8, pricePerHour: 0.5, providerId }).id;
+
+      OrderRepository.create({ gpuId: gpu1Id, userId: 'u1', providerId, durationMinutes: 60, status: 'completed', totalPrice: 1000, totalPriceJPY: 1500, createdAt: new Date().toISOString() });
+      OrderRepository.create({ gpuId: gpu1Id, userId: 'u2', providerId, durationMinutes: 60, status: 'completed', totalPrice: 800,  totalPriceJPY: 1200, createdAt: new Date().toISOString() });
+      OrderRepository.create({ gpuId: gpu2Id, userId: 'u3', providerId, durationMinutes: 60, status: 'completed', totalPrice: 500,  totalPriceJPY: 750,  createdAt: new Date().toISOString() });
+    });
+
+    it('earnings response includes byGpu array', async () => {
+      const res = await request(app)
+        .get('/api/v1/orders/provider/earnings')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.body.earnings.byGpu)).toBe(true);
+    });
+
+    it('byGpu shows correct per-GPU completed counts and earnings', async () => {
+      const res = await request(app)
+        .get('/api/v1/orders/provider/earnings')
+        .set('Authorization', `Bearer ${providerToken}`);
+      const g1 = res.body.earnings.byGpu.find(g => g.gpuId === gpu1Id);
+      const g2 = res.body.earnings.byGpu.find(g => g.gpuId === gpu2Id);
+      expect(g1).toBeDefined();
+      expect(g1.completedCount).toBe(2);
+      expect(g1.completedSats).toBe(1800);
+      expect(g2).toBeDefined();
+      expect(g2.completedCount).toBe(1);
+      expect(g2.completedSats).toBe(500);
+    });
+
+    it('byGpu is sorted by completedSats descending (highest earner first)', async () => {
+      const res = await request(app)
+        .get('/api/v1/orders/provider/earnings')
+        .set('Authorization', `Bearer ${providerToken}`);
+      const byGpu = res.body.earnings.byGpu;
+      for (let i = 1; i < byGpu.length; i++) {
+        expect(byGpu[i - 1].completedSats).toBeGreaterThanOrEqual(byGpu[i].completedSats);
+      }
+    });
+
+    it('byGpu includes gpuName from the GPU registry', async () => {
+      const res = await request(app)
+        .get('/api/v1/orders/provider/earnings')
+        .set('Authorization', `Bearer ${providerToken}`);
+      const g1 = res.body.earnings.byGpu.find(g => g.gpuId === gpu1Id);
+      expect(g1.gpuName).toBe('Earn GPU 1');
+    });
+  });
+
+  describe('Marketplace public stats endpoint (#48)', () => {
+    it('GET /marketplace/stats returns without auth (public)', async () => {
+      const res = await request(app).get('/api/v1/marketplace/stats');
+      expect(res.statusCode).toBe(200);
+      expect(typeof res.body.totalGpus).toBe('number');
+      expect(typeof res.body.availableGpus).toBe('number');
+    });
+
+    it('response includes pricing summary', async () => {
+      const res = await request(app).get('/api/v1/marketplace/stats');
+      expect(res.body).toHaveProperty('pricing');
+      expect(res.body.pricing).toHaveProperty('minPricePerHour');
+    });
+
+    it('response includes vendorDistribution object', async () => {
+      const res = await request(app).get('/api/v1/marketplace/stats');
+      expect(res.body).toHaveProperty('vendorDistribution');
+      expect(typeof res.body.vendorDistribution).toBe('object');
+    });
+
+    it('topGpusByCompletedOrders is an array (max 10)', async () => {
+      const res = await request(app).get('/api/v1/marketplace/stats');
+      expect(Array.isArray(res.body.topGpusByCompletedOrders)).toBe(true);
+      expect(res.body.topGpusByCompletedOrders.length).toBeLessThanOrEqual(10);
+    });
+  });
+
   describe('Webhook retry logic withRetry (#45)', () => {
     const { withRetry } = require('../src/utils/notifier');
     const http = require('http');

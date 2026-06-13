@@ -70,7 +70,9 @@ function isPublicPath(path) {
     || path.startsWith('/gpus/')
     // プロバイダ公開レピュテーション照会 & 借り手公開プロフィール（閲覧はマーケット信頼判断のため公開、GETのみ）
     || /^\/users\/[^/]+\/reputation$/.test(path)
-    || /^\/users\/[^/]+\/renter-profile$/.test(path);
+    || /^\/users\/[^/]+\/renter-profile$/.test(path)
+    // マーケット公開統計（サプライ・ディマンド・価格帯の概要 — 閲覧のみ）
+    || path === '/marketplace/stats';
 }
 router.use((req, res, next) => {
   if (isPublicPath(req.path)) return next();

@@ -105,33 +105,41 @@ async function sendNotification(typeOrUserId, message, options = {}) {
 // LINE Notify
 async function sendLineNotify(message, { token }) {
   if (!token) throw new Error('LINEトークン未設定');
-  const res = await axios.post('https://notify-api.line.me/api/notify',
-    new URLSearchParams({ message }),
-    { headers: { 'Authorization': `Bearer ${token}` } }
-  );
-  return res.data;
+  return withRetry(async () => {
+    const res = await axios.post('https://notify-api.line.me/api/notify',
+      new URLSearchParams({ message }),
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    );
+    return res.data;
+  });
 }
 
 // Discord Webhook
 async function sendDiscordNotify(message, { webhookUrl }) {
   if (!webhookUrl) throw new Error('Discord Webhook URL未設定');
-  const res = await axios.post(webhookUrl, { content: message });
-  return res.data;
+  return withRetry(async () => {
+    const res = await axios.post(webhookUrl, { content: message });
+    return res.data;
+  });
 }
 
 // Slack Webhook
 async function sendSlackNotify(message, { webhookUrl }) {
   if (!webhookUrl) throw new Error('Slack Webhook URL未設定');
-  const res = await axios.post(webhookUrl, { text: message });
-  return res.data;
+  return withRetry(async () => {
+    const res = await axios.post(webhookUrl, { text: message });
+    return res.data;
+  });
 }
 
 // Telegram Bot
 async function sendTelegramNotify(message, { botToken, chatId }) {
   if (!botToken || !chatId) throw new Error('Telegram Bot情報未設定');
-  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-  const res = await axios.post(url, { chat_id: chatId, text: message });
-  return res.data;
+  return withRetry(async () => {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const res = await axios.post(url, { chat_id: chatId, text: message });
+    return res.data;
+  });
 }
 
 // Email（SendGrid/Mailgun等は別途実装）
@@ -140,14 +148,36 @@ async function sendEmailNotify(message, { to, subject = '通知', from, sendFunc
   return await sendFunc({ to, subject, text: message, from });
 }
 
+// 指数バックオフ付きリトライ（一時的なネットワーク障害 / 5xx に対応）
+async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      // 4xx はクライアントエラーのためリトライしない
+      const status = err.response && err.response.status;
+      if (status && status >= 400 && status < 500) throw err;
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt - 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // 汎用Webhook
 async function sendWebhookNotify(message, { webhookUrl, payload = {} }) {
   if (!webhookUrl) throw new Error('Webhook URL未設定');
-  const res = await axios.post(webhookUrl, { message, ...payload });
-  return res.data;
+  return withRetry(async () => {
+    const res = await axios.post(webhookUrl, { message, ...payload });
+    return res.data;
+  });
 }
 
 module.exports = {
   sendNotification,
   NotifyType,
+  withRetry,
 };

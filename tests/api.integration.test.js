@@ -2184,6 +2184,63 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Webhook retry logic withRetry (#45)', () => {
+    const { withRetry } = require('../src/utils/notifier');
+    const http = require('http');
+
+    it('succeeds immediately when the first attempt works', async () => {
+      let calls = 0;
+      const result = await withRetry(async () => { calls++; return 'ok'; });
+      expect(result).toBe('ok');
+      expect(calls).toBe(1);
+    });
+
+    it('retries after transient network error and succeeds', async () => {
+      let calls = 0;
+      const result = await withRetry(async () => {
+        calls++;
+        if (calls < 2) throw Object.assign(new Error('ECONNREFUSED'), { code: 'ECONNREFUSED' });
+        return 'recovered';
+      }, { maxAttempts: 3, baseDelayMs: 1 });
+      expect(result).toBe('recovered');
+      expect(calls).toBe(2);
+    });
+
+    it('throws after exhausting all attempts', async () => {
+      let calls = 0;
+      await expect(withRetry(async () => {
+        calls++;
+        throw Object.assign(new Error('always fails'), { code: 'ECONNREFUSED' });
+      }, { maxAttempts: 3, baseDelayMs: 1 })).rejects.toThrow('always fails');
+      expect(calls).toBe(3);
+    });
+
+    it('does NOT retry on 4xx client errors (non-retriable)', async () => {
+      let calls = 0;
+      const err = Object.assign(new Error('Bad Request'), { response: { status: 400 } });
+      await expect(withRetry(async () => {
+        calls++;
+        throw err;
+      }, { maxAttempts: 3, baseDelayMs: 1 })).rejects.toThrow();
+      expect(calls).toBe(1);
+    });
+
+    it('delivers to a real localhost HTTP webhook server', async () => {
+      let received = null;
+      const server = http.createServer((req, res) => {
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => { received = JSON.parse(body); res.end('{}'); });
+      });
+      await new Promise(r => server.listen(0, '127.0.0.1', r));
+      const port = server.address().port;
+      const { sendNotification, NotifyType } = require('../src/utils/notifier');
+      await sendNotification(NotifyType.WEBHOOK, 'test-msg', { webhookUrl: `http://127.0.0.1:${port}` });
+      await new Promise(r => server.close(r));
+      expect(received).toMatchObject({ message: 'test-msg' });
+    });
+  });
+
   describe('Refresh token single-use enforcement (#44)', () => {
     let firstRefreshToken;
 

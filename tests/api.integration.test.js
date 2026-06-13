@@ -792,13 +792,14 @@ describe('API Integration', () => {
     });
 
     it('GET /gpus?minRating=3 returns GPUs with avg rating ≥ 3', async () => {
-      const res = await request(app).get('/api/v1/gpus?minRating=3');
+      // limit=200 so the seeded GPU isn't paginated out by accumulated test data
+      const res = await request(app).get('/api/v1/gpus?minRating=3&limit=200');
       expect(res.statusCode).toBe(200);
       expect(res.body.gpus.some(g => g.id === gpuId)).toBe(true);
     });
 
     it('GET /gpus?minRating=5 excludes GPU with avg 4 stars', async () => {
-      const res = await request(app).get('/api/v1/gpus?minRating=5');
+      const res = await request(app).get('/api/v1/gpus?minRating=5&limit=200');
       expect(res.statusCode).toBe(200);
       expect(res.body.gpus.some(g => g.id === gpuId)).toBe(false);
     });

@@ -94,6 +94,10 @@
 | 34 | 借り手への注文状態変化通知 | 中（matched/active への遷移時に借り手へ通知がなく、手動でポーリングするか注文詳細を確認するしかなかった） | ✅ 実装済み（`PUT /orders/:id` でステータスが matched/active に変わると `notifyUser` で借り手へ通知、`POST /orders/:id/start` も同様） |
 | 35 | 注文ステータス変遷タイムライン | 低（`GET /orders/:id` に各ステータスへの遷移タイムスタンプがバラバラに存在したが、時系列に整理された `timeline` フィールドがなかった） | ✅ 実装済み（`GET /orders/:id` に `timeline: [{status, at}]` を追加、既存の createdAt/matchedAt/startedAt/completedAt/cancelledAt/dispute.raisedAt を昇順整列） |
 | 36 | GPU 国・APIタイプフィルタ | 低（GPU 一覧が vendor/price/memory のみで絞り込め、国やAPIタイプ（CUDA/ROCm等）では絞り込めなかった） | ✅ 実装済み（`GET /gpus?country=JP&apiType=CUDA` で location.country と apiType を大文字統一で絞り込み） |
+| 37 | 注文失効時の借り手通知 | 中（pending 注文が payment_timeout で自動キャンセルされても借り手に通知が届かず、GPU をブロックしている理由が不明だった） | ✅ 実装済み（`expireStaleOrders` が注文を失効させた後に `notifyUser` で借り手へキャンセル通知） |
+| 38 | 注文 gpuId フィルタ | 低（`GET /orders?gpuId=X` が存在せず、プロバイダが特定 GPU の注文だけを素早く確認できなかった） | ✅ 実装済み（全ロールで `?gpuId=X` フィルタを有効化、認可チェックは従来通り各ロールに適用） |
+| 39 | 管理者向けエスクロー横断クエリ | 中（エスクローの参照が `GET /orders/:id/payment`（注文スコープ）しかなく、管理者がエスクローを横断検索できなかった） | ✅ 実装済み（`GET /admin/escrow?orderId=X&state=Y`、管理者限定、ページネーション付き） |
+| 40 | GPU 手動オフライン（available トグル） | 中（プロバイダが一時的にメンテナンスなどで GPU をオフラインにする手段がなく、注文を拒否し続けるしかなかった） | ✅ 実装済み（`PUT /gpus/:id { available: boolean }` でプロバイダが手動トグル可能、`GET /gpus?available=true` でも除外される）|
 
 ### ソクラテス問答による発見（critical）
 
@@ -141,7 +145,7 @@
 
 ## 総評
 
-土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 40 件中 39 件が実装済み（106/106 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 44 件中 43 件が実装済み（116/116 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
 
 - **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
 - **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。

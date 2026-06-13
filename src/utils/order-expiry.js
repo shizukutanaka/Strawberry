@@ -41,6 +41,13 @@ function expireStaleOrders() {
     });
     expired++;
     logger.info(`Order auto-expired (payment timeout): ${order.id}`);
+    // 借り手へ失効通知（決済タイムアウトで自動キャンセルされたことを即時周知）
+    try {
+      const { notifyUser } = require('./user-notify');
+      notifyUser(order.userId, 'order_expired',
+        `【Strawberry】注文が決済タイムアウトにより自動キャンセルされました\n注文: #${order.id}`,
+        { subject: `【Strawberry】注文 #${order.id} 自動キャンセル通知` });
+    } catch (_) { /* 通知失敗は失効処理を妨げない */ }
   }
   return expired;
 }

@@ -193,6 +193,23 @@ router.get('/admin/verifications/:jobId', jwtAuth, rbac('admin'), asyncHandler(a
   res.json(record);
 }));
 
+// エスクロー一覧（管理者のみ）— orderId・state で絞り込み可能。
+// 注文当事者は GET /orders/:id/payment で自分の注文のエスクローを閲覧できるが、
+// 管理者が全エスクローをクロス検索する手段がなかった。
+router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const EscrowRepository = require('../../db/json/EscrowRepository');
+  let escrows = EscrowRepository.getAll();
+  if (req.query.orderId) escrows = escrows.filter(e => e.orderId === req.query.orderId);
+  if (req.query.state) escrows = escrows.filter(e => e.state === req.query.state);
+  const limitRaw = parseInt(req.query.limit, 10);
+  const offsetRaw = parseInt(req.query.offset, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const total = escrows.length;
+  const page = escrows.slice(offset, offset + limit);
+  res.json({ total, limit, offset, escrows: page });
+}));
+
 // システム情報取得（adminのみ許可）
 router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   // システム情報を取得

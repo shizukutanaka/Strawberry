@@ -1786,8 +1786,8 @@ describe('API Integration', () => {
     });
 
     it('completed order timeline includes pending + completed entries', async () => {
-      const renterId = UserRepository.getAll().find(u => u.username?.startsWith('tl'))?.id;
-      const gpuObj = GpuRepository.getById(gpuId);
+      const tlEmail = `tl${unique}@example.com`;
+      const renterId = UserRepository.getByEmail(tlEmail)?.id;
       const order = OrderRepository.create({
         gpuId, userId: renterId, status: 'completed', durationMinutes: 30, totalPrice: 3,
         createdAt: '2026-06-01T10:00:00.000Z',
@@ -1836,6 +1836,139 @@ describe('API Integration', () => {
       const res = await request(app).get('/api/v1/gpus?country=DE');
       expect(res.statusCode).toBe(200);
       expect(res.body.gpus.length).toBe(0);
+    });
+  });
+
+  describe('gpuId filter in GET /orders (#38)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let renterToken, renterId, gpuAId, gpuBId;
+
+    beforeAll(async () => {
+      const r = `gf${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+      gpuAId = GpuRepository.create({ name: 'Filter GPU A', vendor: 'AMD', model: 'RX-FA', memoryGB: 4, pricePerHour: 0.05 }).id;
+      gpuBId = GpuRepository.create({ name: 'Filter GPU B', vendor: 'NVIDIA', model: 'RTX-FB', memoryGB: 8, pricePerHour: 0.1 }).id;
+      OrderRepository.create({ gpuId: gpuAId, userId: renterId, status: 'cancelled', durationMinutes: 30, totalPrice: 2, createdAt: new Date().toISOString() });
+      OrderRepository.create({ gpuId: gpuBId, userId: renterId, status: 'cancelled', durationMinutes: 30, totalPrice: 3, createdAt: new Date().toISOString() });
+    });
+
+    it('GET /orders?gpuId=X returns only orders for that GPU', async () => {
+      const res = await request(app).get(`/api/v1/orders?gpuId=${gpuAId}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.orders.every(o => o.gpuId === gpuAId)).toBe(true);
+    });
+
+    it('GET /orders?gpuId=unknown returns empty list', async () => {
+      const res = await request(app).get('/api/v1/orders?gpuId=00000000-0000-4000-8000-000000000000')
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.orders.length).toBe(0);
+    });
+  });
+
+  describe('Admin escrow query (#39)', () => {
+    const EscrowRepository = require('../src/db/json/EscrowRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let adminToken, escrowOrderId;
+
+    beforeAll(async () => {
+      const adm = `esadm${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
+      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
+      UserRepository.update(admUser.id, { role: 'admin' });
+      adminToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
+      // Use unique orderId per run to avoid accumulation from previous test runs sharing data/escrows.json
+      escrowOrderId = `esc-${unique}-1`;
+      EscrowRepository.create({ orderId: escrowOrderId, amountSats: 500, feeRate: 0, state: 'HELD' });
+      EscrowRepository.create({ orderId: `esc-${unique}-2`, amountSats: 1000, feeRate: 1, state: 'SETTLED' });
+    });
+
+    it('GET /admin/escrow returns all escrows for admin', async () => {
+      const res = await request(app).get('/api/v1/admin/escrow')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('total');
+      expect(res.body).toHaveProperty('escrows');
+      expect(res.body.total).toBeGreaterThanOrEqual(2);
+    });
+
+    it('GET /admin/escrow?state=HELD filters by state', async () => {
+      const res = await request(app).get('/api/v1/admin/escrow?state=HELD')
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.escrows.every(e => e.state === 'HELD')).toBe(true);
+    });
+
+    it('GET /admin/escrow?orderId=X filters by orderId', async () => {
+      const res = await request(app).get(`/api/v1/admin/escrow?orderId=${escrowOrderId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.escrows.length).toBe(1);
+      expect(res.body.escrows[0].orderId).toBe(escrowOrderId);
+    });
+
+    it('GET /admin/escrow requires admin (401 without auth, 403 for non-admin)', async () => {
+      const noAuth = await request(app).get('/api/v1/admin/escrow');
+      expect(noAuth.statusCode).toBe(401);
+    });
+  });
+
+  describe('GPU available toggle via PUT (#40)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, gpuId;
+
+    beforeAll(async () => {
+      const p = `avp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+      gpuId = GpuRepository.create({
+        name: 'Toggle GPU', vendor: 'AMD', model: 'RX-TOG', memoryGB: 8, pricePerHour: 0.1, providerId,
+      }).id;
+    });
+
+    it('PUT /gpus/:id with available:false marks GPU offline', async () => {
+      const res = await request(app).put(`/api/v1/gpus/${gpuId}`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ available: false });
+      expect(res.statusCode).toBe(200);
+      expect(GpuRepository.getById(gpuId).available).toBe(false);
+    });
+
+    it('GET /gpus?available=true excludes manually-offline GPUs', async () => {
+      const res = await request(app).get('/api/v1/gpus?available=true&limit=200');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.find(g => g.id === gpuId)).toBeUndefined();
+    });
+
+    it('PUT /gpus/:id with available:true brings GPU back online', async () => {
+      const res = await request(app).put(`/api/v1/gpus/${gpuId}`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ available: true });
+      expect(res.statusCode).toBe(200);
+      expect(GpuRepository.getById(gpuId).available).toBe(true);
+    });
+
+    it('PUT /gpus/:id with available: non-boolean → 400', async () => {
+      const res = await request(app).put(`/api/v1/gpus/${gpuId}`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ available: 'yes' });
+      expect(res.statusCode).toBe(400);
     });
   });
 });

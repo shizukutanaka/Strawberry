@@ -82,6 +82,20 @@ const schemas = {
   minRenterRating: Joi.number().min(1).max(5).optional()
 }),
 
+    // GPU更新用スキーマ（全フィールドオプション — 部分更新）
+    update: Joi.object({
+      name: Joi.string().max(128).optional(),
+      pricePerHour: Joi.number().min(0.00001).optional(),
+      availability: Joi.object({
+        startTime: Joi.date().iso(),
+        endTime: Joi.date().iso(),
+        hoursPerDay: Joi.number().min(1).max(24),
+        daysAvailable: Joi.array().items(Joi.number().min(0).max(6))
+      }).optional(),
+      minRenterRating: Joi.number().min(1).max(5).optional(),
+      available: Joi.boolean().optional()
+    }),
+
     // GPU検索用スキーマ
     search: Joi.object({
       minMemoryGB: Joi.number().min(1),

@@ -98,7 +98,12 @@ router.get('/', asyncHandler(async (req, res) => {
       return slotStart <= nowMs && slotEnd > nowMs;
     }).map(o => o.gpuId)
   );
-  gpus = gpus.map(gpu => ({ ...gpu, available: !occupiedGpuIds.has(gpu.id) }));
+  // available: プロバイダが手動で false に設定している場合はそれを優先し、
+  // そうでなければ現在時刻に重複注文がない場合は true とする（動的稼働チェック）。
+  gpus = gpus.map(gpu => ({
+    ...gpu,
+    available: gpu.available === false ? false : !occupiedGpuIds.has(gpu.id),
+  }));
   // ?available=true で空き GPU のみに絞り込み
   if (req.query.available === 'true') {
     gpus = gpus.filter(gpu => gpu.available);
@@ -326,7 +331,11 @@ router.put('/:id',
     const gpuId = gpu.id;
     logger.info(`Updating GPU: ${gpuId}`);
     // 入力値サニタイズ
-    const sanitized = sanitizeObject(req.body, ['name', 'pricePerHour', 'availability', 'minRenterRating']);
+    const sanitized = sanitizeObject(req.body, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available']);
+    // available は boolean のみ許可（任意の型汚染を防ぐ）
+    if ('available' in sanitized && typeof sanitized.available !== 'boolean') {
+      return res.status(400).json({ error: '"available" must be a boolean' });
+    }
     // 重複スペック登録防止
     const duplicate = GpuRepository.getAll().find(g =>
       g.id !== gpuId &&

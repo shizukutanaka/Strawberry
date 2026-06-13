@@ -120,6 +120,10 @@ router.get('/',
       if (status) {
         orders = orders.filter(order => order.status === status);
       }
+      // gpuId で絞り込み（全ロール対応 — プロバイダが特定 GPU の注文を確認する際に便利）
+      if (req.query.gpuId) {
+        orders = orders.filter(order => order.gpuId === req.query.gpuId);
+      }
       const SORTABLE_FIELDS = new Set(['createdAt', 'updatedAt', 'status', 'totalPrice', 'durationMinutes']);
       const sortBy = SORTABLE_FIELDS.has(req.query.sortBy) ? req.query.sortBy : 'createdAt';
       const sortDir = req.query.sortDir === 'asc' ? 1 : -1;

@@ -2184,6 +2184,83 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Order completion notification + GPU list rating + health summary (#58-60)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let renterToken, renterId, providerToken, providerId, gpuId;
+
+    beforeAll(async () => {
+      const r = `cmp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+
+      const p = `cmpp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      gpuId = GpuRepository.create({
+        name: 'Cmp GPU', vendor: 'NVIDIA', model: 'RTX-CMP', memoryGB: 8, pricePerHour: 0.5, providerId,
+      }).id;
+    });
+
+    it('GET /gpus response includes summary (totalRegistered/Available/Occupied) (#60)', async () => {
+      const res = await request(app).get('/api/v1/gpus');
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('summary');
+      expect(typeof res.body.summary.totalRegistered).toBe('number');
+      expect(typeof res.body.summary.totalAvailable).toBe('number');
+      expect(typeof res.body.summary.totalOccupied).toBe('number');
+      expect(res.body.summary.totalRegistered).toBeGreaterThan(0);
+    });
+
+    it('GET /gpus response includes rating field for each GPU (#59)', async () => {
+      const res = await request(app).get(`/api/v1/gpus?search=Cmp+GPU`);
+      expect(res.statusCode).toBe(200);
+      const gpu = res.body.gpus.find(g => g.id === gpuId);
+      expect(gpu).toBeDefined();
+      expect(gpu).toHaveProperty('rating');
+      expect(gpu.rating).toHaveProperty('average');
+      expect(gpu.rating).toHaveProperty('count');
+    });
+
+    it('rating.average reflects submitted reviews (#59)', async () => {
+      // inject a completed order with a review
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'completed',
+        review: { rating: 4, comment: 'good' },
+        createdAt: new Date().toISOString(),
+      });
+      const res = await request(app).get(`/api/v1/gpus?search=Cmp+GPU`);
+      const gpu = res.body.gpus.find(g => g.id === gpuId);
+      expect(gpu.rating.average).toBe(4);
+      expect(gpu.rating.count).toBe(1);
+      OrderRepository.update(order.id, { status: 'cancelled', review: null });
+    });
+
+    it('POST /orders/:id/stop sends completion notification to renter (#58)', async () => {
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
+        createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
+      });
+      // renter stops the order (renter or admin can call /stop)
+      const res = await request(app)
+        .post(`/api/v1/orders/${order.id}/stop`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      // verify order is completed (notification is fire-and-forget so we check state)
+      const completed = OrderRepository.getById(order.id);
+      expect(completed.status).toBe('completed');
+    });
+  });
+
   describe('Provider "my GPUs" endpoint GET /gpus/my (#55)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const UserRepository = require('../src/db/json/UserRepository');

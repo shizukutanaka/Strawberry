@@ -171,14 +171,30 @@ router.get('/', asyncHandler(async (req, res) => {
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
   const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
-  gpus = gpus.slice(offset, offset + limit);
-  // レスポンスに追加情報を含める
+  const pagedGpus = gpus.slice(offset, offset + limit);
+
+  // 全 GPU の状況サマリ（ページング前の全体集計）
+  const allGpus = GpuRepository.getAll();
+  const totalRegistered = allGpus.length;
+  const totalAvailable = allGpus.filter(g => g.available !== false && !occupiedGpuIds.has(g.id)).length;
+  const totalOccupied = allGpus.filter(g => occupiedGpuIds.has(g.id)).length;
+
+  // レスポンスに追加情報を含める（reviewMap を使ってページ内 GPU に rating を付与）
   const response = {
     message: 'Fetched available GPUs',
     total: totalCount,
     limit,
     offset,
-    gpus: gpus.map(({ apiKey, ...gpu }) => gpu), // apiKeyなどの漏洩防止
+    summary: { totalRegistered, totalAvailable, totalOccupied },
+    gpus: pagedGpus.map(({ apiKey, ...gpu }) => {
+      const r = reviewMap.get(gpu.id);
+      return {
+        ...gpu,
+        rating: r && r.count > 0
+          ? { average: Math.round((r.sum / r.count) * 10) / 10, count: r.count }
+          : { average: null, count: 0 },
+      };
+    }),
     timestamp: new Date().toISOString()
   };
   res.json(response);

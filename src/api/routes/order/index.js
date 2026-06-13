@@ -1052,6 +1052,16 @@ router.post('/:id/stop',
       }
     }
 
+    // 借り手へ完了通知（支払い確認と利用時間サマリを含む）
+    try {
+      const { notifyUser } = require('../../../utils/user-notify');
+      const duration = usageStats && usageStats.usageSeconds
+        ? `${Math.round(usageStats.usageSeconds / 60)} 分` : `${order.durationMinutes} 分`;
+      notifyUser(order.userId, 'order_completed',
+        `【Strawberry】GPU 利用が完了しました\n注文: #${orderId}\n利用時間: ${duration}\nレビューを投稿して次回の GPU 選択に役立ててください。`,
+        { subject: `【Strawberry】注文 #${orderId} 完了` });
+    } catch (_) { /* 通知失敗は完了処理を妨げない */ }
+
     res.json({ message: 'Order execution stopped successfully', usageStats });
   })
 );

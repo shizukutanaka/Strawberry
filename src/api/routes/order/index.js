@@ -357,8 +357,14 @@ router.put('/:id',
     logger.info(`Updating order: ${order.id}`);
     // 入力値サニタイズ
     const sanitized = sanitizeObject(req.body, ['description']);
-    // 状態遷移チェック
+    // ステータス変更は管理者専用（専用エンドポイント /accept /reject /start /stop /dispute を使う）。
+    // 一般ユーザー（借り手・提供者）が PUT で status を直接操作できると正規フローを迂回できる:
+    //   - 借り手が pending→matched や matched→active にすることで提供者確認をスキップ
+    //   - 提供者が active→completed にすることで /stop のエスクロー決済をスキップ
     if (sanitized.status && sanitized.status !== order.status) {
+      if (req.user.role !== 'admin') {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Only admins can change order status via this endpoint. Use the dedicated endpoints (/accept, /reject, /start, /stop, /dispute)', 403);
+      }
       if (!isValidOrderTransition(order.status, sanitized.status)) {
         return res.status(400).json({ error: `Invalid status transition from ${order.status} to ${sanitized.status}` });
       }

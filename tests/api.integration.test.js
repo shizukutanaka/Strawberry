@@ -116,33 +116,31 @@ describe('API Integration', () => {
       expect(res.body.order.status).toBe('pending');
     });
 
-    it('rejects an invalid status transition with 400 (not a 500 ReferenceError)', async () => {
+    it('rejects status change via PUT for non-admin users with 403 (security fix #69)', async () => {
       const create = await request(app)
         .post('/api/v1/orders')
         .set('Authorization', `Bearer ${token}`)
         .send({ gpuId: seedGpu(), durationMinutes: 60 });
       const orderId = create.body.order.id;
-      // pending -> completed は不正遷移（pending は matched/cancelled のみ許可）
+      // renter cannot set status via PUT — must use dedicated endpoints
       const res = await request(app)
         .put(`/api/v1/orders/${orderId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ status: 'completed' });
-      expect(res.statusCode).toBe(400);
-      expect(res.body.error).toMatch(/transition/i);
+      expect(res.statusCode).toBe(403);
     });
 
-    it('allows a valid status transition pending -> cancelled', async () => {
+    it('cancel pending order via DELETE /orders/:id (soft-cancel)', async () => {
       const create = await request(app)
         .post('/api/v1/orders')
         .set('Authorization', `Bearer ${token}`)
         .send({ gpuId: seedGpu(), durationMinutes: 60 });
       const orderId = create.body.order.id;
       const res = await request(app)
-        .put(`/api/v1/orders/${orderId}`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ status: 'cancelled' });
+        .delete(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${token}`);
       expect(res.statusCode).toBe(200);
-      expect(res.body.order.status).toBe('cancelled');
+      expect(res.body.orderId).toBe(orderId);
     });
 
     it('rejects double-booking the same GPU with 409', async () => {
@@ -557,9 +555,9 @@ describe('API Integration', () => {
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
       // manually transition to cancelled
-      await request(app).put(`/api/v1/orders/${orderId}`)
-        .set('Authorization', `Bearer ${renterToken}`)
-        .send({ status: 'cancelled' });
+      // Cancel via DELETE (correct endpoint for renters)
+      await request(app).delete(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`);
 
       const reject = await request(app)
         .post(`/api/v1/orders/${orderId}/reject`)
@@ -2919,6 +2917,72 @@ describe('API Integration', () => {
       const res = await request(app).get('/api/v1/marketplace/stats');
       expect(Array.isArray(res.body.topGpusByCompletedOrders)).toBe(true);
       expect(res.body.topGpusByCompletedOrders.length).toBeLessThanOrEqual(10);
+    });
+  });
+
+  describe('PUT /orders/:id status change restricted to admin only (#69)', () => {
+    let renterToken, providerToken, gpuId, orderId;
+    const u69r = `p69r${unique}`.slice(0, 28);
+    const u69p = `p69p${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u69r, email: `${u69r}@example.com`, password: 'Test1234!' });
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u69p, email: `${u69p}@example.com`, password: 'Test1234!', role: 'provider' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u69r}@example.com`, password: 'Test1234!' })).body.token;
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u69p}@example.com`, password: 'Test1234!' })).body.token;
+
+      const gpuRes = await request(app).post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({
+          id: `p69gpu${unique}`.slice(0, 64),
+          name: 'P69 GPU',
+          vendor: 'NVIDIA',
+          model: 'RTX-P69',
+          apiType: 'CUDA',
+          driverVersion: '525.0',
+          os: 'linux',
+          arch: 'x86_64',
+          memoryGB: 8,
+          clockMHz: 1500,
+          powerWatt: 200,
+          pricePerHour: 0.5,
+        });
+      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+
+      if (gpuId) {
+        const orderRes = await request(app).post('/api/v1/orders')
+          .set('Authorization', `Bearer ${renterToken}`)
+          .send({ gpuId, durationMinutes: 5 });
+        orderId = orderRes.body.order && orderRes.body.order.id;
+      }
+    });
+
+    it('renter cannot change order status via PUT /orders/:id (403)', async () => {
+      if (!orderId) return;
+      const res = await request(app).put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ status: 'matched' });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('provider cannot change order status via PUT /orders/:id (403)', async () => {
+      if (!orderId) return;
+      const res = await request(app).put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ status: 'matched' });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('renter CAN update non-status fields via PUT /orders/:id (200)', async () => {
+      if (!orderId) return;
+      const res = await request(app).put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ description: 'Updated description' });
+      expect(res.statusCode).toBe(200);
     });
   });
 

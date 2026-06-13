@@ -2184,6 +2184,187 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Escrow auto-release on order completion (#61)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const EscrowRepository = require('../src/db/json/EscrowRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let renterToken, renterId, gpuId, providerId;
+
+    beforeAll(async () => {
+      const r = `escar${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+      providerId = `esc-prov-${unique}`;
+      gpuId = GpuRepository.create({ name: 'Escrow GPU', vendor: 'NVIDIA', model: 'RTX-ESC', memoryGB: 8, pricePerHour: 0.5, providerId }).id;
+    });
+
+    it('HELD escrow transitions to SETTLED when order completes via /stop', async () => {
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
+        createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
+      });
+      // Inject a HELD escrow for this order
+      const escrow = EscrowRepository.create({
+        orderId: order.id, amountSats: 1000, feeRate: 0.02, state: 'HELD',
+        history: [], createdAt: new Date().toISOString(),
+      });
+
+      const res = await request(app)
+        .post(`/api/v1/orders/${order.id}/stop`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+
+      const updatedEscrow = EscrowRepository.getById(escrow.id);
+      expect(updatedEscrow.state).toBe('SETTLED');
+    });
+
+    it('order without escrow still completes successfully', async () => {
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
+        createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
+      });
+      const res = await request(app)
+        .post(`/api/v1/orders/${order.id}/stop`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(OrderRepository.getById(order.id).status).toBe('completed');
+    });
+  });
+
+  describe('GPU clone endpoint POST /gpus/:id/clone (#62)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, sourceGpuId, otherToken;
+
+    beforeAll(async () => {
+      const p = `clnp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const o = `clno${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: o, email: `${o}@example.com`, password: 'Test1234!' });
+      otherToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${o}@example.com`, password: 'Test1234!' })).body.token;
+
+      sourceGpuId = GpuRepository.create({
+        name: 'Source GPU', vendor: 'NVIDIA', model: 'RTX-SRC', memoryGB: 24,
+        pricePerHour: 1.5, providerId, clockMHz: 2000, powerWatt: 350,
+      }).id;
+    });
+
+    it('clones GPU with same specs but new id (201)', async () => {
+      const res = await request(app)
+        .post(`/api/v1/gpus/${sourceGpuId}/clone`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ name: 'Clone GPU' });
+      expect(res.statusCode).toBe(201);
+      expect(res.body.gpu.id).not.toBe(sourceGpuId);
+      expect(res.body.gpu.memoryGB).toBe(24);
+      expect(res.body.gpu.name).toBe('Clone GPU');
+      expect(res.body.clonedFrom).toBe(sourceGpuId);
+    });
+
+    it('clone without name uses "copy" suffix', async () => {
+      const res = await request(app)
+        .post(`/api/v1/gpus/${sourceGpuId}/clone`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({});
+      expect(res.statusCode).toBe(201);
+      expect(res.body.gpu.name).toMatch(/copy/i);
+    });
+
+    it('other provider cannot clone someone elses GPU (403)', async () => {
+      const res = await request(app)
+        .post(`/api/v1/gpus/${sourceGpuId}/clone`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({});
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('cloning non-existent GPU returns 404', async () => {
+      const res = await request(app)
+        .post('/api/v1/gpus/no-such-gpu/clone')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({});
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('Provider explicit order accept POST /orders/:id/accept (#63)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, renterToken, renterId, gpuId;
+
+    beforeAll(async () => {
+      const p = `accp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const r = `accr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+
+      gpuId = GpuRepository.create({ name: 'Accept GPU', vendor: 'AMD', model: 'RX-ACC', memoryGB: 8, pricePerHour: 0.2, providerId }).id;
+    });
+
+    it('provider can accept a pending order → status becomes matched (200)', async () => {
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
+      const res = await request(app)
+        .post(`/api/v1/orders/${order.id}/accept`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.status).toBe('matched');
+      expect(OrderRepository.getById(order.id).status).toBe('matched');
+      expect(OrderRepository.getById(order.id).matchedAt).toBeTruthy();
+      OrderRepository.update(order.id, { status: 'cancelled' });
+    });
+
+    it('renter cannot accept their own order (403)', async () => {
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'pending',
+        createdAt: new Date().toISOString(),
+      });
+      const res = await request(app)
+        .post(`/api/v1/orders/${order.id}/accept`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(403);
+      OrderRepository.update(order.id, { status: 'cancelled' });
+    });
+
+    it('cannot accept a non-pending order (400)', async () => {
+      const order = OrderRepository.create({
+        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'matched',
+        matchedAt: new Date().toISOString(), createdAt: new Date().toISOString(),
+      });
+      const res = await request(app)
+        .post(`/api/v1/orders/${order.id}/accept`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(400);
+      OrderRepository.update(order.id, { status: 'cancelled' });
+    });
+  });
+
   describe('Order completion notification + GPU list rating + health summary (#58-60)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');

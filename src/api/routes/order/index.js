@@ -645,6 +645,40 @@ router.post('/:id/reject',
   })
 );
 
+// プロバイダによる注文の明示的承認 (pending → matched)
+// POST /:id/accept — GPU オーナーまたは admin のみ
+// 自動マッチングを使わず、プロバイダが手動で注文を確認・承認するフロー。
+router.post('/:id/accept',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    const gpu = GpuRepository.getById(order.gpuId);
+    const isProvider = gpu && gpu.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can accept an order', 403);
+    }
+    if (order.status !== 'pending') {
+      throw new APIError(ErrorTypes.VALIDATION, `Cannot accept order in '${order.status}' state (only pending orders can be accepted)`, 400);
+    }
+    const now = new Date().toISOString();
+    OrderRepository.update(order.id, {
+      status: 'matched',
+      matchedAt: now,
+      updatedAt: now,
+    });
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpuName = gpu ? gpu.name : order.gpuId;
+    notifyUser(order.userId, 'order_accepted',
+      `【Strawberry】プロバイダがあなたの注文を承認しました\nGPU: ${gpuName}\n注文: #${order.id}`,
+      { subject: `【Strawberry】注文 #${order.id} が承認されました` });
+    logger.info(`Order accepted by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id });
+    res.json({ message: 'Order accepted', orderId: order.id, status: 'matched' });
+  })
+);
+
 // 係争申請（active/matched 注文の当事者〈借り手 or プロバイダ〉が管理者介入を要求）
 // POST /orders/:id/dispute { reason: string }
 // 管理者は別途 POST /api/v1/marketplace/escrow/:id/resolve で決済する。
@@ -1050,6 +1084,25 @@ router.post('/:id/stop',
       } catch (e) {
         logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
       }
+    }
+
+    // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
+    // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const { createEscrowService } = require('../../../payments/escrow-service');
+      const escrowSvc = createEscrowService();
+      const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
+      for (const escrow of escrows) {
+        const ratio = usageStats && usageStats.usageSeconds && order.durationMinutes
+          ? Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60))
+          : 1;
+        escrowSvc.settle(escrow.id, { deliveredRatio: ratio, slaUptimePct: 100 });
+        escrowSvc.apply(escrow.id, 'DELIVER_OK');
+        logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
+      }
+    } catch (e) {
+      logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
     }
 
     // 借り手へ完了通知（支払い確認と利用時間サマリを含む）

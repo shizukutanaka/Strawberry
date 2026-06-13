@@ -365,6 +365,31 @@ router.post('/',
   })
 );
 
+// GPU複製（認証必須 — 既存 GPU の仕様をコピーして新しい登録を作成する）
+// POST /gpus/:id/clone?name=カスタム名 — id と providerId は新たに生成される
+router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asyncHandler(async (req, res) => {
+  const sourceId = req.params.id;
+  const source = GpuRepository.getById(sourceId);
+  if (!source) return res.status(404).json({ error: 'GPU not found' });
+  if (req.user.role !== 'admin' && source.providerId !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const {
+    id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b, ...specFields
+  } = source;
+  const newName = req.body.name || req.query.name
+    ? (req.body.name || req.query.name)
+    : `${source.name} (copy)`;
+  const cloned = GpuRepository.create({
+    ...specFields,
+    name: String(newName).slice(0, 128),
+    providerId: req.user.id,
+    attestation: { passed: false, score: 0, findings: ['cloned from ' + sourceId + '; re-attest to verify'], verifiedAt: null },
+  });
+  const { apiKey: _k, ...safe } = cloned;
+  res.status(201).json({ message: 'GPU cloned successfully', gpu: safe, clonedFrom: sourceId });
+}));
+
 // GPU一括登録 (認証必須、最大20台)
 // POST /gpus/bulk — 同一プロバイダが複数の GPU をまとめて登録する。
 // 各エントリに個別のバリデーションと重複チェックを行い、失敗したものはスキップして

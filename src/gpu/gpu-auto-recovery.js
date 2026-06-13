@@ -17,13 +17,14 @@ async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
     logger.info(`[AUTO-RECOVERY] Order ${orderId} marked as failed due to GPU error: ${reason}`);
   }
   // 2. 返金処理（支払い済みの場合）
-  let payment = PaymentRepository.getByOrderId(orderId);
-  if (payment && payment.status === 'paid') {
-    payment.status = 'refunded';
-    payment.refundedAt = new Date().toISOString();
-    PaymentRepository.update(payment.id, payment);
-    logger.info(`[AUTO-RECOVERY] Payment ${payment.id} marked as refunded for order ${orderId}`);
-    // TODO: 実際の返金処理（Lightning/銀行API等）は今後拡張
+  // getByOrderId は many:true で配列を返すため、単体オブジェクトとして扱うバグを修正。
+  const payments = PaymentRepository.getByOrderId(orderId) || [];
+  for (const payment of payments) {
+    if (payment.status === 'paid') {
+      PaymentRepository.update(payment.id, { status: 'refunded', refundedAt: new Date().toISOString() });
+      logger.info(`[AUTO-RECOVERY] Payment ${payment.id} marked as refunded for order ${orderId}`);
+      // TODO: 実際の返金処理（Lightning/銀行API等）は今後拡張
+    }
   }
   // 3. 多段通知
   const msg = `【GPU障害自動対応】\n注文: ${orderId}\nGPU: ${gpuId}\nユーザー: ${userId}\n理由: ${reason}\n\nオーダー停止・返金処理を自動実行しました。`;

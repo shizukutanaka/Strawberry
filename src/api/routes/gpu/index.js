@@ -94,25 +94,48 @@ router.get('/', asyncHandler(async (req, res) => {
     gpus = gpus.filter(gpu => gpu.available);
   }
   // ?minRating=N (1–5) で平均評価が N 以上の GPU のみに絞り込み（レビューなし GPU は除外）
+  // レーティングは sort=rating でも使うので先に計算しておく
+  const reviewMap = new Map(); // gpuId → { sum, count }
+  for (const o of OrderRepository.getAll()) {
+    if (o.review && o.gpuId) {
+      const cur = reviewMap.get(o.gpuId) || { sum: 0, count: 0 };
+      cur.sum += o.review.rating;
+      cur.count++;
+      reviewMap.set(o.gpuId, cur);
+    }
+  }
   const minRatingRaw = parseFloat(req.query.minRating);
   if (!isNaN(minRatingRaw) && minRatingRaw > 0) {
-    const reviewMap = new Map(); // gpuId → { sum, count }
-    for (const o of OrderRepository.getAll()) {
-      if (o.review && o.gpuId) {
-        const cur = reviewMap.get(o.gpuId) || { sum: 0, count: 0 };
-        cur.sum += o.review.rating;
-        cur.count++;
-        reviewMap.set(o.gpuId, cur);
-      }
-    }
     gpus = gpus.filter(gpu => {
       const r = reviewMap.get(gpu.id);
       if (!r || r.count === 0) return false;
       return (r.sum / r.count) >= minRatingRaw;
     });
   }
-  // 価格順にソート
-  gpus.sort((a, b) => a.pricePerHour - b.pricePerHour);
+  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|availability(空き優先)
+  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; rating は常に高→低）
+  const sort = req.query.sort || 'price';
+  const sortDir = req.query.sortDir === 'desc' ? -1 : 1;
+  if (sort === 'rating') {
+    gpus.sort((a, b) => {
+      const ra = reviewMap.get(a.id);
+      const rb = reviewMap.get(b.id);
+      const avgA = ra && ra.count > 0 ? ra.sum / ra.count : 0;
+      const avgB = rb && rb.count > 0 ? rb.sum / rb.count : 0;
+      return avgB - avgA; // 常に高評価順（降順）
+    });
+  } else if (sort === 'memory') {
+    gpus.sort((a, b) => sortDir * (b.memoryGB - a.memoryGB));
+  } else if (sort === 'availability') {
+    // 空き GPU を先に表示
+    gpus.sort((a, b) => {
+      if (a.available === b.available) return a.pricePerHour - b.pricePerHour;
+      return a.available ? -1 : 1;
+    });
+  } else {
+    // price (default)
+    gpus.sort((a, b) => sortDir * (a.pricePerHour - b.pricePerHour));
+  }
   // ページネーション（limit: 1..200 既定50 / offset: 0..）
   const totalCount = gpus.length;
   const limitRaw = parseInt(req.query.limit, 10);

@@ -297,12 +297,14 @@ router.delete('/:id',
     } catch (e) {
       logger.warn(`Escrow lookup on order delete failed (order=${order.id}): ${e.message}`);
     }
-    const deleted = OrderRepository.delete(order.id);
-    if (!deleted) {
-      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
-    }
-    logger.info(`Order deleted: ${order.id}`);
-    res.json({ message: 'Order deleted', orderId: order.id });
+    // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）
+    OrderRepository.update(order.id, {
+      status: 'cancelled',
+      cancelReason: 'user_cancelled',
+      cancelledAt: new Date().toISOString(),
+    });
+    logger.info(`Order cancelled (soft-delete): ${order.id}`);
+    res.json({ message: 'Order cancelled', orderId: order.id });
   })
 );
 

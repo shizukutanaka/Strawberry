@@ -161,6 +161,37 @@ router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
   });
 }));
 
+// 検証レコード一覧（管理者のみ）— ジョブ再実行監査の結果を閲覧・デバッグ用
+router.get('/admin/verifications', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const VerificationRepository = require('../../db/json/VerificationRepository');
+  const all = VerificationRepository.getAll();
+  const limitRaw = parseInt(req.query.limit, 10);
+  const offsetRaw = parseInt(req.query.offset, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  // ?passed=true/false でフィルタ
+  let records = all;
+  if (req.query.passed === 'true') records = all.filter(v => v.passed === true);
+  else if (req.query.passed === 'false') records = all.filter(v => v.passed === false);
+  // 最新順
+  records = [...records].sort((a, b) =>
+    (b.createdAt || '').localeCompare(a.createdAt || ''));
+  res.json({
+    total: records.length,
+    limit,
+    offset,
+    records: records.slice(offset, offset + limit),
+  });
+}));
+
+// 単一検証レコード取得（管理者のみ）
+router.get('/admin/verifications/:jobId', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const VerificationRepository = require('../../db/json/VerificationRepository');
+  const record = VerificationRepository.getByJobId(req.params.jobId);
+  if (!record) return res.status(404).json({ error: 'Verification record not found' });
+  res.json(record);
+}));
+
 // システム情報取得（adminのみ許可）
 router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   // システム情報を取得

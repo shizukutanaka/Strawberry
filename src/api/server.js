@@ -252,10 +252,16 @@ if (require.main === module) {
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
-  // グレースフルシャットダウン
+  // グレースフルシャットダウン（30秒でタイムアウト — ハングしたハンドラで無限待機しない）
   process.on('SIGTERM', () => {
     logger.info('SIGTERM signal received: closing HTTP server');
+    const forceExit = setTimeout(() => {
+      logger.error('Graceful shutdown timed out after 30s; forcing exit');
+      process.exit(1);
+    }, 30000);
+    if (forceExit.unref) forceExit.unref();
     server.close(() => {
+      clearTimeout(forceExit);
       logger.info('HTTP server closed');
       process.exit(0);
     });

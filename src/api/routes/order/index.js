@@ -241,6 +241,45 @@ router.get('/:id',
   })
 );
 
+// オーダーの課金・エスクロー状況（注文当事者＝借り手/プロバイダ/管理者のみ）
+// これまで支払状況は別の paymentId 経由（支払者しか知らない）、エスクローは管理者限定でしか
+// 見えず、注文当事者が自分の注文の決済状態を確認できなかった。orderId 起点で一括照会する。
+router.get('/:id/payment',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
+  asyncHandler(async (req, res) => {
+    const order = req.resource;
+    const PaymentRepository = require('../../../db/json/PaymentRepository');
+    const EscrowRepository = require('../../../db/json/EscrowRepository');
+
+    const payments = (PaymentRepository.getByOrderId(order.id) || []).map(p => ({
+      id: p.id,
+      status: p.status,
+      amount: p.amount,
+      method: p.method,
+      paidAt: p.paidAt || null,
+      invoiceExpiresAt: p.invoiceExpiresAt || null,
+    }));
+    const escrows = (EscrowRepository.getByOrderId(order.id) || []).map(e => ({
+      id: e.id,
+      state: e.state,
+      amountSats: e.amountSats,
+      feeRate: e.feeRate,
+      createdAt: e.createdAt || null,
+    }));
+
+    res.json({
+      orderId: order.id,
+      orderStatus: order.status,
+      totalPrice: typeof order.totalPrice === 'number' ? order.totalPrice : null,
+      totalPriceJPY: typeof order.totalPriceJPY === 'number' ? order.totalPriceJPY : null,
+      payments,
+      escrows,
+    });
+  })
+);
+
 // オーダー更新 (認証必須)
 router.put('/:id',
   authenticateJWT,
@@ -721,6 +760,45 @@ router.post('/:id/review',
     }
     logger.info(`Review submitted for order: ${order.id}`, { orderId: order.id, rating });
     res.status(201).json({ message: 'Review submitted', review });
+  })
+);
+
+// プロバイダ→借り手レビュー（完了済み注文の GPU プロバイダのみ、1 注文 1 回のみ）。
+// 借り手→プロバイダ評価(#17)の対称: 難あり借り手（不払い・濫用・不当係争）を記録できる手段。
+// POST /orders/:id/renter-review { rating: 1-5, comment?: string }
+router.post('/:id/renter-review',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (!order.providerId || order.providerId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider can review the renter', 403);
+    }
+    // 自己レビュー防止（多層防御）: 自己注文では借り手＝プロバイダのため評価不可
+    if (order.userId === req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You cannot review yourself', 403);
+    }
+    if (order.status !== 'completed') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
+    }
+    if (order.renterReview) {
+      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a renter review', 409);
+    }
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
+    }
+    const comment = req.body.comment ? String(req.body.comment).slice(0, 500) : '';
+    const renterReview = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
+    OrderRepository.update(order.id, { renterReview });
+    // 借り手へ通知
+    const { notifyUser } = require('../../../utils/user-notify');
+    notifyUser(order.userId, 'renter_reviewed',
+      `【Strawberry】取引相手（プロバイダ）からあなたへの評価が投稿されました ★${rating}/5\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
+      { subject: `【Strawberry】あなたへの評価 ★${rating}/5（注文 #${order.id}）` });
+    logger.info(`Renter review submitted for order: ${order.id}`, { orderId: order.id, rating, renterId: order.userId });
+    res.status(201).json({ message: 'Renter review submitted', review: renterReview });
   })
 );
 

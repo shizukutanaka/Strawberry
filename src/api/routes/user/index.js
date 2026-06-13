@@ -389,6 +389,14 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
   const completedOrders = orders.filter(o => o.status === 'completed').length;
   const rejectedOrders = orders.filter(o => o.cancelReason === 'provider_rejected').length;
 
+  // 借り手としての受領評価（プロバイダ→借り手レビューの集計）。これにより
+  // プロバイダが投稿する借り手評価が実際に閲覧可能になり、難あり借り手が可視化される。
+  const asRenter = OrderRepository.getAll().filter(o => o.userId === providerId && o.renterReview);
+  const renterReviewCount = asRenter.length;
+  const renterRatingAverage = renterReviewCount > 0
+    ? Math.round((asRenter.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount) * 10) / 10
+    : null;
+
   res.json({
     providerId,
     score,
@@ -399,6 +407,8 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
     reviewCount,
     completedOrders,
     rejectedOrders,
+    renterRatingAverage,
+    renterReviewCount,
     memberSince: user.createdAt || null,
   });
 }));

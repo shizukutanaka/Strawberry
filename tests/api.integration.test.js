@@ -1397,4 +1397,122 @@ describe('API Integration', () => {
       expect(res.body.error).toMatch(/admin/i);
     });
   });
+
+  describe('Order payment/escrow visibility + provider→renter reviews', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+    const PaymentRepository = require('../src/db/json/PaymentRepository');
+    const EscrowRepository = require('../src/db/json/EscrowRepository');
+
+    let renterToken, renterId, providerToken, providerId, otherToken, gpuId;
+
+    beforeAll(async () => {
+      const r = `pvr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+
+      const p = `pvp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const o = `pvo${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: o, email: `${o}@example.com`, password: 'Test1234!' });
+      otherToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${o}@example.com`, password: 'Test1234!' })).body.token;
+
+      gpuId = GpuRepository.create({
+        name: 'Pay/Review GPU', vendor: 'NVIDIA', model: 'RTX-PV', memoryGB: 16, pricePerHour: 0.5,
+        providerId,
+      }).id;
+    });
+
+    async function makeOrder() {
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      return create.body.order.id;
+    }
+
+    it('GET /orders/:id/payment returns payments + escrows for the order owner', async () => {
+      const orderId = await makeOrder();
+      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 100, method: 'lightning', paidAt: new Date().toISOString() });
+      EscrowRepository.create({ orderId, amountSats: 100, feeRate: 0 });
+
+      const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.orderId).toBe(orderId);
+      expect(Array.isArray(res.body.payments)).toBe(true);
+      expect(res.body.payments.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.payments[0].status).toBe('paid');
+      expect(Array.isArray(res.body.escrows)).toBe(true);
+      expect(res.body.escrows.length).toBeGreaterThanOrEqual(1);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('GET /orders/:id/payment is visible to the GPU provider too', async () => {
+      const orderId = await makeOrder();
+      OrderRepository.update(orderId, { providerId });
+      const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('GET /orders/:id/payment is forbidden to an unrelated user (403)', async () => {
+      const orderId = await makeOrder();
+      const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
+        .set('Authorization', `Bearer ${otherToken}`);
+      expect(res.statusCode).toBe(403);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('provider can review the renter on a completed order (201)', async () => {
+      const orderId = await makeOrder();
+      OrderRepository.update(orderId, { status: 'completed', providerId });
+      const res = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ rating: 4, comment: 'prompt payment' });
+      expect(res.statusCode).toBe(201);
+      expect(res.body.review.rating).toBe(4);
+      expect(OrderRepository.getById(orderId).renterReview.rating).toBe(4);
+    });
+
+    it('a non-provider cannot submit a renter review (403)', async () => {
+      const orderId = await makeOrder();
+      OrderRepository.update(orderId, { status: 'completed', providerId });
+      const res = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ rating: 5 });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('duplicate renter review → 409', async () => {
+      const orderId = await makeOrder();
+      OrderRepository.update(orderId, { status: 'completed', providerId });
+      await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
+        .set('Authorization', `Bearer ${providerToken}`).send({ rating: 3 });
+      const dup = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
+        .set('Authorization', `Bearer ${providerToken}`).send({ rating: 2 });
+      expect(dup.statusCode).toBe(409);
+    });
+
+    it('GET /users/:id/reputation surfaces the renter rating aggregate', async () => {
+      const res = await request(app).get(`/api/v1/users/${renterId}/reputation`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('renterRatingAverage');
+      expect(res.body).toHaveProperty('renterReviewCount');
+      // earlier tests posted at least one renter review for this renter
+      expect(res.body.renterReviewCount).toBeGreaterThanOrEqual(1);
+      expect(res.body.renterRatingAverage).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

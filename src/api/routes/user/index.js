@@ -338,8 +338,14 @@ router.put('/me/password',
   })
 );
 
-// 許可された設定キーのみ受け付ける（任意キーの書き込みを防ぐ）
-const ALLOWED_SETTINGS_KEYS = new Set(['notifications', 'theme', 'language', 'timezone', 'currency']);
+// 許可された設定キーと各値のバリデータ（key allowlist + value type/range）
+const SETTINGS_SCHEMA = {
+  notifications: v => typeof v === 'boolean',
+  theme:         v => ['light', 'dark', 'system'].includes(v),
+  language:      v => typeof v === 'string' && /^[a-z]{2,5}(-[A-Z]{2})?$/.test(v),
+  timezone:      v => typeof v === 'string' && v.length > 0 && v.length <= 64 && /^[A-Za-z0-9/_+-]+$/.test(v),
+  currency:      v => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
+};
 
 // ユーザー設定更新 (認証必須)
 router.put('/me/settings',
@@ -348,9 +354,17 @@ router.put('/me/settings',
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       return res.status(400).json({ error: 'Settings must be an object' });
     }
-    const settings = Object.fromEntries(
-      Object.entries(req.body).filter(([k]) => ALLOWED_SETTINGS_KEYS.has(k))
-    );
+    const settings = {};
+    for (const [k, v] of Object.entries(req.body)) {
+      if (!Object.prototype.hasOwnProperty.call(SETTINGS_SCHEMA, k)) continue;
+      if (!SETTINGS_SCHEMA[k](v)) {
+        return res.status(400).json({ error: `Invalid value for setting: ${k}` });
+      }
+      settings[k] = v;
+    }
+    if (Object.keys(settings).length === 0) {
+      return res.status(400).json({ error: `No valid settings provided. Allowed: ${Object.keys(SETTINGS_SCHEMA).join(', ')}` });
+    }
     logger.info(`Updating settings for user: ${req.user.id}`);
     
     // ユーザーを検索（永続化対応）

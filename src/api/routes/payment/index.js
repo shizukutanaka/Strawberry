@@ -138,6 +138,17 @@ router.get('/invoice/:id',
     const invoiceId = req.params.id;
     logger.info(`Checking invoice status: ${invoiceId}`);
 
+    // 所有権チェック: インボイス(paymentHash)に紐づく決済レコードの所有者、
+    // または管理者のみ閲覧可。任意の invoiceId 推測で他人の金額・入金状況を
+    // 覗けないようにする（情報漏洩防止）。
+    if (req.user.role !== 'admin') {
+      const records = PaymentRepository.getByPaymentHash(invoiceId);
+      const owns = Array.isArray(records) && records.some(p => p.userId === req.user.id);
+      if (!owns) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to view this invoice', 403);
+      }
+    }
+
     // インボイス状態を確認
     const invoiceStatus = await lightning.checkInvoice(invoiceId);
     

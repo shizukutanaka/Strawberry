@@ -184,6 +184,15 @@ describe('API Integration', () => {
       expect(res.body).toHaveProperty('uptimeSeconds');
     });
 
+    it('GET /ready → 200 ready with real data-layer checks (no auth)', async () => {
+      const res = await request(app).get('/ready');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.status).toBe('ready');
+      expect(res.body.checks.dataDirWritable).toBe('ok');
+      expect(res.body.checks.repositoriesReadable).toBe('ok');
+      expect(res.body).toHaveProperty('optionalServices');
+    });
+
     it('GET /openapi.json → 200 with an OpenAPI 3 document', async () => {
       const res = await request(app).get('/openapi.json');
       expect(res.statusCode).toBe(200);

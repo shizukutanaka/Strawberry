@@ -85,6 +85,7 @@
 | 25 | アカウント自己退会（GDPR/プライバシー） | 高（本人がアカウントを無効化する手段がなく、管理者 DELETE しか存在しなかった） | ✅ 実装済み（`DELETE /users/me` でソフト無効化・PII 匿名化・トークン失効・最後の管理者は保護、login/refresh も無効化を拒否） |
 | 26 | 注文当事者の決済/エスクロー可視化 | 中（支払状況は別 paymentId 経由、エスクローは管理者限定で、注文当事者が自分の注文の決済状態を確認できなかった） | ✅ 実装済み（`GET /orders/:id/payment`、owner/provider/admin が orderId 起点で payments+escrows を照会） |
 | 27 | 双方向レビュー（プロバイダ→借り手） | 中（レビューは借り手→プロバイダの片方向のみで、難あり借り手の評判が蓄積されなかった） | ✅ 実装済み（`POST /orders/:id/renter-review`、`GET /users/:id/reputation` に `renterRatingAverage`/`renterReviewCount` を追加） |
+| 28 | レディネスプローブ（実依存検証） | 中（`/health` は静的 ok のみで、データ層が壊れていても 200 を返し LB/k8s が不健全なノードへ流していた） | ✅ 実装済み（`GET /ready`、data ディレクトリ書込・リポジトリ読込を実検証し失敗時 503、オプショナルサービスは情報併記） |
 
 ### ソクラテス問答による発見（critical）
 
@@ -132,7 +133,7 @@
 
 ## 総評
 
-土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 32 件中 30 件が実装済み（307/309 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 33 件中 31 件が実装済み（308/310 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
 
 - **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
 - **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。

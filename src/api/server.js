@@ -111,6 +111,53 @@ app.get('/health', (req, res) => {
   });
 });
 
+// /ready — レディネスプローブ（/health の静的 ok と異なり、データ層が実際に使えるかを検証する）。
+// JSON データ層が本プロダクトの唯一必須の依存。data ディレクトリへ実際に temp ファイルを書き
+// 削除し、リポジトリ読込が例外を投げないことを確認する。失敗時は 503 を返し、LB/k8s が
+// トラフィックを流さないようにする。オプショナルサービス（Lightning/P2P）は情報として
+// 併記するが readiness のゲートには含めない（未導入でも API 本体は機能するため）。
+app.get('/ready', (req, res) => {
+  const fs = require('fs');
+  const checks = {};
+  let ready = true;
+
+  // 1) data ディレクトリの書き込み可否（atomicWriteJSON と同じ依存）
+  try {
+    const dataDir = path.join(__dirname, '../../data');
+    const probe = path.join(dataDir, `.ready-probe-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    checks.dataDirWritable = 'ok';
+  } catch (e) {
+    ready = false;
+    checks.dataDirWritable = `failed: ${e.message}`;
+  }
+
+  // 2) リポジトリ読込が例外を投げないこと（破損 JSON 等の早期検知）
+  try {
+    require('../db/json/GpuRepository').getAll();
+    require('../db/json/OrderRepository').getAll();
+    checks.repositoriesReadable = 'ok';
+  } catch (e) {
+    ready = false;
+    checks.repositoriesReadable = `failed: ${e.message}`;
+  }
+
+  // オプショナルサービス（情報のみ。readiness をブロックしない）
+  let optional = {};
+  try {
+    const { lightning, p2pNetwork } = require('../core/services');
+    optional = { lightning: lightning ? 'available' : 'disabled', p2pNetwork: p2pNetwork ? 'available' : 'disabled' };
+  } catch (_) { /* services 未解決時は省略 */ }
+
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    checks,
+    optionalServices: optional,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // /openapi.json — API 仕様の HTTP 公開（初回アクセス時に生成しキャッシュ）
 let openapiSpecCache = null;
 app.get('/openapi.json', apiLimiter, (req, res) => {

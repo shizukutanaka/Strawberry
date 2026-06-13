@@ -139,7 +139,7 @@ const schemas = {
     create: Joi.object({
       // userId はトークン(req.user.id)から設定するため body では任意（送られても無視）
       userId: Joi.string().optional(),
-      gpuId: Joi.string().required(),
+      gpuId: Joi.string().max(128).required(),
       // ハンドラは正の整数かつ 5 の倍数を要求する
       durationMinutes: Joi.number().integer().min(5).multiple(5).required(),
       description: Joi.string().max(1000).optional(),

@@ -125,6 +125,17 @@ router.get('/',
       if (req.query.gpuId) {
         orders = orders.filter(order => order.gpuId === req.query.gpuId);
       }
+      // 日付範囲フィルタ（from=ISO&to=ISO — createdAt ベース）
+      if (req.query.from) {
+        const fromMs = Date.parse(req.query.from);
+        if (!Number.isFinite(fromMs)) return res.status(400).json({ error: 'Invalid "from" date' });
+        orders = orders.filter(o => Date.parse(o.createdAt) >= fromMs);
+      }
+      if (req.query.to) {
+        const toMs = Date.parse(req.query.to);
+        if (!Number.isFinite(toMs)) return res.status(400).json({ error: 'Invalid "to" date' });
+        orders = orders.filter(o => Date.parse(o.createdAt) <= toMs);
+      }
       const SORTABLE_FIELDS = new Set(['createdAt', 'updatedAt', 'status', 'totalPrice', 'durationMinutes']);
       const sortBy = SORTABLE_FIELDS.has(req.query.sortBy) ? req.query.sortBy : 'createdAt';
       const sortDir = req.query.sortDir === 'asc' ? 1 : -1;

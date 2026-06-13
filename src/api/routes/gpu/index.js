@@ -184,6 +184,21 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json(response);
 }));
 
+// プロバイダ自身のGPU一覧（認証必須 — ページネーションと available フラグを含む）
+// GET /gpus/my
+router.get('/my', authenticateJWT, asyncHandler(async (req, res) => {
+  const providerId = req.user.id;
+  const limitRaw = parseInt(req.query.limit, 10);
+  const offsetRaw = parseInt(req.query.offset, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+
+  let gpus = GpuRepository.getAll().filter(g => g.providerId === providerId);
+  const total = gpus.length;
+  const page = gpus.slice(offset, offset + limit);
+  res.json({ total, limit, offset, gpus: page });
+}));
+
 // 特定のGPUの詳細情報を取得（レーティング集計を含む）
 router.get('/:id', asyncHandler(async (req, res) => {
   const gpuId = req.params.id;

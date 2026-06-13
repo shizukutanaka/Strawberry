@@ -2184,6 +2184,116 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Provider "my GPUs" endpoint GET /gpus/my (#55)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, otherToken;
+
+    beforeAll(async () => {
+      const p = `myp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const o = `myo${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: o, email: `${o}@example.com`, password: 'Test1234!' });
+      otherToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${o}@example.com`, password: 'Test1234!' })).body.token;
+
+      GpuRepository.create({ name: 'My GPU 1', vendor: 'NVIDIA', model: 'RTX-MY1', memoryGB: 8, pricePerHour: 0.5, providerId });
+      GpuRepository.create({ name: 'My GPU 2', vendor: 'AMD',    model: 'RX-MY2',  memoryGB: 16, pricePerHour: 0.3, providerId });
+    });
+
+    it('GET /gpus/my returns only the providers own GPUs', async () => {
+      const res = await request(app).get('/api/v1/gpus/my')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.body.gpus)).toBe(true);
+      expect(res.body.gpus.every(g => g.providerId === providerId)).toBe(true);
+      expect(res.body.total).toBeGreaterThanOrEqual(2);
+    });
+
+    it('response includes pagination metadata (total, limit, offset)', async () => {
+      const res = await request(app).get('/api/v1/gpus/my?limit=1&offset=0')
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus).toHaveLength(1);
+      expect(res.body.total).toBeGreaterThanOrEqual(2);
+      expect(res.body.limit).toBe(1);
+      expect(res.body.offset).toBe(0);
+    });
+
+    it('unauthenticated request returns 401', async () => {
+      const res = await request(app).get('/api/v1/gpus/my');
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("regular user sees only their own (empty list if no GPUs)", async () => {
+      const res = await request(app).get('/api/v1/gpus/my')
+        .set('Authorization', `Bearer ${otherToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpus.length).toBe(0);
+    });
+  });
+
+  describe('Order date range filter ?from=&to= (#56)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let renterToken, renterId, gpuId;
+    const past = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days ago
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // tomorrow
+
+    beforeAll(async () => {
+      const r = `drr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+      gpuId = GpuRepository.create({ name: 'DR GPU', vendor: 'NVIDIA', model: 'RTX-DR', memoryGB: 8, pricePerHour: 0.1, providerId: 'dr-prov' }).id;
+
+      // create an old order (5 days ago) and a new order (just now)
+      OrderRepository.create({ gpuId, userId: renterId, providerId: 'dr-prov', durationMinutes: 30, status: 'cancelled', createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString() });
+      OrderRepository.create({ gpuId, userId: renterId, providerId: 'dr-prov', durationMinutes: 30, status: 'cancelled', createdAt: new Date().toISOString() });
+    });
+
+    it('?from= filters out orders before the date', async () => {
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const res = await request(app)
+        .get(`/api/v1/orders?from=${encodeURIComponent(yesterday)}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      // All returned orders must be on or after yesterday
+      for (const o of res.body.orders) {
+        expect(new Date(o.createdAt).getTime()).toBeGreaterThanOrEqual(new Date(yesterday).getTime());
+      }
+    });
+
+    it('?to= filters out orders after the date', async () => {
+      const weekAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await request(app)
+        .get(`/api/v1/orders?to=${encodeURIComponent(weekAgo)}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      for (const o of res.body.orders) {
+        expect(new Date(o.createdAt).getTime()).toBeLessThanOrEqual(new Date(weekAgo).getTime());
+      }
+    });
+
+    it('invalid from date → 400', async () => {
+      const res = await request(app)
+        .get('/api/v1/orders?from=not-a-date')
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
   describe('Bulk GPU registration POST /gpus/bulk (#52)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const UserRepository = require('../src/db/json/UserRepository');

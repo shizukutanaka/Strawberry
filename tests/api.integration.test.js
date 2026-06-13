@@ -3107,6 +3107,85 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Order expiry: dispute auto-resolution and scheduled order TTL (#66)', () => {
+    const { expireStaleDisputedOrders, expireStaleOrders } = require('../src/utils/order-expiry');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+
+    it('expireStaleDisputedOrders resolves disputed orders older than timeout', () => {
+      const past = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+      const order = OrderRepository.create({
+        userId: 'u-expdisp1',
+        providerId: 'p-expdisp1',
+        gpuId: 'g-expdisp1',
+        status: 'disputed',
+        durationMinutes: 60,
+        createdAt: past,
+        updatedAt: past,
+        dispute: { raisedBy: 'u-expdisp1', reason: 'test', raisedAt: past },
+      });
+      const count = expireStaleDisputedOrders();
+      expect(count).toBeGreaterThanOrEqual(1);
+      const updated = OrderRepository.getById(order.id);
+      expect(updated.status).toBe('cancelled');
+      expect(updated.dispute.resolution).toBeDefined();
+      expect(updated.dispute.resolution.decision).toBe('refund');
+      OrderRepository.delete(order.id);
+    });
+
+    it('expireStaleDisputedOrders does NOT touch recent disputed orders', () => {
+      const recent = new Date().toISOString();
+      const order = OrderRepository.create({
+        userId: 'u-expdisp2',
+        providerId: 'p-expdisp2',
+        gpuId: 'g-expdisp2',
+        status: 'disputed',
+        durationMinutes: 60,
+        createdAt: recent,
+        updatedAt: recent,
+        dispute: { raisedBy: 'u-expdisp2', reason: 'test', raisedAt: recent },
+      });
+      expireStaleDisputedOrders();
+      const still = OrderRepository.getById(order.id);
+      expect(still.status).toBe('disputed');
+      OrderRepository.delete(order.id);
+    });
+
+    it('expireStaleOrders does NOT cancel scheduled orders within absolute TTL', () => {
+      const recentCreated = new Date().toISOString();
+      const futureScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const order = OrderRepository.create({
+        userId: 'u-sched1',
+        status: 'pending',
+        durationMinutes: 5,
+        createdAt: recentCreated,
+        updatedAt: recentCreated,
+        scheduledStartAt: futureScheduled,
+      });
+      expireStaleOrders();
+      const still = OrderRepository.getById(order.id);
+      expect(still.status).toBe('pending');
+      OrderRepository.delete(order.id);
+    });
+
+    it('expireStaleOrders cancels very old scheduled orders (absolute TTL breach)', () => {
+      const ancientCreated = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString();
+      const futureScheduled = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const order = OrderRepository.create({
+        userId: 'u-sched2',
+        status: 'pending',
+        durationMinutes: 5,
+        createdAt: ancientCreated,
+        updatedAt: ancientCreated,
+        scheduledStartAt: futureScheduled,
+      });
+      expireStaleOrders();
+      const expired = OrderRepository.getById(order.id);
+      expect(expired.status).toBe('cancelled');
+      expect(expired.cancelReason).toBe('payment_timeout');
+      OrderRepository.delete(order.id);
+    });
+  });
+
   describe('Refresh token single-use enforcement (#44)', () => {
     let firstRefreshToken;
 

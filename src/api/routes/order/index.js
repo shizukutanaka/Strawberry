@@ -86,7 +86,7 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
-const { expireStaleOrders, expireStaleMatchedOrders } = require('../../../utils/order-expiry');
+const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders } = require('../../../utils/order-expiry');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
@@ -106,6 +106,7 @@ router.get('/',
       // 期限切れ pending/matched 注文を失効させてから一覧を返す（遅延スイープ）
       expireStaleOrders();
       expireStaleMatchedOrders();
+      expireStaleDisputedOrders();
       let orders;
       if (req.user.role === 'admin') {
         orders = OrderRepository.getAll();

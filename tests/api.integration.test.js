@@ -994,4 +994,143 @@ describe('API Integration', () => {
       expect(Array.isArray(res.body.records)).toBe(true);
     });
   });
+
+  describe('Dispute resolution + reputation failure feedback', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let adminToken, renterToken, providerId, gpuId;
+
+    beforeAll(async () => {
+      const adm = `dra${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
+      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
+      UserRepository.update(admUser.id, { role: 'admin' });
+      adminToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
+
+      const rn = `drr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: rn, email: `${rn}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${rn}@example.com`, password: 'Test1234!' })).body.token;
+
+      const p = `drp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const gpu = GpuRepository.create({
+        name: 'Dispute Resolve GPU', vendor: 'NVIDIA', model: 'RTX-DRR', memoryGB: 16, pricePerHour: 0.6,
+        providerId,
+      });
+      gpuId = gpu.id;
+    });
+
+    async function makeDisputedOrder() {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+      await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ reason: 'GPU unresponsive' });
+      return orderId;
+    }
+
+    it('refund verdict cancels the order and PENALIZES provider reputation', async () => {
+      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const beforeFailed = before.body.stats.failedJobs;
+      const beforeSlash = before.body.stats.slashCount;
+
+      const orderId = await makeDisputedOrder();
+      const resolve = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ decision: 'refund', note: 'provider at fault' });
+      expect(resolve.statusCode).toBe(200);
+
+      const order = OrderRepository.getById(orderId);
+      expect(order.status).toBe('cancelled');
+      expect(order.cancelReason).toBe('dispute_resolved_refund');
+      expect(order.dispute.resolution.decision).toBe('refund');
+
+      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      expect(after.body.stats.failedJobs).toBe(beforeFailed + 1);
+      expect(after.body.stats.slashCount).toBe(beforeSlash + 1);
+    });
+
+    it('refund verdict actually LOWERS the provider score (reputation can decrease)', async () => {
+      // Seed a clean baseline of successes, capture score, then refund-dispute and re-check
+      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const beforeScore = before.body.score;
+
+      const orderId = await makeDisputedOrder();
+      await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ decision: 'refund' });
+
+      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      expect(after.body.score).toBeLessThan(beforeScore);
+    });
+
+    it('uphold verdict completes the order and CREDITS provider reputation', async () => {
+      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const beforeCompleted = before.body.stats.completedJobs;
+
+      const orderId = await makeDisputedOrder();
+      const resolve = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ decision: 'uphold' });
+      expect(resolve.statusCode).toBe(200);
+
+      const order = OrderRepository.getById(orderId);
+      expect(order.status).toBe('completed');
+      expect(order.dispute.resolution.decision).toBe('uphold');
+
+      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
+    });
+
+    it('only admin can resolve a dispute (403 for renter)', async () => {
+      const orderId = await makeDisputedOrder();
+      const resolve = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ decision: 'refund' });
+      expect(resolve.statusCode).toBe(403);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('cannot resolve a non-disputed order (400)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      const orderId = create.body.order.id;
+      const resolve = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ decision: 'refund' });
+      expect(resolve.statusCode).toBe(400);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+
+    it('invalid decision is rejected (400)', async () => {
+      const orderId = await makeDisputedOrder();
+      const resolve = await request(app)
+        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ decision: 'maybe' });
+      expect(resolve.statusCode).toBe(400);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+    });
+  });
 });

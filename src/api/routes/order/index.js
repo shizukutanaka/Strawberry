@@ -533,6 +533,101 @@ router.post('/:id/dispute',
   })
 );
 
+// 係争の裁定（管理者のみ）— 宙ぶらりんの disputed 注文を終端状態へ遷移させ、
+// かつ「実フロー」のレピュテーションへ失敗を反映する（これまで失敗系は抽象 auction 経路でしか
+// 記録されず、実際の注文ライフサイクルでは reputation が単調増加しかしなかった欠陥を是正）。
+// POST /orders/:id/dispute/resolve { decision: 'refund'|'uphold', note?: string }
+//  - refund: 借り手勝訴（プロバイダ過失）→ 注文を cancelled、エスクロー返金、
+//            provider に recordJobResult(false) + slash（評判を減点）。
+//  - uphold: 係争棄却（プロバイダ正当）→ 注文を completed、provider に recordJobResult(true)。
+router.post('/:id/dispute/resolve',
+  authenticateJWT,
+  checkRole(['admin']),
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (order.status !== 'disputed') {
+      throw new APIError(ErrorTypes.VALIDATION, `Only disputed orders can be resolved (current: '${order.status}')`, 400);
+    }
+    const decision = req.body.decision;
+    if (!['refund', 'uphold'].includes(decision)) {
+      throw new APIError(ErrorTypes.VALIDATION, "decision must be 'refund' or 'uphold'", 400);
+    }
+    const note = req.body.note ? String(req.body.note).slice(0, 1000) : '';
+    const resolvedAt = new Date().toISOString();
+    const resolution = { decision, note, resolvedBy: req.user.id, resolvedAt };
+
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpu = GpuRepository.getById(order.gpuId);
+    const gpuName = gpu ? gpu.name : order.gpuId;
+
+    if (decision === 'refund') {
+      // 注文を終端へ（cancelled）。dispute オブジェクトに裁定結果を併記。
+      OrderRepository.update(order.id, {
+        status: 'cancelled',
+        cancelReason: 'dispute_resolved_refund',
+        cancelledAt: resolvedAt,
+        dispute: { ...order.dispute, resolution },
+      });
+      // エスクロー返金（存在すれば、ベストエフォート）
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const escrows = EscrowRepository.getByOrderId(order.id);
+        if (Array.isArray(escrows) && escrows.length > 0) {
+          const { createEscrowService } = require('../../../payments/escrow-service');
+          const escrowSvc = createEscrowService();
+          for (const e of escrows) {
+            if (!['CANCELED', 'SETTLED'].includes(e.state)) {
+              try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn(`Escrow refund on dispute resolve failed (order=${order.id}): ${e.message}`);
+      }
+      // レピュテーション減点（実フローでの失敗反映）— ベストエフォート
+      if (order.providerId) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          const rep = createReputationService();
+          rep.recordJobResult(order.providerId, false);
+          rep.slash(order.providerId);
+        } catch (e) {
+          logger.warn(`reputation penalty on dispute refund failed (order=${order.id}): ${e.message}`);
+        }
+      }
+    } else {
+      // uphold: 係争棄却。仕事は有効として completed へ。プロバイダに成功を記録。
+      OrderRepository.update(order.id, {
+        status: 'completed',
+        stoppedAt: resolvedAt,
+        dispute: { ...order.dispute, resolution },
+      });
+      if (order.providerId) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          createReputationService().recordJobResult(order.providerId, true);
+        } catch (e) {
+          logger.warn(`reputation credit on dispute uphold failed (order=${order.id}): ${e.message}`);
+        }
+      }
+    }
+
+    // 両当事者へ裁定結果を通知
+    const verdictText = decision === 'refund' ? '借り手への返金（プロバイダ過失）' : '係争棄却（注文は有効）';
+    for (const uid of [order.userId, order.providerId]) {
+      if (uid) {
+        notifyUser(uid, 'order_dispute_resolved',
+          `【Strawberry】注文 #${order.id} の係争が裁定されました。\n結果: ${verdictText}\nGPU: ${gpuName}${note ? `\n備考: ${note}` : ''}`,
+          { subject: `【Strawberry】係争裁定: 注文 #${order.id}` });
+      }
+    }
+    logger.info(`Dispute resolved for order: ${order.id}`, { orderId: order.id, decision, resolvedBy: req.user.id });
+    res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
+  })
+);
+
 // 注文レビュー投稿（完了済み注文の借り手のみ、1 注文 1 回のみ）
 // POST /orders/:id/review { rating: 1-5, comment?: string }
 router.post('/:id/review',

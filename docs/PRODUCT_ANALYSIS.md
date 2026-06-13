@@ -78,6 +78,16 @@
 | 20a | GPU 一覧のソートパラメータ | 中（price 固定で rating/memory/availability 順に並べ替え不可） | ✅ 実装済み（`?sort=rating\|price\|memory\|availability&sortDir=asc\|desc`） |
 | 20b | 注文ソフトキャンセル（soft-delete） | 高（DELETE が hard-delete で監査証跡・係争履歴を消去していた） | ✅ 実装済み（`DELETE /orders/:id` → status=cancelled+cancelReason=user_cancelled に変更） |
 | 20c | 検証レコード管理者 HTTP 公開 | 低（VerificationRepository がどのルートにも未配線） | ✅ 実装済み（`GET /admin/verifications?passed=true\|false`・`GET /admin/verifications/:jobId`、管理者限定） |
+| 21 | 係争の裁定 + レピュテーション失敗連動（ソクラテス問答で発見） | **致命**（disputed 注文が終端に到達できず宙ぶらり、かつ実フローのレピュテーションが単調増加しかせず信頼指標として機能不全だった） | ✅ 実装済み（`POST /orders/:id/dispute/resolve`、管理者裁定で refund→減点+slash / uphold→completed+加点） |
+
+### ソクラテス問答による発見（critical）
+
+表層のギャップ充填では見えなかった**構造的欠陥**を、自己問答で抽出した。
+
+- **問: #18 の「レピュテーション」と #19c の「係争」は、信頼指標として実際に機能しているか？** コミットメッセージではなくコードで検証する。
+- **問: 実フローでプロバイダのスコアは下がり得るか？** スコアラ（`reputation-scorer.js`）は双方向（`failedJobs` が成功率を下げ、`slashCount` が減点）で数式は健全。しかし失敗記録（`recordJobResult(false)`/`slash()`）は抽象 auction 経路（`marketplace-service.js`）にしか存在せず、**実 HTTP オーダー経路（`/stop`→完了）は `recordJobResult(true)` しか呼ばない**。→ 実運用では**評判は単調増加（上がるのみ）**。50 回係争されたプロバイダもクリーンなプロバイダと同スコア。
+- **問: 借り手が係争（#19c）を申請したら、誰が解決するのか？** 誰も解決しない。`POST /orders/:id/dispute` は `status='disputed'` にするだけで、disputed 注文を終端へ遷移させるエンドポイントが存在しなかった（marketplace の `resolveDispute` は**エスクロー**対象でオーダーには無関係）。→ **disputed は出口なしのデッドエンド状態**で、係争はプロバイダの評判に一切影響しなかった。
+- **結論: 能力あるスコアラに片側だけのデータを流し、解決手段のない係争ボタンを置いていた。** 是正は一つの整合した変更＝**管理者による係争裁定エンドポイント**で、(a) disputed 注文に終端出口を与え、(b) 実フローでレピュテーションの**失敗経路**を初めて駆動する。テスト `refund verdict actually LOWERS the provider score` で「評判が下がり得る」ことを保証した。
 
 - **GPU 時間帯予約**: 注文作成時に `scheduledStartAt`（ISO 8601）を指定可能。未指定は即時（`now`）扱い。`scheduledEndAt = scheduledStartAt + durationMinutes` を自動計算して保存。二重予約チェックをステータスベースから**時間帯重複チェック**（[A,B) ∩ [C,D) ≠ ∅）に変更し、同一 GPU でも時間帯が重ならなければ複数の先行予約を受け付ける。`GET /gpus/:id/schedule?from=ISO&to=ISO`（認証不要）で空き状況をカレンダー形式で照会可能。未来の `scheduledStartAt` を持つ pending 注文は支払タイムアウト失効の対象外（事前予約の保護）。
 
@@ -95,7 +105,7 @@
 
 ## 総評
 
-土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 25 件中 23 件が実装済み（279/281 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 26 件中 24 件が実装済み（285/287 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
 
 - **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
 - **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。

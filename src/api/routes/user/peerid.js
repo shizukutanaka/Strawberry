@@ -19,7 +19,7 @@ router.post('/link', asyncHandler(async (req, res) => {
   }
   const user = UserRepository.getById(req.user.id);
   if (!user) throw new APIError(ErrorTypes.NOT_FOUND, 'User not found', 404);
-  UserRepository.update(user.id, { ...user, peerId });
+  UserRepository.update(user.id, { peerId });
   res.json({ message: 'ピアIDを紐付けました', peerId });
 }));
 
@@ -27,7 +27,7 @@ router.post('/link', asyncHandler(async (req, res) => {
 router.post('/unlink', asyncHandler(async (req, res) => {
   const user = UserRepository.getById(req.user.id);
   if (!user) throw new APIError(ErrorTypes.NOT_FOUND, 'User not found', 404);
-  UserRepository.update(user.id, { ...user, peerId: null });
+  UserRepository.update(user.id, { peerId: null });
   res.json({ message: 'ピアIDの紐付けを解除しました' });
 }));
 

@@ -545,7 +545,7 @@ router.put('/:id',
       }
     }
     // GPU情報を更新
-    const updatedGPU = GpuRepository.update(gpuId, { ...gpu, ...sanitized });
+    const updatedGPU = GpuRepository.update(gpuId, sanitized);
     logger.info(`GPU updated: ${gpuId}`);
     // apiKey等の機密情報を除外
     const { apiKey, ...gpuSafe } = updatedGPU;

@@ -107,7 +107,7 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
       logger.error('Exchange rate fetch failed:', err);
       exchangeRateFailureCounter.inc();
       lastError = err;
-      appendAuditLog('exchange_rate_fetch_failure', { error: err.message });
+      try { appendAuditLog('exchange_rate_fetch_failure', { error: err.message }); } catch {}
       try { await notifyExternalAlert('exchange_rate_fetch_failure', { error: err.message }); } catch {}
     }
   }

@@ -48,7 +48,7 @@ function createReputationService({ repository } = {}) {
 
     /** スラッシング（検証不一致/SLA違反/紛争 refund 時）。 */
     slash: (providerId, count = 1) =>
-      mutate(providerId, (s) => ({ slashCount: s.slashCount + Math.max(1, count) })),
+      mutate(providerId, (s) => ({ slashCount: s.slashCount + Math.max(0, count) })),
 
     /** 担保ステークの増減/設定。 */
     addStake: (providerId, amount) =>

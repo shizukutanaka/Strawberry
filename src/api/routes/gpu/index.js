@@ -428,7 +428,8 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
     return res.status(403).json({ error: 'Forbidden' });
   }
   const {
-    id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b, ...specFields
+    id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b,
+    apiKey: _ak, ...specFields
   } = source;
   const newName = req.body.name || req.query.name
     ? (req.body.name || req.query.name)
@@ -605,8 +606,8 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'GPU does not have a valid price configured' });
   }
   const durationRaw = parseInt(req.query.durationMinutes, 10);
-  if (!Number.isInteger(durationRaw) || durationRaw <= 0 || durationRaw % 5 !== 0) {
-    return res.status(400).json({ error: 'durationMinutes must be a positive integer and a multiple of 5' });
+  if (!Number.isInteger(durationRaw) || durationRaw <= 0 || durationRaw % 5 !== 0 || durationRaw > 43200) {
+    return res.status(400).json({ error: 'durationMinutes must be a positive integer, a multiple of 5, and at most 43200 (30 days)' });
   }
   const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
   const rateInfo = await fetchRateInfo();

@@ -99,11 +99,16 @@ router.get('/', asyncHandler(async (req, res) => {
     }).map(o => o.gpuId)
   );
   // available: プロバイダが手動で false に設定している場合はそれを優先し、
-  // そうでなければ現在時刻に重複注文がない場合は true とする（動的稼働チェック）。
-  gpus = gpus.map(gpu => ({
-    ...gpu,
-    available: gpu.available === false ? false : !occupiedGpuIds.has(gpu.id),
-  }));
+  // そうでなければ現在時刻に手動ブロック or 重複注文がない場合は true とする。
+  gpus = gpus.map(gpu => {
+    if (gpu.available === false) return { ...gpu, available: false };
+    const manuallyBlocked = Array.isArray(gpu.manualBlocks) && gpu.manualBlocks.some(b => {
+      const bs = new Date(b.from).getTime();
+      const be = new Date(b.to).getTime();
+      return bs <= nowMs && be > nowMs;
+    });
+    return { ...gpu, available: !manuallyBlocked && !occupiedGpuIds.has(gpu.id) };
+  });
   // ?available=true で空き GPU のみに絞り込み
   if (req.query.available === 'true') {
     gpus = gpus.filter(gpu => gpu.available);
@@ -425,6 +430,59 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
   });
 }));
 
+// GPU 手動ブロック登録（メンテナンス・個人利用等）
+// POST /gpus/:id/block — 認証必須（GPU オーナーまたは管理者）
+router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+  if (req.user.role !== 'admin' && gpu.providerId !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const { from, to, reason } = req.body;
+  if (!from || !to) return res.status(400).json({ error: '"from" and "to" are required' });
+  const fromMs = new Date(from).getTime();
+  const toMs = new Date(to).getTime();
+  if (isNaN(fromMs)) return res.status(400).json({ error: 'Invalid "from" date' });
+  if (isNaN(toMs)) return res.status(400).json({ error: 'Invalid "to" date' });
+  if (fromMs >= toMs) return res.status(400).json({ error: '"from" must be before "to"' });
+  if (reason !== undefined && (typeof reason !== 'string' || reason.length > 200)) {
+    return res.status(400).json({ error: '"reason" must be a string (max 200 chars)' });
+  }
+
+  const { v4: uuidv4 } = require('uuid');
+  const block = {
+    id: uuidv4(),
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    reason: reason || null,
+    createdAt: new Date().toISOString(),
+  };
+  const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];
+  GpuRepository.update(gpuId, { manualBlocks: [...existing, block] });
+  res.status(201).json({ block });
+}));
+
+// GPU 手動ブロック削除
+// DELETE /gpus/:id/block/:blockId — 認証必須（GPU オーナーまたは管理者）
+router.delete('/:id/block/:blockId', authenticateJWT, asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+  if (req.user.role !== 'admin' && gpu.providerId !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const blockId = req.params.blockId;
+  const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];
+  const idx = existing.findIndex(b => b.id === blockId);
+  if (idx === -1) return res.status(404).json({ error: 'Block not found' });
+  const updated = existing.filter(b => b.id !== blockId);
+  GpuRepository.update(gpuId, { manualBlocks: updated });
+  res.status(200).json({ message: 'Block removed' });
+}));
+
 // GPU の予約カレンダー（空き時間帯の照会）
 // GET /gpus/:id/schedule?from=ISO&to=ISO
 // 認証不要（マーケットプレイスブラウジングと同等）
@@ -451,9 +509,14 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
     .map(o => {
       const slotStart = new Date(o.scheduledStartAt || o.createdAt);
       const slotEnd = new Date(slotStart.getTime() + (o.durationMinutes || 0) * 60 * 1000);
-      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), orderId: o.id, status: o.status };
+      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), orderId: o.id, status: o.status, type: 'order' };
     })
     .filter(slot => new Date(slot.from) < to && new Date(slot.to) > from)
+    .sort((a, b) => a.from.localeCompare(b.from));
+
+  const manualBlocks = (Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [])
+    .filter(b => new Date(b.from) < to && new Date(b.to) > from)
+    .map(b => ({ ...b, type: 'manual' }))
     .sort((a, b) => a.from.localeCompare(b.from));
 
   res.json({
@@ -461,6 +524,7 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
     from: from.toISOString(),
     to: to.toISOString(),
     blockedSlots,
+    manualBlocks,
   });
 }));
 

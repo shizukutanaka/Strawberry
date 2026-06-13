@@ -2033,4 +2033,120 @@ describe('API Integration', () => {
       GpuRepository.update(gpuId, { minRenterRating: null });
     });
   });
+
+  describe('Provider GPU manual block (maintenance windows) (#42)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, otherToken, gpuId;
+
+    beforeAll(async () => {
+      const p = `blkp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const o = `blko${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: o, email: `${o}@example.com`, password: 'Test1234!' });
+      otherToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${o}@example.com`, password: 'Test1234!' })).body.token;
+
+      gpuId = GpuRepository.create({
+        name: 'Block GPU', vendor: 'AMD', model: 'RX-BLK', memoryGB: 8, pricePerHour: 0.1,
+        providerId,
+      }).id;
+    });
+
+    const futureFrom = () => new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const futureTo = () => new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+
+    it('provider can create a manual block (201)', async () => {
+      const res = await request(app)
+        .post(`/api/v1/gpus/${gpuId}/block`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ from: futureFrom(), to: futureTo(), reason: 'maintenance' });
+      expect(res.statusCode).toBe(201);
+      expect(res.body.block.id).toBeDefined();
+      expect(res.body.block.reason).toBe('maintenance');
+    });
+
+    it('schedule endpoint includes manual blocks', async () => {
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/schedule`);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(res.body.manualBlocks)).toBe(true);
+      expect(res.body.manualBlocks.length).toBeGreaterThan(0);
+      expect(res.body.manualBlocks[0].type).toBe('manual');
+    });
+
+    it('non-owner renter cannot create a manual block (403)', async () => {
+      const res = await request(app)
+        .post(`/api/v1/gpus/${gpuId}/block`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ from: futureFrom(), to: futureTo() });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('missing "from" or "to" → 400', async () => {
+      const res = await request(app)
+        .post(`/api/v1/gpus/${gpuId}/block`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ from: futureFrom() });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('"from" >= "to" → 400', async () => {
+      const t = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      const res = await request(app)
+        .post(`/api/v1/gpus/${gpuId}/block`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ from: t, to: t });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('provider can delete an existing block (200)', async () => {
+      const create = await request(app)
+        .post(`/api/v1/gpus/${gpuId}/block`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ from: futureFrom(), to: futureTo() });
+      const blockId = create.body.block.id;
+
+      const del = await request(app)
+        .delete(`/api/v1/gpus/${gpuId}/block/${blockId}`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(del.statusCode).toBe(200);
+
+      const gpu = GpuRepository.getById(gpuId);
+      expect((gpu.manualBlocks || []).find(b => b.id === blockId)).toBeUndefined();
+    });
+
+    it('delete non-existent block → 404', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/gpus/${gpuId}/block/no-such-block`)
+        .set('Authorization', `Bearer ${providerToken}`);
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('current-time block makes GPU appear unavailable in GET /gpus list', async () => {
+      const now = new Date();
+      const blockFrom = new Date(now.getTime() - 60 * 1000).toISOString();
+      const blockTo = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+      await request(app)
+        .post(`/api/v1/gpus/${gpuId}/block`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ from: blockFrom, to: blockTo, reason: 'now-blocked' });
+
+      const list = await request(app).get('/api/v1/gpus?available=true&limit=200');
+      expect(list.body.gpus.find(g => g.id === gpuId)).toBeUndefined();
+
+      // clean up — remove the now-block
+      const gpu = GpuRepository.getById(gpuId);
+      const b = (gpu.manualBlocks || []).find(b2 => b2.reason === 'now-blocked');
+      if (b) await request(app)
+        .delete(`/api/v1/gpus/${gpuId}/block/${b.id}`)
+        .set('Authorization', `Bearer ${providerToken}`);
+    });
+  });
 });

@@ -84,6 +84,11 @@ router.post('/login',
       logger.warn(`Login failed: user not found (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    // 無効化済みアカウントはログイン不可（メール匿名化に加えた多層防御）
+    if (user.status === 'deactivated') {
+      logger.warn(`Login failed: account deactivated (${email})`);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
     // パスワード検証
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
@@ -129,9 +134,9 @@ router.post('/refresh',
     if (payload.jti && isRevoked(payload.jti)) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
-    // ユーザーが削除されていないか確認（最新のロールも反映）
+    // ユーザーが削除/無効化されていないか確認（最新のロールも反映）
     const user = UserRepository.getById(payload.id);
-    if (!user) {
+    if (!user || user.status === 'deactivated') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
     const { signAccessToken } = require('../../utils/tokens');
@@ -182,6 +187,49 @@ router.get('/me',
     const userResponse = { ...user };
     delete userResponse.password;
     res.json(userResponse);
+  })
+);
+
+// アカウント自己退会（ソフト無効化。認証必須）
+// ハード削除はしない: 注文履歴・係争・監査証跡を保全しつつ、本人を確実にロックアウトする。
+// メール/ユーザー名を匿名化して再ログイン・再利用を防ぎ、現在のアクセストークンを失効させる。
+router.delete('/me',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const user = UserRepository.getById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (user.status === 'deactivated') {
+      return res.status(409).json({ error: 'Account is already deactivated' });
+    }
+    // 最後の管理者は自己退会できない（管理不能化の防止。ロール変更と同一ポリシー）
+    if (user.role === 'admin') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin' && u.status !== 'deactivated').length;
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: 'At least one active admin must remain; transfer admin before deactivating' });
+      }
+    }
+    const anonId = uuidv4();
+    UserRepository.update(user.id, {
+      status: 'deactivated',
+      deactivatedAt: new Date().toISOString(),
+      // 個人情報の匿名化（履歴の userId 参照は維持されるため注文・監査は保全される）
+      email: `deactivated+${anonId}@invalid.local`,
+      username: `deactivated_${anonId.slice(0, 8)}`,
+      // パスワードを無効化（万一メールが復元されても認証不可）
+      password: `!deactivated-${anonId}`,
+      apiKey: null,
+    });
+    // 現在のアクセストークンを失効（exp まで保持）。本人の能動的ロックアウト。
+    try {
+      const { revoke } = require('../../middleware/token-denylist');
+      if (req.user.jti) revoke(req.user.jti, (req.user.exp || 0) * 1000);
+    } catch (e) {
+      logger.warn(`token revoke on self-deactivation failed (user=${user.id}): ${e.message}`);
+    }
+    logger.info(`User self-deactivated account: ${user.id}`);
+    res.json({ message: 'Account deactivated', userId: user.id });
   })
 );
 

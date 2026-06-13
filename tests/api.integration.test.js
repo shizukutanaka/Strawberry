@@ -1971,4 +1971,66 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(400);
     });
   });
+
+  describe('GPU cost estimate endpoint GET /gpus/:id/estimate (#41)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+
+    let gpuId;
+
+    beforeAll(async () => {
+      gpuId = GpuRepository.create({
+        name: 'Estimate GPU', vendor: 'NVIDIA', model: 'RTX-EST', memoryGB: 8, pricePerHour: 1.0,
+        providerId: 'est-provider-1',
+      }).id;
+    });
+
+    it('returns pricing breakdown for valid durationMinutes', async () => {
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.gpuId).toBe(gpuId);
+      expect(res.body.durationMinutes).toBe(60);
+      expect(typeof res.body.totalPrice).toBe('number');
+      expect(typeof res.body.availableAtRequestedTime).toBe('boolean');
+    });
+
+    it('rejects non-multiple-of-5 durationMinutes (400)', async () => {
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=7`);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toMatch(/multiple of 5/i);
+    });
+
+    it('rejects missing durationMinutes (400)', async () => {
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate`);
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 404 for unknown GPU ID', async () => {
+      const res = await request(app).get('/api/v1/gpus/no-such-gpu/estimate?durationMinutes=30');
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('availableAtRequestedTime is false when an active order occupies the slot', async () => {
+      const OrderRepository = require('../src/db/json/OrderRepository');
+      const now = new Date();
+      const order = OrderRepository.create({
+        gpuId, userId: 'u1', providerId: 'est-provider-1',
+        durationMinutes: 60, status: 'active',
+        scheduledStartAt: now.toISOString(),
+        createdAt: now.toISOString(),
+      });
+      const res = await request(app)
+        .get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=30&scheduledStartAt=${encodeURIComponent(now.toISOString())}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.availableAtRequestedTime).toBe(false);
+      OrderRepository.update(order.id, { status: 'cancelled' });
+    });
+
+    it('minRenterRating is included when set on the GPU', async () => {
+      GpuRepository.update(gpuId, { minRenterRating: 4 });
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=30`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.minRenterRating).toBe(4);
+      GpuRepository.update(gpuId, { minRenterRating: null });
+    });
+  });
 });

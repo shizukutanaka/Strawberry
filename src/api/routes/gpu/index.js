@@ -384,6 +384,47 @@ router.delete('/:id',
   })
 );
 
+// 注文コスト事前見積もり（認証不要、注文作成なし）
+// GET /gpus/:id/estimate?durationMinutes=60[&scheduledStartAt=ISO]
+// 借り手が実際に注文を作成する前に料金を確認できる。
+router.get('/:id/estimate', asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+  if (!gpu.pricePerHour || gpu.pricePerHour <= 0) {
+    return res.status(400).json({ error: 'GPU does not have a valid price configured' });
+  }
+  const durationRaw = parseInt(req.query.durationMinutes, 10);
+  if (!Number.isInteger(durationRaw) || durationRaw <= 0 || durationRaw % 5 !== 0) {
+    return res.status(400).json({ error: 'durationMinutes must be a positive integer and a multiple of 5' });
+  }
+  const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+  const rateInfo = await fetchRateInfo();
+  const pricing = computeOrderPricing({ gpuId, durationMinutes: durationRaw, pricePerHour: gpu.pricePerHour }, rateInfo);
+
+  // 空き状況チェック（見積もり時点の参考情報 — 確定は注文作成時に行う）
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const scheduledStart = req.query.scheduledStartAt ? new Date(req.query.scheduledStartAt).getTime() : Date.now();
+  const scheduledEnd = scheduledStart + durationRaw * 60 * 1000;
+  const conflicting = OrderRepository.getAll().find(o => {
+    if (o.gpuId !== gpuId || !BLOCKING.has(o.status)) return false;
+    const s = new Date(o.scheduledStartAt || o.createdAt).getTime();
+    const e = s + (o.durationMinutes || 0) * 60 * 1000;
+    return scheduledStart < e && scheduledEnd > s;
+  });
+
+  res.json({
+    gpuId,
+    gpuName: gpu.name,
+    durationMinutes: durationRaw,
+    ...pricing,
+    exchangeRateTimestamp: rateInfo.timestamp,
+    availableAtRequestedTime: !conflicting,
+    minRenterRating: gpu.minRenterRating || null,
+  });
+}));
+
 // GPU の予約カレンダー（空き時間帯の照会）
 // GET /gpus/:id/schedule?from=ISO&to=ISO
 // 認証不要（マーケットプレイスブラウジングと同等）

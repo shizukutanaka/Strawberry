@@ -760,6 +760,31 @@ describe('API Integration', () => {
         .set('Authorization', `Bearer ${otherToken}`);
       expect(res403.statusCode).toBe(403);
     });
+
+    it('SSRF: private/loopback webhook URLs are rejected (#79)', async () => {
+      const privateUrls = [
+        'http://127.0.0.1:9200/delete-all',
+        'http://localhost:8080/internal',
+        'http://192.168.1.1/admin',
+        'http://10.0.0.1/metadata',
+        'http://169.254.169.254/latest/meta-data/',
+      ];
+      for (const url of privateUrls) {
+        const res = await request(app)
+          .post(`/api/v1/notification-settings/${userId}`)
+          .set('Authorization', `Bearer ${userToken}`)
+          .send({ genericWebhook: url });
+        expect(res.statusCode).toBe(400);
+      }
+    });
+
+    it('SSRF: public webhook URL is accepted (#79)', async () => {
+      const res = await request(app)
+        .post(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ genericWebhook: 'https://hooks.example.com/webhook/abc123' });
+      expect(res.statusCode).toBe(200);
+    });
   });
 
   describe('GPU minRating filter + order dispute', () => {
@@ -2751,6 +2776,31 @@ describe('API Integration', () => {
         .send({ username: `uniq${unique}`.slice(0, 28) });
       expect(res.statusCode).toBe(409);
       expect(res.body.error).toMatch(/taken/i);
+    });
+
+    it('PUT /me allowlist: allowed profile fields are accepted (#80)', async () => {
+      const res = await request(app).put('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token1}`)
+        .send({ bio: 'GPU provider', location: 'Tokyo', website: 'https://example.com', displayName: 'Test User' });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.user.bio).toBe('GPU provider');
+      expect(res.body.user.location).toBe('Tokyo');
+    });
+
+    it('PUT /me allowlist: unknown fields (id, role, status) are ignored not crash (#80)', async () => {
+      const res = await request(app).put('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token1}`)
+        .send({ bio: 'Updated bio', role: 'admin', status: 'deactivated', apiKey: 'hack' });
+      expect(res.statusCode).toBe(200);
+      // role, status, apiKey should NOT appear or be changed
+      expect(res.body.user.role).not.toBe('admin');
+    });
+
+    it('PUT /me allowlist: sending only disallowed fields returns 400 (#80)', async () => {
+      const res = await request(app).put('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token1}`)
+        .send({ role: 'admin', id: 'hack' });
+      expect(res.statusCode).toBe(400);
     });
   });
 

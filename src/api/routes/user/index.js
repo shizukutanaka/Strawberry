@@ -240,34 +240,51 @@ router.delete('/me',
 );
 
 // ユーザー情報更新 (認証必須)
-router.put('/me', 
+// 許可するプロフィールフィールドの明示的な allowlist。
+// 削除ベース (delete updateData.sensitive) では新フィールド追加時に漏れが生じるため、
+// 許可リストベースに切り替え: 未知のフィールドは無視して inject を防止する。
+const ALLOWED_PROFILE_FIELDS = {
+  username:    v => typeof v === 'string' && v.length >= 3 && v.length <= 30 && /^[a-zA-Z0-9_-]+$/.test(v),
+  displayName: v => typeof v === 'string' && v.length <= 50,
+  bio:         v => typeof v === 'string' && v.length <= 500,
+  website:     v => typeof v === 'string' && v.length <= 200,
+  location:    v => typeof v === 'string' && v.length <= 100,
+  avatar:      v => typeof v === 'string' && v.length <= 500,
+};
+
+router.put('/me',
   authenticateJWT,
   asyncHandler(async (req, res) => {
-    const updateData = req.body;
     logger.info(`Updating user profile: ${req.user.id}`);
-    
-    // ユーザーを検索（永続化対応）
     const user = UserRepository.getById(req.user.id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // 更新不可のフィールドを削除
-    delete updateData.id;
-    delete updateData.email;
-    delete updateData.password;
-    delete updateData.role;
-    delete updateData.createdAt;
-    // ユーザー名の重複チェック（既に別ユーザーが使用している場合は 409）
-    if (updateData.username && typeof updateData.username === 'string') {
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+    // 許可フィールドのみを抽出・検証（値の型も確認）
+    const updateData = {};
+    for (const [field, validate] of Object.entries(ALLOWED_PROFILE_FIELDS)) {
+      if (field in req.body) {
+        if (!validate(req.body[field])) {
+          return res.status(400).json({ error: `Invalid value for field: ${field}` });
+        }
+        updateData[field] = req.body[field];
+      }
+    }
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: `No updatable fields provided. Allowed: ${Object.keys(ALLOWED_PROFILE_FIELDS).join(', ')}` });
+    }
+    // ユーザー名の重複チェック
+    if (updateData.username) {
       const existing = UserRepository.getAll().find(u => u.username === updateData.username && u.id !== req.user.id);
       if (existing) return res.status(409).json({ error: 'Username already taken' });
     }
-    // ユーザー情報を更新
     const updatedUser = UserRepository.update(req.user.id, {
       ...updateData,
       updatedAt: new Date().toISOString()
     });
-    // レスポンス用にパスワードを削除
     const userResponse = { ...updatedUser };
     delete userResponse.password;
     res.json({

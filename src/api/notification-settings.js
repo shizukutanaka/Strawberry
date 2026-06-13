@@ -7,6 +7,31 @@ const { authenticateJWT } = require('./middleware/security');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
 
+// SSRF対策: プライベートIPアドレス・ループバック・メタデータサービスをブロック
+const PRIVATE_IP_PATTERNS = [
+  /^https?:\/\/localhost[:/]/i,
+  /^https?:\/\/127\.\d+\.\d+\.\d+[:/]/,
+  /^https?:\/\/10\.\d+\.\d+\.\d+[:/]/,
+  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+[:/]/,
+  /^https?:\/\/192\.168\.\d+\.\d+[:/]/,
+  /^https?:\/\/169\.254\.\d+\.\d+[:/]/,  // AWS metadata
+  /^https?:\/\/\[?::[1f]\]?[:/]/i,        // ::1, ::ffff IPv6 loopback
+];
+function isSSRFUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  if (!/^https?:\/\//i.test(url)) return true;
+  return PRIVATE_IP_PATTERNS.some(re => re.test(url));
+}
+
+// Joi カスタムバリデータ（URI形式 + SSRF禁止）
+const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)
+  .custom((value, helpers) => {
+    if (isSSRFUrl(value)) {
+      return helpers.error('any.invalid');
+    }
+    return value;
+  }).messages({ 'any.invalid': 'Webhook URL must not point to private or internal addresses' });
+
 const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
 
 function loadSettings() {
@@ -40,16 +65,16 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
   }
   const schema = Joi.object({
     lineToken: Joi.string().allow('').optional(),
-    discordWebhook: Joi.string().uri().allow('').optional(),
-    slackWebhook: Joi.string().uri().allow('').optional(),
+    discordWebhook: safeWebhookUrl.allow('').optional(),
+    slackWebhook: safeWebhookUrl.allow('').optional(),
     telegramBotToken: Joi.string().allow('').optional(),
     telegramChatId: Joi.string().allow('').optional(),
     email: Joi.string().email().allow('').optional(),
-    genericWebhook: Joi.string().uri().allow('').optional(),
-    enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional(), // 各チャネルON/OFF
+    genericWebhook: safeWebhookUrl.allow('').optional(),
+    enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional(),
     webhooks: Joi.array().items(Joi.object({
       event: Joi.string().max(64).required(),
-      url: Joi.string().uri().max(2048).required(),
+      url: safeWebhookUrl.required(),
       enabled: Joi.boolean().default(true),
       payloadTemplate: Joi.string().max(4096).allow('').optional()
     })).max(20).optional()

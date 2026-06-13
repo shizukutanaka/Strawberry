@@ -474,6 +474,7 @@ router.post('/bulk',
     }
     const { schemas: { gpu: gpuSchemas } } = require('../../../utils/validator');
     const results = [];
+    const batchKeys = new Set();
     for (const entry of entries) {
       const { error: valErr, value } = gpuSchemas.register.validate(entry, { abortEarly: false, stripUnknown: true });
       if (valErr) {
@@ -486,6 +487,11 @@ router.post('/bulk',
         'features', 'capabilities', 'location', 'performance', 'minRenterRating',
       ]);
       gpuInfo.providerId = req.user.id;
+      const dedupKey = `${gpuInfo.name}|${gpuInfo.model}|${gpuInfo.vendor}|${gpuInfo.memoryGB}`;
+      if (batchKeys.has(dedupKey)) {
+        results.push({ success: false, id: entry.id || null, error: 'Duplicate GPU spec within this batch' });
+        continue;
+      }
       const duplicate = GpuRepository.getAll().find(g =>
         g.name === gpuInfo.name && g.model === gpuInfo.model &&
         g.vendor === gpuInfo.vendor && g.memoryGB === gpuInfo.memoryGB &&
@@ -495,6 +501,7 @@ router.post('/bulk',
         results.push({ success: false, id: entry.id || null, error: 'Duplicate GPU spec already registered' });
         continue;
       }
+      batchKeys.add(dedupKey);
       gpuInfo.capabilities = gpuInfo.capabilities || {};
       if (gpuInfo.apiType === 'CUDA') gpuInfo.capabilities.cuda = true;
       if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
@@ -608,7 +615,11 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
   // 空き状況チェック（見積もり時点の参考情報 — 確定は注文作成時に行う）
   const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
-  const scheduledStart = req.query.scheduledStartAt ? new Date(req.query.scheduledStartAt).getTime() : Date.now();
+  let scheduledStart = Date.now();
+  if (req.query.scheduledStartAt) {
+    scheduledStart = Date.parse(req.query.scheduledStartAt);
+    if (!Number.isFinite(scheduledStart)) return res.status(400).json({ error: 'Invalid scheduledStartAt date' });
+  }
   const scheduledEnd = scheduledStart + durationRaw * 60 * 1000;
   const conflicting = OrderRepository.getAll().find(o => {
     if (o.gpuId !== gpuId || !BLOCKING.has(o.status)) return false;
@@ -648,13 +659,16 @@ router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
   if (reason !== undefined && (typeof reason !== 'string' || reason.length > 200)) {
     return res.status(400).json({ error: '"reason" must be a string (max 200 chars)' });
   }
+  const sanitizedReason = reason
+    ? reason.replace(/[<>"'&]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 200) || null
+    : null;
 
   const { v4: uuidv4 } = require('uuid');
   const block = {
     id: uuidv4(),
     from: new Date(fromMs).toISOString(),
     to: new Date(toMs).toISOString(),
-    reason: reason || null,
+    reason: sanitizedReason,
     createdAt: new Date().toISOString(),
   };
   const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];

@@ -512,15 +512,16 @@ router.put('/:id',
     if ('available' in sanitized && typeof sanitized.available !== 'boolean') {
       return res.status(400).json({ error: '"available" must be a boolean' });
     }
-    // 重複スペック登録防止
-    const duplicate = GpuRepository.getAll().find(g =>
-      g.id !== gpuId &&
-      g.name === sanitized.name &&
-      g.memory === sanitized.memory &&
-      g.providerId === gpu.providerId
-    );
-    if (duplicate) {
-      return res.status(409).json({ error: 'Duplicate GPU spec already registered' });
+    // 名前変更時の重複チェック（memoryGB を正しいフィールド名で参照）
+    if (sanitized.name !== undefined && sanitized.name !== gpu.name) {
+      const duplicate = GpuRepository.getAll().find(g =>
+        g.id !== gpuId &&
+        g.name === sanitized.name &&
+        g.providerId === gpu.providerId
+      );
+      if (duplicate) {
+        return res.status(409).json({ error: 'Duplicate GPU name already registered by this provider' });
+      }
     }
     // GPU情報を更新
     const updatedGPU = GpuRepository.update(gpuId, { ...gpu, ...sanitized });

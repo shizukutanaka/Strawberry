@@ -274,10 +274,50 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   res.json({ gpuId, total, limit, offset, ratingAverage, reviews: page });
 }));
 
+// GPU注文履歴取得（認証必須 — 所有者または管理者のみ）
+// プロバイダが自分のGPUの使用状況を把握するためのエンドポイント。
+// ?limit=N ?offset=N ?status=completed|cancelled|etc. でフィルタリング可能。
+router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+  if (req.user.role !== 'admin' && gpu.providerId !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const limitRaw = parseInt(req.query.limit, 10);
+  const offsetRaw = parseInt(req.query.offset, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+  const statusFilter = req.query.status || null;
+
+  let orders = OrderRepository.getAll().filter(o => o.gpuId === gpuId);
+  if (statusFilter) orders = orders.filter(o => o.status === statusFilter);
+  orders = orders.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  const total = orders.length;
+  const page = orders.slice(offset, offset + limit).map(o => ({
+    orderId: o.id,
+    userId: o.userId,
+    status: o.status,
+    durationMinutes: o.durationMinutes,
+    totalPrice: o.totalPrice || null,
+    createdAt: o.createdAt,
+    startedAt: o.startedAt || null,
+    stoppedAt: o.stoppedAt || null,
+    cancelledAt: o.cancelledAt || null,
+    hasReview: !!o.review,
+    reviewRating: o.review ? o.review.rating : null,
+  }));
+
+  res.json({ gpuId, total, limit, offset, orders: page });
+}));
+
 // GPU出品登録 (認証必須)
-router.post('/', 
-  authenticateJWT, 
-  checkRole(['provider', 'admin']), 
+router.post('/',
+  authenticateJWT,
+  checkRole(['provider', 'admin']),
   validateMiddleware(schemas.gpu.register),
   asyncHandler(async (req, res) => {
     // 入力値サニタイズ
@@ -288,6 +328,19 @@ router.post('/',
       'features', 'capabilities', 'location', 'performance', 'minRenterRating'
     ]);
     logger.info(`[GPU登録] ${gpuInfo.vendor} ${gpuInfo.model} (${gpuInfo.apiType}) by ${req.user.id}`);
+
+    // 提供者ごとのGPU登録数上限チェック（スパム・在庫偽装防止）
+    const MAX_GPUS = (() => {
+      const raw = process.env.MAX_GPUS_PER_PROVIDER;
+      const n = Number(raw);
+      return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
+    })();
+    if (req.user.role !== 'admin') {
+      const providerGpuCount = GpuRepository.getAll().filter(g => g.providerId === req.user.id).length;
+      if (providerGpuCount >= MAX_GPUS) {
+        return res.status(429).json({ error: `GPU registration limit reached (max ${MAX_GPUS} per provider)` });
+      }
+    }
 
     // 重複登録チェック（model, vendor, providerId, memoryGB）
     const duplicate = GpuRepository.getAll().find(g =>

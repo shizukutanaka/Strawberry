@@ -3186,6 +3186,125 @@ describe('API Integration', () => {
     });
   });
 
+  describe('GPU order history GET /gpus/:id/history and provider quota (#67)', () => {
+    let token, gpuId, orderId;
+    const u67 = `hist67${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u67, email: `${u67}@example.com`, password: 'Test1234!', role: 'provider' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u67}@example.com`, password: 'Test1234!' });
+      token = login.body.token;
+
+      const gpuRes = await request(app).post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          id: `hist67gpu${unique}`.slice(0, 64),
+          name: 'History GPU',
+          vendor: 'NVIDIA',
+          model: 'RTX-HIST',
+          apiType: 'CUDA',
+          driverVersion: '525.0',
+          os: 'linux',
+          arch: 'x86_64',
+          memoryGB: 8,
+          clockMHz: 1500,
+          powerWatt: 200,
+          pricePerHour: 0.5,
+        });
+      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+
+      if (gpuId) {
+        const orderRes = await request(app).post('/api/v1/orders')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ gpuId, durationMinutes: 5 });
+        orderId = orderRes.body.order && orderRes.body.order.id;
+      }
+    });
+
+    it('GET /gpus/:id/history requires authentication', async () => {
+      if (!gpuId) return;
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/history`);
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('GET /gpus/:id/history returns order history for GPU owner', async () => {
+      if (!gpuId) return;
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/history`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('gpuId', gpuId);
+      expect(res.body).toHaveProperty('total');
+      expect(Array.isArray(res.body.orders)).toBe(true);
+    });
+
+    it('GET /gpus/:id/history includes order details with correct fields', async () => {
+      if (!gpuId || !orderId) return;
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/history`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      const entry = res.body.orders.find(o => o.orderId === orderId);
+      expect(entry).toBeTruthy();
+      expect(entry).toHaveProperty('status');
+      expect(entry).toHaveProperty('durationMinutes');
+      expect(entry).toHaveProperty('createdAt');
+      expect(entry).toHaveProperty('hasReview');
+    });
+
+    it('GET /gpus/:id/history ?status= filter works', async () => {
+      if (!gpuId) return;
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/history?status=pending`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      for (const o of res.body.orders) {
+        expect(o.status).toBe('pending');
+      }
+    });
+
+    it('GET /gpus/:id/history 403 for non-owner', async () => {
+      if (!gpuId) return;
+      // Register a second user
+      const u2 = `hist67b${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u2, email: `${u2}@example.com`, password: 'Test1234!' });
+      const login2 = await request(app).post('/api/v1/users/login')
+        .send({ email: `${u2}@example.com`, password: 'Test1234!' });
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/history`)
+        .set('Authorization', `Bearer ${login2.body.token}`);
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('GPU registration quota: returns 429 when limit reached (MAX_GPUS_PER_PROVIDER=1)', async () => {
+      // Set limit to 1; the provider already has 1 GPU registered above
+      const origEnv = process.env.MAX_GPUS_PER_PROVIDER;
+      process.env.MAX_GPUS_PER_PROVIDER = '1';
+      try {
+        const res = await request(app).post('/api/v1/gpus')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            id: `hist67gpu2${unique}`.slice(0, 64),
+            name: 'Second GPU',
+            vendor: 'AMD',
+            model: 'RX7900',
+            apiType: 'ROCm',
+            driverVersion: '5.0',
+            os: 'linux',
+            arch: 'x86_64',
+            memoryGB: 16,
+            clockMHz: 2000,
+            powerWatt: 300,
+            pricePerHour: 0.8,
+          });
+        expect(res.statusCode).toBe(429);
+        expect(res.body.error).toMatch(/limit/i);
+      } finally {
+        if (origEnv === undefined) delete process.env.MAX_GPUS_PER_PROVIDER;
+        else process.env.MAX_GPUS_PER_PROVIDER = origEnv;
+      }
+    });
+  });
+
   describe('Refresh token single-use enforcement (#44)', () => {
     let firstRefreshToken;
 

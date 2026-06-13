@@ -66,8 +66,11 @@ const ensureGoogleEnabled = (req, res, next) => {
 };
 router.get('/google', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next));
 router.get('/google/callback', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { failureRedirect: '/master-auth/fail' })(req, res, next), (req, res) => {
-  req.session.googleAuth = true;
-  res.redirect('/master-auth/totp');
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).send('セッション初期化エラー');
+    req.session.googleAuth = true;
+    res.redirect('/master-auth/totp');
+  });
 });
 
 // --- TOTP認証 ---
@@ -77,10 +80,19 @@ router.get('/totp', (req, res) => {
 });
 router.post('/totp', async (req, res) => {
   if (!req.session.googleAuth) return res.status(401).send('Google認証未完了');
-  const valid = verifyTOTP(process.env.MASTER_TOTP_SECRET, req.body.token);
-  if (!valid) {
-    return res.send('TOTP認証失敗');
+  const { token } = req.body;
+  if (!token || typeof token !== 'string' || !/^\d{6}$/.test(token)) {
+    return res.status(400).send('認証コードは6桁の数字を入力してください');
   }
+  req.session.totpAttempts = (req.session.totpAttempts || 0) + 1;
+  if (req.session.totpAttempts > 5) {
+    return res.status(429).send('試行回数が多すぎます。Google認証からやり直してください。');
+  }
+  const valid = verifyTOTP(process.env.MASTER_TOTP_SECRET, token);
+  if (!valid) {
+    return res.status(401).send('TOTP認証失敗');
+  }
+  req.session.totpAttempts = 0;
   req.session.totpAuth = true;
   // メール認証コード発行（暗号論的乱数。Math.random は予測可能で不可）
   const mailCode = crypto.randomInt(100000, 1000000).toString();
@@ -104,6 +116,10 @@ router.get('/mail', (req, res) => {
 });
 router.post('/mail', (req, res) => {
   if (!req.session.totpAuth) return res.status(401).send('TOTP認証未完了');
+  const { code } = req.body;
+  if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+    return res.status(400).send('認証コードは6桁の数字を入力してください');
+  }
   // 期限切れ/未発行を拒否
   if (!req.session.mailCode || !req.session.mailCodeExpires || Date.now() > req.session.mailCodeExpires) {
     req.session.mailCode = null;
@@ -111,7 +127,7 @@ router.post('/mail', (req, res) => {
     return res.status(401).send('認証コードの有効期限が切れています。再発行してください。');
   }
   // タイミング攻撃耐性のある比較
-  const ok = timingSafeStrEqual(req.body.code, req.session.mailCode);
+  const ok = timingSafeStrEqual(code, req.session.mailCode);
   // 成否に関わらずコードは単回限り（リプレイ/総当たり防止）
   req.session.mailCode = null;
   req.session.mailCodeExpires = null;

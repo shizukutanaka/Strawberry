@@ -61,9 +61,12 @@ async function sendNotification(typeOrUserId, message, options = {}) {
           let payload = { message };
           if (wh.payloadTemplate) {
             try {
-              // テンプレートは ${message} 置換のみサポート
-              payload = JSON.parse(wh.payloadTemplate.replace(/\$\{message\}/g, message));
-            } catch {
+              // テンプレートは ${message} 置換のみサポート。
+              // JSON.stringify でエスケープして注入攻撃・不正 JSON を防ぐ。
+              const safeMsg = JSON.stringify(String(message)).slice(1, -1);
+              payload = JSON.parse(wh.payloadTemplate.replace(/\$\{message\}/g, safeMsg));
+            } catch (e) {
+              logger.warn(`Webhook payloadTemplate parse failed (url=${wh.url}): ${e.message}`);
               payload = { message };
             }
           }

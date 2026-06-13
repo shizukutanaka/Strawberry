@@ -1273,5 +1273,45 @@ describe('API Integration', () => {
       // reset for isolation
       UserRepository.update(renterId, { deniedDisputeCount: 0 });
     });
+
+    it('a refund (vindicated) dispute increments the raiser vindicatedDisputeCount', async () => {
+      UserRepository.update(renterId, { deniedDisputeCount: 0, vindicatedDisputeCount: 0 });
+      const before = UserRepository.getById(renterId).vindicatedDisputeCount || 0;
+      await disputeAndResolve('refund');
+      const after = UserRepository.getById(renterId).vindicatedDisputeCount || 0;
+      expect(after).toBe(before + 1);
+    });
+
+    it('the gate uses denied RATE, not absolute count: many vindications keep access open', async () => {
+      // 3 denied but 10 vindicated → rate 3/13 ≈ 0.23 < 0.67 → NOT blocked (recovery/proportionality)
+      UserRepository.update(renterId, { deniedDisputeCount: 3, vindicatedDisputeCount: 10 });
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      const dispute = await request(app).post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`).send({ reason: 'legit' });
+      expect(dispute.statusCode).toBe(201);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+      UserRepository.update(renterId, { deniedDisputeCount: 0, vindicatedDisputeCount: 0 });
+    });
+
+    it('below the minimum sample, a high denied rate does NOT block (avoids early false-positives)', async () => {
+      // 2 denied, 0 vindicated → resolved=2 < MIN_RESOLVED(3) → not blocked despite rate 1.0
+      UserRepository.update(renterId, { deniedDisputeCount: 2, vindicatedDisputeCount: 0 });
+      const create = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 30 });
+      const orderId = create.body.order.id;
+      OrderRepository.update(orderId, { status: 'active', providerId });
+
+      const dispute = await request(app).post(`/api/v1/orders/${orderId}/dispute`)
+        .set('Authorization', `Bearer ${renterToken}`).send({ reason: 'still allowed' });
+      expect(dispute.statusCode).toBe(201);
+      OrderRepository.update(orderId, { status: 'cancelled' });
+      UserRepository.update(renterId, { deniedDisputeCount: 0, vindicatedDisputeCount: 0 });
+    });
   });
 });

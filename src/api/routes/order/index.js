@@ -518,16 +518,21 @@ router.post('/:id/dispute',
     if (!['active', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot dispute an order in '${order.status}' state (only active or matched orders can be disputed)`, 400);
     }
-    // 連続グリーフィング防止: 棄却された係争が閾値（既定3, MAX_DENIED_DISPUTES）以上の
-    // 申請者は新規係争を起こせない（管理者は対象外）。対称性: プロバイダが係争で減点される一方、
-    // 申請者は無償で active 注文を凍結し続けられる、という非対称を是正する。
+    // 連続グリーフィング防止 — ただし「率」で判定する（#23 の絶対カウント永久バンを是正）。
+    // プロバイダ評判が成功「率」(Bayesian)で測られるのと対称に、申請者も棄却「率」で測る。
+    // 正当な係争(vindicated)を起こせば率が下がり回復できる＝単調な永久ペナルティにしない。
+    // ゲート発火条件: 解決済み係争が最小サンプル以上 かつ 棄却率が閾値以上（管理者は対象外）。
     if (req.user.role !== 'admin') {
-      const MAX_DENIED = Number(process.env.MAX_DENIED_DISPUTES) || 3;
+      const MIN_RESOLVED = Number(process.env.MIN_RESOLVED_DISPUTES) || 3;
+      const MAX_DENIED_RATE = Number(process.env.MAX_DENIED_DISPUTE_RATE) || 0.67;
       const UserRepository = require('../../../db/json/UserRepository');
       const me = UserRepository.getById(req.user.id);
-      if (me && (me.deniedDisputeCount || 0) >= MAX_DENIED) {
+      const denied = (me && me.deniedDisputeCount) || 0;
+      const vindicated = (me && me.vindicatedDisputeCount) || 0;
+      const resolved = denied + vindicated;
+      if (resolved >= MIN_RESOLVED && denied / resolved >= MAX_DENIED_RATE) {
         throw new APIError(ErrorTypes.FORBIDDEN,
-          `Too many of your disputes have been denied (${me.deniedDisputeCount}); contact support to raise further disputes`, 403);
+          `Too high a share of your disputes have been denied (${denied}/${resolved}); raise legitimate disputes or contact support`, 403);
       }
     }
     const reason = req.body.reason ? String(req.body.reason).slice(0, 1000) : '';
@@ -613,6 +618,21 @@ router.post('/:id/dispute/resolve',
           rep.slash(order.providerId);
         } catch (e) {
           logger.warn(`reputation penalty on dispute refund failed (order=${order.id}): ${e.message}`);
+        }
+      }
+      // 係争認容 = 申請者の主張は正当。申請者に「認容された係争」を加算する。
+      // これにより申請者の「棄却率」が下がり、ゲート(#23の monotonic な永久バンを是正)から
+      // 回復できる。正当な係争を多く起こす利用者を、数件の棄却で永久に締め出さない。
+      const vRaiser = order.dispute && order.dispute.raisedBy;
+      if (vRaiser) {
+        try {
+          const UserRepository = require('../../../db/json/UserRepository');
+          const u = UserRepository.getById(vRaiser);
+          if (u) {
+            UserRepository.update(vRaiser, { vindicatedDisputeCount: (u.vindicatedDisputeCount || 0) + 1 });
+          }
+        } catch (e) {
+          logger.warn(`vindicated-dispute accounting failed (raiser=${vRaiser}): ${e.message}`);
         }
       }
     } else {

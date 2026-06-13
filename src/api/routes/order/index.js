@@ -183,6 +183,61 @@ router.get('/',
   })
 );
 
+// ユーザー自身の注文統計 (認証必須 — 全ロール)
+// 借り手として: 総支出・完了件数・キャンセル件数・係争件数
+// 提供者として: 収益サマリは /provider/earnings を参照（こちらはより軽量）
+router.get('/stats',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const allOrders = OrderRepository.getAll();
+
+    const asRenter = allOrders.filter(o => o.userId === userId);
+    const asProvider = req.user.role === 'provider' || req.user.role === 'admin'
+      ? allOrders.filter(o => o.providerId === userId)
+      : [];
+
+    const countByStatus = (orders) => {
+      const counts = {};
+      for (const o of orders) {
+        counts[o.status] = (counts[o.status] || 0) + 1;
+      }
+      return counts;
+    };
+
+    const totalSpentSats = asRenter
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPrice === 'number' ? o.totalPrice : 0), 0);
+    const totalSpentJPY = asRenter
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0), 0);
+
+    const totalEarnedSats = asProvider
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPrice === 'number' ? o.totalPrice : 0), 0);
+    const totalEarnedJPY = asProvider
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0), 0);
+
+    res.json({
+      userId,
+      asRenter: {
+        total: asRenter.length,
+        byStatus: countByStatus(asRenter),
+        totalSpentSats,
+        totalSpentJPY,
+      },
+      // 提供者・管理者は asProvider を常に返す（件数 0 でも null にしない）
+      asProvider: (req.user.role === 'provider' || req.user.role === 'admin') ? {
+        total: asProvider.length,
+        byStatus: countByStatus(asProvider),
+        totalEarnedSats,
+        totalEarnedJPY,
+      } : null,
+    });
+  })
+);
+
 // プロバイダ収益サマリ (認証必須, provider/admin)
 // 自身が providerId の注文を集計し、完了済み収益と進行中の見込み額を返す。
 router.get('/provider/earnings',
@@ -656,6 +711,24 @@ router.post('/:id/reject',
       cancelNote,
       cancelledAt: new Date().toISOString(),
     });
+    // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const escrows = EscrowRepository.getByOrderId(order.id);
+      if (Array.isArray(escrows) && escrows.length > 0) {
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        for (const escrow of escrows) {
+          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
+            try { escrowSvc.cancel(escrow.id); } catch (e) {
+              logger.warn(`Escrow cancel failed on reject (id=${escrow.id}): ${e.message}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Escrow lookup on order reject failed (order=${order.id}): ${e.message}`);
+    }
     // 借り手（レンター）へ通知
     const { notifyUser } = require('../../../utils/user-notify');
     const gpuName = gpu ? gpu.name : order.gpuId;

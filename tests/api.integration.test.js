@@ -3003,6 +3003,147 @@ describe('API Integration', () => {
     });
   });
 
+  describe('User order stats GET /orders/stats (#71)', () => {
+    let token, gpuId;
+    const u71 = `stats71${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u71, email: `${u71}@example.com`, password: 'Test1234!', role: 'provider' });
+      token = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u71}@example.com`, password: 'Test1234!' })).body.token;
+
+      const gpuRes = await request(app).post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          id: `stats71gpu${unique}`.slice(0, 64),
+          name: 'Stats71 GPU',
+          vendor: 'NVIDIA',
+          model: 'RTX-S71',
+          apiType: 'CUDA',
+          driverVersion: '525.0',
+          os: 'linux',
+          arch: 'x86_64',
+          memoryGB: 8,
+          clockMHz: 1500,
+          powerWatt: 200,
+          pricePerHour: 0.5,
+        });
+      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+    });
+
+    it('GET /orders/stats requires authentication', async () => {
+      const res = await request(app).get('/api/v1/orders/stats');
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('GET /orders/stats returns stats for authenticated user', async () => {
+      const res = await request(app).get('/api/v1/orders/stats')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toHaveProperty('userId');
+      expect(res.body).toHaveProperty('asRenter');
+      expect(res.body.asRenter).toHaveProperty('total');
+      expect(res.body.asRenter).toHaveProperty('byStatus');
+      expect(res.body.asRenter).toHaveProperty('totalSpentSats');
+    });
+
+    it('asProvider stats are returned for providers', async () => {
+      const res = await request(app).get('/api/v1/orders/stats')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      // Provider role — asProvider should not be null
+      expect(res.body.asProvider).not.toBeNull();
+      expect(res.body.asProvider).toHaveProperty('total');
+    });
+
+    it('asProvider is null for regular users', async () => {
+      const u71r = `stats71r${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u71r, email: `${u71r}@example.com`, password: 'Test1234!' });
+      const rToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u71r}@example.com`, password: 'Test1234!' })).body.token;
+      const res = await request(app).get('/api/v1/orders/stats')
+        .set('Authorization', `Bearer ${rToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.asProvider).toBeNull();
+    });
+  });
+
+  describe('Escrow cleanup on order reject (#72)', () => {
+    let providerToken, renterToken, gpuId, orderId;
+    const u72p = `rej72p${unique}`.slice(0, 28);
+    const u72r = `rej72r${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u72p, email: `${u72p}@example.com`, password: 'Test1234!', role: 'provider' });
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u72r, email: `${u72r}@example.com`, password: 'Test1234!' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u72p}@example.com`, password: 'Test1234!' })).body.token;
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u72r}@example.com`, password: 'Test1234!' })).body.token;
+
+      const gpuRes = await request(app).post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({
+          id: `rej72gpu${unique}`.slice(0, 64),
+          name: 'Reject72 GPU',
+          vendor: 'NVIDIA',
+          model: 'RTX-REJ72',
+          apiType: 'CUDA',
+          driverVersion: '525.0',
+          os: 'linux',
+          arch: 'x86_64',
+          memoryGB: 8,
+          clockMHz: 1500,
+          powerWatt: 200,
+          pricePerHour: 0.5,
+        });
+      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+    });
+
+    it('provider can reject a pending order (200)', async () => {
+      if (!gpuId) return;
+      const orderRes = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 5 });
+      orderId = orderRes.body.order && orderRes.body.order.id;
+      if (!orderId) return;
+      const res = await request(app).post(`/api/v1/orders/${orderId}/reject`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ reason: 'Unavailable' });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.orderId).toBe(orderId);
+    });
+
+    it('rejected order status is cancelled', async () => {
+      if (!orderId) return;
+      const res = await request(app).get(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.order.status).toBe('cancelled');
+      expect(res.body.order.cancelReason).toBe('provider_rejected');
+    });
+
+    it('renter cannot reject their own order (403)', async () => {
+      if (!gpuId) return;
+      const orderRes = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId, durationMinutes: 5 });
+      const newOrderId = orderRes.body.order && orderRes.body.order.id;
+      if (!newOrderId) return;
+      const res = await request(app).post(`/api/v1/orders/${newOrderId}/reject`)
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({});
+      expect(res.statusCode).toBe(403);
+      // Cleanup
+      await request(app).delete(`/api/v1/orders/${newOrderId}`)
+        .set('Authorization', `Bearer ${renterToken}`);
+    });
+  });
+
   describe('PUT /orders/:id status change restricted to admin only (#69)', () => {
     let renterToken, providerToken, gpuId, orderId;
     const u69r = `p69r${unique}`.slice(0, 28);

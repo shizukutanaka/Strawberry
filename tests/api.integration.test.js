@@ -1133,4 +1133,66 @@ describe('API Integration', () => {
       OrderRepository.update(orderId, { status: 'cancelled' });
     });
   });
+
+  describe('Self-dealing prevention (wash-trading guard)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken, providerId, ownGpuId, renterToken;
+
+    beforeAll(async () => {
+      const p = `sdp${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      const login = await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' });
+      providerToken = login.body.token;
+      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
+
+      const r = `sdr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
+      renterToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+
+      const gpu = GpuRepository.create({
+        name: 'Self Deal GPU', vendor: 'NVIDIA', model: 'RTX-SD', memoryGB: 12, pricePerHour: 0.4,
+        providerId,
+      });
+      ownGpuId = gpu.id;
+    });
+
+    it('provider cannot order their own GPU (400)', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ gpuId: ownGpuId, durationMinutes: 30 });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error.message || res.body.error).toMatch(/own GPU/i);
+    });
+
+    it('a different renter CAN order that GPU (guard is provider-specific)', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId: ownGpuId, durationMinutes: 30 });
+      expect(res.statusCode).toBe(201);
+      OrderRepository.update(res.body.order.id, { status: 'cancelled' });
+    });
+
+    it('provider cannot self-review even a pre-existing self-order (403 defense-in-depth)', async () => {
+      // Simulate a legacy self-order injected directly into the repo
+      const selfOrder = OrderRepository.create({
+        gpuId: ownGpuId, userId: providerId, providerId, durationMinutes: 30,
+        status: 'completed', totalPrice: 10, createdAt: new Date().toISOString(),
+      });
+      const res = await request(app)
+        .post(`/api/v1/orders/${selfOrder.id}/review`)
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ rating: 5, comment: 'self praise' });
+      expect(res.statusCode).toBe(403);
+      expect(res.body.error.message || res.body.error).toMatch(/own GPU/i);
+    });
+  });
 });

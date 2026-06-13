@@ -336,6 +336,12 @@ router.post('/',
     if (!gpu) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Specified GPU not found', 404);
     }
+    // 自己取引（ウォッシュトレード）防止: プロバイダは自分の GPU を注文できない。
+    // これを許すと、注文→完了で recordJobResult(true) により自分の評判を、
+    // 自己レビューで自分の GPU 評価を、いずれも無から捏造できてしまう（信頼層の偽造）。
+    if (gpu.providerId && gpu.providerId === req.user.id) {
+      throw new APIError(ErrorTypes.VALIDATION, 'You cannot order your own GPU', 400);
+    }
     // 二重予約チェック: 期限切れ pending を先に失効させ、時間帯の重複を確認する。
     // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
     // 指定がない場合は即時予約として全 BLOCKING 注文と重複とみなす。
@@ -638,6 +644,11 @@ router.post('/:id/review',
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     if (order.userId !== req.user.id) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order owner can submit a review', 403);
+    }
+    // 自己レビュー防止（多層防御）: 注文作成側で自己取引は弾くが、レガシー/管理者生成の
+    // 自己注文が混入しても自分の GPU を自分で評価できないようにする。
+    if (order.providerId && order.providerId === req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You cannot review your own GPU', 403);
     }
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);

@@ -2184,6 +2184,133 @@ describe('API Integration', () => {
     });
   });
 
+  describe('GPU price upper bound validation (#49)', () => {
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken;
+
+    beforeAll(async () => {
+      const p = `gpmax${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+    });
+
+    it('GPU registration with price above 1,000,000 is rejected (400)', async () => {
+      const res = await request(app)
+        .post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ name: 'Pricey GPU', vendor: 'NVIDIA', model: 'RTX-X', apiType: 'CUDA', driverVersion: '1.0', os: 'Linux', arch: 'x86_64', memoryGB: 8, clockMHz: 1000, powerWatt: 200, pricePerHour: 9999999, id: `gp-${unique}` });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('GPU registration with price of exactly 1,000,000 is accepted', async () => {
+      const res = await request(app)
+        .post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ name: 'Max GPU', vendor: 'NVIDIA', model: 'RTX-M', apiType: 'CUDA', driverVersion: '1.0', os: 'Linux', arch: 'x86_64', memoryGB: 8, clockMHz: 1000, powerWatt: 200, pricePerHour: 1000000, id: `gm-${unique}` });
+      expect(res.statusCode).toBe(201);
+    });
+  });
+
+  describe('Username uniqueness check on PUT /me (#50)', () => {
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let token1, token2;
+    const u1name = `un1${unique}`.slice(0, 28);
+    const u2name = `un2${unique}`.slice(0, 28);
+
+    beforeAll(async () => {
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u1name, email: `${u1name}@example.com`, password: 'Test1234!' });
+      token1 = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u1name}@example.com`, password: 'Test1234!' })).body.token;
+
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u2name, email: `${u2name}@example.com`, password: 'Test1234!' });
+      token2 = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u2name}@example.com`, password: 'Test1234!' })).body.token;
+    });
+
+    it('user can change their username to a unique name (200)', async () => {
+      const newName = `uniq${unique}`.slice(0, 28);
+      const res = await request(app).put('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token1}`)
+        .send({ username: newName });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.user.username).toBe(newName);
+    });
+
+    it('user cannot steal another user username (409)', async () => {
+      const res = await request(app).put('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token2}`)
+        .send({ username: `uniq${unique}`.slice(0, 28) });
+      expect(res.statusCode).toBe(409);
+      expect(res.body.error).toMatch(/taken/i);
+    });
+  });
+
+  describe('Notification settings DELETE endpoint (#51)', () => {
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let token, userId;
+
+    beforeAll(async () => {
+      const u = `nsd${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      token = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
+      userId = UserRepository.getByEmail(`${u}@example.com`)?.id;
+      // create settings first
+      await request(app).post(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ email: `${u}@example.com`, enabled: { email: true } });
+    });
+
+    it('DELETE /notification-settings/:userId removes settings (200)', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
+    it('GET after DELETE returns empty object', async () => {
+      const res = await request(app)
+        .get(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+      expect(Object.keys(res.body).length).toBe(0);
+    });
+
+    it('DELETE again returns 404 (idempotent check)', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/notification-settings/${userId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('another user cannot delete someone elses settings (403)', async () => {
+      const v = `nsd2${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: v, email: `${v}@example.com`, password: 'Test1234!' });
+      const otherToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${v}@example.com`, password: 'Test1234!' })).body.token;
+      const otherId = UserRepository.getByEmail(`${v}@example.com`)?.id;
+      // create settings for other user
+      await request(app).post(`/api/v1/notification-settings/${otherId}`)
+        .set('Authorization', `Bearer ${otherToken}`)
+        .send({ enabled: { email: false } });
+      // try to delete as different user
+      const res = await request(app)
+        .delete(`/api/v1/notification-settings/${otherId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(403);
+    });
+  });
+
   describe('GPU delete cascade protection (#46)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');

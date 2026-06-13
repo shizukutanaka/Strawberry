@@ -45,7 +45,7 @@ const schemas = {
   memoryGB: Joi.number().min(1).required(),
   clockMHz: Joi.number().min(100).required(),
   powerWatt: Joi.number().min(1).required(),
-  pricePerHour: Joi.number().min(0.00001).required(),
+  pricePerHour: Joi.number().min(0.00001).max(1000000).required(),
   availability: Joi.object({
     startTime: Joi.date().iso(),
     endTime: Joi.date().iso(),
@@ -85,7 +85,7 @@ const schemas = {
     // GPU更新用スキーマ（全フィールドオプション — 部分更新）
     update: Joi.object({
       name: Joi.string().max(128).optional(),
-      pricePerHour: Joi.number().min(0.00001).optional(),
+      pricePerHour: Joi.number().min(0.00001).max(1000000).optional(),
       availability: Joi.object({
         startTime: Joi.date().iso(),
         endTime: Joi.date().iso(),

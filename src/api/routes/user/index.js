@@ -257,6 +257,11 @@ router.put('/me',
     delete updateData.password;
     delete updateData.role;
     delete updateData.createdAt;
+    // ユーザー名の重複チェック（既に別ユーザーが使用している場合は 409）
+    if (updateData.username && typeof updateData.username === 'string') {
+      const existing = UserRepository.getAll().find(u => u.username === updateData.username && u.id !== req.user.id);
+      if (existing) return res.status(409).json({ error: 'Username already taken' });
+    }
     // ユーザー情報を更新
     const updatedUser = UserRepository.update(req.user.id, {
       ...updateData,

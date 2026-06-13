@@ -62,4 +62,17 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
   res.json({ success: true });
 }));
 
+// 通知設定削除（自分のみ、管理者は任意ユーザー）
+router.delete('/notification-settings/:userId', asyncHandler(async (req, res) => {
+  const userId = req.params.userId;
+  if (req.user.id !== userId && req.user.role !== 'admin') {
+    throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
+  }
+  const settings = loadSettings();
+  if (!settings[userId]) return res.status(404).json({ error: 'Notification settings not found' });
+  delete settings[userId];
+  atomicWriteJSON(SETTINGS_PATH, settings);
+  res.json({ success: true });
+}));
+
 module.exports = { router };

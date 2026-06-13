@@ -31,9 +31,15 @@ const logger = winston.createLogger({
       )
     }),
     // ファイル出力
-    new winston.transports.File({ 
-      filename: path.join(logDir, 'error.log'), 
+    // maxsize + maxFiles でローテーションし、ログ肥大化（ディスク枯渇）を防ぐ。
+    // 以前は無制限で、combined.log/error.log が数GBまで膨張し
+    // readFileSync が ERR_STRING_TOO_LONG で失敗する事態を招いていた。
+    new winston.transports.File({
+      filename: path.join(logDir, 'error.log'),
       level: 'error',
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 5,
+      tailable: true,
       format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json(),
@@ -45,8 +51,11 @@ const logger = winston.createLogger({
         })()
       )
     }),
-    new winston.transports.File({ 
+    new winston.transports.File({
       filename: path.join(logDir, 'combined.log'),
+      maxsize: 10 * 1024 * 1024, // 10MB
+      maxFiles: 5,
+      tailable: true,
       format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json(),

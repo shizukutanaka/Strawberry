@@ -11,12 +11,28 @@ const errorLog = path.join(logDir, 'error.log');
 // テストでファイルを unlink するとログは削除済み inode へ書かれ、パス上のファイルには
 // 反映されない（旧テストの flakiness の原因）。代わりに「一意なマーカー」を毎回生成し、
 // ファイル末尾に出現するまで短くポーリングする（unlink しない）。
-function waitForMatch(file, marker, timeoutMs = 2000) {
+// ファイル末尾のみを読む（最大 1MB）。ログが巨大化しても readFileSync の
+// ERR_STRING_TOO_LONG を避けつつ、直近に書いたマーカーを確実に検出できる。
+function readTail(file, maxBytes = 1024 * 1024) {
+  const stat = fs.statSync(file);
+  const start = Math.max(0, stat.size - maxBytes);
+  const fd = fs.openSync(file, 'r');
+  try {
+    const len = stat.size - start;
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, start);
+    return buf.toString('utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function waitForMatch(file, marker, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const tick = () => {
       try {
-        if (fs.existsSync(file) && fs.readFileSync(file, 'utf-8').includes(marker)) {
+        if (fs.existsSync(file) && readTail(file).includes(marker)) {
           return resolve(true);
         }
       } catch (_) { /* 書込み途中の読取りは無視 */ }

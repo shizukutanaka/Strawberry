@@ -379,10 +379,21 @@ router.get('/',
 // プロバイダ公開レピュテーション (認証不要 — マーケットプレイスの信頼判断材料)。
 // reputation-scorer の score/tier（完了/失敗/監査/SLA/スラッシュ由来）に加え、
 // 当該プロバイダの全 GPU に対するレビュー集計（平均★・件数）と取引実績を返す。
+// レピュテーションスコアの簡易インメモリキャッシュ（TTL: 5分）
+// 同一プロバイダへの連続リクエストでの O(n) 集計を避ける。
+const _reputationCache = new Map(); // providerId → { data, expiresAt }
+const REPUTATION_CACHE_TTL_MS = 5 * 60 * 1000;
+
 router.get('/:id/reputation', asyncHandler(async (req, res) => {
   const providerId = req.params.id;
   const user = UserRepository.getById(providerId);
   if (!user) return res.status(404).json({ error: 'User not found' });
+
+  // キャッシュヒット確認
+  const cached = _reputationCache.get(providerId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.json(cached.data);
+  }
 
   const { createReputationService } = require('../../../reputation/reputation-service');
   const repSvc = createReputationService();
@@ -408,7 +419,7 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
     ? Math.round((asRenter.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount) * 10) / 10
     : null;
 
-  res.json({
+  const data = {
     providerId,
     score,
     tier,
@@ -421,7 +432,12 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
     renterRatingAverage,
     renterReviewCount,
     memberSince: user.createdAt || null,
-  });
+  };
+  // キャッシュに保存（テスト環境ではキャッシュしない — レピュテーション変化を即時反映したい）
+  if (process.env.NODE_ENV !== 'test') {
+    _reputationCache.set(providerId, { data, expiresAt: Date.now() + REPUTATION_CACHE_TTL_MS });
+  }
+  res.json(data);
 }));
 
 // 借り手公開プロフィール（認証不要 — プロバイダが注文受付前に借り手を調査できる）。

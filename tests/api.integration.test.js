@@ -2184,6 +2184,115 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Bulk GPU registration POST /gpus/bulk (#52)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    const UserRepository = require('../src/db/json/UserRepository');
+
+    let providerToken;
+
+    beforeAll(async () => {
+      const p = `blkr${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
+      providerToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
+    });
+
+    const validGpu = (suffix) => ({
+      name: `Bulk GPU ${suffix}`, vendor: 'NVIDIA', model: `RTX-BLK-${suffix}`,
+      apiType: 'CUDA', driverVersion: '1.0', os: 'Linux', arch: 'x86_64',
+      memoryGB: 8, clockMHz: 1000, powerWatt: 200, pricePerHour: 0.5,
+      id: `blk-${unique}-${suffix}`,
+    });
+
+    it('registers multiple GPUs in a single call (201)', async () => {
+      const res = await request(app)
+        .post('/api/v1/gpus/bulk')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send([validGpu('A'), validGpu('B')]);
+      expect(res.statusCode).toBe(201);
+      expect(res.body.registered).toBe(2);
+      expect(res.body.results).toHaveLength(2);
+      expect(res.body.results.every(r => r.success)).toBe(true);
+    });
+
+    it('partial success: invalid entries fail without blocking valid ones', async () => {
+      const bad = { name: 'Bad', vendor: 'UNKNOWN', model: 'X', apiType: 'CUDA', driverVersion: '1.0', os: 'Linux', arch: 'x86_64', memoryGB: 8, clockMHz: 1000, powerWatt: 200, pricePerHour: 0.5, id: `blk-bad-${unique}` };
+      const good = validGpu('C');
+      const res = await request(app)
+        .post('/api/v1/gpus/bulk')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send([bad, good]);
+      expect(res.statusCode).toBe(201);
+      expect(res.body.registered).toBe(1);
+      expect(res.body.results[0].success).toBe(false);
+      expect(res.body.results[1].success).toBe(true);
+    });
+
+    it('rejects empty array (400)', async () => {
+      const res = await request(app)
+        .post('/api/v1/gpus/bulk')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send([]);
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('rejects more than 20 GPUs (400)', async () => {
+      const many = Array.from({ length: 21 }, (_, i) => validGpu(`X${i}`));
+      const res = await request(app)
+        .post('/api/v1/gpus/bulk')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send(many);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toMatch(/Maximum 20/);
+    });
+
+    it('non-provider (regular user) cannot bulk-register GPUs (403)', async () => {
+      const u = `blkn${unique}`.slice(0, 28);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const uToken = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
+      const res = await request(app)
+        .post('/api/v1/gpus/bulk')
+        .set('Authorization', `Bearer ${uToken}`)
+        .send([validGpu('D')]);
+      expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe('Matched order auto-expiry (match_timeout) (#53)', () => {
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const { expireStaleMatchedOrders } = require('../src/utils/order-expiry');
+
+    it('expires a matched order older than ORDER_MATCHED_TIMEOUT_MINUTES', () => {
+      const old = OrderRepository.create({
+        gpuId: 'g1', userId: 'u1', providerId: 'p1', durationMinutes: 30, status: 'matched',
+        matchedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
+        createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      });
+      process.env.ORDER_MATCHED_TIMEOUT_MINUTES = '60';
+      const count = expireStaleMatchedOrders();
+      delete process.env.ORDER_MATCHED_TIMEOUT_MINUTES;
+      expect(count).toBeGreaterThanOrEqual(1);
+      expect(OrderRepository.getById(old.id).status).toBe('cancelled');
+      expect(OrderRepository.getById(old.id).cancelReason).toBe('match_timeout');
+    });
+
+    it('does NOT expire a recently matched order', () => {
+      const fresh = OrderRepository.create({
+        gpuId: 'g2', userId: 'u2', providerId: 'p2', durationMinutes: 30, status: 'matched',
+        matchedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5min ago
+        createdAt: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+      });
+      process.env.ORDER_MATCHED_TIMEOUT_MINUTES = '60';
+      expireStaleMatchedOrders();
+      delete process.env.ORDER_MATCHED_TIMEOUT_MINUTES;
+      expect(OrderRepository.getById(fresh.id).status).toBe('matched');
+      OrderRepository.update(fresh.id, { status: 'cancelled' });
+    });
+  });
+
   describe('GPU price upper bound validation (#49)', () => {
     const UserRepository = require('../src/db/json/UserRepository');
 

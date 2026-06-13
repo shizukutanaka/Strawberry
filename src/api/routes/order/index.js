@@ -86,7 +86,7 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
-const { expireStaleOrders } = require('../../../utils/order-expiry');
+const { expireStaleOrders, expireStaleMatchedOrders } = require('../../../utils/order-expiry');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
@@ -103,8 +103,9 @@ router.get('/',
   asyncHandler(async (req, res, next) => {
     try {
       logger.info('Fetching orders');
-      // 期限切れ pending 注文を失効させてから一覧を返す（遅延スイープ）
+      // 期限切れ pending/matched 注文を失効させてから一覧を返す（遅延スイープ）
       expireStaleOrders();
+      expireStaleMatchedOrders();
       let orders;
       if (req.user.role === 'admin') {
         orders = OrderRepository.getAll();
@@ -478,6 +479,7 @@ router.post('/',
     // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
     // 指定がない場合は即時予約として全 BLOCKING 注文と重複とみなす。
     expireStaleOrders();
+    expireStaleMatchedOrders();
     const newStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
     const newEnd = newStart + durationMinutes * 60 * 1000;
     const blocking = OrderRepository.getAll().find(o => {

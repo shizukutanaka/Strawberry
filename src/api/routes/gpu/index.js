@@ -334,6 +334,59 @@ router.post('/',
   })
 );
 
+// GPU一括登録 (認証必須、最大20台)
+// POST /gpus/bulk — 同一プロバイダが複数の GPU をまとめて登録する。
+// 各エントリに個別のバリデーションと重複チェックを行い、失敗したものはスキップして
+// 結果の配列で返す（部分成功を許容）。
+router.post('/bulk',
+  authenticateJWT,
+  checkRole(['provider', 'admin']),
+  asyncHandler(async (req, res) => {
+    const entries = req.body;
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: 'Request body must be a non-empty array of GPU objects' });
+    }
+    if (entries.length > 20) {
+      return res.status(400).json({ error: 'Maximum 20 GPUs per bulk registration request' });
+    }
+    const { schemas: { gpu: gpuSchemas } } = require('../../../utils/validator');
+    const results = [];
+    for (const entry of entries) {
+      const { error: valErr, value } = gpuSchemas.register.validate(entry, { abortEarly: false, stripUnknown: true });
+      if (valErr) {
+        results.push({ success: false, id: entry.id || null, error: valErr.details.map(d => d.message).join('; ') });
+        continue;
+      }
+      const gpuInfo = sanitizeObject(value, [
+        'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
+        'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
+        'features', 'capabilities', 'location', 'performance', 'minRenterRating',
+      ]);
+      gpuInfo.providerId = req.user.id;
+      const duplicate = GpuRepository.getAll().find(g =>
+        g.name === gpuInfo.name && g.model === gpuInfo.model &&
+        g.vendor === gpuInfo.vendor && g.memoryGB === gpuInfo.memoryGB &&
+        g.providerId === req.user.id
+      );
+      if (duplicate) {
+        results.push({ success: false, id: entry.id || null, error: 'Duplicate GPU spec already registered' });
+        continue;
+      }
+      gpuInfo.capabilities = gpuInfo.capabilities || {};
+      if (gpuInfo.apiType === 'CUDA') gpuInfo.capabilities.cuda = true;
+      if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
+      if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
+      if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
+      gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
+      const registered = GpuRepository.create(gpuInfo);
+      const { apiKey: _k, ...safe } = registered;
+      results.push({ success: true, gpu: safe });
+    }
+    const successCount = results.filter(r => r.success).length;
+    res.status(successCount > 0 ? 201 : 400).json({ registered: successCount, total: entries.length, results });
+  })
+);
+
 // GPU情報更新 (認証必須)
 router.put('/:id',
   authenticateJWT,

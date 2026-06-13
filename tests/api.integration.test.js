@@ -2627,6 +2627,32 @@ describe('API Integration', () => {
         .send([validGpu('D')]);
       expect(res.statusCode).toBe(403);
     });
+
+    it('bulk registration respects MAX_GPUS_PER_PROVIDER quota (429 when exceeded)', async () => {
+      const p2 = `blkq${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: p2, email: `${p2}@example.com`, password: 'Test1234!', role: 'provider' });
+      const p2Token = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${p2}@example.com`, password: 'Test1234!' })).body.token;
+
+      process.env.MAX_GPUS_PER_PROVIDER = '1';
+      try {
+        // First single GPU is allowed
+        const first = await request(app).post('/api/v1/gpus/bulk')
+          .set('Authorization', `Bearer ${p2Token}`)
+          .send([validGpu('Q1')]);
+        expect(first.statusCode).toBe(201);
+
+        // Second bulk (even 1 GPU) must hit the quota limit
+        const second = await request(app).post('/api/v1/gpus/bulk')
+          .set('Authorization', `Bearer ${p2Token}`)
+          .send([validGpu('Q2')]);
+        expect(second.statusCode).toBe(429);
+        expect(second.body.error).toMatch(/limit/i);
+      } finally {
+        delete process.env.MAX_GPUS_PER_PROVIDER;
+      }
+    });
   });
 
   describe('Matched order auto-expiry (match_timeout) (#53)', () => {

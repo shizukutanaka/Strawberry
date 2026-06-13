@@ -170,7 +170,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
   const pagedGpus = gpus.slice(offset, offset + limit);
 
   // 全 GPU の状況サマリ（ページング前の全体集計）
@@ -258,11 +258,11 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
   const reviews = OrderRepository.getAll()
     .filter(o => o.gpuId === gpuId && o.review)
-    .sort((a, b) => b.review.reviewedAt.localeCompare(a.review.reviewedAt))
+    .sort((a, b) => (b.review.reviewedAt || '').localeCompare(a.review.reviewedAt || ''))
     .map(o => ({ orderId: o.id, ...o.review }));
 
   const total = reviews.length;
@@ -289,7 +289,7 @@ router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
   const statusFilter = req.query.status || null;
 
   let orders = OrderRepository.getAll().filter(o => o.gpuId === gpuId);
@@ -457,6 +457,20 @@ router.post('/bulk',
     }
     if (entries.length > 20) {
       return res.status(400).json({ error: 'Maximum 20 GPUs per bulk registration request' });
+    }
+    // 提供者ごとの上限チェック（単体登録と同じガード — バルクで上限を迂回させない）
+    const MAX_GPUS_BULK = (() => {
+      const raw = process.env.MAX_GPUS_PER_PROVIDER;
+      const n = Number(raw);
+      return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
+    })();
+    if (req.user.role !== 'admin') {
+      const currentCount = GpuRepository.getAll().filter(g => g.providerId === req.user.id).length;
+      if (currentCount + entries.length > MAX_GPUS_BULK) {
+        return res.status(429).json({
+          error: `Would exceed GPU registration limit. Current: ${currentCount}, limit: ${MAX_GPUS_BULK}, requested: ${entries.length}`,
+        });
+      }
     }
     const { schemas: { gpu: gpuSchemas } } = require('../../../utils/validator');
     const results = [];

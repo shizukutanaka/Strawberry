@@ -6,6 +6,9 @@ const UserRepository = require('../db/json/UserRepository');
 const GPURepository = require('../db/json/GpuRepository');
 const jwt = require('jsonwebtoken');
 const { resolveSecret } = require('./middleware/jwt-auth');
+const { isRevoked } = require('./middleware/token-denylist');
+// 価格計算は REST と同一の共通ユーティリティを使う（整数 sats へ丸め・単位統一）。
+const { computeOrderPricing } = require('../utils/order-pricing');
 
 // GraphQLスキーマ定義（簡易例）
 const typeDefs = gql`
@@ -98,24 +101,14 @@ const resolvers = {
     },
   },
   Order: {
-    pricePer5Min: (order) => {
-      const pricePerHour = order.pricePerHour || 0;
-      return pricePerHour / 12;
-    },
-    totalPrice: (order) => {
-      const pricePerHour = order.pricePerHour || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * ((order.durationMinutes || 0) / 5);
-      return totalPrice;
-    },
+    pricePer5Min: (order) => computeOrderPricing(order).pricePer5Min,
+    totalPrice: (order) => computeOrderPricing(order).totalPrice,
     totalPriceJPY: async (order) => {
-      const pricePerHour = order.pricePerHour || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * ((order.durationMinutes || 0) / 5);
-      const { rate, timestamp } = await getBTCtoJPYRate(false, true);
+      const rateInfo = await getBTCtoJPYRate(false, true);
+      const { totalPriceJPY, exchangeRateTimestamp } = computeOrderPricing(order, rateInfo);
       // exchangeRateTimestampも返すため、resolverで値をorderに注入
-      order._exchangeRateTimestamp = timestamp;
-      return Math.round(totalPrice * rate);
+      order._exchangeRateTimestamp = exchangeRateTimestamp;
+      return totalPriceJPY;
     },
     exchangeRateTimestamp: (order) => {
       // totalPriceJPY解決時に注入されていればそれを返す
@@ -136,6 +129,11 @@ async function setupGraphQL(app) {
       if (!token) return { user: null };
       try {
         const user = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+        // REST(jwt-auth.js) と同一ポリシー: リフレッシュトークンをアクセスとして使わせない、
+        // かつ logout で失効済み(jti)のトークンは拒否する。これを欠くと GraphQL 経由で
+        // ログアウト済み/リフレッシュ用トークンが認証を通ってしまう。
+        if (user.type === 'refresh') return { user: null };
+        if (user.jti && isRevoked(user.jti)) return { user: null };
         return { user };
       } catch (_) {
         return { user: null };

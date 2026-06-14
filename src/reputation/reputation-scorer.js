@@ -18,7 +18,11 @@ function clamp01(x) {
 function bayesianRate(success, total, { priorMean = 0.8, priorWeight = 5 } = {}) {
   const s = Math.max(0, num(success));
   const t = Math.max(s, num(total));
-  return (s + priorMean * priorWeight) / (t + priorWeight);
+  // priorWeight は厳密に正にクランプ（呼び出し側が 0/負を渡すと分母 0 → NaN になり
+  // ランキングソートを破壊する。opts はマーケット API 経由でユーザー制御可能なため必須）。
+  const pw = Math.max(1e-9, num(priorWeight, 5));
+  const pm = clamp01(num(priorMean, 0.8));
+  return (s + pm * pw) / (t + pw);
 }
 
 /**

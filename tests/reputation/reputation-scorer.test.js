@@ -78,4 +78,17 @@ describe('reputation-scorer: bayesianRate', () => {
     expect(bayesianRate(1, 1, { priorMean: 0.8, priorWeight: 5 })).toBeLessThan(1);
     expect(bayesianRate(1000, 1000, { priorMean: 0.8, priorWeight: 5 })).toBeGreaterThan(0.99);
   });
+
+  it('never returns NaN when priorWeight is 0 and total is 0 (user-controlled opts)', () => {
+    const r = bayesianRate(0, 0, { priorMean: 0.8, priorWeight: 0 });
+    expect(Number.isFinite(r)).toBe(true);
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThanOrEqual(1);
+  });
+
+  it('clamps an out-of-range priorMean into [0,1]', () => {
+    const r = bayesianRate(0, 0, { priorMean: 5, priorWeight: 5 });
+    expect(r).toBeLessThanOrEqual(1);
+    expect(r).toBeGreaterThanOrEqual(0);
+  });
 });

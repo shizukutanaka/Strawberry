@@ -248,7 +248,10 @@ router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
 // 将来的に削除予定
 // 注: 旧 GET /gpus はここより前に gpuRoutes（router.use('/gpus')）が必ず応答するため
 // 到達不能となっており削除済み。
-router.post('/order', asyncHandler(async (req, res) => {
+// セキュリティ: これらは生のインフラ・パススルー（P2P ブロードキャスト・任意インボイス送金）
+// であり、特に /payment は運営ノードから任意の BOLT11 を送金できてしまう。注文所有権等の
+// 検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
+router.post('/order', rbac('admin'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /order accessed, use /api/v1/orders instead');
   if (!requireService(p2pNetwork, res)) return;
   const order = req.body;
@@ -256,14 +259,14 @@ router.post('/order', asyncHandler(async (req, res) => {
   res.status(201).json({ message: 'Order created', order });
 }));
 
-router.post('/match', asyncHandler(async (req, res) => {
+router.post('/match', rbac('admin'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /match accessed, use /api/v1/orders/:id/match instead');
   if (!requireService(p2pNetwork, res)) return;
   const matchResult = await p2pNetwork.matchOrder(req.body);
   res.json({ matched: !!matchResult, detail: matchResult });
 }));
 
-router.post('/payment', asyncHandler(async (req, res) => {
+router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
   if (!requireService(lightning, res)) return;
   const { paymentRequest, amount } = req.body;

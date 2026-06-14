@@ -2740,6 +2740,14 @@ describe('API Integration', () => {
         .send({ name: 'Max GPU', vendor: 'NVIDIA', model: 'RTX-M', apiType: 'CUDA', driverVersion: '1.0', os: 'Linux', arch: 'x86_64', memoryGB: 8, clockMHz: 1000, powerWatt: 200, pricePerHour: 1000000, id: `gm-${unique}` });
       expect(res.statusCode).toBe(201);
     });
+
+    it('GPU registration with absurd memoryGB is rejected (400)', async () => {
+      const res = await request(app)
+        .post('/api/v1/gpus')
+        .set('Authorization', `Bearer ${providerToken}`)
+        .send({ name: 'Fake GPU', vendor: 'NVIDIA', model: 'RTX-F', apiType: 'CUDA', driverVersion: '1.0', os: 'Linux', arch: 'x86_64', memoryGB: 999999, clockMHz: 1000, powerWatt: 200, pricePerHour: 100, id: `gf-${unique}` });
+      expect(res.statusCode).toBe(400);
+    });
   });
 
   describe('Username uniqueness check on PUT /me (#50)', () => {

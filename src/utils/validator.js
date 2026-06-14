@@ -42,9 +42,9 @@ const schemas = {
   driverVersion: Joi.string().max(64).required(),
   os: Joi.string().max(64).required(),
   arch: Joi.string().valid('x86_64', 'arm64', 'aarch64', 'x86', 'arm').required(),
-  memoryGB: Joi.number().min(1).required(),
-  clockMHz: Joi.number().min(100).required(),
-  powerWatt: Joi.number().min(1).required(),
+  memoryGB: Joi.number().min(1).max(8192).required(),
+  clockMHz: Joi.number().min(100).max(20000).required(),
+  powerWatt: Joi.number().min(1).max(20000).required(),
   pricePerHour: Joi.number().min(0.00001).max(1000000).required(),
   availability: Joi.object({
     startTime: Joi.date().iso(),
@@ -75,9 +75,9 @@ const schemas = {
     longitude: Joi.number().min(-180).max(180)
   }),
   performance: Joi.object({
-    benchmarkScore: Joi.number(),
-    teraflops: Joi.number(),
-    hashrate: Joi.number()
+    benchmarkScore: Joi.number().min(0),
+    teraflops: Joi.number().min(0),
+    hashrate: Joi.number().min(0)
   }),
   minRenterRating: Joi.number().min(1).max(5).optional()
 }),

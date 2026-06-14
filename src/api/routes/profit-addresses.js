@@ -1,7 +1,7 @@
 // 運営利益受取アドレス管理API（Web管理UI用）
 const express = require('express');
 const router = express.Router();
-const { getProfitAddresses, addProfitAddress, removeProfitAddress } = require('../utils/profit-addresses');
+const { getProfitAddresses, addProfitAddress, removeProfitAddress, isValidBtcAddress } = require('../utils/profit-addresses');
 const jwtAuth = require('../middleware/jwt-auth');
 const rbac = require('../middleware/rbac');
 const { logger } = require('../../utils/logger');
@@ -30,9 +30,14 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ message: 'address required' });
+  // 多層防御: ルート層でも構文検証し、無効入力は 400 で明確に拒否する
+  // （ユーティリティの fail-fast を 500 ではなくクライアントエラーとして返す）。
+  if (!isValidBtcAddress(address)) {
+    return res.status(400).json({ message: 'Invalid Bitcoin address' });
+  }
   try {
     addProfitAddress(address);
-    res.json({ message: 'Added', address });
+    res.json({ message: 'Added', address: String(address).trim() });
   } catch (e) {
     res.status(500).json({ message: 'Failed to add address', error: maskError(e, 'Failed to add address') });
   }

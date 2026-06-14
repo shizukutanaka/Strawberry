@@ -607,9 +607,15 @@ router.post('/',
     orderData.scheduledEndAt = new Date(new Date(orderData.scheduledStartAt).getTime() + durationMinutes * 60 * 1000).toISOString();
     // 5分単価
     const pricePer5Min = pricePerHour / 12;
-    const totalPrice = pricePer5Min * (durationMinutes / 5);
+    // totalPrice は整数 sats へ丸める（computeOrderPricing と同一規則）。丸めないと
+    // 注文作成時に保存・表示する totalPrice が、支払い時に再計算される額と食い違う。
+    const totalPrice = Math.round(pricePer5Min * (durationMinutes / 5));
     const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
     // ファイル永続化リポジトリで作成
+    // 価格ロック: 合意時の時間単価を注文に固定する。これが無いと支払い時の
+    // computeOrderPricing が GPU の「現在価格」へフォールバックし、プロバイダが注文後に
+    // 値上げするとレンターが合意額より高く課金される（見積りの拘束力が失われる）バグになる。
+    orderData.pricePerHour = pricePerHour;
     orderData.totalPrice = totalPrice;
     orderData.totalPriceJPY = totalPriceJPY;
     const createdOrder = OrderRepository.create(orderData);

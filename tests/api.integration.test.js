@@ -3913,4 +3913,40 @@ describe('API Integration', () => {
       expect(second.body.paymentId).toBe(first.body.paymentId);
     });
   });
+
+  describe('Order price is locked at creation (quote integrity)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    let token;
+
+    beforeAll(async () => {
+      const u = `plock${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      token = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
+    });
+
+    it('locks pricePerHour onto the order so a later GPU price hike does not change the bill', async () => {
+      const gpuId = GpuRepository.create({
+        name: 'Lock GPU', vendor: 'NVIDIA', model: 'RTX-LK', memoryGB: 24, pricePerHour: 0.5,
+      }).id;
+      const order = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60 });
+      expect(order.statusCode).toBe(201);
+      expect(order.body.order.pricePerHour).toBe(0.5);
+      const lockedTotal = order.body.order.totalPrice;
+
+      // Provider raises the GPU price 10x after the renter committed.
+      GpuRepository.update(gpuId, { pricePerHour: 5.0 });
+
+      // Paying must still bill the locked 0.5/h total, not the new 5.0/h.
+      const pay = await request(app)
+        .post(`/api/v1/payments/order/${order.body.order.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ paymentMethod: 'manual' });
+      expect(pay.statusCode).toBe(200);
+      expect(pay.body.amountPaid).toBe(lockedTotal);
+    });
+  });
 });

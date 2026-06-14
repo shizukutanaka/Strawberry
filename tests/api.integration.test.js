@@ -3874,4 +3874,43 @@ describe('API Integration', () => {
       expect(typeof res.body.total).toBe('number');
     });
   });
+
+  describe('Payment idempotency on retry (no double-charge)', () => {
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    let token;
+    let orderId;
+
+    beforeAll(async () => {
+      const u = `pidem${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      token = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
+      const gpuId = GpuRepository.create({
+        name: 'Idem GPU', vendor: 'NVIDIA', model: 'RTX-ID', memoryGB: 24, pricePerHour: 0.5,
+      }).id;
+      const order = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 60 });
+      orderId = order.body.order.id;
+    });
+
+    it('a retried manual payment reuses the existing pending payment instead of duplicating', async () => {
+      const first = await request(app)
+        .post(`/api/v1/payments/order/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ paymentMethod: 'manual' });
+      expect(first.statusCode).toBe(200);
+      expect(first.body.paymentId).toBeTruthy();
+
+      const second = await request(app)
+        .post(`/api/v1/payments/order/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ paymentMethod: 'manual' });
+      expect(second.statusCode).toBe(200);
+      expect(second.body.idempotent).toBe(true);
+      // Same payment record — no duplicate was created.
+      expect(second.body.paymentId).toBe(first.body.paymentId);
+    });
+  });
 });

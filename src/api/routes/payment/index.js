@@ -182,6 +182,32 @@ router.post('/order/:id',
     if (order.userId !== req.user.id && req.user.role !== 'admin') {
       throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to pay for this order', 403);
     }
+    // べき等性: 同一注文に対する未払い(pending)かつ未失効の決済が既に存在すれば、
+    // 新たに請求書/決済レコードを作らず既存を返す。クライアントのタイムアウト再送で
+    // 二重請求書発行・二重支払いが起きるのを防ぐ（決済系で最も避けたい事故）。
+    const nowMs = Date.now();
+    const existingPending = (PaymentRepository.getByOrderId(orderId) || []).find(p =>
+      p.userId === req.user.id &&
+      p.status === 'pending' &&
+      (!p.invoiceExpiresAt || new Date(p.invoiceExpiresAt).getTime() > nowMs)
+    );
+    if (existingPending) {
+      logger.info(`Returning existing pending payment for order ${orderId} (idempotent)`, {
+        userId: req.user.id, orderId, paymentId: existingPending.id,
+      });
+      return res.json({
+        status: 'pending',
+        idempotent: true,
+        paymentId: existingPending.id,
+        orderId,
+        amountSats: existingPending.amount,
+        paymentMethod: existingPending.method,
+        paymentRequest: existingPending.paymentRequest || undefined,
+        invoiceId: existingPending.paymentHash || undefined,
+        expiresAt: existingPending.invoiceExpiresAt || undefined,
+        message: 'A pending payment already exists for this order. Reusing it instead of creating a duplicate.',
+      });
+    }
     const rateInfo = await fetchRateInfo();
     const { pricePerHour, pricePer5Min, durationMinutes, totalPrice, totalPriceJPY } =
       computeOrderPricing(order, rateInfo);

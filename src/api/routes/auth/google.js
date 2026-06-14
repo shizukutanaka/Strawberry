@@ -1,10 +1,9 @@
 // src/api/routes/auth/google.js - Google OAuth2認証エンドポイント
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
 const UserRepository = require('../../../db/json/UserRepository');
 const { APIError, ErrorTypes, asyncHandler } = require('../../../utils/error-handler');
-const { resolveSecret } = require('../../middleware/jwt-auth');
+const { signAccessToken } = require('../../utils/tokens');
 const { authLimiter } = require('../../middleware/rate-limit');
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -40,12 +39,10 @@ router.post('/', authLimiter, asyncHandler(async (req, res) => {
     user = UserRepository.create({ googleId, email, name, picture, role: 'user' });
   }
 
-  // JWT発行（resolveSecret で署名鍵を統一）
-  const token = jwt.sign(
-    { id: user.id, email: user.email, role: user.role, googleId },
-    resolveSecret(),
-    { expiresIn: '7d', algorithm: 'HS256' }
-  );
+  // JWT発行: 共通の signAccessToken を使い jti（logout 失効可能）・type:'access'・
+  // 一貫した TTL を付与する。以前は jti 無し・7日固定のアクセストークンを直接署名しており、
+  // Google ログインユーザーは logout でトークンを失効できなかった。
+  const token = signAccessToken(user);
   res.json({ token, user: { id: user.id, email: user.email, name: user.name, picture: user.picture, role: user.role } });
 }));
 

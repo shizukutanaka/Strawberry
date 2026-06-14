@@ -252,9 +252,14 @@ if (require.main === module) {
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
-  // グレースフルシャットダウン（30秒でタイムアウト — ハングしたハンドラで無限待機しない）
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM signal received: closing HTTP server');
+  // グレースフルシャットダウン（30秒でタイムアウト — ハングしたハンドラで無限待機しない）。
+  // SIGTERM(オーケストレータ)と SIGINT(Ctrl-C/開発・一部環境) の両方を扱う。未処理シグナルでの
+  // ハード終了は進行中レスポンス・ファイル書込みを切断するため。二重受信に備え冪等化する。
+  let shuttingDown = false;
+  const gracefulShutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`${signal} signal received: closing HTTP server`);
     const forceExit = setTimeout(() => {
       logger.error('Graceful shutdown timed out after 30s; forcing exit');
       process.exit(1);
@@ -265,7 +270,9 @@ if (require.main === module) {
       logger.info('HTTP server closed');
       process.exit(0);
     });
-  });
+  };
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 module.exports = { app, server, graphqlReady };

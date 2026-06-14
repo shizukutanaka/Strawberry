@@ -6,7 +6,9 @@ const path = require('path');
 const axios = require('axios');
 
 const HEALTH_FILE = path.join(__dirname, 'health.json');
-const LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../logs/audit.log');
+// 死活監視アラートの記録先。改ざん検知ハッシュチェーンが管理する logs/audit.log とは
+// 分離する（混在させると verifyAuditLogIntegrity / audit-anchor が常に失敗する）。
+const LOG_PATH = process.env.MONITOR_LOG_PATH || path.join(__dirname, '../logs/monitor-audit.log');
 
 // 通知先（環境変数で柔軟に切替）
 const CHANNELS = [

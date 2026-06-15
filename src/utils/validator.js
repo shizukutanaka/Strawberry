@@ -139,7 +139,7 @@ const schemas = {
     create: Joi.object({
       // userId はトークン(req.user.id)から設定するため body では任意（送られても無視）
       userId: Joi.string().optional(),
-      gpuId: Joi.string().max(128).required(),
+      gpuId: Joi.string().uuid().required(),
       // ハンドラは正の整数かつ 5 の倍数を要求する。上限は 30 日（43200分）—
       // 無制限だと totalPrice 計算が天文学的な値になりオーバーフロー/DoS の温床になる。
       durationMinutes: Joi.number().integer().min(5).max(43200).multiple(5).required(),

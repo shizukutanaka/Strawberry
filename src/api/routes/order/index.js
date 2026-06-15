@@ -610,6 +610,15 @@ router.post('/',
     // Node.js のシングルスレッドモデルにより、同期処理は割り込みなしに実行される。
     expireStaleOrders();
     expireStaleMatchedOrders();
+    // Reject scheduledStartAt more than 5 minutes in the past (allows clock-drift
+    // but prevents creating orders for historical dates that bypass booking checks).
+    if (orderData.scheduledStartAt) {
+      const schedMs = new Date(orderData.scheduledStartAt).getTime();
+      if (schedMs < Date.now() - 5 * 60 * 1000) {
+        throw new APIError(ErrorTypes.VALIDATION,
+          'scheduledStartAt must not be more than 5 minutes in the past', 400);
+      }
+    }
     const newStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
     const newEnd = newStart + durationMinutes * 60 * 1000;
     const blocking = OrderRepository.getAll().find(o => {
@@ -640,7 +649,11 @@ router.post('/',
     const pricePer5Min = pricePerHour / 12;
     // totalPrice は整数 sats へ丸める（computeOrderPricing と同一規則）。丸めないと
     // 注文作成時に保存・表示する totalPrice が、支払い時に再計算される額と食い違う。
-    const totalPrice = Math.round(pricePer5Min * (durationMinutes / 5));
+    // 1 satoshi はビットコインの最小不可分単位。pricePerHour > 0（上で検証済み）の有償注文が
+    // 丸めで 0 sat になると「無料レンタル」かつ「支払い不能(btc-onchain は 0 を拒否)」になるため、
+    // 正の生額は最小 1 sat に切り上げる（端数 0.25 sat の注文も実際には 1 sat 課金される）。
+    const rawTotal = pricePer5Min * (durationMinutes / 5);
+    const totalPrice = rawTotal > 0 ? Math.max(1, Math.round(rawTotal)) : 0;
     const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
     // ファイル永続化リポジトリで作成
     // 価格ロック: 合意時の時間単価を注文に固定する。これが無いと支払い時の

@@ -8,20 +8,29 @@ const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
 
 // SSRF対策: プライベートIPアドレス・ループバック・メタデータサービスをブロック
+// 設定時（POST）と送信時（notifier.js の sendWebhookNotify）の両方で検証（多層防御）。
 const PRIVATE_IP_PATTERNS = [
   /^https?:\/\/localhost[:/]/i,
   /^https?:\/\/127\.\d+\.\d+\.\d+[:/]/,
+  /^https?:\/\/0\.0\.0\.0[:/]/,            // 0.0.0.0 = ループバック扱い
   /^https?:\/\/10\.\d+\.\d+\.\d+[:/]/,
   /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+[:/]/,
   /^https?:\/\/192\.168\.\d+\.\d+[:/]/,
-  /^https?:\/\/169\.254\.\d+\.\d+[:/]/,  // AWS metadata
-  /^https?:\/\/\[?::[1f]\]?[:/]/i,        // ::1, ::ffff IPv6 loopback
+  /^https?:\/\/169\.254\.\d+\.\d+[:/]/,   // AWS/Azure/GCP リンクローカルメタデータ
+  /^https?:\/\/\[::1\][:/]/i,             // IPv6 loopback ::1
+  /^https?:\/\/\[::ffff:/i,               // IPv4-mapped IPv6 (::ffff:127.x.x.x 等)
+  /^https?:\/\/\[f[cd]/i,                 // IPv6 プライベート fc00::/7 (fc/fd) & リンクローカル fe80::/10 の一部
+  /^https?:\/\/\[fe80:/i,                 // IPv6 link-local
+  /^https?:\/\/metadata\.google\.internal[:/]/i,  // GCP metadata
+  /^https?:\/\/instance-data[:/]/i,       // AWS 代替メタデータホスト名
 ];
 function isSSRFUrl(url) {
   if (!url || typeof url !== 'string') return false;
   if (!/^https?:\/\//i.test(url)) return true;
   return PRIVATE_IP_PATTERNS.some(re => re.test(url));
 }
+// エクスポートして notifier.js の送信時にも再検証できるようにする
+module.exports._isSSRFUrl = isSSRFUrl;
 
 // Joi カスタムバリデータ（URI形式 + SSRF禁止）
 const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)

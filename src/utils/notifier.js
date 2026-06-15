@@ -171,8 +171,23 @@ async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
 }
 
 // 汎用Webhook
+// 送信時にも SSRF チェックを行う（設定保存時のバリデーションに加えた多層防御）。
+// notification-settings.js の isSSRFUrl をインポートして同一ロジックを再利用する。
+function _loadSSRFCheck() {
+  try {
+    const ns = require('../api/notification-settings');
+    return ns._isSSRFUrl || (() => false);
+  } catch (_) {
+    return () => false;
+  }
+}
+const _isSSRFUrl = _loadSSRFCheck();
+
 async function sendWebhookNotify(message, { webhookUrl, payload = {} }) {
   if (!webhookUrl) throw new Error('Webhook URL未設定');
+  if (_isSSRFUrl(webhookUrl)) {
+    throw new Error(`Webhook URL is not allowed (SSRF blocked): ${webhookUrl}`);
+  }
   return withRetry(async () => {
     const res = await axios.post(webhookUrl, { message, ...payload });
     return res.data;

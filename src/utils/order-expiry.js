@@ -43,12 +43,18 @@ function expireStaleOrders() {
       const isAbsolutelyStale = createdMs < now - maxAgeMs;
       if (isFutureSchedule && !isAbsolutelyStale) continue;
     }
-    OrderRepository.update(order.id, {
+    // 原子的に pending→cancelled へ遷移する。スナップショット取得から書込みまでの間に
+    // 別の sweep（同時 list/create 要求から呼ばれる）や /match が状態を変えている可能性が
+    // あるため、書込み時点でも pending である場合のみ確定する。これが無いと:
+    //   - 2 つの sweep が同じ注文を二重キャンセルし借り手へ通知が二重に飛ぶ
+    //   - sweep が直前に確定した pending→matched を無条件 update で踏み潰す
+    const result = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
       status: 'cancelled',
       cancelReason: 'payment_timeout',
       cancelledAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    if (!result.ok) continue; // 既に他経路で確定済み（冪等）
     expired++;
     logger.info(`Order auto-expired (payment timeout): ${order.id}`);
     // 借り手へ失効通知（決済タイムアウトで自動キャンセルされたことを即時周知）
@@ -77,12 +83,14 @@ function expireStaleMatchedOrders() {
     if (order.status !== 'matched') continue;
     const matchedMs = Date.parse(order.matchedAt || order.updatedAt || order.createdAt);
     if (!Number.isFinite(matchedMs) || matchedMs > cutoff) continue;
-    OrderRepository.update(order.id, {
+    // 原子的に matched→cancelled。並行 sweep / /start による状態変化を踏み潰さない。
+    const result = OrderRepository.updateIf(order.id, (o) => o.status === 'matched', {
       status: 'cancelled',
       cancelReason: 'match_timeout',
       cancelledAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    if (!result.ok) continue; // 既に他経路で確定済み（冪等）
     expired++;
     logger.info(`Order auto-expired (match timeout): ${order.id}`);
     try {
@@ -122,40 +130,35 @@ function expireStaleDisputedOrders() {
       resolvedBy: 'system',
     };
 
-    if (decision === 'refund') {
-      OrderRepository.update(order.id, {
-        status: 'cancelled',
-        cancelReason: 'dispute_auto_resolved_refund',
-        cancelledAt: resolution.resolvedAt,
-        updatedAt: resolution.resolvedAt,
-        dispute: { ...(order.dispute || {}), resolution },
-      });
-      // エスクロー返金を試みる（失敗してもログのみ）
-      try {
-        const EscrowRepository = require('../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
-        for (const esc of escrows) {
-          EscrowRepository.update(esc.id, { state: 'SETTLED', settledAt: resolution.resolvedAt });
+    // 原子的に disputed→(cancelled|completed) へ遷移する。書込み時点でも disputed の
+    // 場合のみ確定し、並行 sweep や管理者の手動裁定との二重解決・エスクロー二重返金・
+    // 二重通知を防ぐ。
+    const updates = decision === 'refund'
+      ? {
+          status: 'cancelled',
+          cancelReason: 'dispute_auto_resolved_refund',
+          cancelledAt: resolution.resolvedAt,
+          updatedAt: resolution.resolvedAt,
+          dispute: { ...(order.dispute || {}), resolution },
         }
-      } catch (e) {
-        logger.warn(`Auto-dispute escrow refund failed (order=${order.id}): ${e.message}`);
+      : {
+          status: 'completed',
+          stoppedAt: resolution.resolvedAt,
+          updatedAt: resolution.resolvedAt,
+          dispute: { ...(order.dispute || {}), resolution },
+        };
+    const result = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', updates);
+    if (!result.ok) continue; // 既に他経路で解決済み（冪等）
+
+    // エスクロー精算（状態確定後にのみ実行。失敗してもログのみ）
+    try {
+      const EscrowRepository = require('../db/json/EscrowRepository');
+      const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
+      for (const esc of escrows) {
+        EscrowRepository.update(esc.id, { state: 'SETTLED', settledAt: resolution.resolvedAt });
       }
-    } else {
-      OrderRepository.update(order.id, {
-        status: 'completed',
-        stoppedAt: resolution.resolvedAt,
-        updatedAt: resolution.resolvedAt,
-        dispute: { ...(order.dispute || {}), resolution },
-      });
-      try {
-        const EscrowRepository = require('../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
-        for (const esc of escrows) {
-          EscrowRepository.update(esc.id, { state: 'SETTLED', settledAt: resolution.resolvedAt });
-        }
-      } catch (e) {
-        logger.warn(`Auto-dispute escrow uphold failed (order=${order.id}): ${e.message}`);
-      }
+    } catch (e) {
+      logger.warn(`Auto-dispute escrow settle failed (order=${order.id}, decision=${decision}): ${e.message}`);
     }
     resolved++;
     logger.info(`Dispute auto-resolved (${decision}) after ${days}d: order=${order.id}`);

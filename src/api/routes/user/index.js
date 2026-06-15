@@ -22,6 +22,12 @@ const UserRepository = require('../../../db/json/UserRepository');
 // ピアID管理サブルート
 const peeridRouter = require('./peerid');
 
+// Dummy bcrypt hash for constant-time comparison when the email doesn't exist.
+// Without this, an attacker can enumerate valid emails by measuring whether the
+// response takes ~1ms (no user) vs ~100ms (wrong password, bcrypt ran).
+// Generated once at startup so the cost is paid upfront, not on first login attempt.
+const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', 10);
+
 // ユーザー登録
 router.post('/register',
   authLimiter,
@@ -80,19 +86,19 @@ router.post('/login',
     logger.info(`Login attempt: ${email}`);
     // ユーザーを検索（永続化対応）
     const user = UserRepository.getByEmail(email);
-    if (!user) {
-      logger.warn(`Login failed: user not found (${email})`);
+    // Always run bcrypt.compare even when user is not found to prevent
+    // account enumeration via timing: without this, non-existent emails
+    // return in ~1ms vs ~100ms for wrong passwords, leaking email validity.
+    const hashToCompare = (user && user.password) || _DUMMY_HASH;
+    const validPassword = await bcrypt.compare(password, hashToCompare);
+    if (!user || !validPassword) {
+      if (!user) logger.warn(`Login failed: user not found (${email})`);
+      else logger.warn(`Login failed: wrong password (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // 無効化済みアカウントはログイン不可（メール匿名化に加えた多層防御）
     if (user.status === 'deactivated') {
       logger.warn(`Login failed: account deactivated (${email})`);
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    // パスワード検証
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      logger.warn(`Login failed: wrong password (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。

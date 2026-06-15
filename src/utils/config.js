@@ -75,7 +75,10 @@ const defaultConfig = {
   // セキュリティ設定
   security: {
     jwtSecret: requireSecret('JWT_SECRET'),
-    jwtExpiresIn: '24h',
+    // アクセストークンは短命にする。漏洩した場合の悪用期間を最大 1 時間に限定する。
+    // 長時間セッション（GPU レンタル）はリフレッシュトークンローテーションで維持する。
+    // 本番環境では JWT_EXPIRES_IN=15m など環境変数でさらに短縮することを推奨。
+    jwtExpiresIn: '1h',
     // リフレッシュトークンの有効期限（短命アクセストークン + 長命リフレッシュの構成）
     jwtRefreshExpiresIn: '7d',
     bcryptRounds: 10,

@@ -8,7 +8,7 @@ const { config } = require('../../utils/config');
 const { resolveSecret } = require('../middleware/jwt-auth');
 
 // TTL は呼出し毎に env を解決（テスト・運用での動的変更に対応）
-const accessTTL = () => process.env.JWT_EXPIRES_IN || config.security.jwtExpiresIn || '24h';
+const accessTTL = () => process.env.JWT_EXPIRES_IN || config.security.jwtExpiresIn || '1h';
 const refreshTTL = () => process.env.JWT_REFRESH_EXPIRES_IN || config.security.jwtRefreshExpiresIn || '7d';
 
 function signAccessToken(user) {

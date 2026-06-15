@@ -216,6 +216,21 @@ router.delete('/me',
         return res.status(400).json({ error: 'At least one active admin must remain; transfer admin before deactivating' });
       }
     }
+    // 進行中の注文を残したまま退会させない（GPU削除の "active orders first" と同一ポリシー）。
+    // 放置すると、レンターとしての注文はプロバイダのGPUを幽霊ユーザーで占有し続け、
+    // プロバイダとしての注文はレンターの進行中レンタルを宙吊りにする。本人が先に
+    // 解決（完了/キャンセル）する必要がある。終端状態 = completed / cancelled。
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const NON_TERMINAL = new Set(['pending', 'matched', 'active', 'disputed']);
+    const openOrders = OrderRepository.getAll().filter(o =>
+      NON_TERMINAL.has(o.status) && (o.userId === user.id || o.providerId === user.id)
+    );
+    if (openOrders.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot deactivate while you have in-flight orders. Complete or cancel them first.',
+        openOrderCount: openOrders.length,
+      });
+    }
     const anonId = uuidv4();
     UserRepository.update(user.id, {
       status: 'deactivated',

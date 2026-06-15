@@ -1430,6 +1430,30 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(400);
       expect(res.body.error).toMatch(/admin/i);
     });
+
+    it('cannot self-deactivate while holding an in-flight order (409)', async () => {
+      const GpuRepository = require('../src/db/json/GpuRepository');
+      const user = await freshUser('dlord');
+      const gpuId = GpuRepository.create({
+        name: 'Deact GPU', vendor: 'NVIDIA', model: 'RTX-DA', memoryGB: 24, pricePerHour: 0.5,
+      }).id;
+      const order = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ gpuId, durationMinutes: 60 });
+      expect(order.statusCode).toBe(201);
+
+      const res = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(res.statusCode).toBe(409);
+      expect(res.body.openOrderCount).toBeGreaterThanOrEqual(1);
+
+      // After cancelling the order, deactivation succeeds.
+      await request(app).delete(`/api/v1/orders/${order.body.order.id}`)
+        .set('Authorization', `Bearer ${user.token}`);
+      const ok = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(ok.statusCode).toBe(200);
+    });
   });
 
   describe('Order payment/escrow visibility + provider→renter reviews', () => {

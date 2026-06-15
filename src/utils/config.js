@@ -153,7 +153,9 @@ function loadFromEnv() {
   if (process.env.JWT_SECRET) config.security.jwtSecret = process.env.JWT_SECRET;
   if (process.env.JWT_EXPIRES_IN) config.security.jwtExpiresIn = process.env.JWT_EXPIRES_IN;
   if (process.env.JWT_REFRESH_EXPIRES_IN) config.security.jwtRefreshExpiresIn = process.env.JWT_REFRESH_EXPIRES_IN;
-  const bcryptRounds = safeInt('BCRYPT_ROUNDS', 1, 31);
+  // Minimum 10 rounds enforced: below 10 makes brute-force trivially fast
+  // (cost doubles per round; rounds=1 is ~0.1ms vs rounds=10's ~100ms per hash).
+  const bcryptRounds = safeInt('BCRYPT_ROUNDS', 10, 31);
   if (bcryptRounds !== undefined) config.security.bcryptRounds = bcryptRounds;
   
   // ログ設定

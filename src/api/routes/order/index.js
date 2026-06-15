@@ -422,7 +422,7 @@ router.put('/:id',
     const order = req.resource;
     logger.info(`Updating order: ${order.id}`);
     // 入力値サニタイズ
-    const sanitized = sanitizeObject(req.body, ['description']);
+    const sanitized = sanitizeObject(req.body, ['description', 'notes']);
     // ステータス変更は管理者専用（専用エンドポイント /accept /reject /start /stop /dispute を使う）。
     // 一般ユーザー（借り手・提供者）が PUT で status を直接操作できると正規フローを迂回できる:
     //   - 借り手が pending→matched や matched→active にすることで提供者確認をスキップ
@@ -435,21 +435,30 @@ router.put('/:id',
         return res.status(400).json({ error: `Invalid status transition from ${order.status} to ${sanitized.status}` });
       }
     }
-    // オーダーを更新
+    // フィールドフィルタ: 非管理者は description/notes のみ変更可能。
+    // これがないと借り手が { totalPrice: 1, pricePerHour: 0.001 } を PUT して
+    // 合意済み金額を事後改竄できてしまう（管理者は status 含む全フィールドを操作可）。
+    const MUTABLE_BY_OWNER = new Set(['description', 'notes']);
+    const updateData = req.user.role === 'admin'
+      ? sanitized
+      : Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_OWNER.has(k)));
+    // オーダーを更新（update() は内部で merge するため delta のみ渡す。
+    // 旧コードの { ...order, ...sanitized } は getById〜update 間の並行書き込みを上書きする
+    // stale-spread anti-pattern だった）
     const prevStatus = order.status;
-    const updatedOrder = OrderRepository.update(order.id, { ...order, ...sanitized });
+    const updatedOrder = OrderRepository.update(order.id, updateData);
     logger.info(`Order updated: ${order.id}`);
     invalidateUserCache(req.user.id);
     if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
     // ステータスが matched または active に変わった場合は借り手へ通知
-    if (sanitized.status && sanitized.status !== prevStatus) {
+    if (updateData.status && updateData.status !== prevStatus) {
       try {
         const { notifyUser } = require('../../../utils/user-notify');
-        if (sanitized.status === 'matched') {
+        if (updateData.status === 'matched') {
           notifyUser(order.userId, 'order_matched',
             `【Strawberry】注文がマッチしました\n注文: #${order.id}\nまもなく利用を開始できます`,
             { subject: `【Strawberry】注文 #${order.id} マッチング完了` });
-        } else if (sanitized.status === 'active') {
+        } else if (updateData.status === 'active') {
           notifyUser(order.userId, 'order_started',
             `【Strawberry】GPU の利用が開始されました\n注文: #${order.id}`,
             { subject: `【Strawberry】注文 #${order.id} 利用開始` });

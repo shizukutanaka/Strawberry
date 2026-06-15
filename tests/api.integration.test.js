@@ -130,6 +130,26 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(403);
     });
 
+    it('non-admin cannot mutate totalPrice or pricePerHour via PUT (field allowlist)', async () => {
+      const create = await request(app)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId: seedGpu(), durationMinutes: 60 });
+      expect(create.statusCode).toBe(201);
+      const orderId = create.body.order.id;
+      const originalPrice = create.body.order.totalPrice;
+      // Attempt to overwrite financial fields — should be silently ignored (200 but no price change)
+      const res = await request(app)
+        .put(`/api/v1/orders/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ totalPrice: 1, pricePerHour: 0.0001, description: 'legit note' });
+      expect(res.statusCode).toBe(200);
+      // Financial fields must be unchanged
+      const saved = require('../src/db/json/OrderRepository').getById(orderId);
+      expect(saved.totalPrice).toBe(originalPrice);
+      expect(saved.description).toBe('legit note');
+    });
+
     it('cancel pending order via DELETE /orders/:id (soft-cancel)', async () => {
       const create = await request(app)
         .post('/api/v1/orders')

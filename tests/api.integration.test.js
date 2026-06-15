@@ -150,6 +150,38 @@ describe('API Integration', () => {
       expect(saved.description).toBe('legit note');
     });
 
+    it('per-user cache: two users cannot see each other\'s orders (cache partition regression)', async () => {
+      // Regression for the bug where cacheMiddleware ran before authenticateJWT,
+      // making req.user always undefined → key was always 'anon:/api/v1/orders'
+      // → user B could get user A's cached order list.
+      const u2name = `uc2${unique}`.slice(0, 20);
+      const u2email = `${u2name}@example.com`;
+      const reg2 = await request(app).post('/api/v1/users/register')
+        .send({ username: u2name, email: u2email, password: 'Test1234!' });
+      expect(reg2.statusCode).toBe(201);
+      const login2 = await request(app).post('/api/v1/users/login')
+        .send({ email: u2email, password: 'Test1234!' });
+      expect(login2.statusCode).toBe(200);
+      const token2 = login2.body.token;
+
+      // User A creates an order
+      const gpuId = seedGpu();
+      await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ gpuId, durationMinutes: 30 });
+
+      // Populate user A's cache
+      const a1 = await request(app).get('/api/v1/orders').set('Authorization', `Bearer ${token}`);
+      expect(a1.statusCode).toBe(200);
+      const a1Count = a1.body.orders.length;
+      expect(a1Count).toBeGreaterThan(0);
+
+      // User B must NOT see user A's orders (they have 0 orders)
+      const b1 = await request(app).get('/api/v1/orders').set('Authorization', `Bearer ${token2}`);
+      expect(b1.statusCode).toBe(200);
+      expect(b1.body.orders.length).toBe(0);
+    });
+
     it('cancel pending order via DELETE /orders/:id (soft-cancel)', async () => {
       const create = await request(app)
         .post('/api/v1/orders')

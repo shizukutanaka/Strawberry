@@ -98,8 +98,8 @@ const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache
 // 他ユーザーに返る（認可バイパス）ため、ユーザーIDをキーに含める。
 
 router.get('/',
-  cacheMiddleware({ perUser: true }),
   authenticateJWT,
+  cacheMiddleware({ perUser: true }),
   asyncHandler(async (req, res, next) => {
     try {
       logger.info('Fetching orders');

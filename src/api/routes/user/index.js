@@ -501,20 +501,33 @@ router.get('/me/activity',
 );
 
 // ユーザー一覧取得 (管理者のみ)
+// ページネーション: ?limit=50&offset=0 — 上限200, 既定50
 router.get('/',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
     logger.info('Fetching all users');
+    let users = UserRepository.getAll();
+    // 任意フィルタ（ロール・ステータス）
+    if (req.query.role) users = users.filter(u => u.role === req.query.role);
+    if (req.query.status) users = users.filter(u => u.status === req.query.status);
+    const total = users.length;
+    // ページネーション
+    const limitRaw = parseInt(req.query.limit, 10);
+    const offsetRaw = parseInt(req.query.offset, 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    const page = users.slice(offset, offset + limit);
     // パスワード・APIキーを除外
-    const allUsers = UserRepository.getAll();
-    const usersNoSecrets = allUsers.map(u => {
+    const usersNoSecrets = page.map(u => {
       const { password, apiKey, ...rest } = u;
       return rest;
     });
     res.json({
       message: 'Fetched all users',
-      total: usersNoSecrets.length,
+      total,
+      limit,
+      offset,
       users: usersNoSecrets
     });
   })

@@ -99,8 +99,8 @@ const authenticateJWT = (req, res, next) => {
     if (!tokenUser || tokenUser.status === 'deactivated') {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
-    if (tokenUser.passwordChangedAt &&
-        decoded.iat <= Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+    const { isSessionInvalidated } = require('../utils/session-invalidation');
+    if (isSessionInvalidated(tokenUser, decoded.iat)) {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
     req.user = decoded;

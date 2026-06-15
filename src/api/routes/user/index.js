@@ -135,20 +135,31 @@ router.post('/refresh',
     if (payload.type !== 'refresh') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
-    // logout で失効済み、または既に一度使用済みのリフレッシュトークンは拒否
-    const { isRevoked, revoke } = require('../../middleware/token-denylist');
-    if (payload.jti && isRevoked(payload.jti)) {
-      return res.status(401).json({ error: 'Invalid refresh token' });
-    }
     // ユーザーが削除/無効化されていないか確認（最新のロールも反映）
     const user = UserRepository.getById(payload.id);
     if (!user || user.status === 'deactivated') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
-    // パスワード変更後に発行されたリフレッシュトークンのみ受け付ける。
-    // これにより盗まれたリフレッシュトークンはパスワード変更で無効化できる。
-    if (user.passwordChangedAt &&
-        payload.iat <= Math.floor(Date.parse(user.passwordChangedAt) / 1000)) {
+    // リフレッシュトークン再利用検知（盗難シグナル）:
+    // 既に失効済み(= logout または rotation で消費済み)の jti が再提示された場合、
+    // 単にこの 1 トークンを 401 で弾くだけでは不十分。rotation で「先に進んだ」攻撃者
+    // (または被害者)が保持する新しいリフレッシュトークンは生き残ってしまう。OWASP 推奨に
+    // 従い、再利用検知時は当該ユーザーの *全* セッションを失効させ(sessionsRevokedAt を更新)、
+    // 攻撃者の連鎖トークンも含めて全て無効化して再ログインを強制する。
+    const { isRevoked, revoke } = require('../../middleware/token-denylist');
+    if (payload.jti && isRevoked(payload.jti)) {
+      try {
+        UserRepository.update(user.id, { sessionsRevokedAt: new Date().toISOString() });
+        logger.warn(`Refresh token reuse detected for user ${user.id}; all sessions revoked`);
+      } catch (e) {
+        logger.error(`Failed to revoke sessions on refresh reuse (user=${user.id}): ${e.message}`);
+      }
+      return res.status(401).json({ error: 'Refresh token reuse detected; all sessions have been revoked. Please log in again.' });
+    }
+    // パスワード変更・全セッション失効より後に発行されたリフレッシュトークンのみ受け付ける
+    // （共有ヘルパーで REST/GraphQL と同一ポリシー）。盗まれたトークンはこれらで無効化できる。
+    const { isSessionInvalidated } = require('../../utils/session-invalidation');
+    if (isSessionInvalidated(user, payload.iat)) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
     // 使い切り（single-use）: 使用済みリフレッシュトークンの jti を失効させることで

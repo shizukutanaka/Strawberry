@@ -30,14 +30,15 @@ module.exports = function(req, res, next) {
     if (payload.jti && isRevoked(payload.jti)) {
       return res.status(401).json({ error: '無効なトークン' });
     }
-    // パスワード変更・アカウント無効化後のトークンを拒否（security.js と同一ポリシー）
+    // パスワード変更・全セッション失効（リフレッシュ再利用検知等）後のトークンを拒否
+    // （security.js / GraphQL / refresh と同一ポリシーを共有ヘルパーに集約）。
     const UserRepository = require('../../db/json/UserRepository');
     const tokenUser = UserRepository.getById(payload.id);
     if (!tokenUser || tokenUser.status === 'deactivated') {
       return res.status(401).json({ error: '無効なトークン' });
     }
-    if (tokenUser.passwordChangedAt &&
-        payload.iat <= Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+    const { isSessionInvalidated } = require('../utils/session-invalidation');
+    if (isSessionInvalidated(tokenUser, payload.iat)) {
       return res.status(401).json({ error: '無効なトークン' });
     }
     req.user = payload;

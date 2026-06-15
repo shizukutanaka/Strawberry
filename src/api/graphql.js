@@ -141,8 +141,8 @@ async function setupGraphQL(app) {
         // before the password change so that GraphQL is covered by session invalidation.
         const tokenUser = UserRepository.getById(payload.id);
         if (!tokenUser || tokenUser.status === 'deactivated') return { user: null };
-        if (tokenUser.passwordChangedAt &&
-            payload.iat <= Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+        const { isSessionInvalidated } = require('./utils/session-invalidation');
+        if (isSessionInvalidated(tokenUser, payload.iat)) {
           return { user: null };
         }
         return { user: payload };

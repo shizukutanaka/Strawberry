@@ -3993,15 +3993,19 @@ describe('API Integration', () => {
 
   describe('Password change invalidates all existing sessions', () => {
     let token;
+    let refreshToken;
+    let email;
     let userId;
 
     beforeAll(async () => {
       const u = `pwdinv${Date.now().toString(36)}`.slice(0, 18);
+      email = `${u}@example.com`;
       await request(app).post('/api/v1/users/register')
-        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+        .send({ username: u, email, password: 'Test1234!' });
       const login = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body;
+        .send({ email, password: 'Test1234!' })).body;
       token = login.token;
+      refreshToken = login.refreshToken;
       // Fetch userId via /me
       const me = (await request(app).get('/api/v1/users/me')
         .set('Authorization', `Bearer ${token}`)).body;
@@ -4025,6 +4029,13 @@ describe('API Integration', () => {
       const after = await request(app).get('/api/v1/users/me')
         .set('Authorization', `Bearer ${token}`);
       expect(after.statusCode).toBe(401);
+    });
+
+    it('pre-change refresh token is rejected after password change (stolen refresh cannot bypass)', async () => {
+      // refreshToken was issued before the password change — must not be usable
+      const refresh = await request(app).post('/api/v1/users/refresh')
+        .send({ refreshToken });
+      expect(refresh.statusCode).toBe(401);
     });
   });
 

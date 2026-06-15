@@ -139,6 +139,12 @@ router.post('/refresh',
     if (!user || user.status === 'deactivated') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
+    // パスワード変更後に発行されたリフレッシュトークンのみ受け付ける。
+    // これにより盗まれたリフレッシュトークンはパスワード変更で無効化できる。
+    if (user.passwordChangedAt &&
+        payload.iat <= Math.floor(Date.parse(user.passwordChangedAt) / 1000)) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
     // 使い切り（single-use）: 使用済みリフレッシュトークンの jti を失効させることで
     // 同じトークンを再利用したリプレイアタックを防ぐ。
     if (payload.jti) {

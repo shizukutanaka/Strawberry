@@ -37,7 +37,7 @@ module.exports = function(req, res, next) {
       return res.status(401).json({ error: '無効なトークン' });
     }
     if (tokenUser.passwordChangedAt &&
-        payload.iat < Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+        payload.iat <= Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
       return res.status(401).json({ error: '無効なトークン' });
     }
     req.user = payload;

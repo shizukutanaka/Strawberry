@@ -100,7 +100,7 @@ const authenticateJWT = (req, res, next) => {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
     if (tokenUser.passwordChangedAt &&
-        decoded.iat < Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+        decoded.iat <= Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
     req.user = decoded;

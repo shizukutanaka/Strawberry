@@ -18,6 +18,32 @@ const _attestationVerifier = createMockAttestationVerifier();
 const { createReputationService } = require('../../../reputation/reputation-service');
 const { sanitizeObject } = require('../../../utils/sanitize');
 
+// Short-lived cache for per-GPU rating aggregation (O(n) order scan).
+// TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
+// Invalidated when a review is submitted (see order routes).
+const _gpuRatingCache = new Map();
+const GPU_RATING_TTL = process.env.NODE_ENV === 'test' ? 0 : 3 * 60 * 1000;
+
+function getGpuRating(gpuId) {
+  const cached = _gpuRatingCache.get(gpuId);
+  if (cached && Date.now() - cached.cachedAt < GPU_RATING_TTL) return cached;
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const orders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && o.review);
+  const count = orders.length;
+  const avg = count > 0
+    ? Math.round((orders.reduce((s, o) => s + o.review.rating, 0) / count) * 10) / 10
+    : null;
+  const entry = { avg, count, cachedAt: Date.now() };
+  _gpuRatingCache.set(gpuId, entry);
+  return entry;
+}
+
+function invalidateGpuRatingCache(gpuId) {
+  _gpuRatingCache.delete(gpuId);
+}
+
+module.exports._invalidateGpuRatingCache = invalidateGpuRatingCache;
+
 // 利用可能なGPU一覧を取得
 router.get('/', asyncHandler(async (req, res) => {
   logger.info('Fetching available GPUs');
@@ -96,11 +122,13 @@ router.get('/', asyncHandler(async (req, res) => {
   }
   // 占有状況の注釈: 現時刻と時間帯が重複する BLOCKING 注文がある GPU は available=false。
   // 二重予約は注文作成時に 409 で拒否されるため、ここは閲覧時のヒント表示。
+  // Single getAll() — derive both occupancy and ratings from one read to halve disk I/O.
   const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
   const nowMs = Date.now();
+  const allOrders = OrderRepository.getAll();
   const occupiedGpuIds = new Set(
-    OrderRepository.getAll().filter(o => {
+    allOrders.filter(o => {
       if (!BLOCKING.has(o.status)) return false;
       const slotStart = new Date(o.scheduledStartAt || o.createdAt).getTime();
       const slotEnd = slotStart + (o.durationMinutes || 0) * 60 * 1000;
@@ -125,7 +153,7 @@ router.get('/', asyncHandler(async (req, res) => {
   // ?minRating=N (1–5) で平均評価が N 以上の GPU のみに絞り込み（レビューなし GPU は除外）
   // レーティングは sort=rating でも使うので先に計算しておく
   const reviewMap = new Map(); // gpuId → { sum, count }
-  for (const o of OrderRepository.getAll()) {
+  for (const o of allOrders) {
     if (o.review && o.gpuId) {
       const cur = reviewMap.get(o.gpuId) || { sum: 0, count: 0 };
       cur.sum += o.review.rating;
@@ -232,13 +260,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const details = vgpuManager ? await vgpuManager.getGPUDetails(gpuId).catch(() => null) : null;
   const usageStats = vgpuManager ? await vgpuManager.getGPUUsageStats(gpuId).catch(() => null) : null;
   const availability = vgpuManager ? await vgpuManager.getGPUAvailability(gpuId).catch(() => null) : null;
-  // レーティング集計（レビュー付き完了注文から on-the-fly 計算）
-  const OrderRepository = require('../../../db/json/OrderRepository');
-  const reviewOrders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && o.review);
-  const ratingCount = reviewOrders.length;
-  const ratingAverage = ratingCount > 0
-    ? Math.round((reviewOrders.reduce((s, o) => s + o.review.rating, 0) / ratingCount) * 10) / 10
-    : null;
+  // レーティング集計（TTL キャッシュ付き — 生 O(n) スキャンの繰り返し呼び出しを防ぐ）
+  const { avg: ratingAverage, count: ratingCount } = getGpuRating(gpuId);
   // レスポンスを構築（apiKey等除外）
   const { apiKey, ...gpuSafe } = gpu;
   const response = {

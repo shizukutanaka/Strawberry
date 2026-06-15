@@ -1053,6 +1053,13 @@ router.post('/:id/review',
         `【Strawberry】あなたの GPU にレビューが投稿されました ★${rating}/5\nGPU: ${gpuName}\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
         { subject: `【Strawberry】GPU「${gpuName}」にレビュー ★${rating}/5` });
     }
+    // Invalidate GPU rating cache so the next GET /gpus/:id reflects the new review
+    try {
+      const GpuRoutes = require('../gpu/index');
+      if (typeof GpuRoutes._invalidateGpuRatingCache === 'function') {
+        GpuRoutes._invalidateGpuRatingCache(order.gpuId);
+      }
+    } catch (_) { /* best-effort */ }
     logger.info(`Review submitted for order: ${order.id}`, { orderId: order.id, rating });
     res.status(201).json({ message: 'Review submitted', review });
   })
@@ -1134,7 +1141,12 @@ router.post('/:id/match',
       providerId: matchResult.gpu.providerId,
       matchedAt: new Date().toISOString()
     };
-    OrderRepository.update(orderId, updateData);
+    // Atomic write: guards against /accept or a second /match completing while
+    // p2pNetwork.matchOrder() was awaiting above.
+    const matchWriteResult = OrderRepository.updateIf(orderId, o => o.status === 'pending', updateData);
+    if (!matchWriteResult.ok) {
+      return res.status(409).json({ error: 'Order status changed while matching; match aborted', details: `Current status: ${(matchWriteResult.current || {}).status}` });
+    }
     if (typeof p2pNetwork.updateOrder === 'function') {
       try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
     }

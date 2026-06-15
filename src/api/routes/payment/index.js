@@ -412,15 +412,22 @@ router.post('/manual/approve/:id',
     if (payment.method === 'lightning') {
       throw new APIError(ErrorTypes.VALIDATION, 'Lightning payments cannot be manually approved', 400);
     }
-    if (payment.status === 'paid') {
-      throw new APIError(ErrorTypes.VALIDATION, 'Payment already marked as paid', 400);
+    // Atomic compare-and-swap: check status and write in one synchronous section to
+    // prevent two concurrent admin approvals from both seeing status!=='paid' and
+    // double-approving the same payment.
+    const result = PaymentRepository.updateIf(
+      paymentId,
+      p => p.status !== 'paid' && p.method !== 'lightning',
+      { status: 'paid', paidAt: new Date().toISOString() }
+    );
+    if (!result.ok) {
+      const cur = result.current;
+      if (cur && cur.status === 'paid') {
+        throw new APIError(ErrorTypes.VALIDATION, 'Payment already marked as paid', 400);
+      }
+      throw new APIError(ErrorTypes.VALIDATION, 'Payment cannot be approved in its current state', 400);
     }
-    // delta のみ渡す: { ...payment } spread は getById〜update 間の並行書き込みを上書きする
-    // stale-spread anti-pattern（order PUT の同種バグを是正済み）。
-    const updated = PaymentRepository.update(paymentId, {
-      status: 'paid',
-      paidAt: new Date().toISOString(),
-    });
+    const updated = result.row;
     res.json({
       message: 'Manual payment approved',
       paymentId,

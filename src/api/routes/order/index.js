@@ -91,6 +91,19 @@ const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders }
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
+// 事前予約の先行上限（既定 90 日）。durationMinutes の上限は Joi スキーマ
+// (validator.js: max 43200 = 30日) が担保するが、scheduledStartAt は isoDate
+// 形式のみ検証され「どれだけ先か」は無制限だった。pending 注文の絶対 TTL(90日)を
+// 超える先の枠を予約できると、その注文は後で必ず自動キャンセルされるのに在庫だけを
+// ブロックする（在庫ブロッキング / 不可解な UX）。作成時点で先行上限を課して塞ぐ。env 上書き可。
+function resolvePositiveIntEnv(name, def) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return def;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : def;
+}
+const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_AHEAD_DAYS', 90); // pending TTL と整合
+
 const { sanitizeObject } = require('../../../utils/sanitize');
 const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
 
@@ -540,6 +553,7 @@ router.post('/',
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes % 5 !== 0) {
       throw new APIError(ErrorTypes.VALIDATION, 'durationMinutes must be a positive integer and a multiple of 5 (minutes)', 400);
     }
+    // 注: durationMinutes の上限(30日 = 43200分)は schemas.order.create(Joi) が担保する。
     orderData.durationMinutes = durationMinutes;
 
     // gpuId必須化（maxPricePerHourとの排他チェック）
@@ -614,9 +628,19 @@ router.post('/',
     // but prevents creating orders for historical dates that bypass booking checks).
     if (orderData.scheduledStartAt) {
       const schedMs = new Date(orderData.scheduledStartAt).getTime();
+      if (!Number.isFinite(schedMs)) {
+        throw new APIError(ErrorTypes.VALIDATION, 'scheduledStartAt is not a valid date', 400);
+      }
       if (schedMs < Date.now() - 5 * 60 * 1000) {
         throw new APIError(ErrorTypes.VALIDATION,
           'scheduledStartAt must not be more than 5 minutes in the past', 400);
+      }
+      // 先行予約の上限: pending 注文の絶対 TTL(90日)を超える枠は、後で必ず自動
+      // キャンセルされる（在庫を無駄にブロックするだけ）ため作成時点で拒否する。
+      const maxAheadMs = MAX_ORDER_SCHEDULE_AHEAD_DAYS * 24 * 60 * 60 * 1000;
+      if (schedMs > Date.now() + maxAheadMs) {
+        throw new APIError(ErrorTypes.VALIDATION,
+          `scheduledStartAt must not be more than ${MAX_ORDER_SCHEDULE_AHEAD_DAYS} days in the future`, 400);
       }
     }
     const newStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();

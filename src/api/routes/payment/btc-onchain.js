@@ -12,17 +12,35 @@ const { logger } = require('../../../utils/logger');
  */
 router.post('/', async (req, res) => {
   try {
-    const { orderId, lenderWallet, borrowerWallet, priceBTC } = req.body;
-    if (!orderId || !lenderWallet || !borrowerWallet || !priceBTC) {
-      return res.status(400).json({ message: 'orderId, lenderWallet, borrowerWallet, priceBTC are required' });
+    const { orderId, lenderWallet, borrowerWallet } = req.body;
+    // priceBTC は受け付けない: ユーザーが任意金額を指定する価格操作を防ぐ。
+    // 支払額は注文作成時にロックされた order.totalPrice（サトシ）から一意に決まる。
+    if (!orderId || !lenderWallet || !borrowerWallet) {
+      return res.status(400).json({ message: 'orderId, lenderWallet, borrowerWallet are required' });
     }
-    // 注文の所有者確認（認証ユーザーが借り手または管理者であることを確認）
+    // ウォレットアドレスの基本フォーマット検証（空文字・過大入力を拒否）
+    if (typeof lenderWallet !== 'string' || lenderWallet.length < 10 || lenderWallet.length > 500) {
+      return res.status(400).json({ message: 'Invalid lenderWallet format' });
+    }
+    if (typeof borrowerWallet !== 'string' || borrowerWallet.length < 10 || borrowerWallet.length > 500) {
+      return res.status(400).json({ message: 'Invalid borrowerWallet format' });
+    }
+    // 注文の所有者確認（認証必須 — グローバル jwtAuth が保証するが防御的に確認）
     const OrderRepository = require('../../../db/json/OrderRepository');
     const order = OrderRepository.getById(orderId);
     if (!order) return res.status(404).json({ message: 'Order not found' });
-    if (req.user && req.user.role !== 'admin' && order.userId !== req.user.id) {
+    if (!req.user || (req.user.role !== 'admin' && order.userId !== req.user.id)) {
       return res.status(403).json({ message: 'You do not have permission to pay for this order' });
     }
+    // order.totalPrice（サトシ）→ BTC 換算（1 BTC = 1e8 sat）
+    // 注文作成時にロックされた pricePerHour・durationMinutes から算出済み。
+    // NOTE: lenderWallet は呼び出し側提供のため貸し手ウォレット詐称リスクが残る。
+    //       プロバイダがウォレットアドレスを登録するレジストリ機能（TODO）があれば
+    //       それを使用すること（UserRepository / GpuRepository に walletAddress フィールド追加）。
+    if (!order.totalPrice || order.totalPrice <= 0) {
+      return res.status(422).json({ message: 'Order has no valid total price; cannot process payment' });
+    }
+    const priceBTC = order.totalPrice / 1e8;
     // 借り手が支払う総額
     const total = calcTotalWithFee(priceBTC);
     // 運営利益

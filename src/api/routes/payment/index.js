@@ -415,10 +415,11 @@ router.post('/manual/approve/:id',
     if (payment.status === 'paid') {
       throw new APIError(ErrorTypes.VALIDATION, 'Payment already marked as paid', 400);
     }
+    // delta のみ渡す: { ...payment } spread は getById〜update 間の並行書き込みを上書きする
+    // stale-spread anti-pattern（order PUT の同種バグを是正済み）。
     const updated = PaymentRepository.update(paymentId, {
-      ...payment,
       status: 'paid',
-      paidAt: new Date().toISOString()
+      paidAt: new Date().toISOString(),
     });
     res.json({
       message: 'Manual payment approved',

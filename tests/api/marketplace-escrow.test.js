@@ -1,13 +1,34 @@
 // tests/api/marketplace-escrow.test.js
 const request = require('supertest');
-const jwt = require('jsonwebtoken');
 const { app } = require('../../src/api/server');
-const { config } = require('../../src/utils/config');
 const OrderRepository = require('../../src/db/json/OrderRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
+const UserRepository = require('../../src/db/json/UserRepository');
 
-const adminTok = jwt.sign({ id: 'admin1', role: 'admin' }, config.security.jwtSecret);
-const userTok = jwt.sign({ id: 'user1', role: 'user' }, config.security.jwtSecret);
+// Register real users so the new per-request user-existence check in jwt-auth passes.
+const uniq = Date.now().toString(36);
+let adminTok;
+let userTok;
+
+beforeAll(async () => {
+  const admName = `escadm${uniq}`.slice(0, 20);
+  const admEmail = `${admName}@example.com`;
+  await request(app).post('/api/v1/users/register')
+    .send({ username: admName, email: admEmail, password: 'Test1234!' });
+  // Elevate to admin directly via repository (test convenience)
+  const admUser = UserRepository.getByEmail(admEmail);
+  UserRepository.update(admUser.id, { role: 'admin' });
+  adminTok = (await request(app).post('/api/v1/users/login')
+    .send({ email: admEmail, password: 'Test1234!' })).body.token;
+
+  const usrName = `escusr${uniq}`.slice(0, 20);
+  const usrEmail = `${usrName}@example.com`;
+  await request(app).post('/api/v1/users/register')
+    .send({ username: usrName, email: usrEmail, password: 'Test1234!' });
+  userTok = (await request(app).post('/api/v1/users/login')
+    .send({ email: usrEmail, password: 'Test1234!' })).body.token;
+});
+
 const asAdmin = (r) => r.set('Authorization', `Bearer ${adminTok}`);
 
 // Seed a minimal order with a locked price to use in escrow tests

@@ -343,11 +343,21 @@ router.put('/me/password',
     // 新しいパスワードをハッシュ化
     const salt = await bcrypt.genSalt(config.security.bcryptRounds);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
-    // パスワードを更新
+    // passwordChangedAt を記録し、iat がこれより古いトークンを全無効化する。
+    // jti 失効（denylist）はログアウトした1トークンのみを対象にするが、
+    // passwordChangedAt は他端末・盗難トークンを含むすべての既存セッションを無効化する。
+    const changedAt = new Date().toISOString();
     UserRepository.update(req.user.id, {
       password: hashedPassword,
-      updatedAt: new Date().toISOString()
+      updatedAt: changedAt,
+      passwordChangedAt: changedAt,
     });
+    // 現在のアクセストークンも即時失効（他セッションは passwordChangedAt で弾かれるが、
+    // 本リクエストで使ったトークンは iat が同秒になる可能性があるため denylist でも対処）
+    try {
+      const { revoke } = require('../../middleware/token-denylist');
+      if (req.user.jti) revoke(req.user.jti, (req.user.exp || 0) * 1000);
+    } catch (_) { /* denylist 失敗は更新を妨げない */ }
     logger.info(`Password changed for user: ${req.user.id}`);
     res.json({ message: 'Password changed successfully' });
   })
@@ -544,7 +554,8 @@ const REPUTATION_CACHE_TTL_MS = 5 * 60 * 1000;
 router.get('/:id/reputation', asyncHandler(async (req, res) => {
   const providerId = req.params.id;
   const user = UserRepository.getById(providerId);
-  if (!user) return res.status(404).json({ error: 'User not found' });
+  // renter-profile と同様: 無効化済みユーザーは 404 で返し PII を漏洩しない
+  if (!user || user.status === 'deactivated') return res.status(404).json({ error: 'User not found' });
 
   // キャッシュヒット確認
   const cached = _reputationCache.get(providerId);
@@ -674,6 +685,20 @@ router.delete('/:id',
       if (adminCount <= 1) {
         return res.status(400).json({ error: 'At least one active admin must remain' });
       }
+    }
+    // 進行中の注文がある場合は削除不可（自己退会と同一ポリシー）。
+    // 注文に参加中のユーザーをハード削除すると userId/providerId 参照が孤児化し、
+    // 支払・係争・エスクロー処理が機能しなくなる。
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const NON_TERMINAL = new Set(['pending', 'matched', 'active', 'disputed']);
+    const openOrders = OrderRepository.getAll().filter(o =>
+      NON_TERMINAL.has(o.status) && (o.userId === userId || o.providerId === userId)
+    );
+    if (openOrders.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete user with in-flight orders. Resolve them first.',
+        openOrderCount: openOrders.length,
+      });
     }
     // ユーザー削除（永続化対応）
     const deleted = UserRepository.delete(userId);

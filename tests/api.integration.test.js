@@ -3990,6 +3990,94 @@ describe('API Integration', () => {
     });
   });
 
+  describe('Password change invalidates all existing sessions', () => {
+    let token;
+    let userId;
+
+    beforeAll(async () => {
+      const u = `pwdinv${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
+      const login = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body;
+      token = login.token;
+      // Fetch userId via /me
+      const me = (await request(app).get('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`)).body;
+      userId = me.id;
+    });
+
+    it('token is valid before password change', async () => {
+      const res = await request(app).get('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('old token is rejected after password change (all sessions invalidated)', async () => {
+      // Change the password while still holding the old token
+      const change = await request(app).put('/api/v1/users/me/password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ currentPassword: 'Test1234!', newPassword: 'NewPass9!' });
+      expect(change.statusCode).toBe(200);
+
+      // The old token must now be rejected
+      const after = await request(app).get('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`);
+      expect(after.statusCode).toBe(401);
+    });
+  });
+
+  describe('Admin delete user: blocked by in-flight orders', () => {
+    const OrderRepository = require('../src/db/json/OrderRepository');
+    const GpuRepository = require('../src/db/json/GpuRepository');
+    let adminToken;
+    let targetUserId;
+
+    beforeAll(async () => {
+      const adm = `dliadm${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
+      const aLogin = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body;
+      adminToken = aLogin.token;
+
+      // Promote to admin via UserRepository directly (test convenience)
+      const UserRepository = require('../src/db/json/UserRepository');
+      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
+      UserRepository.update(admUser.id, { role: 'admin' });
+      // Re-login to get admin token
+      const aLogin2 = (await request(app).post('/api/v1/users/login')
+        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body;
+      adminToken = aLogin2.token;
+
+      const tgt = `dlitgt${Date.now().toString(36)}`.slice(0, 18);
+      await request(app).post('/api/v1/users/register')
+        .send({ username: tgt, email: `${tgt}@example.com`, password: 'Test1234!' });
+      const UserRepository2 = require('../src/db/json/UserRepository');
+      const tgtUser = UserRepository2.getByEmail(`${tgt}@example.com`);
+      targetUserId = tgtUser.id;
+
+      // Seed a pending order for the target user
+      const gpu = GpuRepository.create({
+        name: 'Admin-Del GPU', vendor: 'AMD', model: 'RX-DEL', memoryGB: 8, pricePerHour: 1,
+      });
+      OrderRepository.create({
+        gpuId: gpu.id, userId: targetUserId, providerId: null,
+        durationMinutes: 60, status: 'pending',
+        pricePerHour: 1, totalPrice: 1, totalPriceJPY: 50,
+        createdAt: new Date().toISOString(),
+      });
+    });
+
+    it('admin delete is rejected with 409 when the target user has in-flight orders', async () => {
+      const res = await request(app)
+        .delete(`/api/v1/users/${targetUserId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      expect(res.statusCode).toBe(409);
+      expect(res.body).toHaveProperty('openOrderCount');
+    });
+  });
+
   describe('Order price is locked at creation (quote integrity)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     let token;

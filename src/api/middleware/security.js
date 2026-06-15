@@ -91,6 +91,18 @@ const authenticateJWT = (req, res, next) => {
     if (decoded.jti && isRevoked(decoded.jti)) {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
+    // パスワード変更・アカウント無効化後のトークンを拒否。
+    // 攻撃者が盗んだトークンを保持していても、被害者がパスワードを変更した時点で
+    // 全セッションが無効化される（jti 単体失効では対応できない他端末トークンも含む）。
+    const UserRepository = require('../../db/json/UserRepository');
+    const tokenUser = UserRepository.getById(decoded.id);
+    if (!tokenUser || tokenUser.status === 'deactivated') {
+      return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
+    }
+    if (tokenUser.passwordChangedAt &&
+        decoded.iat < Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+      return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
+    }
     req.user = decoded;
     next();
   } catch (error) {

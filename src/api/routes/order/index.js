@@ -560,6 +560,27 @@ router.post('/',
     if (gpu.providerId && gpu.providerId === req.user.id) {
       throw new APIError(ErrorTypes.VALIDATION, 'You cannot order your own GPU', 400);
     }
+    // GPU 利用可能性チェック: プロバイダが明示的に無効化した GPU は予約不可。
+    // GET /gpus リストはフロントエンド向けの表示フィルタだが、gpuId を知っていれば
+    // リストに出なくても直接 POST /orders で予約できてしまう(バイパス)のでここで防ぐ。
+    if (gpu.available === false) {
+      throw new APIError(ErrorTypes.CONFLICT, 'GPU is not available for booking', 409);
+    }
+    // 手動ブロック期間との重複チェック（プロバイダが整備/メンテのため予約を止めた時間帯）。
+    // double-booking チェックはオーダーステータス基準なのでこちらも必要。
+    const reqStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
+    const reqEnd = reqStart + durationMinutes * 60 * 1000;
+    if (Array.isArray(gpu.manualBlocks)) {
+      const blocked = gpu.manualBlocks.find(b => {
+        const bs = new Date(b.from).getTime();
+        const be = new Date(b.to).getTime();
+        return Number.isFinite(bs) && Number.isFinite(be) && reqStart < be && reqEnd > bs;
+      });
+      if (blocked) {
+        throw new APIError(ErrorTypes.CONFLICT,
+          `GPU is manually blocked during the requested period (blocked until ${blocked.to})`, 409);
+      }
+    }
     // 借り手レーティングフロア: GPU に minRenterRating が設定されている場合、
     // 十分なレビュー実績を持つ借り手はその平均評価が floor を下回ると 422 で拒否される。
     // レビュー実績がない新規借り手は通過させる（初回拒絶ループ防止）。

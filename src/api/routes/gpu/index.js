@@ -657,6 +657,18 @@ router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
   if (isNaN(fromMs)) return res.status(400).json({ error: 'Invalid "from" date' });
   if (isNaN(toMs)) return res.status(400).json({ error: 'Invalid "to" date' });
   if (fromMs >= toMs) return res.status(400).json({ error: '"from" must be before "to"' });
+  // 最大ブロック期間: 90日。無期限ブロックはプロバイダによる GPU 実質廃棄に相当し、
+  // マーケットプレイスのサプライを恒久的に枯渇させる（ゾンビ GPU 問題）。
+  const MAX_BLOCK_DURATION_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+  if (toMs - fromMs > MAX_BLOCK_DURATION_MS) {
+    return res.status(400).json({ error: 'Block duration cannot exceed 90 days' });
+  }
+  // ブロック数上限: プロバイダが大量のブロックを登録してスキャンを O(n) DoS 化するのを防ぐ。
+  const MAX_BLOCKS_PER_GPU = 100;
+  const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];
+  if (existing.length >= MAX_BLOCKS_PER_GPU) {
+    return res.status(429).json({ error: `Cannot add more than ${MAX_BLOCKS_PER_GPU} manual blocks per GPU. Remove old blocks first.` });
+  }
   if (reason !== undefined && (typeof reason !== 'string' || reason.length > 200)) {
     return res.status(400).json({ error: '"reason" must be a string (max 200 chars)' });
   }
@@ -672,7 +684,6 @@ router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
     reason: sanitizedReason,
     createdAt: new Date().toISOString(),
   };
-  const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];
   GpuRepository.update(gpuId, { manualBlocks: [...existing, block] });
   res.status(201).json({ block });
 }));
@@ -713,6 +724,11 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
   if (isNaN(from.getTime())) return res.status(400).json({ error: 'Invalid "from" date' });
   if (isNaN(to.getTime())) return res.status(400).json({ error: 'Invalid "to" date' });
   if (from >= to) return res.status(400).json({ error: '"from" must be before "to"' });
+  // 最大照会ウィンドウ: 180日。過度に広いウィンドウは大量スロットを返すレスポンス DoS になる。
+  const MAX_SCHEDULE_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
+  if (to - from > MAX_SCHEDULE_WINDOW_MS) {
+    return res.status(400).json({ error: 'Schedule query window cannot exceed 180 days' });
+  }
 
   const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
@@ -722,7 +738,9 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
     .map(o => {
       const slotStart = new Date(o.scheduledStartAt || o.createdAt);
       const slotEnd = new Date(slotStart.getTime() + (o.durationMinutes || 0) * 60 * 1000);
-      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), orderId: o.id, status: o.status, type: 'order' };
+      // orderId は非公開: 認証なし閲覧者への注文 ID 列挙を防ぐ。
+      // スロットの占有期間と状態のみ返す（予約計画には十分）。
+      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), status: o.status, type: 'order' };
     })
     .filter(slot => new Date(slot.from) < to && new Date(slot.to) > from)
     .sort((a, b) => a.from.localeCompare(b.from));

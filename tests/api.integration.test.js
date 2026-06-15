@@ -508,7 +508,8 @@ describe('API Integration', () => {
       const slot = res.body.blockedSlots[0];
       expect(slot).toHaveProperty('from');
       expect(slot).toHaveProperty('to');
-      expect(slot).toHaveProperty('orderId');
+      // orderId は公開スケジュールから除外（認証なし閲覧者への注文 ID 列挙を防ぐため）
+      expect(slot).not.toHaveProperty('orderId');
       expect(slot).toHaveProperty('status');
     });
 

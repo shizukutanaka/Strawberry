@@ -608,6 +608,11 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
   res.json(data);
 }));
 
+// 借り手公開プロフィールのキャッシュ（TTL: 5分 — レピュテーションキャッシュと同一設定）
+// 認証不要の O(n) スキャンを連続リクエストから保護する。
+const _renterProfileCache = new Map(); // userId → { data, expiresAt }
+const RENTER_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 // 借り手公開プロフィール（認証不要 — プロバイダが注文受付前に借り手を調査できる）。
 // 受領したプロバイダ→借り手レビューの集計（平均★・件数）と取引実績を返す。
 // 無効化済みユーザーは 404 で応答し PII を漏洩しない。
@@ -616,6 +621,12 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
   const user = UserRepository.getById(userId);
   if (!user || user.status === 'deactivated') {
     return res.status(404).json({ error: 'User not found' });
+  }
+
+  // キャッシュヒット確認（テスト時はキャッシュしない — 変化を即時反映するため）
+  const cachedProfile = _renterProfileCache.get(userId);
+  if (cachedProfile && cachedProfile.expiresAt > Date.now()) {
+    return res.json(cachedProfile.data);
   }
 
   const OrderRepository = require('../../../db/json/OrderRepository');
@@ -632,14 +643,18 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
 
   const completedOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.status === 'completed').length;
 
-  res.json({
+  const profileData = {
     userId,
     ratingAverage,
     reviewCount,
     completedOrders,
     recentReviews,
     memberSince: user.createdAt || null,
-  });
+  };
+  if (process.env.NODE_ENV !== 'test') {
+    _renterProfileCache.set(userId, { data: profileData, expiresAt: Date.now() + RENTER_PROFILE_CACHE_TTL_MS });
+  }
+  res.json(profileData);
 }));
 
 // 特定ユーザーの情報取得 (管理者のみ)

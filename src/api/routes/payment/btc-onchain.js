@@ -12,16 +12,13 @@ const { logger } = require('../../../utils/logger');
  */
 router.post('/', async (req, res) => {
   try {
-    const { orderId, lenderWallet, borrowerWallet } = req.body;
+    const { orderId, lenderWallet: bodyLenderWallet, borrowerWallet } = req.body;
     // priceBTC は受け付けない: ユーザーが任意金額を指定する価格操作を防ぐ。
     // 支払額は注文作成時にロックされた order.totalPrice（サトシ）から一意に決まる。
-    if (!orderId || !lenderWallet || !borrowerWallet) {
-      return res.status(400).json({ message: 'orderId, lenderWallet, borrowerWallet are required' });
+    if (!orderId || !borrowerWallet) {
+      return res.status(400).json({ message: 'orderId and borrowerWallet are required' });
     }
     // ウォレットアドレスの基本フォーマット検証（空文字・過大入力を拒否）
-    if (typeof lenderWallet !== 'string' || lenderWallet.length < 10 || lenderWallet.length > 500) {
-      return res.status(400).json({ message: 'Invalid lenderWallet format' });
-    }
     if (typeof borrowerWallet !== 'string' || borrowerWallet.length < 10 || borrowerWallet.length > 500) {
       return res.status(400).json({ message: 'Invalid borrowerWallet format' });
     }
@@ -32,11 +29,32 @@ router.post('/', async (req, res) => {
     if (!req.user || (req.user.role !== 'admin' && order.userId !== req.user.id)) {
       return res.status(403).json({ message: 'You do not have permission to pay for this order' });
     }
+
+    // 貸し手(プロバイダ)への送金先(lenderWallet)を決定する。
+    // 借り手(req.user)がボディで任意の lenderWallet を指定できると、プロバイダへの payout を
+    // 別アドレスへ流す/握りつぶす詐称・妨害が可能になる。よってプロバイダ本人が登録した
+    // payoutAddress を「正」とし、登録があればボディ値を無視する。
+    const UserRepository = require('../../../db/json/UserRepository');
+    const provider = order.providerId ? UserRepository.getById(order.providerId) : null;
+    let lenderWallet = (provider && provider.payoutAddress) ? provider.payoutAddress : bodyLenderWallet;
+    if (!lenderWallet) {
+      return res.status(400).json({
+        message: 'No payout address available for this order. The GPU provider must register a payoutAddress (PUT /users/me) before payouts can be sent.'
+      });
+    }
+    if (typeof lenderWallet !== 'string' || lenderWallet.length < 10 || lenderWallet.length > 500) {
+      return res.status(400).json({ message: 'Invalid lenderWallet format' });
+    }
+    // 登録済み payoutAddress が無くボディ値にフォールバックする場合、借り手が payout を
+    // 自分(=借り手ウォレット)へ流す self-dealing を拒否する。プロバイダが本来受け取る送金を
+    // 借り手が奪える穴を塞ぐ（登録アドレスがあれば上書き済みのためこの経路には入らない）。
+    if (!(provider && provider.payoutAddress) && lenderWallet === borrowerWallet) {
+      return res.status(400).json({
+        message: 'lenderWallet must differ from borrowerWallet. Ask the provider to register a payoutAddress for a verified payout.'
+      });
+    }
     // order.totalPrice（サトシ）→ BTC 換算（1 BTC = 1e8 sat）
     // 注文作成時にロックされた pricePerHour・durationMinutes から算出済み。
-    // NOTE: lenderWallet は呼び出し側提供のため貸し手ウォレット詐称リスクが残る。
-    //       プロバイダがウォレットアドレスを登録するレジストリ機能（TODO）があれば
-    //       それを使用すること（UserRepository / GpuRepository に walletAddress フィールド追加）。
     if (!order.totalPrice || order.totalPrice <= 0) {
       return res.status(422).json({ message: 'Order has no valid total price; cannot process payment' });
     }

@@ -282,6 +282,11 @@ const ALLOWED_PROFILE_FIELDS = {
   // javascript: や data:text/html が XSS ベクターになる。
   avatar:      v => v === '' || (typeof v === 'string' && v.length <= 500 &&
                     (/^https?:\/\//i.test(v) || /^data:image\//i.test(v))),
+  // payoutAddress: プロバイダ（貸し手）が受取に使う Lightning / on-chain アドレス。
+  // 決済(btc-onchain)はこの登録済みアドレスを「正」として使い、リクエストボディで
+  // 送金先を差し替えられる詐称・妨害(借り手が貸し手への payout を別アドレスへ流す)を防ぐ。
+  // 形式はプロバイダ依存(bolt11/LNURL/オンチェーン)のため緩めに検証。空文字で削除可。
+  payoutAddress: v => v === '' || (typeof v === 'string' && v.length >= 10 && v.length <= 500 && !/\s/.test(v)),
 };
 
 router.put('/me',

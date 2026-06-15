@@ -57,20 +57,30 @@ router.post('/auction', (req, res) => {
 // --- エスクロー・ライフサイクル（admin 限定）---
 
 // 注文に価格を確定し hold-invoice エスクローを開く（PENDING）
+// エスクロー amountSats は注文作成時に合意した totalPrice から取る。
+// リクエスト body の gpu/durationMinutes から再計算すると GPU 値上げ後に
+// escrow.amountSats ≠ order.totalPrice となり係争時の精算額が狂う。
 router.post('/escrow/open', adminOnly, (req, res) => {
-  const { orderId, providerId, gpu, durationMinutes, market, feeRate } = req.body || {};
+  const { orderId, feeRate } = req.body || {};
   if (!orderId) return res.status(400).json({ error: 'orderId is required' });
-  if (!gpu || typeof gpu !== 'object' || Array.isArray(gpu)) {
-    return res.status(400).json({ error: 'gpu object is required' });
-  }
   try {
+    const OrderRepository = require('../../db/json/OrderRepository');
+    const GpuRepository = require('../../db/json/GpuRepository');
+    const order = OrderRepository.getById(orderId);
+    if (!order) return res.status(404).json({ error: 'order not found' });
+    if (typeof order.totalPrice !== 'number' || order.totalPrice <= 0) {
+      return res.status(422).json({ error: 'order.totalPrice is not set; cannot open escrow' });
+    }
+    const gpu = GpuRepository.getById(order.gpuId) || {};
     const result = marketplace.openOrderEscrow({
       orderId,
-      providerId: providerId || null,
+      providerId: order.providerId || null,
       gpu,
-      durationMinutes: Number(durationMinutes) || 0,
-      market: market && typeof market === 'object' ? market : {},
+      durationMinutes: order.durationMinutes || 0,
+      market: {},
       feeRate: Number(feeRate) || 0,
+      // Override the quote-based amountSats with the price-locked order total
+      amountSatOverride: order.totalPrice,
     });
     return res.status(201).json(result);
   } catch (e) {

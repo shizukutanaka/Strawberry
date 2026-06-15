@@ -51,11 +51,13 @@ function createMarketplaceService({
    * 注文に対し価格を確定し、hold-invoice エスクローを開く（PENDING）。
    * @returns {{escrow, quote, amountSats, providerId}}
    */
-  function openOrderEscrow({ orderId, providerId = null, gpu = {}, durationMinutes = 0, market = {}, feeRate = 0 }) {
+  function openOrderEscrow({ orderId, providerId = null, gpu = {}, durationMinutes = 0, market = {}, feeRate = 0, amountSatOverride }) {
     if (!orderId) throw new Error('orderId required');
     const quote = quoteGpu(gpu, market);
     const hours = Math.max(0, durationMinutes) / 60;
-    const amountSats = Math.round(quote.pricePerHour * hours);
+    // amountSatOverride: HTTP ルートが注文の price-locked totalPrice を渡す。
+    // 渡されない場合（ユニットテスト・直接呼び出し）は quote から計算する。
+    const amountSats = typeof amountSatOverride === 'number' ? amountSatOverride : Math.round(quote.pricePerHour * hours);
     const escrow = escrowService.create({ orderId, amountSats, feeRate, invoice: null });
     return { escrow, quote, amountSats, providerId };
   }

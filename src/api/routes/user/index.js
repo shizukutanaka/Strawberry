@@ -35,7 +35,11 @@ router.post('/register',
   asyncHandler(async (req, res) => {
     // 入力値サニタイズ
     const sanitized = sanitizeObject(req.validatedBody, ['username', 'email']);
-    const { username, email, password, role } = sanitized;
+    // メールアドレスは大文字小文字を区別しない（RFC 5321 では local-part は区別されるが
+    // 実運用上ほぼ全プロバイダが等価扱い）。正規化しないと USER@X.COM と user@x.com が
+    // 別アカウントとして登録でき、同一受信箱へのなりすましや混乱が生じる。
+    const { username, password, role } = sanitized;
+    const email = typeof sanitized.email === 'string' ? sanitized.email.toLowerCase() : sanitized.email;
     // 自己登録では 'user' または 'provider' のみ許可（admin への昇格は管理者が行う）
     const assignedRole = (role === 'provider') ? 'provider' : 'user';
     logger.info(`Registering new user: ${username}`);
@@ -82,7 +86,8 @@ router.post('/login',
   authLimiter,
   validateMiddleware(schemas.user.login),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.validatedBody;
+    const { password } = req.validatedBody;
+    const email = typeof req.validatedBody.email === 'string' ? req.validatedBody.email.toLowerCase() : req.validatedBody.email;
     logger.info(`Login attempt: ${email}`);
     // ユーザーを検索（永続化対応）
     const user = UserRepository.getByEmail(email);

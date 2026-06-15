@@ -262,9 +262,14 @@ const ALLOWED_PROFILE_FIELDS = {
   username:    v => typeof v === 'string' && v.length >= 3 && v.length <= 30 && /^[a-zA-Z0-9_-]+$/.test(v),
   displayName: v => typeof v === 'string' && v.length <= 50,
   bio:         v => typeof v === 'string' && v.length <= 500,
-  website:     v => typeof v === 'string' && v.length <= 200,
+  // website: http/https のみ許可。javascript: / data: URI はフロントエンドで <a href> 等に
+  // 展開されると Stored XSS になる。空文字（削除）は許可。
+  website:     v => v === '' || (typeof v === 'string' && v.length <= 200 && /^https?:\/\//i.test(v)),
   location:    v => typeof v === 'string' && v.length <= 100,
-  avatar:      v => typeof v === 'string' && v.length <= 500,
+  // avatar: http/https または data:image/ のみ許可。<img src> で展開される場合に
+  // javascript: や data:text/html が XSS ベクターになる。
+  avatar:      v => v === '' || (typeof v === 'string' && v.length <= 500 &&
+                    (/^https?:\/\//i.test(v) || /^data:image\//i.test(v))),
 };
 
 router.put('/me',

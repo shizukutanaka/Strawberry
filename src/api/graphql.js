@@ -123,18 +123,29 @@ async function setupGraphQL(app) {
   const server = new ApolloServer({
     typeDefs,
     resolvers,
+    // Disable introspection in production to avoid leaking the full API schema
+    // to unauthenticated callers (attackers, crawlers).
+    introspection: process.env.NODE_ENV !== 'production',
     context: ({ req }) => {
       const auth = req.headers.authorization || '';
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
       if (!token) return { user: null };
       try {
-        const user = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+        const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
         // REST(jwt-auth.js) と同一ポリシー: リフレッシュトークンをアクセスとして使わせない、
         // かつ logout で失効済み(jti)のトークンは拒否する。これを欠くと GraphQL 経由で
         // ログアウト済み/リフレッシュ用トークンが認証を通ってしまう。
-        if (user.type === 'refresh') return { user: null };
-        if (user.jti && isRevoked(user.jti)) return { user: null };
-        return { user };
+        if (payload.type === 'refresh') return { user: null };
+        if (payload.jti && isRevoked(payload.jti)) return { user: null };
+        // passwordChangedAt check (same as REST middleware): reject tokens issued at or
+        // before the password change so that GraphQL is covered by session invalidation.
+        const tokenUser = UserRepository.getById(payload.id);
+        if (!tokenUser || tokenUser.status === 'deactivated') return { user: null };
+        if (tokenUser.passwordChangedAt &&
+            payload.iat <= Math.floor(Date.parse(tokenUser.passwordChangedAt) / 1000)) {
+          return { user: null };
+        }
+        return { user: payload };
       } catch (_) {
         return { user: null };
       }

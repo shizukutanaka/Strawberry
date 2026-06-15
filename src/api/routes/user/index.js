@@ -631,9 +631,10 @@ router.get('/:id',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // パスワードを除外
-    const { password, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    // パスワード・APIキーを除外（GET /users リストと同一ポリシー。
+    // 管理者でも他人の credential を平文で参照できてはならない）
+    const { password, apiKey, ...userWithoutSecrets } = user;
+    res.json(userWithoutSecrets);
   })
 );
 

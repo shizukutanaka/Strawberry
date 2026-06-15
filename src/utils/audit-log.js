@@ -4,27 +4,36 @@ const path = require('path');
 const crypto = require('crypto');
 const { atomicWriteString } = require('../db/json/atomicWrite');
 
-const AUDIT_LOG_PATH = path.join(__dirname, '../../logs/audit.log');
-const HASH_CHAIN_PATH = path.join(__dirname, '../../logs/audit.hash');
+const LOGS_DIR = path.join(__dirname, '../../logs');
+const AUDIT_LOG_PATH = path.join(LOGS_DIR, 'audit.log');
+const HASH_CHAIN_PATH = path.join(LOGS_DIR, 'audit.hash');
+
+// ディレクトリが存在しない場合に作成（起動時・テスト時の ENOENT を防ぐ）
+try { fs.mkdirSync(LOGS_DIR, { recursive: true }); } catch (_) {}
 
 /**
- * 監査ログを追記し、改ざん検知用ハッシュチェーンを自動生成
- * @param {string} action - 操作種別
- * @param {object} detail - 詳細情報
- * @param {string} [user] - 操作者
+ * 監査ログを追記し、改ざん検知用ハッシュチェーンを自動生成。
+ * I/O エラーは呼び出し元に伝播させない。監査ログの書き込み失敗が
+ * 業務レスポンス（決済・部分決済通知など）をマスクしてはならないため。
  */
 function appendAuditLog(action, detail = {}, user = 'system') {
-  const timestamp = new Date().toISOString();
-  const entry = { timestamp, action, detail, user };
-  const entryStr = JSON.stringify(entry);
-  fs.appendFileSync(AUDIT_LOG_PATH, entryStr + '\n');
-  // 改ざん検知用ハッシュチェーン
-  let prevHash = '';
-  if (fs.existsSync(HASH_CHAIN_PATH)) {
-    prevHash = fs.readFileSync(HASH_CHAIN_PATH, 'utf-8').trim();
+  try {
+    const timestamp = new Date().toISOString();
+    const entry = { timestamp, action, detail, user };
+    const entryStr = JSON.stringify(entry);
+    fs.appendFileSync(AUDIT_LOG_PATH, entryStr + '\n');
+    // 改ざん検知用ハッシュチェーン
+    let prevHash = '';
+    if (fs.existsSync(HASH_CHAIN_PATH)) {
+      prevHash = fs.readFileSync(HASH_CHAIN_PATH, 'utf-8').trim();
+    }
+    const hash = crypto.createHash('sha256').update(prevHash + entryStr).digest('hex');
+    atomicWriteString(HASH_CHAIN_PATH, hash);
+  } catch (e) {
+    // 監査ログ書き込み失敗はサイレントに記録し、呼び出し元をクラッシュさせない
+    // eslint-disable-next-line no-console
+    console.error('[audit-log] Failed to write audit entry:', action, e && e.message);
   }
-  const hash = crypto.createHash('sha256').update(prevHash + entryStr).digest('hex');
-  atomicWriteString(HASH_CHAIN_PATH, hash);
 }
 
 /**

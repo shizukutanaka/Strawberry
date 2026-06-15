@@ -63,6 +63,25 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       audit('update', { id, updates });
       return rows[idx];
     },
+    // Atomic compare-and-swap: loads, checks predicate, and writes in one synchronous
+    // section (no await between load and write), preventing TOCTOU race conditions.
+    // Returns { ok: true, row } on success or { ok: false, reason, current } on failure.
+    updateIf: (id, predicate, updates) => {
+      const rows = load();
+      const idx = rows.findIndex((r) => r.id === id);
+      if (idx === -1) {
+        audit('updateIf', { id, result: 'not_found' });
+        return { ok: false, reason: 'not_found' };
+      }
+      if (!predicate(rows[idx])) {
+        audit('updateIf', { id, result: 'condition_failed' });
+        return { ok: false, reason: 'condition_failed', current: rows[idx] };
+      }
+      rows[idx] = { ...rows[idx], ...updates };
+      atomicWriteJSON(filePath, rows);
+      audit('updateIf', { id, updates });
+      return { ok: true, row: rows[idx] };
+    },
     delete: (id) => {
       const rows = load();
       const remaining = rows.filter((r) => r.id !== id);

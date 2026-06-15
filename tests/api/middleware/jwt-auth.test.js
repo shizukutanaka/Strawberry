@@ -1,5 +1,17 @@
 // JWT認証ミドルウェア自動テスト雛形（Jest）
 const jwt = require('jsonwebtoken');
+
+// Mock UserRepository so the middleware's per-request user lookup finds a real-looking user.
+// The actual DB is irrelevant for this unit test; we're testing middleware logic only.
+jest.mock('../../../src/db/json/UserRepository', () => ({
+  getById: (id) => {
+    if (id === 1 || id === 'user1') {
+      return { id, role: 'admin', status: 'active' };
+    }
+    return null;
+  },
+}));
+
 const jwtAuth = require('../../../src/api/middleware/jwt-auth');
 
 const SECRET = 'test_secret';

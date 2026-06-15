@@ -72,6 +72,7 @@ const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-han
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
+const { withLock } = require('../../../utils/async-lock');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
 const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
@@ -1027,16 +1028,22 @@ router.post('/:id/review',
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
     }
-    if (order.review) {
-      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a review', 409);
-    }
     const rating = Number(req.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
     }
     const comment = req.body.comment ? String(req.body.comment).slice(0, 500) : '';
     const review = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
-    OrderRepository.update(order.id, { review });
+    // Atomic check-and-write: re-reads the order inside the same synchronous section
+    // to prevent a concurrent request that also passed the review=null check above
+    // from overwriting the first writer's review.
+    const reviewResult = OrderRepository.updateIf(order.id,
+      o => o.status === 'completed' && !o.review,
+      { review }
+    );
+    if (!reviewResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a review', 409);
+    }
     // プロバイダへレビュー通知
     if (order.providerId) {
       const { notifyUser } = require('../../../utils/user-notify');
@@ -1070,16 +1077,19 @@ router.post('/:id/renter-review',
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
     }
-    if (order.renterReview) {
-      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a renter review', 409);
-    }
     const rating = Number(req.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
     }
     const comment = req.body.comment ? String(req.body.comment).slice(0, 500) : '';
     const renterReview = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
-    OrderRepository.update(order.id, { renterReview });
+    const renterReviewResult = OrderRepository.updateIf(order.id,
+      o => o.status === 'completed' && !o.renterReview,
+      { renterReview }
+    );
+    if (!renterReviewResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a renter review', 409);
+    }
     // 借り手へ通知
     const { notifyUser } = require('../../../utils/user-notify');
     notifyUser(order.userId, 'renter_reviewed',
@@ -1144,39 +1154,50 @@ router.post('/:id/start',
     const orderId = req.params.id;
     logger.info(`Starting order execution: ${orderId}`);
 
-    // ローカルリポジトリから取得（ソースオブトゥルース）
-    const order = OrderRepository.getById(orderId);
-    if (!order) {
-      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
-    }
-    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to start this order', 403);
-    }
-    if (order.status !== 'matched') {
-      return res.status(400).json({ error: 'Order cannot be started', details: `Current status: ${order.status}` });
-    }
+    // Per-order mutex: prevents concurrent /start calls from both passing the
+    // status check, double-allocating the GPU, and writing duplicate 'active' states.
+    return withLock(`order:${orderId}`, async () => {
+      const order = OrderRepository.getById(orderId);
+      if (!order) {
+        throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+      }
+      if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to start this order', 403);
+      }
+      if (order.status !== 'matched') {
+        return res.status(400).json({ error: 'Order cannot be started', details: `Current status: ${order.status}` });
+      }
 
-    // GPU割り当てには vgpuManager が必要
-    if (!requireService(vgpuManager, res)) return;
-    const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
-    if (!allocation || !allocation.success) {
-      throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation && allocation.message });
-    }
+      // GPU割り当てには vgpuManager が必要
+      if (!requireService(vgpuManager, res)) return;
+      const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
+      if (!allocation || !allocation.success) {
+        throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation && allocation.message });
+      }
 
-    const updateData = { status: 'active', startedAt: new Date().toISOString(), allocationDetails: allocation };
-    OrderRepository.update(orderId, updateData);
-    if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
-      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
-    }
-    // 借り手へ利用開始通知
-    try {
-      const { notifyUser } = require('../../../utils/user-notify');
-      notifyUser(order.userId, 'order_started',
-        `【Strawberry】GPU の利用が開始されました\n注文: #${orderId}`,
-        { subject: `【Strawberry】注文 #${orderId} 利用開始` });
-    } catch (_) { /* 通知失敗は起動を妨げない */ }
+      // Atomic compare-and-swap: only write if the order is still in 'matched' state.
+      // Guards against a second concurrent request that passed the check above but
+      // whose GPU allocation completed after ours.
+      const updateData = { status: 'active', startedAt: new Date().toISOString(), allocationDetails: allocation };
+      const result = OrderRepository.updateIf(orderId, o => o.status === 'matched', updateData);
+      if (!result.ok) {
+        // Another concurrent request already transitioned this order — release the GPU we just allocated.
+        try { await vgpuManager.releaseGPU(order.gpuId, orderId); } catch (_) {}
+        return res.status(409).json({ error: 'Order was already started by a concurrent request' });
+      }
+      if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
+        try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+      }
+      // 借り手へ利用開始通知
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        notifyUser(order.userId, 'order_started',
+          `【Strawberry】GPU の利用が開始されました\n注文: #${orderId}`,
+          { subject: `【Strawberry】注文 #${orderId} 利用開始` });
+      } catch (_) { /* 通知失敗は起動を妨げない */ }
 
-    res.json({ message: 'Order execution started successfully', allocationDetails: allocation });
+      res.json({ message: 'Order execution started successfully', allocationDetails: allocation });
+    });
   })
 );
 
@@ -1188,81 +1209,89 @@ router.post('/:id/stop',
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
 
-    // ローカルリポジトリから取得（ソースオブトゥルース）
-    const order = OrderRepository.getById(orderId);
-    if (!order) {
-      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
-    }
-    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
-    }
-    if (order.status !== 'active') {
-      throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
-    }
+    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU,
+    // double-recording reputation, and double-settling escrow for the same order.
+    return withLock(`order:${orderId}`, async () => {
+      const order = OrderRepository.getById(orderId);
+      if (!order) {
+        throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+      }
+      if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
+      }
+      if (order.status !== 'active') {
+        throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
+      }
 
-    // GPU解放（vgpuManager が利用可能な場合のみ）
-    let usageStats = null;
-    if (vgpuManager) {
+      // GPU解放（vgpuManager が利用可能な場合のみ）
+      let usageStats = null;
+      if (vgpuManager) {
+        try {
+          await vgpuManager.releaseGPU(order.gpuId, orderId);
+          usageStats = await vgpuManager.getGPUUsageStats(order.gpuId, orderId).catch(() => null);
+        } catch (e) {
+          logger.warn(`GPU release failed for order ${orderId}: ${e.message}`);
+        }
+      }
+
+      // ハートビートセッションを削除（メモリリーク防止）
+      usageSessions.delete(orderId);
+
+      // Atomic compare-and-swap: only write completed if still active.
+      // Reputation and escrow settlement only run when this write succeeds,
+      // preventing double-increment if a second concurrent stop somehow slipped through.
+      const updateData = { status: 'completed', stoppedAt: new Date().toISOString(), usageStats };
+      const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);
+      if (!result.ok) {
+        return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });
+      }
+      if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
+        try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+      }
+
+      // プロバイダ・レピュテーションへ完了を記録（updateIf 成功時のみ: 二重記録を防ぐ）。
+      if (order.providerId) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          createReputationService().recordJobResult(order.providerId, true);
+        } catch (e) {
+          logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
+        }
+      }
+
+      // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
+      // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
       try {
-        await vgpuManager.releaseGPU(order.gpuId, orderId);
-        usageStats = await vgpuManager.getGPUUsageStats(order.gpuId, orderId).catch(() => null);
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
+        for (const escrow of escrows) {
+          const ratio = usageStats && usageStats.usageSeconds && order.durationMinutes
+            ? Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60))
+            : 1;
+          escrowSvc.settle(escrow.id, { deliveredRatio: ratio, slaUptimePct: 100 });
+          escrowSvc.apply(escrow.id, 'DELIVER_OK');
+          logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
+        }
       } catch (e) {
-        logger.warn(`GPU release failed for order ${orderId}: ${e.message}`);
+        logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
       }
-    }
 
-    // ハートビートセッションを削除（メモリリーク防止）
-    usageSessions.delete(orderId);
-
-    const updateData = { status: 'completed', stoppedAt: new Date().toISOString(), usageStats };
-    OrderRepository.update(orderId, updateData);
-    if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
-      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
-    }
-
-    // プロバイダ・レピュテーションへ完了を記録（マーケットの主要フロー→評判を接続）。
-    // 失敗してもオーダー完了は妨げない（評判記録はベストエフォート）。
-    if (order.providerId) {
+      // 借り手へ完了通知（支払い確認と利用時間サマリを含む）
       try {
-        const { createReputationService } = require('../../../reputation/reputation-service');
-        createReputationService().recordJobResult(order.providerId, true);
-      } catch (e) {
-        logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
-      }
-    }
+        const { notifyUser } = require('../../../utils/user-notify');
+        const duration = usageStats && usageStats.usageSeconds
+          ? `${Math.round(usageStats.usageSeconds / 60)} 分` : `${order.durationMinutes} 分`;
+        notifyUser(order.userId, 'order_completed',
+          `【Strawberry】GPU 利用が完了しました\n注文: #${orderId}\n利用時間: ${duration}\nレビューを投稿して次回の GPU 選択に役立ててください。`,
+          { subject: `【Strawberry】注文 #${orderId} 完了` });
+      } catch (_) { /* 通知失敗は完了処理を妨げない */ }
 
-    // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
-    // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const { createEscrowService } = require('../../../payments/escrow-service');
-      const escrowSvc = createEscrowService();
-      const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
-      for (const escrow of escrows) {
-        const ratio = usageStats && usageStats.usageSeconds && order.durationMinutes
-          ? Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60))
-          : 1;
-        escrowSvc.settle(escrow.id, { deliveredRatio: ratio, slaUptimePct: 100 });
-        escrowSvc.apply(escrow.id, 'DELIVER_OK');
-        logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
-      }
-    } catch (e) {
-      logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
-    }
-
-    // 借り手へ完了通知（支払い確認と利用時間サマリを含む）
-    try {
-      const { notifyUser } = require('../../../utils/user-notify');
-      const duration = usageStats && usageStats.usageSeconds
-        ? `${Math.round(usageStats.usageSeconds / 60)} 分` : `${order.durationMinutes} 分`;
-      notifyUser(order.userId, 'order_completed',
-        `【Strawberry】GPU 利用が完了しました\n注文: #${orderId}\n利用時間: ${duration}\nレビューを投稿して次回の GPU 選択に役立ててください。`,
-        { subject: `【Strawberry】注文 #${orderId} 完了` });
-    } catch (_) { /* 通知失敗は完了処理を妨げない */ }
-
-    invalidateUserCache(order.userId);
-    if (order.providerId) invalidateUserCache(order.providerId);
-    res.json({ message: 'Order execution stopped successfully', usageStats });
+      invalidateUserCache(order.userId);
+      if (order.providerId) invalidateUserCache(order.providerId);
+      res.json({ message: 'Order execution stopped successfully', usageStats });
+    });
   })
 );
 

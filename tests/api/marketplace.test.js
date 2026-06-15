@@ -1,12 +1,26 @@
 // tests/api/marketplace.test.js
 const request = require('supertest');
-const jwt = require('jsonwebtoken');
 const { app } = require('../../src/api/server');
-const { config } = require('../../src/utils/config');
 
-const token = jwt.sign({ id: 'u1', role: 'admin' }, config.security.jwtSecret);
-const auth = (r) => r.set('Authorization', `Bearer ${token}`);
 const GPU = { vramGB: 80, memBandwidthGBs: 3350, benchmarkScore: 300, generation: 'hopper' };
+
+let token;
+
+beforeAll(async () => {
+  // Register a real user so the per-request user lookup in jwtAuth succeeds.
+  const suffix = `${Date.now()}`;
+  const email = `market${suffix}@example.com`;
+  const password = 'TestPass123!';
+  await request(app).post('/api/v1/users/register').send({
+    username: `mkttester${suffix}`,
+    email,
+    password,
+  });
+  const login = await request(app).post('/api/v1/users/login').send({ email, password });
+  token = login.body.token;
+});
+
+const auth = (r) => r.set('Authorization', `Bearer ${token}`);
 
 describe('marketplace API', () => {
   it('requires authentication', async () => {

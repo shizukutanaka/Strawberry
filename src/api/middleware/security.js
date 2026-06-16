@@ -39,12 +39,22 @@ const corsOptions = {
   maxAge: 86400, // 24時間
 };
 
+// X-Forwarded-For 偽装によるレート制限回避を防ぐ keyGenerator（rate-limit.js と同じポリシー）
+const _rlKeyGenerator = (req) => {
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy && trustProxy !== '0' && trustProxy !== 'false') {
+    return req.ip || req.socket.remoteAddress || 'unknown';
+  }
+  return req.socket.remoteAddress || req.ip || 'unknown';
+};
+
 // レート制限設定
 const apiLimiter = rateLimit({
   windowMs: config.server.rateLimitWindowMs,
   max: () => process.env.NODE_ENV === 'test' ? 10000 : config.server.rateLimitMax,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: _rlKeyGenerator,
   message: {
     error: {
       type: ErrorTypes.FORBIDDEN,

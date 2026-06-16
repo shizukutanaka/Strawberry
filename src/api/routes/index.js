@@ -270,15 +270,24 @@ router.post('/match', rbac('admin'), asyncHandler(async (req, res) => {
 router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
   if (!requireService(lightning, res)) return;
-  const { paymentRequest, amount } = req.body;
+  const { paymentRequest, amount, orderId } = req.body;
   // BOLT11 最低限の形式チェック: lnbc/lntb/lnbcrt で始まる文字列のみ受け入れる
   if (typeof paymentRequest !== 'string' || !/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(paymentRequest)) {
     return res.status(400).json({ error: 'paymentRequest must be a valid BOLT11 invoice string' });
   }
-  // 金額上限: 21M BTC（サトシ換算 2100兆）を超える額は拒否してノードドレインを防ぐ
-  const MAX_SATS = 2_100_000_000_000_000;
-  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > MAX_SATS)) {
-    return res.status(400).json({ error: `amount must be a positive number not exceeding ${MAX_SATS}` });
+  // 注文相関チェック: 任意送金によるノードドレインを防ぐため、orderId を必須とし
+  // 実在する注文の totalPrice を超える送金を拒否する（上限を注文額に束縛）。
+  if (!orderId || typeof orderId !== 'string') {
+    return res.status(400).json({ error: 'orderId is required — payment must correspond to a real order' });
+  }
+  const OrderRepository = require('../../db/json/OrderRepository');
+  const order = OrderRepository.getById(orderId);
+  if (!order) {
+    return res.status(404).json({ error: `Order ${orderId} not found` });
+  }
+  const orderMaxSats = order.totalPrice && order.totalPrice > 0 ? Math.ceil(order.totalPrice * 1.05) : 100000;
+  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > orderMaxSats)) {
+    return res.status(400).json({ error: `amount must be a positive number not exceeding the order total (${orderMaxSats} sats)` });
   }
   const result = await lightning.payInvoice(paymentRequest, amount);
   res.json({ status: 'paid', result });

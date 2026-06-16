@@ -232,7 +232,7 @@ router.get('/', asyncHandler(async (req, res) => {
     limit,
     offset,
     summary: { totalRegistered, totalAvailable, totalOccupied },
-    gpus: pagedGpus.map(({ apiKey, ...gpu }) => {
+    gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, ...gpu }) => {
       const r = reviewMap.get(gpu.id);
       return {
         ...gpu,
@@ -808,9 +808,10 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
     .filter(slot => new Date(slot.from) < to && new Date(slot.to) > from)
     .sort((a, b) => a.from.localeCompare(b.from));
 
+  // reason フィールドは非公開: プロバイダの業務上のメモが漏洩しないよう除去する。
   const manualBlocks = (Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [])
     .filter(b => new Date(b.from) < to && new Date(b.to) > from)
-    .map(b => ({ ...b, type: 'manual' }))
+    .map(({ reason: _r, ...b }) => ({ ...b, type: 'manual' }))
     .sort((a, b) => a.from.localeCompare(b.from));
 
   res.json({

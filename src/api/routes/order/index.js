@@ -692,13 +692,23 @@ router.post('/',
       );
     }
 
-    // カレンダー洪水防止: 同一ユーザーが同一 GPU に対して持てる未決注文数を上限化する。
-    // 時間帯が重複しない pending 注文を大量作成するとプロバイダの 90 日カレンダーを
-    // DoS できるため、ユーザー×GPU で最大 MAX_PENDING_ORDERS_PER_USER_GPU 件まで。
+    // 洪水防止: 2 段階チェック（単一 getAll() で両チェックを完結させ余分な I/O を避ける）。
+    // (1) グローバル上限: ユーザーが全 GPU 横断で保持できる合計アクティブ/保留注文数。
+    //     上限がないと N GPU × 5 件 = 無制限の注文でストレージ枯渇/O(n)スキャン DoS になる。
+    // (2) GPU ローカル上限: 同一 GPU に非重複スロットで大量予約してプロバイダカレンダーを埋めるのを防ぐ。
+    const MAX_GLOBAL_PENDING_PER_USER = Number(process.env.MAX_PENDING_ORDERS_PER_USER) || 50;
     const MAX_PENDING_ORDERS_PER_USER_GPU = 5;
-    const userPendingForGpu = OrderRepository.getAll().filter(
-      (o) => o.userId === req.user.id && o.gpuId === orderData.gpuId && BLOCKING_ORDER_STATUSES.has(o.status)
-    ).length;
+    const userBlockingOrders = OrderRepository.getAll().filter(
+      (o) => o.userId === req.user.id && BLOCKING_ORDER_STATUSES.has(o.status)
+    );
+    if (userBlockingOrders.length >= MAX_GLOBAL_PENDING_PER_USER) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `You have reached the global limit of ${MAX_GLOBAL_PENDING_PER_USER} active/pending orders. Complete or cancel existing orders before creating more.`,
+        409
+      );
+    }
+    const userPendingForGpu = userBlockingOrders.filter((o) => o.gpuId === orderData.gpuId).length;
     if (userPendingForGpu >= MAX_PENDING_ORDERS_PER_USER_GPU) {
       throw new APIError(
         ErrorTypes.CONFLICT,

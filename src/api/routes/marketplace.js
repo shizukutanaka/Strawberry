@@ -131,6 +131,17 @@ router.post('/escrow/:id/resolve', adminOnly, (req, res) => {
     return res.status(400).json({ error: "decision must be 'settle' or 'refund'" });
   }
   try {
+    // providerId が渡された場合、エスクローの注文に記録された実際のプロバイダと一致するか検証する。
+    // 不一致を許すと admin が任意の providerId を指定して無関係プロバイダの reputation を slash できてしまう。
+    if (providerId) {
+      const escrow = marketplace.getEscrow(req.params.id);
+      if (!escrow) return res.status(404).json({ error: 'escrow not found' });
+      const OrderRepository = require('../../db/json/OrderRepository');
+      const order = OrderRepository.getById(escrow.orderId);
+      if (order && order.providerId && order.providerId !== providerId) {
+        return res.status(400).json({ error: 'providerId does not match the escrow order provider' });
+      }
+    }
     return res.json(marketplace.resolveDispute(req.params.id, decision, providerId || null));
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });

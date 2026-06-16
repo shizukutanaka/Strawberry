@@ -116,7 +116,7 @@ function resolvePositiveIntEnv(name, def) {
 }
 const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_AHEAD_DAYS', 90); // pending TTL と整合
 
-const { sanitizeObject } = require('../../../utils/sanitize');
+const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
 
 // オーダー一覧取得 (認証必須)
@@ -831,7 +831,7 @@ router.post('/:id/reject',
     if (order.status !== 'pending') {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot reject order in '${order.status}' state (only pending orders can be rejected)`, 400);
     }
-    const cancelNote = req.body.reason ? String(req.body.reason).slice(0, 500) : '';
+    const cancelNote = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 500) : '';
     OrderRepository.update(order.id, {
       status: 'cancelled',
       cancelReason: 'provider_rejected',
@@ -943,7 +943,7 @@ router.post('/:id/dispute',
           `Too high a share of your disputes have been denied (${denied}/${resolved}); raise legitimate disputes or contact support`, 403);
       }
     }
-    const reason = req.body.reason ? String(req.body.reason).slice(0, 1000) : '';
+    const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 1000) : '';
     const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
     OrderRepository.update(order.id, { status: 'disputed', dispute });
 
@@ -1116,7 +1116,7 @@ router.post('/:id/review',
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
     }
-    const comment = req.body.comment ? String(req.body.comment).slice(0, 500) : '';
+    const comment = req.body.comment ? sanitizeString(String(req.body.comment)).slice(0, 500) : '';
     const review = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
     // Atomic check-and-write: re-reads the order inside the same synchronous section
     // to prevent a concurrent request that also passed the review=null check above
@@ -1172,7 +1172,7 @@ router.post('/:id/renter-review',
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
     }
-    const comment = req.body.comment ? String(req.body.comment).slice(0, 500) : '';
+    const comment = req.body.comment ? sanitizeString(String(req.body.comment)).slice(0, 500) : '';
     const renterReview = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
     const renterReviewResult = OrderRepository.updateIf(order.id,
       o => o.status === 'completed' && !o.renterReview,

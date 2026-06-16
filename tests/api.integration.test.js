@@ -746,8 +746,11 @@ describe('API Integration', () => {
         .send({ gpuId, durationMinutes: 30 });
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
-      // stop ハンドラは active 状態を要求するので直接遷移させる
+      // stop ハンドラは active 状態と支払い済みレコードを要求するので直接遷移させる
       OrderRepository.update(orderId, { status: 'active', providerId });
+      const PaymentRepository = require('../src/db/json/PaymentRepository');
+      const orderUserId = create.body.order.userId;
+      PaymentRepository.create({ orderId, userId: orderUserId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       const stop = await request(app)
         .post(`/api/v1/orders/${orderId}/stop`)
@@ -2310,11 +2313,13 @@ describe('API Integration', () => {
         gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
         createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
       });
-      // Inject a HELD escrow for this order
+      // Inject a HELD escrow and a paid payment record for this order
       const escrow = EscrowRepository.create({
         orderId: order.id, amountSats: 1000, feeRate: 0.02, state: 'HELD',
         history: [], createdAt: new Date().toISOString(),
       });
+      const PaymentRepository = require('../src/db/json/PaymentRepository');
+      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1000, method: 'lightning', paidAt: new Date().toISOString() });
 
       const res = await request(app)
         .post(`/api/v1/orders/${order.id}/stop`)
@@ -2330,6 +2335,8 @@ describe('API Integration', () => {
         gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
         createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
       });
+      const PaymentRepository = require('../src/db/json/PaymentRepository');
+      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       const res = await request(app)
         .post(`/api/v1/orders/${order.id}/stop`)
         .set('Authorization', `Bearer ${renterToken}`);
@@ -2533,6 +2540,8 @@ describe('API Integration', () => {
         gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
         createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
       });
+      const PaymentRepository = require('../src/db/json/PaymentRepository');
+      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       // renter stops the order (renter or admin can call /stop)
       const res = await request(app)
         .post(`/api/v1/orders/${order.id}/stop`)

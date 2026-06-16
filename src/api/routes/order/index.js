@@ -1331,6 +1331,23 @@ router.post('/:id/stop',
         throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
       }
 
+      // 支払い確認: active な注文は Lightning インボイス支払い済み、または管理者手動承認済みの
+      // 決済レコードが存在するはずである。未払いのまま /stop を呼んで completed にされると
+      // GPU 利用を無償で受け取り、レピュテーションも加点される。
+      // 管理者は決済記録なしでも停止できる（手動割り当て・テスト環境等の例外処理に対応）。
+      if (req.user.role !== 'admin') {
+        const PaymentRepository = require('../../../db/json/PaymentRepository');
+        const payments = PaymentRepository.getByOrderId(order.id) || [];
+        const hasPaidPayment = payments.some(p => p.status === 'paid');
+        if (!hasPaidPayment) {
+          throw new APIError(
+            ErrorTypes.FORBIDDEN,
+            'Cannot stop order: no confirmed payment found. Complete the payment before stopping the order.',
+            402
+          );
+        }
+      }
+
       // GPU解放（vgpuManager が利用可能な場合のみ）
       let usageStats = null;
       if (vgpuManager) {

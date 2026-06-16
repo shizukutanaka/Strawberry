@@ -14,6 +14,8 @@ const PaymentRepository = require('../../../db/json/PaymentRepository');
 const OrderRepository = require('../../../db/json/OrderRepository');
 // 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+// 並行リクエストによる二重請求書発行を防ぐためのミューテックス
+const { withLock } = require('../../../utils/async-lock');
 
 // インボイス作成 (認証必須)
 router.post('/invoice',
@@ -167,10 +169,14 @@ router.get('/invoice/:id',
 );
 
 // オーダーに対する支払い処理 (認証必須)
-router.post('/order/:id', 
+router.post('/order/:id',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
+    // べき等性チェックと請求書発行をミューテックス内で行う。
+    // ミューテックスなしだと並行リクエストが両方とも「未払いなし」と判断し
+    // 同一注文に二重の Lightning インボイスが発行される。
+    return withLock(`payment:${orderId}`, async () => {
     const { paymentMethod, amount } = req.body;
     logger.info(`Processing payment for order: ${orderId} (method: ${paymentMethod || 'lightning'})`);
 
@@ -283,6 +289,7 @@ router.post('/order/:id',
       expiresAt,
       message: 'Lightning invoice created. Pay using your Lightning wallet.'
     });
+    }); // end withLock
   })
 );
 

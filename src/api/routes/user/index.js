@@ -12,6 +12,7 @@ const { config } = require('../../../utils/config');
 // 署名鍵は検証側（jwt-auth/security）と同一の resolveSecret で解決する。
 // 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
 const { resolveSecret } = require('../../middleware/jwt-auth');
+const { withLock } = require('../../../utils/async-lock');
 
 const { sanitizeObject } = require('../../../utils/sanitize');
 // レスポンスから機密フィールド(password/apiKey 等)を除去する共通ヘルパー。
@@ -428,22 +429,16 @@ router.put('/me/settings',
     }
     logger.info(`Updating settings for user: ${req.user.id}`);
     
-    // ユーザーを検索（永続化対応）
-    const user = UserRepository.getById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    // 設定を更新
-    const updatedUser = UserRepository.update(req.user.id, {
-      settings: {
-        ...user.settings,
-        ...settings
-      },
-      updatedAt: new Date().toISOString()
-    });
-    res.json({
-      message: 'Settings updated successfully',
-      settings: updatedUser.settings
+    // TOCTOU防止: settings はオブジェクトのマージ（stale-spread）で更新するため、
+    // 並行リクエストが互いの変更を上書き消去しないようにロックする。
+    return withLock(`user:${req.user.id}:settings`, async () => {
+      const user = UserRepository.getById(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      const updatedUser = UserRepository.update(req.user.id, {
+        settings: { ...user.settings, ...settings },
+        updatedAt: new Date().toISOString(),
+      });
+      return res.json({ message: 'Settings updated successfully', settings: updatedUser.settings });
     });
   })
 );

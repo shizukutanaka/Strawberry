@@ -17,6 +17,7 @@ const _attestationVerifier = createMockAttestationVerifier();
 // プロバイダ・レピュテーション記録（アテステーション結果の反映）
 const { createReputationService } = require('../../../reputation/reputation-service');
 const { sanitizeObject } = require('../../../utils/sanitize');
+const { withLock } = require('../../../utils/async-lock');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
 // TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
@@ -699,19 +700,12 @@ router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
   if (toMs - fromMs > MAX_BLOCK_DURATION_MS) {
     return res.status(400).json({ error: 'Block duration cannot exceed 90 days' });
   }
-  // ブロック数上限: プロバイダが大量のブロックを登録してスキャンを O(n) DoS 化するのを防ぐ。
-  const MAX_BLOCKS_PER_GPU = 100;
-  const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];
-  if (existing.length >= MAX_BLOCKS_PER_GPU) {
-    return res.status(429).json({ error: `Cannot add more than ${MAX_BLOCKS_PER_GPU} manual blocks per GPU. Remove old blocks first.` });
-  }
   if (reason !== undefined && (typeof reason !== 'string' || reason.length > 200)) {
     return res.status(400).json({ error: '"reason" must be a string (max 200 chars)' });
   }
   const sanitizedReason = reason
     ? reason.replace(/[<>"'&]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 200) || null
     : null;
-
   const { v4: uuidv4 } = require('uuid');
   const block = {
     id: uuidv4(),
@@ -720,8 +714,20 @@ router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
     reason: sanitizedReason,
     createdAt: new Date().toISOString(),
   };
-  GpuRepository.update(gpuId, { manualBlocks: [...existing, block] });
-  res.status(201).json({ block });
+
+  // TOCTOU防止: 並行 add が上限チェックを同時に通過し cap を超過する（100→101+）のと
+  // 後着の write が先着 write の追加ブロックを上書き消去するのを防ぐ。
+  // ロック内で GPU を再取得し最新の manualBlocks 配列に対して上限を評価する。
+  const MAX_BLOCKS_PER_GPU = 100;
+  return withLock(`gpu:${gpuId}:blocks`, async () => {
+    const freshGpu = GpuRepository.getById(gpuId);
+    const existing = Array.isArray(freshGpu && freshGpu.manualBlocks) ? freshGpu.manualBlocks : [];
+    if (existing.length >= MAX_BLOCKS_PER_GPU) {
+      return res.status(429).json({ error: `Cannot add more than ${MAX_BLOCKS_PER_GPU} manual blocks per GPU. Remove old blocks first.` });
+    }
+    GpuRepository.update(gpuId, { manualBlocks: [...existing, block] });
+    return res.status(201).json({ block });
+  });
 }));
 
 // GPU 手動ブロック削除
@@ -735,12 +741,15 @@ router.delete('/:id/block/:blockId', authenticateJWT, asyncHandler(async (req, r
   }
 
   const blockId = req.params.blockId;
-  const existing = Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [];
-  const idx = existing.findIndex(b => b.id === blockId);
-  if (idx === -1) return res.status(404).json({ error: 'Block not found' });
-  const updated = existing.filter(b => b.id !== blockId);
-  GpuRepository.update(gpuId, { manualBlocks: updated });
-  res.status(200).json({ message: 'Block removed' });
+  // TOCTOU防止: 並行 add+delete が互いの変更を上書き消去するのを防ぐ。add と同じキーでシリアライズ。
+  return withLock(`gpu:${gpuId}:blocks`, async () => {
+    const freshGpu = GpuRepository.getById(gpuId);
+    const existing = Array.isArray(freshGpu && freshGpu.manualBlocks) ? freshGpu.manualBlocks : [];
+    const idx = existing.findIndex(b => b.id === blockId);
+    if (idx === -1) return res.status(404).json({ error: 'Block not found' });
+    GpuRepository.update(gpuId, { manualBlocks: existing.filter(b => b.id !== blockId) });
+    return res.status(200).json({ message: 'Block removed' });
+  });
 }));
 
 // GPU の予約カレンダー（空き時間帯の照会）

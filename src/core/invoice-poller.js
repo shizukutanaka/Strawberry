@@ -27,11 +27,40 @@ async function pollOnce() {
         const invoiceStatus = await _lightning.checkInvoice(payment.paymentHash);
 
         if (invoiceStatus && invoiceStatus.settled) {
+          // Underpayment guard: a Lightning invoice can be reported settled while
+          // the amount actually received is less than requested (partial/AMP
+          // settlement, or a misbehaving payer). Marking such a payment 'paid'
+          // would fulfil a full-price order for a fraction of its cost. Only the
+          // amount the invoice actually received counts — verify it covers the
+          // expected order amount before confirming.
+          const paidSats = Number(
+            invoiceStatus.amountPaid != null ? invoiceStatus.amountPaid : invoiceStatus.value
+          );
+          const expectedSats = Number(payment.amount);
+          if (Number.isFinite(expectedSats) && expectedSats > 0 &&
+              Number.isFinite(paidSats) && paidSats < expectedSats) {
+            PaymentRepository.update(payment.id, {
+              status: 'failed',
+              failedAt: new Date().toISOString(),
+              failReason: 'underpayment',
+              amountPaid: paidSats
+            });
+            appendAuditLog('payment_underpaid', {
+              paymentId: payment.id,
+              orderId: payment.orderId,
+              expected: expectedSats,
+              paid: paidSats
+            });
+            logger.warn(`Invoice underpaid: paymentId=${payment.id} expected=${expectedSats} paid=${paidSats}; order not advanced`);
+            continue;
+          }
+
           // Mark payment paid
           PaymentRepository.update(payment.id, {
             status: 'paid',
             paidAt: new Date().toISOString(),
-            settledAt: invoiceStatus.settleDate || new Date().toISOString()
+            settledAt: invoiceStatus.settleDate || new Date().toISOString(),
+            ...(Number.isFinite(paidSats) ? { amountPaid: paidSats } : {})
           });
           appendAuditLog('payment_confirmed', {
             paymentId: payment.id,

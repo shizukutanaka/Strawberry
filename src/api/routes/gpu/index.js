@@ -404,10 +404,12 @@ router.post('/',
     if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
     if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
 
-    // GPU アテステーション（任意）— リクエストに attestationReport が含まれる場合に検証
-    if (req.body.attestationReport) {
+    // GPU アテステーション（任意）— validatedBody から読む（Joi で許可フィールドを限定済み）。
+    // req.body から直接読むと攻撃者が任意フィールドを注入し検証を欺けるため必ず validated 側を使う。
+    const attestationReport = (req.validatedBody || {}).attestationReport;
+    if (attestationReport) {
       try {
-        const attResult = await _attestationVerifier.verify(gpuInfo, req.body.attestationReport);
+        const attResult = await _attestationVerifier.verify(gpuInfo, attestationReport);
         gpuInfo.attestation = {
           passed: attResult.passed,
           score: attResult.score,

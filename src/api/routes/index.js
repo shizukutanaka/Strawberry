@@ -63,11 +63,14 @@ const PUBLIC_PATHS = new Set([
   '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
-// /auth/* と /gpus/* は全てトークン不要（GPU 詳細・スケジュール照会も公開閲覧対象）
+// /auth/* と /gpus/:id, /gpus/:id/schedule はトークン不要（GPU 詳細・スケジュール照会は公開閲覧対象）。
+// /gpus/ 全体を startsWith で免除すると、将来追加される管理系 /gpus/:id/... サブルートも
+// 意図せず公開になるため、既知の公開サブパスだけを明示的に許可する。
 function isPublicPath(path) {
   return PUBLIC_PATHS.has(path)
     || path.startsWith('/auth/')
-    || path.startsWith('/gpus/')
+    || /^\/gpus\/[^/]+$/.test(path)
+    || /^\/gpus\/[^/]+\/schedule$/.test(path)
     // プロバイダ公開レピュテーション照会 & 借り手公開プロフィール（閲覧はマーケット信頼判断のため公開、GETのみ）
     || /^\/users\/[^/]+\/reputation$/.test(path)
     || /^\/users\/[^/]+\/renter-profile$/.test(path)

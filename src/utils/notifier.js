@@ -27,7 +27,7 @@ async function sendNotification(typeOrUserId, message, options = {}) {
   if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
     // 設定ファイルから通知設定を取得
     const userId = typeOrUserId;
-    const settingsPath = path.resolve(__dirname, '../api/notification-settings.json');
+    const settingsPath = path.resolve(__dirname, '../../data/notification-settings.json');
     let settings = {};
     try {
       if (fs.existsSync(settingsPath)) {

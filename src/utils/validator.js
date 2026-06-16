@@ -84,7 +84,24 @@ const schemas = {
     teraflops: Joi.number().min(0).max(100000),
     hashrate: Joi.number().min(0).max(100000000)
   }),
-  minRenterRating: Joi.number().min(1).max(5).optional()
+  minRenterRating: Joi.number().min(1).max(5).optional(),
+  // アテステーションレポート（任意）— 許可フィールドを明示的に列挙し unknown を拒否する。
+  // req.body から直接読むと攻撃者が任意のフィールドを注入できるため Joi を通す。
+  attestationReport: Joi.object({
+    model: Joi.string().max(128).optional(),
+    vendor: Joi.string().max(64).optional(),
+    memoryGB: Joi.number().min(0).max(8192).optional(),
+    driverVersion: Joi.string().max(64).optional(),
+    firmwareIntegrity: Joi.boolean().optional(),
+    certChain: Joi.string().max(4096).optional(),
+    timestamp: Joi.string().isoDate().optional(),
+    signature: Joi.string().max(2048).optional(),
+    measurements: Joi.object({
+      tempC: Joi.number().min(-273).max(300).optional(),
+      powerW: Joi.number().min(0).max(20000).optional(),
+      utilizationPct: Joi.number().min(0).max(100).optional(),
+    }).unknown(false).optional(),
+  }).unknown(false).optional(),
 }),
 
     // GPU更新用スキーマ（全フィールドオプション — 部分更新）

@@ -473,6 +473,14 @@ router.put('/:id',
       if (!isValidOrderTransition(order.status, sanitized.status)) {
         return res.status(400).json({ error: `Invalid status transition from ${order.status} to ${sanitized.status}` });
       }
+      // 'disputed' への直接遷移は POST /:id/dispute のみが正規ルート。
+      // admin PUT で transition させると order.dispute オブジェクトが存在しない状態になり、
+      // /dispute/resolve の raisedBy 参照や係争グリーフィングゲートが正しく機能しなくなる。
+      if (sanitized.status === 'disputed') {
+        throw new APIError(ErrorTypes.VALIDATION,
+          "Use POST /:id/dispute to raise a dispute. Setting status to 'disputed' directly is not allowed.",
+          400);
+      }
     }
     // フィールドフィルタ: 非管理者は description/notes のみ変更可能。
     // これがないと借り手が { totalPrice: 1, pricePerHour: 0.001 } を PUT して
@@ -1025,7 +1033,7 @@ router.post('/:id/dispute/resolve',
     if (!['refund', 'uphold'].includes(decision)) {
       throw new APIError(ErrorTypes.VALIDATION, "decision must be 'refund' or 'uphold'", 400);
     }
-    const note = req.body.note ? String(req.body.note).slice(0, 1000) : '';
+    const note = req.body.note ? sanitizeString(String(req.body.note)).slice(0, 1000) : '';
     const resolvedAt = new Date().toISOString();
     const resolution = { decision, note, resolvedBy: req.user.id, resolvedAt };
 

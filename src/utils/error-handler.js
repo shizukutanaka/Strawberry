@@ -52,22 +52,30 @@ function convertToAPIError(err) {
   if (err instanceof APIError) {
     return err;
   }
-  
-  // エラータイプを判定
+
   let type = ErrorTypes.INTERNAL;
   let statusCode = 500;
   let message = err.message || 'An unexpected error occurred';
-  
-  // エラーメッセージからタイプを推測
+
+  // エラーオブジェクト自体に statusCode が付いていればそれを尊重する（axios, http-errors 等）。
+  // これにより外部ライブラリのエラーがメッセージ文言の偶発的キーワードマッチで
+  // 誤分類（例: "invalid cursor" → 400、"invoice timeout" → 400）されるのを防ぐ。
+  if (typeof err.statusCode === 'number' && err.statusCode >= 400) {
+    statusCode = err.statusCode;
+    type = statusCode < 500 ? ErrorTypes.VALIDATION : ErrorTypes.INTERNAL;
+    return new APIError(type, message, statusCode, { originalError: err.name, code: err.code });
+  }
+
+  // statusCode を持たない未知の Error はデフォルト 500/INTERNAL のまま返す。
+  // アプリケーションコードが意図した 4xx エラーは必ず new APIError(...) で明示的に投げること。
+  // 以下のキーワードマッチはレガシー互換のためのフォールバックにすぎず、
+  // 正確性より「何もしないより多少まし」を優先するベストエフォートである点に注意。
   if (err.message) {
     const msg = err.message.toLowerCase();
-    
+
     if (msg.includes('not found') || msg.includes('does not exist')) {
       type = ErrorTypes.NOT_FOUND;
       statusCode = 404;
-    } else if (msg.includes('validation') || msg.includes('invalid')) {
-      type = ErrorTypes.VALIDATION;
-      statusCode = 400;
     } else if (msg.includes('unauthorized') || msg.includes('authentication')) {
       type = ErrorTypes.UNAUTHORIZED;
       statusCode = 401;
@@ -77,21 +85,14 @@ function convertToAPIError(err) {
     } else if (msg.includes('conflict') || msg.includes('duplicate')) {
       type = ErrorTypes.CONFLICT;
       statusCode = 409;
-    } else if (msg.includes('gpu')) {
-      type = ErrorTypes.GPU_ERROR;
-      statusCode = 500;
-    } else if (msg.includes('p2p') || msg.includes('peer')) {
-      type = ErrorTypes.P2P_ERROR;
-      statusCode = 500;
-    } else if (msg.includes('lightning') || msg.includes('lnd')) {
-      type = ErrorTypes.LIGHTNING_ERROR;
-      statusCode = 500;
-    } else if (msg.includes('payment') || msg.includes('invoice')) {
-      type = ErrorTypes.PAYMENT_ERROR;
-      statusCode = 400;
     }
+    // 旧: msg.includes('validation') || msg.includes('invalid') → 400
+    // 削除理由: 内部エラー（UV_EINVAL, "invalid cursor state"等）を誤って 400 へ格下げし
+    // 本番アラートを抑圧していたため。アプリ側で明示的に APIError を投げること。
+    // 旧: msg.includes('gpu'/'p2p'/'lightning'/'lnd'/'payment'/'invoice') → 500 or 400
+    // 削除理由: 'invoice timeout' → 400 のように正常な 5xx を 400 に格下げしていた。
   }
-  
+
   return new APIError(type, message, statusCode, {
     originalError: err.name,
     code: err.code

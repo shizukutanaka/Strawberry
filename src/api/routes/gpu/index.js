@@ -50,10 +50,22 @@ router.get('/', asyncHandler(async (req, res) => {
   // クエリパラメータからフィルタリング条件を取得
   let parsedFeatures = null;
   if (req.query.features) {
+    // サイズ制限: 未認証呼び出し元が巨大な JSON を送り O(keys × GPUs) の CPU DoS を起こせる。
+    // 512 バイト超 or 20 キー超は拒否する。
+    if (req.query.features.length > 512) {
+      return res.status(400).json({ error: '"features" query param exceeds 512 character limit' });
+    }
     try {
       parsedFeatures = JSON.parse(req.query.features);
     } catch (e) {
       return res.status(400).json({ error: 'Invalid "features" query: must be valid JSON' });
+    }
+    if (parsedFeatures !== null && typeof parsedFeatures === 'object' && !Array.isArray(parsedFeatures)) {
+      if (Object.keys(parsedFeatures).length > 20) {
+        return res.status(400).json({ error: '"features" may not contain more than 20 keys' });
+      }
+    } else if (parsedFeatures !== null) {
+      return res.status(400).json({ error: '"features" must be a JSON object' });
     }
   }
   if (req.query.minMemoryGB && isNaN(parseInt(req.query.minMemoryGB, 10))) {

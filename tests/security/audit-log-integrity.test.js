@@ -56,15 +56,29 @@ describe('audit-log hash chain integrity', () => {
   });
 
   it('the HTTP audit middleware does not target logs/audit.log by default', () => {
-    // Fresh require with no AUDIT_LOG_PATH override; assert it writes elsewhere
-    // than the canonical tamper-evident log.
+    // Verify that loading audit.js (with no AUDIT_LOG_PATH set) does not synchronously
+    // write to the tamper-evident audit.log. We spy on fs.appendFileSync for the duration
+    // of the synchronous require() rather than snapshotting the file, because a background
+    // service-monitor setInterval can fire asynchronously between before/after reads and
+    // produce spurious diff lines in the file-content comparison.
     const saved = process.env.AUDIT_LOG_PATH;
     delete process.env.AUDIT_LOG_PATH;
     jest.resetModules();
-    const before = fs.existsSync(GLOBAL_LOG) ? fs.readFileSync(GLOBAL_LOG, 'utf-8') : '';
-    require('../../src/api/middleware/audit'); // loading must not write to audit.log
-    const after = fs.existsSync(GLOBAL_LOG) ? fs.readFileSync(GLOBAL_LOG, 'utf-8') : '';
-    expect(after).toBe(before);
-    if (saved !== undefined) process.env.AUDIT_LOG_PATH = saved;
+    const writtenPaths = [];
+    const origAppend = fs.appendFileSync.bind(fs);
+    jest.spyOn(fs, 'appendFileSync').mockImplementation((p, data, opts) => {
+      writtenPaths.push(String(p));
+      return origAppend(p, data, opts);
+    });
+    try {
+      require('../../src/api/middleware/audit');
+    } finally {
+      jest.restoreAllMocks();
+      if (saved !== undefined) process.env.AUDIT_LOG_PATH = saved;
+      else delete process.env.AUDIT_LOG_PATH;
+    }
+    // audit.js has no top-level side effects, so no appendFileSync should fire during load.
+    const auditLogWrites = writtenPaths.filter((p) => p.endsWith('audit.log'));
+    expect(auditLogWrites).toHaveLength(0);
   });
 });

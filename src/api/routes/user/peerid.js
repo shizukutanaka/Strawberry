@@ -19,6 +19,10 @@ router.post('/link', asyncHandler(async (req, res) => {
   }
   const user = UserRepository.getById(req.user.id);
   if (!user) throw new APIError(ErrorTypes.NOT_FOUND, 'User not found', 404);
+  const existingOwner = UserRepository.getByPeerId(peerId);
+  if (existingOwner && existingOwner.id !== user.id) {
+    throw new APIError(ErrorTypes.CONFLICT, 'PeerID is already registered to another user', 409);
+  }
   UserRepository.update(user.id, { peerId });
   res.json({ message: 'ピアIDを紐付けました', peerId });
 }));

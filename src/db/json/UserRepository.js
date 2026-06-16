@@ -20,5 +20,6 @@ module.exports = createJsonRepository('users.json', {
     getByEmail: { field: 'email' },
     getByApiKey: { field: 'apiKey' },
     getByGoogleId: { field: 'googleId' },
+    getByPeerId: { field: 'peerId' },
   },
 });

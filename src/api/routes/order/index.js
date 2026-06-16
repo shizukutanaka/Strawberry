@@ -452,6 +452,13 @@ router.put('/:id',
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
+    // PUT is the renter's (order creator's) edit path. allowOwnerOrAdmin also grants
+    // access when req.user.id === order.providerId, but providers must use the
+    // dedicated /accept and /reject endpoints — not PUT — to avoid unauthorized
+    // mutation of the renter's record (e.g., evidence tampering before a dispute).
+    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can edit order fields. Providers must use /accept or /reject.', 403);
+    }
     logger.info(`Updating order: ${order.id}`);
     // 入力値サニタイズ
     const sanitized = sanitizeObject(req.body, ['description', 'notes']);
@@ -511,6 +518,13 @@ router.delete('/:id',
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
+    // DELETE (soft-cancel) is the renter's self-cancel path. allowOwnerOrAdmin also
+    // admits providers via order.providerId, but providers must use POST /:id/reject.
+    // Allowing providers here lets them forge a 'user_cancelled' reason, forfeiting
+    // the renter's escrow deposit and breaking dispute resolution.
+    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can cancel an order via DELETE. Providers must use POST /:id/reject.', 403);
+    }
     logger.info(`Deleting order: ${order.id}`);
     // 状態チェック
     if (!['pending', 'matched'].includes(order.status)) {

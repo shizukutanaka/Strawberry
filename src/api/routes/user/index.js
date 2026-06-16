@@ -742,6 +742,18 @@ router.delete('/:id',
         openOrderCount: openOrders.length,
       });
     }
+    // GPU リストが残存するプロバイダは削除不可。
+    // GPU を削除せずにユーザーをハード削除すると、孤立した GPU がマーケットプレイスに
+    // 残って新規注文を受け付け続け、providerId が解決できない注文・エスクローが生まれる。
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const providerGpus = GpuRepository.getAll().filter(g => g.providerId === userId);
+    if (providerGpus.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete user with registered GPU listings. Remove or transfer all GPU listings first.',
+        gpuCount: providerGpus.length,
+        gpuIds: providerGpus.map(g => g.id),
+      });
+    }
     // ユーザー削除（永続化対応）
     const deleted = UserRepository.delete(userId);
     if (!deleted) {

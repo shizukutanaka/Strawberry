@@ -836,9 +836,12 @@ router.get('/:id/benchmark', asyncHandler(async (req, res) => {
   res.json(benchmarkResults);
 }));
 
-// GPUのベンチマークを実行 (認証必須)
+// GPUのベンチマークを実行 (オーナー/管理者のみ)
+// allowOwnerOrAdmin なしだと任意の認証済みユーザーが他プロバイダの GPU で
+// ベンチマークをトリガーでき、負荷攻撃・レピュテーション汚染の経路になる。
 router.post('/:id/benchmark',
   authenticateJWT,
+  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     if (!requireService(vgpuManager, res)) return;
     const gpuId = req.params.id;

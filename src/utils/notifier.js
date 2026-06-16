@@ -175,25 +175,12 @@ async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
 }
 
 // 汎用Webhook
-// 送信時にも SSRF チェックを行う（設定保存時のバリデーションに加えた多層防御）。
-// notification-settings.js の isSSRFUrl をインポートして同一ロジックを再利用する。
-function _loadSSRFCheck() {
-  try {
-    const ns = require('../api/notification-settings');
-    return ns._isSSRFUrl || (() => false);
-  } catch (_) {
-    return () => false;
-  }
-}
-const _isSSRFUrl = _loadSSRFCheck();
-
+// 送信時に SSRF チェックを行う（設定保存時の regex バリデーションに加えた多層防御）。
+// assertPublicUrl は名前解決まで行い、旧 regex チェックの上位互換（リテラル private IP・
+// DNS リバインディング・内部ホスト名・代替エンコードを一括で遮断）。よって冗長な
+// regex 前段（循環 require に依存し脆かった）は廃し、本ガード一本に集約する。
 async function sendWebhookNotify(message, { webhookUrl, payload = {} }) {
   if (!webhookUrl) throw new Error('Webhook URL未設定');
-  // 1. 文字列ベースの高速フィルタ（リテラル private IP / 既知メタデータホスト名）
-  if (_isSSRFUrl(webhookUrl)) {
-    throw new Error(`Webhook URL is not allowed (SSRF blocked): ${webhookUrl}`);
-  }
-  // 2. 名前解決ベースの検査（DNS リバインディング・内部ホスト名・代替エンコードを遮断）
   await assertPublicUrl(webhookUrl);
   return withRetry(async () => {
     const res = await axios.post(webhookUrl, { message, ...payload });

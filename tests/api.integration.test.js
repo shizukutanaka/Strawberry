@@ -3475,18 +3475,27 @@ describe('API Integration', () => {
     });
 
     it('delivers to a real localhost HTTP webhook server', async () => {
-      let received = null;
-      const server = http.createServer((req, res) => {
-        let body = '';
-        req.on('data', c => { body += c; });
-        req.on('end', () => { received = JSON.parse(body); res.end('{}'); });
-      });
-      await new Promise(r => server.listen(0, '127.0.0.1', r));
-      const port = server.address().port;
-      const { sendNotification, NotifyType } = require('../src/utils/notifier');
-      await sendNotification(NotifyType.WEBHOOK, 'test-msg', { webhookUrl: `http://127.0.0.1:${port}` });
-      await new Promise(r => server.close(r));
-      expect(received).toMatchObject({ message: 'test-msg' });
+      // The send-time SSRF guard blocks loopback by default; this test exercises
+      // delivery to a local server, which is the legitimate opt-in use case.
+      const savedAllow = process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+      process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS = '1';
+      try {
+        let received = null;
+        const server = http.createServer((req, res) => {
+          let body = '';
+          req.on('data', c => { body += c; });
+          req.on('end', () => { received = JSON.parse(body); res.end('{}'); });
+        });
+        await new Promise(r => server.listen(0, '127.0.0.1', r));
+        const port = server.address().port;
+        const { sendNotification, NotifyType } = require('../src/utils/notifier');
+        await sendNotification(NotifyType.WEBHOOK, 'test-msg', { webhookUrl: `http://127.0.0.1:${port}` });
+        await new Promise(r => server.close(r));
+        expect(received).toMatchObject({ message: 'test-msg' });
+      } finally {
+        if (savedAllow === undefined) delete process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+        else process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS = savedAllow;
+      }
     });
   });
 

@@ -79,6 +79,13 @@ async function assertPublicUrl(url, resolver) {
   // URL の hostname は IPv6 の場合 [] を含むので除去する。
   const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
 
+  // 明示的オプトインで private/loopback 宛を許可する（既定は無効＝安全側）。
+  // セルフホスト環境で内部 Webhook（社内 Slack 互換エンドポイント等）へ送る正当な
+  // ユースケースのための逃げ道。本番でこれを有効化するのは利用者の判断と責任に委ねる。
+  const allowPrivate = process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS === 'true'
+    || process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS === '1';
+  if (allowPrivate) return true;
+
   // ホスト名がリテラル IP ならそのまま分類（DNS を引かない）。
   if (net.isIP(hostname)) {
     if (isPrivateIp(hostname)) {

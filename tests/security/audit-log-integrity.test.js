@@ -1,13 +1,39 @@
 // Regression: the tamper-evident audit hash chain (src/utils/audit-log.js) must
-// be the ONLY writer of logs/audit.log. The HTTP audit middleware and the
+// be the ONLY writer of its log file. The HTTP audit middleware and the
 // p2p-notify daemon used to append to the same file, interleaving un-chained
 // lines that made verifyAuditLogIntegrity() always fail.
+//
+// Isolation: this suite points AUDIT_LOG_PATH at a unique temp file so that
+// other suites running in parallel (which call appendAuditLog against the
+// default logs/audit.log) cannot pollute the chain under test. Asserting on the
+// shared global file made these tests flaky when run alongside the rest.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { appendAuditLog, verifyAuditLogIntegrity } = require('../../src/utils/audit-log');
 
-const LOG = path.join(__dirname, '../../logs/audit.log');
-const HASH = path.join(__dirname, '../../logs/audit.hash');
+const GLOBAL_LOG = path.join(__dirname, '../../logs/audit.log');
+
+let TMP_DIR, LOG, HASH;
+const savedEnv = {};
+
+beforeAll(() => {
+  savedEnv.log = process.env.AUDIT_LOG_PATH;
+  savedEnv.hash = process.env.AUDIT_HASH_PATH;
+  TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-integrity-'));
+  LOG = path.join(TMP_DIR, 'audit.log');
+  HASH = path.join(TMP_DIR, 'audit.hash');
+  process.env.AUDIT_LOG_PATH = LOG;
+  process.env.AUDIT_HASH_PATH = HASH;
+});
+
+afterAll(() => {
+  if (savedEnv.log === undefined) delete process.env.AUDIT_LOG_PATH;
+  else process.env.AUDIT_LOG_PATH = savedEnv.log;
+  if (savedEnv.hash === undefined) delete process.env.AUDIT_HASH_PATH;
+  else process.env.AUDIT_HASH_PATH = savedEnv.hash;
+  try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch (_) {}
+});
 
 describe('audit-log hash chain integrity', () => {
   beforeEach(() => {
@@ -30,15 +56,15 @@ describe('audit-log hash chain integrity', () => {
   });
 
   it('the HTTP audit middleware does not target logs/audit.log by default', () => {
-    // Fresh require with no AUDIT_LOG_PATH override; assert it writes elsewhere.
+    // Fresh require with no AUDIT_LOG_PATH override; assert it writes elsewhere
+    // than the canonical tamper-evident log.
     const saved = process.env.AUDIT_LOG_PATH;
     delete process.env.AUDIT_LOG_PATH;
     jest.resetModules();
-    // The middleware computes its path at module load; re-require and inspect via a probe write.
-    const probeEntryBefore = fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf-8') : '';
+    const before = fs.existsSync(GLOBAL_LOG) ? fs.readFileSync(GLOBAL_LOG, 'utf-8') : '';
     require('../../src/api/middleware/audit'); // loading must not write to audit.log
-    const probeEntryAfter = fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf-8') : '';
-    expect(probeEntryAfter).toBe(probeEntryBefore);
+    const after = fs.existsSync(GLOBAL_LOG) ? fs.readFileSync(GLOBAL_LOG, 'utf-8') : '';
+    expect(after).toBe(before);
     if (saved !== undefined) process.env.AUDIT_LOG_PATH = saved;
   });
 });

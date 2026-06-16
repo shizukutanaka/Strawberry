@@ -78,4 +78,27 @@ describe('assertPublicUrl', () => {
     const failing = async () => { throw new Error('ENOTFOUND'); };
     await expect(assertPublicUrl('https://nope.invalid', failing)).rejects.toThrow(/DNS resolution failed/);
   });
+
+  it('honors the SSRF_ALLOW_PRIVATE_WEBHOOKS opt-in for loopback targets', async () => {
+    const saved = process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+    process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS = '1';
+    try {
+      // With the opt-in, a literal loopback host is allowed without resolving.
+      await expect(assertPublicUrl('http://127.0.0.1:8080/hook')).resolves.toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+      else process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS = saved;
+    }
+  });
+
+  it('still validates scheme even when the opt-in is enabled', async () => {
+    const saved = process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+    process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS = '1';
+    try {
+      await expect(assertPublicUrl('file:///etc/passwd')).rejects.toThrow(/unsupported scheme/);
+    } finally {
+      if (saved === undefined) delete process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+      else process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS = saved;
+    }
+  });
 });

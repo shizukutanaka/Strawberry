@@ -7,6 +7,7 @@ const GPURepository = require('../db/json/GpuRepository');
 const jwt = require('jsonwebtoken');
 const { resolveSecret } = require('./middleware/jwt-auth');
 const { isRevoked } = require('./middleware/token-denylist');
+const { sanitizeUser } = require('./utils/sanitize-user');
 // 価格計算は REST と同一の共通ユーティリティを使う（整数 sats へ丸め・単位統一）。
 const { computeOrderPricing } = require('../utils/order-pricing');
 
@@ -74,15 +75,14 @@ const resolvers = {
     users: (_, __, { user }) => {
       if (!user) throw new AuthenticationError('Authentication required');
       if (user.role !== 'admin') throw new ForbiddenError('Admin only');
-      return UserRepository.getAll().map(({ password, apiKey, ...u }) => u);
+      return UserRepository.getAll().map(sanitizeUser);
     },
     user: (_, { id }, { user }) => {
       if (!user) throw new AuthenticationError('Authentication required');
       if (user.role !== 'admin' && user.id !== id) throw new ForbiddenError('Access denied');
       const found = UserRepository.getById(id);
       if (!found) return null;
-      const { password, apiKey, ...safe } = found;
-      return safe;
+      return sanitizeUser(found);
     },
     gpus: () => GPURepository.getAll().map(({ apiKey, ...g }) => g),
     gpu: (_, { id }) => {

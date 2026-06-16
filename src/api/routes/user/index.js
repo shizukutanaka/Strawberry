@@ -14,6 +14,8 @@ const { config } = require('../../../utils/config');
 const { resolveSecret } = require('../../middleware/jwt-auth');
 
 const { sanitizeObject } = require('../../../utils/sanitize');
+// レスポンスから機密フィールド(password/apiKey 等)を除去する共通ヘルパー。
+const { sanitizeUser } = require('../../utils/sanitize-user');
 
 const { authLimiter } = require('../../middleware/rate-limit');
 
@@ -217,10 +219,8 @@ router.get('/me',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // レスポンス用にパスワードを削除
-    const userResponse = { ...user };
-    delete userResponse.password;
-    res.json(userResponse);
+    // レスポンス用に機密フィールド(password/apiKey 等)を一括除去
+    res.json(sanitizeUser(user));
   })
 );
 
@@ -338,11 +338,9 @@ router.put('/me',
       ...updateData,
       updatedAt: new Date().toISOString()
     });
-    const userResponse = { ...updatedUser };
-    delete userResponse.password;
     res.json({
       message: 'User profile updated successfully',
-      user: userResponse
+      user: sanitizeUser(updatedUser)
     });
   })
 );
@@ -566,11 +564,8 @@ router.get('/',
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
     const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
     const page = users.slice(offset, offset + limit);
-    // パスワード・APIキーを除外
-    const usersNoSecrets = page.map(u => {
-      const { password, apiKey, ...rest } = u;
-      return rest;
-    });
+    // パスワード・APIキー等の機密フィールドを除外
+    const usersNoSecrets = page.map(sanitizeUser);
     res.json({
       message: 'Fetched all users',
       total,
@@ -708,10 +703,9 @@ router.get('/:id',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // パスワード・APIキーを除外（GET /users リストと同一ポリシー。
+    // パスワード・APIキー等を除外（GET /users リストと同一ポリシー。
     // 管理者でも他人の credential を平文で参照できてはならない）
-    const { password, apiKey, ...userWithoutSecrets } = user;
-    res.json(userWithoutSecrets);
+    res.json(sanitizeUser(user));
   })
 );
 

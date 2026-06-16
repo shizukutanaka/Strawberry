@@ -187,7 +187,7 @@ router.get('/',
       const limitRaw = parseInt(req.query.limit, 10);
       const offsetRaw = parseInt(req.query.offset, 10);
       const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-      const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+      const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
       orders = orders.slice(offset, offset + limit);
       // リアルタイムBTC/JPY換算（レートは一覧全体で1回だけ取得して使い回す）
       const rateInfo = await fetchRateInfo();

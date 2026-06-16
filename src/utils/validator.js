@@ -75,9 +75,13 @@ const schemas = {
     longitude: Joi.number().min(-180).max(180)
   }),
   performance: Joi.object({
-    benchmarkScore: Joi.number().min(0),
-    teraflops: Joi.number().min(0),
-    hashrate: Joi.number().min(0)
+    // 上限値: プロバイダが自己申告スコアを架空に水増しして検索順位を操作するのを防ぐ。
+    // benchmarkScore: 一般的な GPU ベンチ上位は数万点台（RTX4090 ≈ 35000）。余裕を持って 10M 上限。
+    // teraflops: H100 の FP32 ピーク ≈ 67 TFLOPS。余裕を持って 100000 TFLOPS 上限。
+    // hashrate: MH/s 単位。単一 GPU の最大は数百 GH/s 未満。100000000 MH/s (=100 PH/s) で上限。
+    benchmarkScore: Joi.number().min(0).max(10000000),
+    teraflops: Joi.number().min(0).max(100000),
+    hashrate: Joi.number().min(0).max(100000000)
   }),
   minRenterRating: Joi.number().min(1).max(5).optional()
 }),

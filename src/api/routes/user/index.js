@@ -557,7 +557,7 @@ router.get('/',
     const limitRaw = parseInt(req.query.limit, 10);
     const offsetRaw = parseInt(req.query.offset, 10);
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
     const page = users.slice(offset, offset + limit);
     // パスワード・APIキー等の機密フィールドを除外
     const usersNoSecrets = page.map(sanitizeUser);

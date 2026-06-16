@@ -206,12 +206,14 @@ router.get('/', asyncHandler(async (req, res) => {
     // price (default)
     gpus.sort((a, b) => sortDir * (a.pricePerHour - b.pricePerHour));
   }
-  // ページネーション（limit: 1..200 既定50 / offset: 0..）
+  // ページネーション（limit: 1..200 既定50 / offset: 0..100000）
+  // offset を上限化する理由: 未認証エンドポイントで offset=999999999 を指定されると
+  // gpus 配列全体をロードした後 O(n) slice が走りイベントループをブロックする DoS になる。
   const totalCount = gpus.length;
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
   const pagedGpus = gpus.slice(offset, offset + limit);
 
   // 全 GPU の状況サマリ（ページング前の全体集計）
@@ -248,7 +250,7 @@ router.get('/my', authenticateJWT, asyncHandler(async (req, res) => {
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
 
   let gpus = GpuRepository.getAll().filter(g => g.providerId === providerId);
   const total = gpus.length;

@@ -59,13 +59,25 @@ class OrderUsageSession {
   }
 }
 
-// 全セッションのタイムアウト監視（30秒ごと）
-// unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
-const sessionTimeoutInterval = setInterval(() => {
-  for (const session of usageSessions.values()) {
+// 全セッションのタイムアウト監視 + 終了済みセッションの回収。
+// メモリリーク防止: /stop 以外の終端経路（delete/reject/dispute-resolve）や、
+// オーダーが削除済みの孤児セッションをここで一括回収する。これがないと、
+// 明示的 /stop を経ずに終了したオーダーのセッションが永久に Map に残る。
+const TERMINAL_SESSION_STATUSES = new Set(['completed', 'cancelled']);
+function reapUsageSessions() {
+  // 遅延 require: モジュール末尾で定義される OrderRepository をクロージャ経由で参照する。
+  const OrderRepo = require('../../../db/json/OrderRepository');
+  for (const [orderId, session] of usageSessions) {
     session.checkTimeouts();
+    let order = null;
+    try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
+    if (!order || TERMINAL_SESSION_STATUSES.has(order.status)) {
+      usageSessions.delete(orderId);
+    }
   }
-}, 30000);
+}
+// unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
+const sessionTimeoutInterval = setInterval(reapUsageSessions, 30000);
 if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
@@ -335,6 +347,12 @@ router.post('/:id/heartbeat',
     if ((role === 'lender' && req.user.id !== order.providerId) ||
         (role === 'renter' && req.user.id !== order.userId)) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'No permission for this order as this role', 403);
+    }
+    // 終了済みオーダーへのハートビートは拒否する。ハートビートは稼働中の使用量シグナルであり、
+    // 完了/キャンセル済みオーダーで受け付けると、二度と /stop されないセッションが Map に
+    // 居座りメモリリークになる（30秒スイープでも回収するが、入口で塞ぐのが確実）。
+    if (order.status === 'completed' || order.status === 'cancelled') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Order is no longer active; heartbeats are not accepted', 409);
     }
     // セッション取得または作成
     let session = usageSessions.get(orderId);
@@ -1344,4 +1362,9 @@ router.post('/:id/stop',
   })
 );
 
+// テスト用フック: セッション回収ロジックとセッションマップを公開する。
+// （本番では 30 秒間隔の setInterval が reapUsageSessions を駆動する）
 module.exports = router;
+module.exports._usageSessions = usageSessions;
+module.exports._reapUsageSessions = reapUsageSessions;
+module.exports._OrderUsageSession = OrderUsageSession;

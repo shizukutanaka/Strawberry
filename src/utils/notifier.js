@@ -4,6 +4,8 @@
 
 const axios = require('axios');
 const { logger } = require('./logger');
+// 送信時 SSRF ガード: ホスト名を実際に名前解決して内部/予約アドレスを遮断する。
+const { assertPublicUrl } = require('./ssrf-guard');
 
 // 通知タイプ定義
 const NotifyType = {
@@ -120,6 +122,7 @@ async function sendLineNotify(message, { token }) {
 // Discord Webhook
 async function sendDiscordNotify(message, { webhookUrl }) {
   if (!webhookUrl) throw new Error('Discord Webhook URL未設定');
+  await assertPublicUrl(webhookUrl); // 送信時に名前解決して内部アドレスを遮断
   return withRetry(async () => {
     const res = await axios.post(webhookUrl, { content: message });
     return res.data;
@@ -129,6 +132,7 @@ async function sendDiscordNotify(message, { webhookUrl }) {
 // Slack Webhook
 async function sendSlackNotify(message, { webhookUrl }) {
   if (!webhookUrl) throw new Error('Slack Webhook URL未設定');
+  await assertPublicUrl(webhookUrl); // 送信時に名前解決して内部アドレスを遮断
   return withRetry(async () => {
     const res = await axios.post(webhookUrl, { text: message });
     return res.data;
@@ -185,9 +189,12 @@ const _isSSRFUrl = _loadSSRFCheck();
 
 async function sendWebhookNotify(message, { webhookUrl, payload = {} }) {
   if (!webhookUrl) throw new Error('Webhook URL未設定');
+  // 1. 文字列ベースの高速フィルタ（リテラル private IP / 既知メタデータホスト名）
   if (_isSSRFUrl(webhookUrl)) {
     throw new Error(`Webhook URL is not allowed (SSRF blocked): ${webhookUrl}`);
   }
+  // 2. 名前解決ベースの検査（DNS リバインディング・内部ホスト名・代替エンコードを遮断）
+  await assertPublicUrl(webhookUrl);
   return withRetry(async () => {
     const res = await axios.post(webhookUrl, { message, ...payload });
     return res.data;

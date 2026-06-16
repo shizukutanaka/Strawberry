@@ -942,6 +942,18 @@ router.post('/:id/dispute',
         throw new APIError(ErrorTypes.FORBIDDEN,
           `Too high a share of your disputes have been denied (${denied}/${resolved}); raise legitimate disputes or contact support`, 403);
       }
+      // 未解決係争の絶対数上限: 解決歴がないアカウントでも複数の未解決係争でプロバイダを
+      // DoS できるため（1件/注文の制限はあるが多数の注文で迂回可能）。
+      const MAX_OPEN_DISPUTES = Number(process.env.MAX_OPEN_DISPUTES_PER_USER) || 3;
+      const openDisputes = OrderRepository.getAll().filter(
+        (o) => o.dispute && o.dispute.raisedBy === req.user.id && o.status === 'disputed'
+      ).length;
+      if (openDisputes >= MAX_OPEN_DISPUTES) {
+        throw new APIError(ErrorTypes.CONFLICT,
+          `You already have ${MAX_OPEN_DISPUTES} open disputes. Wait for existing disputes to be resolved before raising new ones.`,
+          409
+        );
+      }
     }
     const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 1000) : '';
     const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };

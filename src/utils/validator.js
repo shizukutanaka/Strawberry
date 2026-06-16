@@ -91,7 +91,7 @@ const schemas = {
         endTime: Joi.date().iso(),
         hoursPerDay: Joi.number().min(1).max(24),
         daysAvailable: Joi.array().items(Joi.number().min(0).max(6))
-      }).optional(),
+      }).unknown(false).optional(),
       minRenterRating: Joi.number().min(1).max(5).optional(),
       available: Joi.boolean().optional()
     }),

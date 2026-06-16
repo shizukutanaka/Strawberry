@@ -91,6 +91,38 @@ describe('auction-engine', () => {
     expect(a.winner.providerId).toBe(b.winner.providerId);
   });
 
+  it('rejects zero-price bids and lets a legitimate positive bid win', () => {
+    const withZero = [
+      { providerId: 'honest', pricePerHour: 100, reputationScore: 0.6, slaUptimePct: 100 },
+      { providerId: 'attacker', pricePerHour: 0, reputationScore: 0.6, slaUptimePct: 100 },
+    ];
+    const { winner, rejected } = runAuction(withZero);
+    expect(winner.providerId).toBe('honest');
+    expect(rejected.find((r) => r.providerId === 'attacker').reasons).toContain('non-positive price');
+  });
+
+  it('rejects negative-price bids (would otherwise score as cheapest)', () => {
+    const withNeg = [
+      { providerId: 'honest', pricePerHour: 100, reputationScore: 0.6, slaUptimePct: 100 },
+      { providerId: 'attacker', pricePerHour: -999999, reputationScore: 0.6, slaUptimePct: 100 },
+    ];
+    const { winner, ranked, rejected } = runAuction(withNeg);
+    expect(winner.providerId).toBe('honest');
+    expect(ranked.map((r) => r.providerId)).not.toContain('attacker');
+    expect(rejected.find((r) => r.providerId === 'attacker').reasons).toContain('non-positive price');
+  });
+
+  it('rejects bids with a missing or non-numeric price', () => {
+    const bad = [
+      { providerId: 'nan', pricePerHour: 'free', reputationScore: 0.9 },
+      { providerId: 'missing', reputationScore: 0.9 },
+      { providerId: 'ok', pricePerHour: 50, reputationScore: 0.5 },
+    ];
+    const { winner, ranked } = runAuction(bad);
+    expect(winner.providerId).toBe('ok');
+    expect(ranked).toHaveLength(1);
+  });
+
   it('throws on non-array bids', () => {
     expect(() => runAuction('nope')).toThrow(/array/);
   });

@@ -92,6 +92,10 @@ function runAuction(bids, opts = {}) {
   for (const bid of bids) {
     const reasons = [];
     if (bid.eligible === false) reasons.push('marked ineligible');
+    // 価格は正の有限数でなければならない。pricePerHour<=0 は scoreBid で priceScore=1.0
+    // （最高得点）に化け、同点時の安値優先と相まって「0/負の入札が必ず勝つ」逆オークションの
+    // 致命的な操作経路になる。入口で不適格として除外する。
+    if (!(num(bid.pricePerHour, 0) > 0)) reasons.push('non-positive price');
     if (num(bid.pricePerHour, Infinity) > reservePrice) reasons.push('over reserve price');
     if (clamp01(num(bid.reputationScore, 0)) < minReputation) reasons.push('below min reputation');
     if (requireAttestation && bid.attestationPassed !== true) reasons.push('attestation required');

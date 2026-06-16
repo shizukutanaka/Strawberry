@@ -129,7 +129,16 @@ app.get('/health', (req, res) => {
 // 削除し、リポジトリ読込が例外を投げないことを確認する。失敗時は 503 を返し、LB/k8s が
 // トラフィックを流さないようにする。オプショナルサービス（Lightning/P2P）は情報として
 // 併記するが readiness のゲートには含めない（未導入でも API 本体は機能するため）。
-app.get('/ready', (req, res) => {
+// 同期 I/O を含むため専用レート制限を設ける（グローバル apiLimiter より前にマウントされるが
+// このエンドポイント単体には 30 req/min のガードを掛ける）。
+const { rateLimit: readyRateLimit } = require('express-rate-limit');
+const readyLimiter = readyRateLimit({
+  windowMs: 60 * 1000,
+  max: () => process.env.NODE_ENV === 'test' ? 10000 : 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.get('/ready', readyLimiter, (req, res) => {
   const fs = require('fs');
   const checks = {};
   let ready = true;

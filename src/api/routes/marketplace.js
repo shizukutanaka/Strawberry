@@ -6,6 +6,7 @@ const express = require('express');
 const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
+const { withLock } = require('../../utils/async-lock');
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -108,11 +109,12 @@ router.post('/escrow/:id/pay', adminOnly, (req, res) => {
 });
 
 // ジョブ結果を検証してエスクローを解放/係争へ
-router.post('/escrow/:id/verify', adminOnly, (req, res) => {
+// withLock で同一エスクローへの並行呼び出しによる二重遷移・二重払い出しを防ぐ
+router.post('/escrow/:id/verify', adminOnly, async (req, res) => {
   const { jobId, providerId, primaryOutput, utilSamples, replicas, auditRate } = req.body || {};
   if (!jobId) return res.status(400).json({ error: 'jobId is required' });
   try {
-    const result = marketplace.verifyAndSettle({
+    const result = await withLock(`escrow:${req.params.id}`, () => marketplace.verifyAndSettle({
       jobId,
       escrowId: req.params.id,
       providerId: providerId || null,
@@ -120,7 +122,7 @@ router.post('/escrow/:id/verify', adminOnly, (req, res) => {
       utilSamples: Array.isArray(utilSamples) ? utilSamples : [],
       replicas: Array.isArray(replicas) ? replicas : [],
       auditRate: typeof auditRate === 'number' ? auditRate : undefined,
-    });
+    }));
     return res.json(result);
   } catch (e) {
     return res.status(500).json({ error: internalError(e) });

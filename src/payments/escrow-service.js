@@ -12,14 +12,29 @@ function createEscrowService({ repository } = {}) {
 
   function persist(escrow, result, event) {
     const now = new Date().toISOString();
-    return repo.update(escrow.id, {
-      state: result.state,
-      updatedAt: now,
-      history: [
-        ...(escrow.history || []),
-        { event, actions: result.actions, state: result.state, at: now },
-      ],
-    });
+    // 楽観的 CAS: 永続化時点でも state が変わっていないことを確認する。
+    // updateIf が null を返したら並行遷移が先に確定している — 呼び出し側に伝播させる。
+    const saved = repo.updateIf
+      ? repo.updateIf(escrow.id, (e) => e.state === escrow.state, {
+          state: result.state,
+          updatedAt: now,
+          history: [
+            ...(escrow.history || []),
+            { event, actions: result.actions, state: result.state, at: now },
+          ],
+        })
+      : repo.update(escrow.id, {
+          state: result.state,
+          updatedAt: now,
+          history: [
+            ...(escrow.history || []),
+            { event, actions: result.actions, state: result.state, at: now },
+          ],
+        });
+    if (saved === null || saved === undefined) {
+      throw new Error(`escrow ${escrow.id} state changed concurrently; transition '${event}' was not applied`);
+    }
+    return saved;
   }
 
   function getOrThrow(escrowId) {
@@ -41,6 +56,15 @@ function createEscrowService({ repository } = {}) {
       if (!orderId) throw new Error('orderId required');
       if (typeof amountSats !== 'number' || !Number.isFinite(amountSats) || amountSats <= 0) {
         throw new Error('amountSats must be a positive finite number');
+      }
+      // 同一注文への二重エスクロー開設を防ぐ: CANCELED 以外のエスクローが既に存在する場合は拒否。
+      // 重複 open は二重課金・二重払い出しの原因になる。
+      if (repo.getByOrderId) {
+        const existing = repo.getByOrderId(orderId) || [];
+        const active = existing.filter((e) => e.state !== 'CANCELED');
+        if (active.length > 0) {
+          throw new Error(`escrow already exists for order ${orderId} (id=${active[0].id}, state=${active[0].state})`);
+        }
       }
       const clampedFeeRate = typeof feeRate === 'number' && Number.isFinite(feeRate)
         ? Math.max(0, Math.min(0.99, feeRate))

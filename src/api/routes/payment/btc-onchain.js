@@ -4,6 +4,7 @@ const router = express.Router();
 const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC, getOperatorWallet } = require('../../utils/btc-payment');
 const { appendAuditLog } = require('../../../utils/audit-log');
 const { logger } = require('../../../utils/logger');
+const { withLock } = require('../../../utils/async-lock');
 
 /**
  * POST /payment
@@ -35,6 +36,11 @@ router.post('/', async (req, res) => {
     if (!req.user || (req.user.role !== 'admin' && order.userId !== req.user.id)) {
       return res.status(403).json({ message: 'You do not have permission to pay for this order' });
     }
+
+    // 二重課金防止: Lightning 経路と同一の per-order ミューテックスで保護する。
+    // ロックなしだと並行リクエストが find(state!==CANCELED)===null を同時に通過し、
+    // EscrowRepository.create() と sendBTC(TX1) を二重実行して借り手に二重課金する。
+    return await withLock(`payment:${orderId}`, async () => {
 
     // 貸し手(プロバイダ)への送金先(lenderWallet)を決定する。
     const UserRepository = require('../../../db/json/UserRepository');
@@ -172,6 +178,7 @@ router.post('/', async (req, res) => {
       txOperatorToLender: { txid: tx2Txid },
       escrowId: escrow.id,
     });
+    }); // end withLock
   } catch (err) {
     logger.error('BTC on-chain payment error:', err);
     return res.status(500).json({ message: 'Payment processing failed', error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message });

@@ -8,8 +8,10 @@ const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 
 const isProd = process.env.NODE_ENV === 'production';
+// バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
+// 未想定の内部エラー（5xx）は本番では詳細を隠す。
 const clientError = (e) => e.message || 'Invalid request';
-const serverError = (e) => isProd ? 'Internal server error' : (e.message || 'Internal server error');
+const internalError = (e) => isProd ? 'Internal server error' : (e.message || 'Internal server error');
 
 // エスクロー操作は資金フローに直結するため admin 限定
 const adminOnly = rbac('admin');
@@ -23,6 +25,7 @@ router.post('/quote', (req, res) => {
   try {
     return res.json(marketplace.quoteGpu(gpu, market && typeof market === 'object' ? market : {}));
   } catch (e) {
+    // quoteGpu はユーザー入力の数値検証でのみ投げる想定 → 400
     return res.status(400).json({ error: clientError(e) });
   }
 });
@@ -84,7 +87,7 @@ router.post('/escrow/open', adminOnly, (req, res) => {
     });
     return res.status(201).json(result);
   } catch (e) {
-    return res.status(400).json({ error: clientError(e) });
+    return res.status(500).json({ error: internalError(e) });
   }
 });
 
@@ -100,7 +103,7 @@ router.post('/escrow/:id/pay', adminOnly, (req, res) => {
   try {
     return res.json(marketplace.recordPaid(req.params.id));
   } catch (e) {
-    return res.status(400).json({ error: clientError(e) });
+    return res.status(500).json({ error: internalError(e) });
   }
 });
 
@@ -120,7 +123,7 @@ router.post('/escrow/:id/verify', adminOnly, (req, res) => {
     });
     return res.json(result);
   } catch (e) {
-    return res.status(400).json({ error: clientError(e) });
+    return res.status(500).json({ error: internalError(e) });
   }
 });
 
@@ -144,7 +147,7 @@ router.post('/escrow/:id/resolve', adminOnly, (req, res) => {
     }
     return res.json(marketplace.resolveDispute(req.params.id, decision, providerId || null));
   } catch (e) {
-    return res.status(400).json({ error: clientError(e) });
+    return res.status(500).json({ error: internalError(e) });
   }
 });
 

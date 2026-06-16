@@ -842,12 +842,16 @@ router.post('/:id/reject',
       throw new APIError(ErrorTypes.VALIDATION, `Cannot reject order in '${order.status}' state (only pending orders can be rejected)`, 400);
     }
     const cancelNote = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 500) : '';
-    OrderRepository.update(order.id, {
+    // TOCTOU防止: reject と DELETE/accept が同時実行された場合どちらか一方のみ通過させる。
+    const rejectResult = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
       status: 'cancelled',
       cancelReason: 'provider_rejected',
       cancelNote,
       cancelledAt: new Date().toISOString(),
     });
+    if (!rejectResult) {
+      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before reject could complete; please retry', 409);
+    }
     // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
     try {
       const EscrowRepository = require('../../../db/json/EscrowRepository');
@@ -898,11 +902,15 @@ router.post('/:id/accept',
       throw new APIError(ErrorTypes.VALIDATION, `Cannot accept order in '${order.status}' state (only pending orders can be accepted)`, 400);
     }
     const now = new Date().toISOString();
-    OrderRepository.update(order.id, {
+    // TOCTOU防止: accept と reject/DELETE が同時実行された場合どちらか一方のみ通過させる。
+    const acceptResult = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
       status: 'matched',
       matchedAt: now,
       updatedAt: now,
     });
+    if (!acceptResult) {
+      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before accept could complete; please retry', 409);
+    }
     const { notifyUser } = require('../../../utils/user-notify');
     const gpuName = gpu ? gpu.name : order.gpuId;
     notifyUser(order.userId, 'order_accepted',
@@ -967,7 +975,15 @@ router.post('/:id/dispute',
     }
     const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 1000) : '';
     const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
-    OrderRepository.update(order.id, { status: 'disputed', dispute });
+    // TOCTOU防止: 並行 dispute リクエストや stop との競合を防ぐ。
+    const disputeResult = OrderRepository.updateIf(
+      order.id,
+      (o) => ['active', 'matched'].includes(o.status) && !o.dispute,
+      { status: 'disputed', dispute }
+    );
+    if (!disputeResult) {
+      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before dispute could be raised; please retry', 409);
+    }
 
     // 管理者・運営側へ通知（ユーザー通知設定経由）
     const { notifyUser } = require('../../../utils/user-notify');
@@ -1017,14 +1033,19 @@ router.post('/:id/dispute/resolve',
     const gpu = GpuRepository.getById(order.gpuId);
     const gpuName = gpu ? gpu.name : order.gpuId;
 
+    // TOCTOU防止: 二重裁定による reputation/escrow 副作用の二重実行を防ぐ。
+    // updateIf が null を返した場合は別の管理者リクエストが先に状態遷移済みなので 409 を返す。
     if (decision === 'refund') {
       // 注文を終端へ（cancelled）。dispute オブジェクトに裁定結果を併記。
-      OrderRepository.update(order.id, {
+      const resolveRefundResult = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', {
         status: 'cancelled',
         cancelReason: 'dispute_resolved_refund',
         cancelledAt: resolvedAt,
         dispute: { ...order.dispute, resolution },
       });
+      if (!resolveRefundResult) {
+        throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
+      }
       // エスクロー返金（存在すれば、ベストエフォート）
       try {
         const EscrowRepository = require('../../../db/json/EscrowRepository');
@@ -1069,11 +1090,14 @@ router.post('/:id/dispute/resolve',
       }
     } else {
       // uphold: 係争棄却。仕事は有効として completed へ。プロバイダに成功を記録。
-      OrderRepository.update(order.id, {
+      const resolveUpholdResult = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', {
         status: 'completed',
         stoppedAt: resolvedAt,
         dispute: { ...order.dispute, resolution },
       });
+      if (!resolveUpholdResult) {
+        throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
+      }
       if (order.providerId) {
         try {
           const { createReputationService } = require('../../../reputation/reputation-service');

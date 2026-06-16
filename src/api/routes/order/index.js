@@ -120,6 +120,14 @@ const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_
 
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
+// スラッシュ/係争解決/レビュー後にレピュテーションキャッシュを無効化する
+let _invalidateRepCache = null;
+function invalidateRepCache(userId) {
+  if (!_invalidateRepCache) {
+    try { _invalidateRepCache = require('../user/index').invalidateReputationCache; } catch (_) { _invalidateRepCache = () => {}; }
+  }
+  if (userId && typeof _invalidateRepCache === 'function') _invalidateRepCache(userId);
+}
 
 // オーダー一覧取得 (認証必須)
 // キャッシュは perUser 必須: URL のみをキーにすると先行ユーザーの注文一覧が
@@ -1081,7 +1089,7 @@ router.post('/:id/dispute/resolve',
         cancelledAt: resolvedAt,
         dispute: { ...order.dispute, resolution },
       });
-      if (!resolveRefundResult) {
+      if (!resolveRefundResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
       }
       // エスクロー返金（存在すれば、ベストエフォート）
@@ -1133,7 +1141,7 @@ router.post('/:id/dispute/resolve',
         stoppedAt: resolvedAt,
         dispute: { ...order.dispute, resolution },
       });
-      if (!resolveUpholdResult) {
+      if (!resolveUpholdResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
       }
       if (order.providerId) {
@@ -1173,6 +1181,9 @@ router.post('/:id/dispute/resolve',
     logger.info(`Dispute resolved for order: ${order.id}`, { orderId: order.id, decision, resolvedBy: req.user.id });
     invalidateUserCache(order.userId);
     if (order.providerId) invalidateUserCache(order.providerId);
+    // 係争解決後はスラッシュ/成功が記録されるためレピュテーションキャッシュを即時無効化する
+    invalidateRepCache(order.userId);
+    if (order.providerId) invalidateRepCache(order.providerId);
     res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
   })
 );
@@ -1238,6 +1249,8 @@ router.post('/:id/review',
       }
     } catch (_) { /* best-effort */ }
     logger.info(`Review submitted for order: ${order.id}`, { orderId: order.id, rating });
+    // レビュー投稿でプロバイダの平均評価が変わる → キャッシュ無効化
+    if (order.providerId) invalidateRepCache(order.providerId);
     res.status(201).json({ message: 'Review submitted', review });
   })
 );
@@ -1292,6 +1305,8 @@ router.post('/:id/renter-review',
       `【Strawberry】取引相手（プロバイダ）からあなたへの評価が投稿されました ★${rating}/5\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
       { subject: `【Strawberry】あなたへの評価 ★${rating}/5（注文 #${order.id}）` });
     logger.info(`Renter review submitted for order: ${order.id}`, { orderId: order.id, rating, renterId: order.userId });
+    // 借り手レビューが追加されると借り手の renterRatingAverage が変わる → キャッシュ無効化
+    invalidateRepCache(order.userId);
     res.status(201).json({ message: 'Renter review submitted', review: renterReview });
   })
 );

@@ -314,6 +314,11 @@ router.put('/me',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+    // 退会済みアカウントがレガシートークン（jti なし）を使って payout address 等を
+    // 変更し資金を横取りする攻撃を防ぐ。
+    if (user.status === 'deactivated') {
+      return res.status(403).json({ error: 'Account is deactivated. Contact support to reactivate.' });
+    }
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
       return res.status(400).json({ error: 'Request body must be a JSON object' });
     }
@@ -434,6 +439,9 @@ router.put('/me/settings',
     return withLock(`user:${req.user.id}:settings`, async () => {
       const user = UserRepository.getById(req.user.id);
       if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.status === 'deactivated') {
+        return res.status(403).json({ error: 'Account is deactivated. Contact support to reactivate.' });
+      }
       const updatedUser = UserRepository.update(req.user.id, {
         settings: { ...user.settings, ...settings },
         updatedAt: new Date().toISOString(),
@@ -823,4 +831,14 @@ router.put('/:id/role',
 // ピアID管理 /api/v1/users/peerid/*
 router.use('/peerid', peeridRouter);
 
+// スラッシュ・係争解決・レビュー投稿後にレピュテーションキャッシュを即座に無効化する。
+// order/index.js から直接呼び出す（循環依存を避けるためルーターではなく関数のみエクスポート）。
+function invalidateReputationCache(userId) {
+  if (userId) {
+    _reputationCache.delete(userId);
+    _renterProfileCache.delete(userId);
+  }
+}
+
 module.exports = router;
+module.exports.invalidateReputationCache = invalidateReputationCache;

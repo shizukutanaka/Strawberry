@@ -8,40 +8,46 @@ const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
 const { appendAuditLog } = require('./audit-log');
 
-// バックアップ対象ファイルリスト
-const DATA_DIR = path.resolve(__dirname, '../../db/json');
+// バックアップ対象ファイルリスト（実データは data/ に格納）
+const DATA_DIR = path.resolve(__dirname, '../../data');
+// ローカルバックアップは data/ と同じディレクトリに置かず専用フォルダに隔離する。
+// data/ に .bak-* ファイルが混在すると、他エンドポイントの path-traversal やディレクトリ
+// リスティングで平文の取引データ・資格情報が読み取られるリスクがある。
+const BACKUP_DIR = path.resolve(__dirname, '../../backups');
 const TARGET_FILES = [
-  'OrderRepository.json',
-  'PaymentRepository.json',
-  'GpuRepository.json',
-  // 必要に応じて追加
+  'orders.json',
+  'payments.json',
+  'gpus.json',
+  'users.json',      // パスワードハッシュ・API キーを含む — 流出しないよう BACKUP_DIR に隔離
+  'escrows.json',
+  'reputations.json',
 ];
 
-// 世代付きローカル自動バックアップ
+// 世代付きローカル自動バックアップ（専用 BACKUP_DIR に書き込む）
 function backupLocalWithGeneration(filePath) {
   if (!fs.existsSync(filePath)) return;
-  const dir = path.dirname(filePath);
+  try { fs.mkdirSync(BACKUP_DIR, { recursive: true }); } catch (_) {}
   const base = path.basename(filePath);
   const now = new Date();
   const stamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 15);
   const backupName = `${base}.bak-${stamp}`;
-  const backupPath = path.join(dir, backupName);
+  const backupPath = path.join(BACKUP_DIR, backupName);
   fs.copyFileSync(filePath, backupPath);
   // 古いバックアップを一定数だけ残す（例: 10世代）
-  const backups = fs.readdirSync(dir).filter(f => f.startsWith(base + '.bak-')).sort().reverse();
+  const backups = fs.readdirSync(BACKUP_DIR).filter(f => f.startsWith(base + '.bak-')).sort().reverse();
   for (let i = 10; i < backups.length; i++) {
-    try { fs.unlinkSync(path.join(dir, backups[i])); } catch (e) {}
+    try { fs.unlinkSync(path.join(BACKUP_DIR, backups[i])); } catch (e) {}
   }
 }
 
-// ファイル破損・消失時の自動リストア
+// ファイル破損・消失時の自動リストア（BACKUP_DIR から復元）
 function restoreFromLatestBackup(filePath) {
-  const dir = path.dirname(filePath);
   const base = path.basename(filePath);
-  const backups = fs.readdirSync(dir).filter(f => f.startsWith(base + '.bak-')).sort().reverse();
+  if (!fs.existsSync(BACKUP_DIR)) return false;
+  const backups = fs.readdirSync(BACKUP_DIR).filter(f => f.startsWith(base + '.bak-')).sort().reverse();
   if (backups.length === 0) return false;
   try {
-    fs.copyFileSync(path.join(dir, backups[0]), filePath);
+    fs.copyFileSync(path.join(BACKUP_DIR, backups[0]), filePath);
     return true;
   } catch (e) { return false; }
 }

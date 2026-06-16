@@ -14,7 +14,7 @@ function createEscrowService({ repository } = {}) {
     const now = new Date().toISOString();
     // 楽観的 CAS: 永続化時点でも state が変わっていないことを確認する。
     // updateIf が null を返したら並行遷移が先に確定している — 呼び出し側に伝播させる。
-    const saved = repo.updateIf
+    const writeResult = repo.updateIf
       ? repo.updateIf(escrow.id, (e) => e.state === escrow.state, {
           state: result.state,
           updatedAt: now,
@@ -31,7 +31,10 @@ function createEscrowService({ repository } = {}) {
             { event, actions: result.actions, state: result.state, at: now },
           ],
         });
-    if (saved === null || saved === undefined) {
+    // updateIf は {ok, row} を返す（null/undefined では返らない）。ok===false は CAS 失敗。
+    // repo.update（updateIf 非対応フォールバック）は更新行を直接返す。
+    const saved = writeResult && typeof writeResult.ok !== 'undefined' ? writeResult.row : writeResult;
+    if (!saved || (writeResult && writeResult.ok === false)) {
       throw new Error(`escrow ${escrow.id} state changed concurrently; transition '${event}' was not applied`);
     }
     return saved;

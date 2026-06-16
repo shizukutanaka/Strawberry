@@ -692,6 +692,21 @@ router.post('/',
       );
     }
 
+    // カレンダー洪水防止: 同一ユーザーが同一 GPU に対して持てる未決注文数を上限化する。
+    // 時間帯が重複しない pending 注文を大量作成するとプロバイダの 90 日カレンダーを
+    // DoS できるため、ユーザー×GPU で最大 MAX_PENDING_ORDERS_PER_USER_GPU 件まで。
+    const MAX_PENDING_ORDERS_PER_USER_GPU = 5;
+    const userPendingForGpu = OrderRepository.getAll().filter(
+      (o) => o.userId === req.user.id && o.gpuId === orderData.gpuId && BLOCKING_ORDER_STATUSES.has(o.status)
+    ).length;
+    if (userPendingForGpu >= MAX_PENDING_ORDERS_PER_USER_GPU) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `You already have ${MAX_PENDING_ORDERS_PER_USER_GPU} active orders for this GPU. Complete or cancel existing orders before creating more.`,
+        409
+      );
+    }
+
     // ユーザーIDを設定
     orderData.userId = req.user.id;
     // GPU プロバイダ ID を注文に記録（allowOwnerOrAdmin でプロバイダが自分の GPU 上の注文を管理できるようにする）

@@ -215,9 +215,9 @@ router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res
 // 期限切れ注文の手動スイープ（管理者のみ）— インシデント対応・テストで使用。
 // POST /admin/expire-orders { types?: ['pending','matched','disputed'] }
 router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders } = require('../../utils/order-expiry');
-  const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed'];
-  const VALID = new Set(['pending', 'matched', 'disputed']);
+  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../utils/order-expiry');
+  const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed', 'active'];
+  const VALID = new Set(['pending', 'matched', 'disputed', 'active']);
   const invalid = types.filter(t => !VALID.has(t));
   if (invalid.length > 0) {
     return res.status(400).json({ error: `Invalid types: ${invalid.join(', ')}. Valid: ${[...VALID].join(', ')}` });
@@ -226,6 +226,7 @@ router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (
   if (types.includes('pending'))   result.pendingExpired   = expireStaleOrders();
   if (types.includes('matched'))   result.matchedExpired   = expireStaleMatchedOrders();
   if (types.includes('disputed'))  result.disputedResolved = expireStaleDisputedOrders();
+  if (types.includes('active'))    result.activeExpired    = expireStaleActiveOrders().length;
   res.json({ message: 'Order expiry sweep completed', ...result });
 }));
 
@@ -270,6 +271,15 @@ router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
   if (!requireService(lightning, res)) return;
   const { paymentRequest, amount } = req.body;
+  // BOLT11 最低限の形式チェック: lnbc/lntb/lnbcrt で始まる文字列のみ受け入れる
+  if (typeof paymentRequest !== 'string' || !/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(paymentRequest)) {
+    return res.status(400).json({ error: 'paymentRequest must be a valid BOLT11 invoice string' });
+  }
+  // 金額上限: 21M BTC（サトシ換算 2100兆）を超える額は拒否してノードドレインを防ぐ
+  const MAX_SATS = 2_100_000_000_000_000;
+  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > MAX_SATS)) {
+    return res.status(400).json({ error: `amount must be a positive number not exceeding ${MAX_SATS}` });
+  }
   const result = await lightning.payInvoice(paymentRequest, amount);
   res.json({ status: 'paid', result });
 }));

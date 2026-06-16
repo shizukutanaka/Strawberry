@@ -99,7 +99,7 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
-const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders } = require('../../../utils/order-expiry');
+const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../../utils/order-expiry');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
@@ -133,6 +133,13 @@ router.get('/',
       expireStaleOrders();
       expireStaleMatchedOrders();
       expireStaleDisputedOrders();
+      // active タイムアウト: 返された各注文の GPU を解放する（vgpuManager 利用可能時のみ）
+      const timedOutActive = expireStaleActiveOrders();
+      if (vgpuManager && timedOutActive.length > 0) {
+        for (const { id: oid, gpuId } of timedOutActive) {
+          try { await vgpuManager.releaseGPU(gpuId, oid); } catch (_) {}
+        }
+      }
       let orders;
       if (req.user.role === 'admin') {
         orders = OrderRepository.getAll();
@@ -841,11 +848,12 @@ router.post('/:id/reject',
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
 
     // プロバイダまたは admin のみ許可
-    const gpu = GpuRepository.getById(order.gpuId);
-    const isProvider = gpu && gpu.providerId === req.user.id;
+    // order.providerId は注文作成時に確定させる（GPU 再代入後の乗っ取りを防ぐ）
+    const isProvider = order.providerId && order.providerId === req.user.id;
     if (req.user.role !== 'admin' && !isProvider) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can reject an order', 403);
     }
+    const gpu = GpuRepository.getById(order.gpuId);
     if (order.status !== 'pending') {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot reject order in '${order.status}' state (only pending orders can be rejected)`, 400);
     }
@@ -901,14 +909,15 @@ router.post('/:id/accept',
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
 
-    const gpu = GpuRepository.getById(order.gpuId);
-    const isProvider = gpu && gpu.providerId === req.user.id;
+    // order.providerId は注文作成時に確定させる（GPU 再代入後の乗っ取りを防ぐ）
+    const isProvider = order.providerId && order.providerId === req.user.id;
     if (req.user.role !== 'admin' && !isProvider) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can accept an order', 403);
     }
     if (order.status !== 'pending') {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot accept order in '${order.status}' state (only pending orders can be accepted)`, 400);
     }
+    const gpu = GpuRepository.getById(order.gpuId);
     const now = new Date().toISOString();
     // TOCTOU防止: accept と reject/DELETE が同時実行された場合どちらか一方のみ通過させる。
     const acceptResult = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
@@ -1212,7 +1221,10 @@ router.post('/:id/renter-review',
   asyncHandler(async (req, res) => {
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
-    if (!order.providerId || order.providerId !== req.user.id) {
+    if (!order.providerId) {
+      throw new APIError(ErrorTypes.VALIDATION, 'Order has no provider recorded — renter review unavailable', 400);
+    }
+    if (order.providerId !== req.user.id) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider can review the renter', 403);
     }
     // 自己レビュー防止（多層防御）: 自己注文では借り手＝プロバイダのため評価不可
@@ -1318,6 +1330,21 @@ router.post('/:id/start',
         return res.status(400).json({ error: 'Order cannot be started', details: `Current status: ${order.status}` });
       }
 
+      // 支払い確認: 無償で GPU を起動されないよう、確定済み支払いレコードを要求する。
+      // 管理者は手動割り当て・テスト環境のために免除。
+      if (req.user.role !== 'admin') {
+        const PaymentRepository = require('../../../db/json/PaymentRepository');
+        const payments = PaymentRepository.getByOrderId(order.id) || [];
+        const hasPaidPayment = payments.some(p => p.status === 'paid');
+        if (!hasPaidPayment) {
+          throw new APIError(
+            ErrorTypes.FORBIDDEN,
+            'Cannot start order: no confirmed payment found. Complete the payment first.',
+            402
+          );
+        }
+      }
+
       // GPU割り当てには vgpuManager が必要
       if (!requireService(vgpuManager, res)) return;
       const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
@@ -1366,7 +1393,10 @@ router.post('/:id/stop',
       if (!order) {
         throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
       }
-      if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+      const canStop = req.user.role === 'admin'
+        || order.userId === req.user.id
+        || (order.providerId && order.providerId === req.user.id);
+      if (!canStop) {
         throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
       }
       if (order.status !== 'active') {

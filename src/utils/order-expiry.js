@@ -172,4 +172,42 @@ function expireStaleDisputedOrders() {
   return resolved;
 }
 
-module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, resolveTimeoutMinutes };
+const DEFAULT_ACTIVE_TIMEOUT_HOURS = 48;
+
+/**
+ * active 状態のまま一定時間経過した注文を cancelled に遷移させる。
+ * 悪意ある借り手が /stop を呼ばずに GPU を人質に取ることを防ぐ。
+ * GPU の実際の解放（vgpuManager.releaseGPU）は呼び出し側が担当する。
+ * @returns {{ id: string, gpuId: string }[]} タイムアウトした注文の配列
+ */
+function expireStaleActiveOrders() {
+  const raw = process.env.ORDER_ACTIVE_TIMEOUT_HOURS;
+  const n = raw !== undefined && raw !== '' ? Number(raw) : DEFAULT_ACTIVE_TIMEOUT_HOURS;
+  const timeoutMs = (Number.isFinite(n) && n > 0 ? n : DEFAULT_ACTIVE_TIMEOUT_HOURS) * 60 * 60 * 1000;
+  const cutoff = Date.now() - timeoutMs;
+  const expired = [];
+  for (const order of OrderRepository.getAll()) {
+    if (order.status !== 'active') continue;
+    const startMs = Date.parse(order.startedAt || order.updatedAt || order.createdAt);
+    if (!Number.isFinite(startMs) || startMs > cutoff) continue;
+    const now = new Date().toISOString();
+    const result = OrderRepository.updateIf(order.id, (o) => o.status === 'active', {
+      status: 'cancelled',
+      cancelReason: 'active_timeout',
+      cancelledAt: now,
+      updatedAt: now,
+    });
+    if (!result.ok) continue;
+    expired.push({ id: order.id, gpuId: order.gpuId });
+    logger.info(`Order auto-expired (active timeout): ${order.id}`);
+    try {
+      const { notifyUser } = require('./user-notify');
+      const msg = `【Strawberry】GPU 利用時間が上限を超えたため注文が自動キャンセルされました\n注文: #${order.id}`;
+      if (order.userId)     notifyUser(order.userId,     'order_active_timeout', msg, {});
+      if (order.providerId) notifyUser(order.providerId, 'order_active_timeout', msg, {});
+    } catch (_) {}
+  }
+  return expired;
+}
+
+module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, resolveTimeoutMinutes };

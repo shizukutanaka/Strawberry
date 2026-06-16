@@ -58,28 +58,30 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
   // キャッシュミス
   exchangeRateCacheMissCounter.inc();
   let lastError = null;
+  // テスト環境では短いタイムアウトを使い、すべて失敗した場合に DEFAULT_RATE へ素早くフォールバック
+  const API_TIMEOUT = process.env.NODE_ENV === 'test' ? 500 : 4000;
   // 順次フォールバックで複数APIを試行
   const apis = [
     async () => {
-      const res = await axios.get(COINGECKO_URL, { timeout: 4000 });
+      const res = await axios.get(COINGECKO_URL, { timeout: API_TIMEOUT });
       const btcJpy = res.data?.bitcoin?.jpy;
       if (typeof btcJpy === 'number' && btcJpy > 0) return btcJpy;
       throw new Error('Invalid Coingecko response');
     },
     async () => {
-      const res = await axios.get(CRYPTOCOMPARE_URL, { timeout: 4000 });
+      const res = await axios.get(CRYPTOCOMPARE_URL, { timeout: API_TIMEOUT });
       const btcJpy = res.data?.JPY;
       if (typeof btcJpy === 'number' && btcJpy > 0) return btcJpy;
       throw new Error('Invalid CryptoCompare response');
     },
     async () => {
-      const res = await axios.get(BITFLYER_URL, { timeout: 4000 });
+      const res = await axios.get(BITFLYER_URL, { timeout: API_TIMEOUT });
       const btcJpy = res.data?.ltp;
       if (typeof btcJpy === 'number' && btcJpy > 0) return btcJpy;
       throw new Error('Invalid BitFlyer response');
     },
     async () => {
-      const res = await axios.get(BINANCE_URL, { timeout: 4000 });
+      const res = await axios.get(BINANCE_URL, { timeout: API_TIMEOUT });
       const btcJpy = parseFloat(res.data?.price);
       if (!isNaN(btcJpy) && btcJpy > 0) return btcJpy;
       throw new Error('Invalid Binance response');

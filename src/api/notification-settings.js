@@ -90,6 +90,20 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
   });
   const { error, value } = schema.validate(req.body);
   if (error) return res.status(400).json({ error: error.message });
+  // payloadTemplate はサーバー側で JSON.parse されてから webhook に送信される。
+  // 不正な JSON を保存すると送信時に例外・通知ループ停止を引き起こすため、
+  // 保存時点で構文チェックを行い悪意ある Stored-JSON-Injection も防ぐ。
+  if (value.webhooks) {
+    for (const wh of value.webhooks) {
+      if (wh.payloadTemplate && wh.payloadTemplate.trim() !== '') {
+        try {
+          JSON.parse(wh.payloadTemplate.replace(/\$\{message\}/g, '"__probe__"'));
+        } catch (e) {
+          return res.status(400).json({ error: `payloadTemplate is not valid JSON: ${e.message}` });
+        }
+      }
+    }
+  }
   const settings = loadSettings();
   settings[userId] = value;
   atomicWriteJSON(SETTINGS_PATH, settings);

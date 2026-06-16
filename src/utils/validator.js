@@ -34,7 +34,8 @@ const schemas = {
   gpu: {
     // GPU登録用スキーマ
     register: Joi.object({
-  id: Joi.string().max(64).required(),
+  // id はサーバー側で UUID v4 生成するため、クライアントからの送信は不要かつ無視される。
+  // スキーマに id を残すと「自分の ID を選べる」と誤解させる API 契約の破綻になるため削除。
   name: Joi.string().max(128).required(),
   vendor: Joi.string().valid('NVIDIA', 'AMD', 'Intel').required(),
   model: Joi.string().max(128).required(),

@@ -139,9 +139,14 @@ function createError(type, message, statusCode, details = null) {
 
 // 404エラー用のミドルウェア
 function notFoundMiddleware(req, res, next) {
+  // req.originalUrl をそのまま埋めると XSS / パス情報漏洩になる。
+  // メソッドはホワイトリスト一致のみ通し、パスは英数字・/ . - _ のみ残す。
+  const SAFE_METHODS = new Set(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS']);
+  const method = SAFE_METHODS.has(req.method) ? req.method : 'UNKNOWN';
+  const safePath = (req.path || '').replace(/[^a-zA-Z0-9/.\-_]/g, '').slice(0, 100);
   const err = new APIError(
     ErrorTypes.NOT_FOUND,
-    `Route not found: ${req.method} ${req.originalUrl}`,
+    `Route not found: ${method} ${safePath}`,
     404
   );
   next(err);

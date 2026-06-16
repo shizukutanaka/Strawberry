@@ -168,8 +168,11 @@ router.get('/', asyncHandler(async (req, res) => {
   const reviewMap = new Map(); // gpuId → { sum, count }
   for (const o of allOrders) {
     if (o.review && o.gpuId) {
+      const raw = Number(o.review.rating);
+      if (!Number.isFinite(raw)) continue;
+      const clamped = Math.min(5, Math.max(1, raw));
       const cur = reviewMap.get(o.gpuId) || { sum: 0, count: 0 };
-      cur.sum += o.review.rating;
+      cur.sum += clamped;
       cur.count++;
       reviewMap.set(o.gpuId, cur);
     }
@@ -466,9 +469,21 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
   if (req.user.role !== 'admin' && source.providerId !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  // GPU 上限チェック: clone も新規登録と同等の制限を受ける（clone での上限迂回を防ぐ）
+  if (req.user.role !== 'admin') {
+    const MAX_GPUS_CLONE = (() => {
+      const raw = process.env.MAX_GPUS_PER_PROVIDER;
+      const n = Number(raw);
+      return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
+    })();
+    const providerGpuCount = GpuRepository.getAll().filter(g => g.providerId === req.user.id).length;
+    if (providerGpuCount >= MAX_GPUS_CLONE) {
+      return res.status(429).json({ error: `GPU registration limit reached (max ${MAX_GPUS_CLONE} per provider)` });
+    }
+  }
   const {
     id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b,
-    apiKey: _ak, ...specFields
+    apiKey: _ak, available: _av, ...specFields  // available を除外 → クローンは常にオンライン
   } = source;
   const newName = req.body.name || req.query.name
     ? (req.body.name || req.query.name)
@@ -477,6 +492,7 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
     ...specFields,
     name: String(newName).slice(0, 128),
     providerId: req.user.id,
+    available: true,  // ソースが offline でもクローンは online 状態で開始
     attestation: { passed: false, score: 0, findings: ['cloned from ' + sourceId + '; re-attest to verify'], verifiedAt: null },
   });
   const { apiKey: _k, ...safe } = cloned;

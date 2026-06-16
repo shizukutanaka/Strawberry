@@ -17,9 +17,13 @@ const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pri
 // 並行リクエストによる二重請求書発行を防ぐためのミューテックス
 const { withLock } = require('../../../utils/async-lock');
 
-// インボイス作成 (認証必須)
+// インボイス作成 (管理者専用)
+// 汎用インボイス発行は注文との紐付けなしにプラットフォームノードのインバウンド容量を消費するため
+// 一般ユーザーに開放すると channel 容量 DoS の温床になる。order ベースの支払いは
+// POST /payment/order/:id を使用すること。
 router.post('/invoice',
   authenticateJWT,
+  checkRole(['admin']),
   validateMiddleware(schemas.payment.createInvoice),
   asyncHandler(async (req, res) => {
     if (!requireService(lightning, res)) return;
@@ -192,8 +196,10 @@ router.post('/order/:id',
     // 新たに請求書/決済レコードを作らず既存を返す。クライアントのタイムアウト再送で
     // 二重請求書発行・二重支払いが起きるのを防ぐ（決済系で最も避けたい事故）。
     const nowMs = Date.now();
+    // べき等性チェック: orderId で検索（userId を問わない）。
+    // 以前は p.userId === req.user.id で絞っていたため、管理者が同一注文で invoiceA を
+    // 作成した後に借り手が invoiceB を作成できる二重インボイス問題があった。
     const existingPending = (PaymentRepository.getByOrderId(orderId) || []).find(p =>
-      p.userId === req.user.id &&
       p.status === 'pending' &&
       (!p.invoiceExpiresAt || new Date(p.invoiceExpiresAt).getTime() > nowMs)
     );

@@ -792,10 +792,18 @@ router.put('/:id/role',
       }
     }
     // ロールを更新（永続化対応）
+    // 降格（特に admin→user/provider）の場合はセッションを即時失効させる。
+    // これにより旧トークンが admin 権限で使い続けられるウィンドウを閉じる。
+    const now = new Date().toISOString();
+    const roleDowngraded = target.role === 'admin' && role !== 'admin';
     const updated = UserRepository.update(userId, {
       role,
-      updatedAt: new Date().toISOString()
+      updatedAt: now,
+      ...(roleDowngraded ? { sessionsRevokedAt: now } : {}),
     });
+    if (roleDowngraded) {
+      logger.warn(`Admin role revoked for user ${userId} by ${req.user.id} — sessions invalidated`);
+    }
     logger.info(`Role changed for user: ${userId}`, {
       userId,
       newRole: role,

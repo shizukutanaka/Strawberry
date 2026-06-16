@@ -18,6 +18,40 @@ function hashChainPath() {
   return log.endsWith('.log') ? `${log.slice(0, -4)}.hash` : `${log}.hash`;
 }
 
+// プロセス内で prevHash をキャッシュ（初回起動時の1回のみディスク読み込み）。
+// クラッシュ・ギャップ検出（ログとハッシュの不整合）も起動時に1回だけ行い、
+// 以降の appendAuditLog 呼び出しは O(1) で動作する。
+const _hashCache = new Map(); // logPath → { prevHash, initialized }
+function _getOrInitPrevHash(logPath, hashPath) {
+  const cached = _hashCache.get(logPath);
+  if (cached) return cached.prevHash;
+  let prevHash = '';
+  if (fs.existsSync(hashPath)) {
+    const stored = fs.readFileSync(hashPath, 'utf-8').trim();
+    if (stored && fs.existsSync(logPath)) {
+      // クラッシュ・ギャップ検出: ログ全体から末尾ハッシュを再計算し、保存値と比較する。
+      // 起動時に1回だけ実施し、ズレがあればハッシュを修復してから in-process キャッシュを設定。
+      const lines = fs.readFileSync(logPath, 'utf-8').split('\n').filter(Boolean);
+      let recomputed = '';
+      for (const line of lines) {
+        recomputed = crypto.createHash('sha256').update(recomputed + line).digest('hex');
+      }
+      if (recomputed !== stored) {
+        // eslint-disable-next-line no-console
+        console.error('[audit-log] Hash chain gap detected (crash recovery); repairing from log.');
+        atomicWriteString(hashPath, recomputed);
+        prevHash = recomputed;
+      } else {
+        prevHash = stored;
+      }
+    } else {
+      prevHash = stored;
+    }
+  }
+  _hashCache.set(logPath, { prevHash });
+  return prevHash;
+}
+
 /**
  * 監査ログを追記し、改ざん検知用ハッシュチェーンを自動生成。
  * I/O エラーは呼び出し元に伝播させない。監査ログの書き込み失敗が
@@ -32,14 +66,14 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     const timestamp = new Date().toISOString();
     const entry = { timestamp, action, detail, user };
     const entryStr = JSON.stringify(entry);
-    fs.appendFileSync(logPath, entryStr + '\n');
-    // 改ざん検知用ハッシュチェーン
-    let prevHash = '';
-    if (fs.existsSync(hashPath)) {
-      prevHash = fs.readFileSync(hashPath, 'utf-8').trim();
-    }
+
+    // prevHash: 起動時に1回だけディスクから読み込み、以降はキャッシュを使う（O(1)）。
+    const prevHash = _getOrInitPrevHash(logPath, hashPath);
     const hash = crypto.createHash('sha256').update(prevHash + entryStr).digest('hex');
+    fs.appendFileSync(logPath, entryStr + '\n');
     atomicWriteString(hashPath, hash);
+    // キャッシュ更新: 次回呼び出しのための prevHash
+    _hashCache.set(logPath, { prevHash: hash });
   } catch (e) {
     // 監査ログ書き込み失敗はサイレントに記録し、呼び出し元をクラッシュさせない
     // eslint-disable-next-line no-console

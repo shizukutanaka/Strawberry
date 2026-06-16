@@ -4,6 +4,8 @@ const router = express.Router();
 
 // --- 利用時間セッション管理クラス ---
 const usageSessions = new Map(); // orderId -> OrderUsageSession
+// ハートビート頻度制限用の最終受信タイムスタンプ（"orderId:userId" → ms）
+const heartbeatTimestamps = new Map();
 class OrderUsageSession {
   constructor(orderId, lenderId, renterId) {
     this.orderId = orderId;
@@ -355,12 +357,23 @@ router.post('/:id/heartbeat',
         (role === 'renter' && req.user.id !== order.userId)) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'No permission for this order as this role', 403);
     }
-    // 終了済みオーダーへのハートビートは拒否する。ハートビートは稼働中の使用量シグナルであり、
-    // 完了/キャンセル済みオーダーで受け付けると、二度と /stop されないセッションが Map に
-    // 居座りメモリリークになる（30秒スイープでも回収するが、入口で塞ぐのが確実）。
-    if (order.status === 'completed' || order.status === 'cancelled') {
-      throw new APIError(ErrorTypes.VALIDATION, 'Order is no longer active; heartbeats are not accepted', 409);
+    // ハートビートは active 状態のオーダーのみ受け付ける。
+    // pending/matched では GPU はまだ割り当てられておらず、
+    // 偽のハートビートで usageSeconds を積み上げることを防ぐ。
+    // completed/cancelled はメモリリーク防止を兼ねる。
+    if (order.status !== 'active') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Heartbeats are only accepted for active orders', 409);
     }
+    // ハートビート頻度制限: 同一 (orderId, userId) で MIN_INTERVAL_MS 未満は 429 を返す。
+    // 制限なしだと毎秒数千リクエストで Node.js イベントループが枯渇する（認証済みユーザーによる DoS）。
+    const HB_MIN_MS = Math.max(1000, Number(process.env.HEARTBEAT_MIN_INTERVAL_MS) || 10000);
+    const hbKey = `${orderId}:${req.user.id}`;
+    const lastHb = heartbeatTimestamps.get(hbKey) || 0;
+    const nowMs = Date.now();
+    if (nowMs - lastHb < HB_MIN_MS) {
+      return res.status(429).json({ error: `Heartbeat too frequent. Minimum interval: ${HB_MIN_MS / 1000}s` });
+    }
+    heartbeatTimestamps.set(hbKey, nowMs);
     // セッション取得または作成
     let session = usageSessions.get(orderId);
     if (!session) {
@@ -386,7 +399,7 @@ router.get('/:id',
       const renterOrders = OrderRepository.getAll().filter(o => o.userId === order.userId && o.renterReview);
       const renterReviewCount = renterOrders.length;
       const renterRatingAverage = renterReviewCount > 0
-        ? Math.round((renterOrders.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount) * 10) / 10
+        ? Math.round((renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount) * 10) / 10
         : null;
       // ステータス変遷タイムライン（既存タイムスタンプを時系列に整列）
       const timeline = [
@@ -649,7 +662,7 @@ router.post('/',
     const renterOrders = OrderRepository.getAll().filter(o => o.userId === req.user.id && o.renterReview);
     const renterReviewCount = renterOrders.length;
     const renterRatingAverage = renterReviewCount > 0
-      ? renterOrders.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount
+      ? renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount
       : null;
     if (gpu.minRenterRating && renterRatingAverage !== null && renterRatingAverage < gpu.minRenterRating) {
       throw new APIError(ErrorTypes.VALIDATION,
@@ -660,6 +673,30 @@ router.post('/',
     if (!pricePerHour || typeof pricePerHour !== 'number' || pricePerHour <= 0) {
       throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
     }
+
+    // 洪水防止: 2 段階チェック（単一 getAll() で両チェックを完結させ余分な I/O を避ける）。
+    // fetchRateInfo より先にチェックし、上限超過の場合は高コストなネットワーク I/O を回避。
+    const MAX_GLOBAL_PENDING_PER_USER = Number(process.env.MAX_PENDING_ORDERS_PER_USER) || 50;
+    const MAX_PENDING_ORDERS_PER_USER_GPU = 5;
+    const userBlockingOrders = OrderRepository.getAll().filter(
+      (o) => o.userId === req.user.id && BLOCKING_ORDER_STATUSES.has(o.status)
+    );
+    if (userBlockingOrders.length >= MAX_GLOBAL_PENDING_PER_USER) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `You have reached the global limit of ${MAX_GLOBAL_PENDING_PER_USER} active/pending orders. Complete or cancel existing orders before creating more.`,
+        409
+      );
+    }
+    const userPendingForGpu = userBlockingOrders.filter((o) => o.gpuId === orderData.gpuId).length;
+    if (userPendingForGpu >= MAX_PENDING_ORDERS_PER_USER_GPU) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `You already have ${MAX_PENDING_ORDERS_PER_USER_GPU} active orders for this GPU. Complete or cancel existing orders before creating more.`,
+        409
+      );
+    }
+
     // 冗長化為替APIで換算（キャッシュ活用）— await を競合チェックの前に移動して
     // チェック→作成の間にイベントループの yield が発生しないようにし、二重予約レースを防ぐ。
     const { rate: satoshiToJPY } = await fetchRateInfo();
@@ -703,31 +740,6 @@ router.post('/',
       throw new APIError(
         ErrorTypes.CONFLICT,
         `GPU is not available: an order in '${blocking.status}' state already exists for this GPU at the requested time`,
-        409
-      );
-    }
-
-    // 洪水防止: 2 段階チェック（単一 getAll() で両チェックを完結させ余分な I/O を避ける）。
-    // (1) グローバル上限: ユーザーが全 GPU 横断で保持できる合計アクティブ/保留注文数。
-    //     上限がないと N GPU × 5 件 = 無制限の注文でストレージ枯渇/O(n)スキャン DoS になる。
-    // (2) GPU ローカル上限: 同一 GPU に非重複スロットで大量予約してプロバイダカレンダーを埋めるのを防ぐ。
-    const MAX_GLOBAL_PENDING_PER_USER = Number(process.env.MAX_PENDING_ORDERS_PER_USER) || 50;
-    const MAX_PENDING_ORDERS_PER_USER_GPU = 5;
-    const userBlockingOrders = OrderRepository.getAll().filter(
-      (o) => o.userId === req.user.id && BLOCKING_ORDER_STATUSES.has(o.status)
-    );
-    if (userBlockingOrders.length >= MAX_GLOBAL_PENDING_PER_USER) {
-      throw new APIError(
-        ErrorTypes.CONFLICT,
-        `You have reached the global limit of ${MAX_GLOBAL_PENDING_PER_USER} active/pending orders. Complete or cancel existing orders before creating more.`,
-        409
-      );
-    }
-    const userPendingForGpu = userBlockingOrders.filter((o) => o.gpuId === orderData.gpuId).length;
-    if (userPendingForGpu >= MAX_PENDING_ORDERS_PER_USER_GPU) {
-      throw new APIError(
-        ErrorTypes.CONFLICT,
-        `You already have ${MAX_PENDING_ORDERS_PER_USER_GPU} active orders for this GPU. Complete or cancel existing orders before creating more.`,
         409
       );
     }
@@ -865,7 +877,7 @@ router.post('/:id/reject',
       cancelNote,
       cancelledAt: new Date().toISOString(),
     });
-    if (!rejectResult) {
+    if (!rejectResult.ok) {
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before reject could complete; please retry', 409);
     }
     // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
@@ -961,6 +973,15 @@ router.post('/:id/dispute',
     if (!['active', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot dispute an order in '${order.status}' state (only active or matched orders can be disputed)`, 400);
     }
+    // matched状態の係争は支払い済みの場合のみ許可（無支払いでプロバイダGPUをDoSする攻撃を防止）
+    if (order.status === 'matched' && req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const payments = PaymentRepository.getByOrderId(order.id) || [];
+      const hasPaidPayment = payments.some(p => p.status === 'paid');
+      if (!hasPaidPayment) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot dispute a matched order without confirmed payment. Complete payment first or wait for the provider to start the session.', 402);
+      }
+    }
     // 連続グリーフィング防止 — ただし「率」で判定する（#23 の絶対カウント永久バンを是正）。
     // プロバイダ評判が成功「率」(Bayesian)で測られるのと対称に、申請者も棄却「率」で測る。
     // 正当な係争(vindicated)を起こせば率が下がり回復できる＝単調な永久ペナルティにしない。
@@ -998,7 +1019,7 @@ router.post('/:id/dispute',
       (o) => ['active', 'matched'].includes(o.status) && !o.dispute,
       { status: 'disputed', dispute }
     );
-    if (!disputeResult) {
+    if (!disputeResult.ok) {
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before dispute could be raised; please retry', 409);
     }
 
@@ -1175,6 +1196,15 @@ router.post('/:id/review',
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
     }
+    // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
+    if (req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const payments = PaymentRepository.getByOrderId(order.id) || [];
+      const hasPaidPayment = payments.some(p => p.status === 'paid');
+      if (!hasPaidPayment) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot review an order without confirmed payment', 402);
+      }
+    }
     const rating = Number(req.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
@@ -1233,6 +1263,15 @@ router.post('/:id/renter-review',
     }
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
+    }
+    // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
+    if (req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const payments = PaymentRepository.getByOrderId(order.id) || [];
+      const hasPaidPayment = payments.some(p => p.status === 'paid');
+      if (!hasPaidPayment) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot submit renter review for an order without confirmed payment', 402);
+      }
     }
     const rating = Number(req.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {

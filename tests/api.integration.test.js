@@ -524,9 +524,10 @@ describe('API Integration', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const UserRepository = require('../src/db/json/UserRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
+    const PaymentRepository = require('../src/db/json/PaymentRepository');
 
     let renterToken, providerToken, otherToken;
-    let gpuId, providerId;
+    let gpuId, providerId, renterId;
 
     // GPU を provider ユーザーが所有するようにセットアップ
     beforeAll(async () => {
@@ -536,6 +537,7 @@ describe('API Integration', () => {
         .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
       renterToken = (await request(app).post('/api/v1/users/login')
         .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
+      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
 
       // provider 登録（role=provider）
       const p = `pv${unique}`.slice(0, 28);
@@ -626,8 +628,9 @@ describe('API Integration', () => {
         .send({ gpuId, durationMinutes: 30 });
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
-      // force to completed
+      // force to completed + add paid payment (required for review)
       OrderRepository.update(orderId, { status: 'completed' });
+      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       const review = await request(app)
         .post(`/api/v1/orders/${orderId}/review`)
@@ -664,6 +667,7 @@ describe('API Integration', () => {
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
       OrderRepository.update(orderId, { status: 'completed' });
+      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       await request(app).post(`/api/v1/orders/${orderId}/review`)
         .set('Authorization', `Bearer ${renterToken}`).send({ rating: 4 });
@@ -708,6 +712,7 @@ describe('API Integration', () => {
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
       OrderRepository.update(orderId, { status: 'completed' });
+      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       const bad = await request(app)
         .post(`/api/v1/orders/${orderId}/review`)
@@ -1592,6 +1597,7 @@ describe('API Integration', () => {
     it('provider can review the renter on a completed order (201)', async () => {
       const orderId = await makeOrder();
       OrderRepository.update(orderId, { status: 'completed', providerId });
+      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       const res = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
         .set('Authorization', `Bearer ${providerToken}`)
         .send({ rating: 4, comment: 'prompt payment' });
@@ -1612,6 +1618,7 @@ describe('API Integration', () => {
     it('duplicate renter review → 409', async () => {
       const orderId = await makeOrder();
       OrderRepository.update(orderId, { status: 'completed', providerId });
+      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
         .set('Authorization', `Bearer ${providerToken}`).send({ rating: 3 });
       const dup = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)

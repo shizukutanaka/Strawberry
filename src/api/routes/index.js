@@ -63,22 +63,23 @@ const PUBLIC_PATHS = new Set([
   '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
-// /auth/* と /gpus/:id, /gpus/:id/schedule はトークン不要（GPU 詳細・スケジュール照会は公開閲覧対象）。
-// /gpus/ 全体を startsWith で免除すると、将来追加される管理系 /gpus/:id/... サブルートも
-// 意図せず公開になるため、既知の公開サブパスだけを明示的に許可する。
-function isPublicPath(path) {
+// /auth/* と /gpus/* は GET のみトークン不要（マーケット閲覧用途）。
+// 旧実装は method を問わず /gpus/ を startsWith で blanket 免除していたため、将来
+// /gpus/:id/<新ルート> に POST/PUT/DELETE が追加された際に意図せず認証バイパスとなる
+// 危険があった。method ガードで mutation は必ず JWT を要求する形に絞る。
+function isPublicPath(path, method) {
+  const isGet = method === 'GET' || method === 'HEAD';
   return PUBLIC_PATHS.has(path)
     || path.startsWith('/auth/')
-    || /^\/gpus\/[^/]+$/.test(path)
-    || /^\/gpus\/[^/]+\/schedule$/.test(path)
+    || (isGet && path.startsWith('/gpus/'))
     // プロバイダ公開レピュテーション照会 & 借り手公開プロフィール（閲覧はマーケット信頼判断のため公開、GETのみ）
-    || /^\/users\/[^/]+\/reputation$/.test(path)
-    || /^\/users\/[^/]+\/renter-profile$/.test(path)
+    || (isGet && /^\/users\/[^/]+\/reputation$/.test(path))
+    || (isGet && /^\/users\/[^/]+\/renter-profile$/.test(path))
     // マーケット公開統計（サプライ・ディマンド・価格帯の概要 — 閲覧のみ）
-    || path === '/marketplace/stats';
+    || (isGet && path === '/marketplace/stats');
 }
 router.use((req, res, next) => {
-  if (isPublicPath(req.path)) return next();
+  if (isPublicPath(req.path, req.method)) return next();
   jwtAuth(req, res, next);
 });
 // --- 監査ログ ---

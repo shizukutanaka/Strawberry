@@ -1339,10 +1339,24 @@ router.post('/:id/match',
       return res.json({ matched: false, message: 'No suitable GPU found for this order' });
     }
 
+    // P2P ピアは信頼境界の外にいる。matchResult.gpu.providerId をそのまま採用すると、
+    // 悪意あるピアが「実 GPU の ID + 被害者プロバイダの ID」を返して注文の providerId を
+    // 被害者にすり替えられ、レピュテーション操作・払い出し先誤誘導につながる。
+    // 必ずローカル GpuRepository の providerId を真とし、不一致なら 409 で拒否する。
+    const matchedGpuId = matchResult.gpu && matchResult.gpu.id;
+    const localGpu = matchedGpuId ? GpuRepository.getById(matchedGpuId) : null;
+    if (!localGpu) {
+      return res.status(409).json({ error: 'P2P match returned a GPU not present in the local registry' });
+    }
+    if (matchResult.gpu.providerId && localGpu.providerId !== matchResult.gpu.providerId) {
+      logger.warn(`P2P providerId mismatch for GPU ${matchedGpuId}: local=${localGpu.providerId} peer=${matchResult.gpu.providerId}`);
+      return res.status(409).json({ error: 'P2P match providerId conflicts with local GPU registry' });
+    }
+
     const updateData = {
       status: 'matched',
-      gpuId: matchResult.gpu.id,
-      providerId: matchResult.gpu.providerId,
+      gpuId: matchedGpuId,
+      providerId: localGpu.providerId,
       matchedAt: new Date().toISOString()
     };
     // Atomic write: guards against /accept or a second /match completing while

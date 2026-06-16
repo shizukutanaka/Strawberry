@@ -64,9 +64,14 @@ router.post('/invoice',
   })
 );
 
-// インボイス支払い (認証必須)
-router.post('/pay', 
+// インボイス支払い (管理者専用)
+// 任意 BOLT11 invoice をプラットフォームの Lightning ノードから払い出すため、
+// 一般ユーザーに開放すると攻撃者が自分宛の invoice を生成して送金させ、
+// チャネル容量を吸い上げることが可能（資金喪失に直結）。
+// 通常の注文支払いは /payments/order/:id を使うこと。
+router.post('/pay',
   authenticateJWT,
+  checkRole(['admin']),
   validateMiddleware(schemas.payment.pay),
   asyncHandler(async (req, res) => {
     const { paymentRequest, amount, maxFeePercent, paymentMethod } = req.validatedBody;

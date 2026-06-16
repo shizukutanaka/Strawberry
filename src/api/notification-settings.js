@@ -76,8 +76,12 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
     lineToken: Joi.string().allow('').optional(),
     discordWebhook: safeWebhookUrl.allow('').optional(),
     slackWebhook: safeWebhookUrl.allow('').optional(),
-    telegramBotToken: Joi.string().allow('').optional(),
-    telegramChatId: Joi.string().allow('').optional(),
+    // Telegram bot token は notifier 側で `https://api.telegram.org/bot${token}/sendMessage`
+    // のパス組み立てに使われる。値に '/' や '?' が混入すると経路再解釈・SSRF誘発の
+    // 可能性があるため、Telegram の公式仕様（数字ID:35文字英数字_- ）に厳格に絞り込む。
+    telegramBotToken: Joi.string().pattern(/^\d{6,12}:[A-Za-z0-9_-]{30,45}$/).allow('').optional(),
+    // chat_id は数値（個人/チャネル）または '@channelname'。それ以外は拒否。
+    telegramChatId: Joi.string().pattern(/^-?\d+$|^@[A-Za-z0-9_]{5,32}$/).allow('').optional(),
     email: Joi.string().email().allow('').optional(),
     genericWebhook: safeWebhookUrl.allow('').optional(),
     enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional(),

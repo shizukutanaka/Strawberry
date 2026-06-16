@@ -140,8 +140,17 @@ async function sendSlackNotify(message, { webhookUrl }) {
 }
 
 // Telegram Bot
+// 注: botToken/chatId は notification-settings.js の Joi で厳格パターン検証済み
+// （`^\d{6,12}:[A-Za-z0-9_-]{30,45}$` / `^-?\d+$|^@[A-Za-z0-9_]{5,32}$`）。
+// 多層防御として送信時にも先頭文字種を再検査し、URL 経路再解釈・SSRF を遮断する。
 async function sendTelegramNotify(message, { botToken, chatId }) {
   if (!botToken || !chatId) throw new Error('Telegram Bot情報未設定');
+  if (!/^\d{6,12}:[A-Za-z0-9_-]{30,45}$/.test(botToken)) {
+    throw new Error('Telegram botToken format invalid');
+  }
+  if (!/^-?\d+$|^@[A-Za-z0-9_]{5,32}$/.test(String(chatId))) {
+    throw new Error('Telegram chatId format invalid');
+  }
   return withRetry(async () => {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     const res = await axios.post(url, { chat_id: chatId, text: message });

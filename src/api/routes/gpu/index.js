@@ -302,10 +302,18 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
   const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
+  // レビュー本体を spread すると reviewerId（借り手の UUID）が漏れ、認証済み任意ユーザーが
+   // GPU 単位で借り手を列挙できる（renter-profile と組合せて renter プロファイリング可能）。
+   // 公開して問題ない rating/comment/reviewedAt のみを明示的に投影する。
   const reviews = OrderRepository.getAll()
     .filter(o => o.gpuId === gpuId && o.review)
     .sort((a, b) => (b.review.reviewedAt || '').localeCompare(a.review.reviewedAt || ''))
-    .map(o => ({ orderId: o.id, ...o.review }));
+    .map(o => ({
+      orderId: o.id,
+      rating: o.review.rating,
+      comment: o.review.comment,
+      reviewedAt: o.review.reviewedAt,
+    }));
 
   const total = reviews.length;
   const page = reviews.slice(offset, offset + limit);
@@ -339,9 +347,12 @@ router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
   orders = orders.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
   const total = orders.length;
+  // 借り手 userId を生で返すと、安価な GPU を撒餌に出品して借り手 UUID を量産収集する
+  // 大量列挙攻撃が成立する（renter-profile と組合せて prof作成可能）。
+  // プロバイダは自分の GPU の稼働実績（料金・期間・レビュー有無）だけ知れれば十分なので
+  // 借り手の内部 ID は返さない。
   const page = orders.slice(offset, offset + limit).map(o => ({
     orderId: o.id,
-    userId: o.userId,
     status: o.status,
     durationMinutes: o.durationMinutes,
     totalPrice: o.totalPrice || null,

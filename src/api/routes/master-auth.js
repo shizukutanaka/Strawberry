@@ -116,6 +116,12 @@ router.get('/mail', (req, res) => {
 });
 router.post('/mail', (req, res) => {
   if (!req.session.totpAuth) return res.status(401).send('TOTP認証未完了');
+  // コード再送などでリトライ攻撃を繰り返す場合の深層防御カウンター。
+  // コードは単回限り消去されるが、セッションレベルで試行数も上限を設ける。
+  req.session.mailAttempts = (req.session.mailAttempts || 0) + 1;
+  if (req.session.mailAttempts > 5) {
+    return res.status(429).send('試行回数が多すぎます。Google認証からやり直してください。');
+  }
   const { code } = req.body;
   if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
     return res.status(400).send('認証コードは6桁の数字を入力してください');
@@ -132,6 +138,7 @@ router.post('/mail', (req, res) => {
   req.session.mailCode = null;
   req.session.mailCodeExpires = null;
   if (ok) {
+    req.session.mailAttempts = 0;
     req.session.masterAuth = true;
     res.send('マスター認証完了！');
   } else {

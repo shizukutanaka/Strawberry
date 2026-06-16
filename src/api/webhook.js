@@ -4,6 +4,7 @@ const router = express.Router();
 const axios = require('axios');
 const { appendAuditLog } = require('../utils/audit-log');
 const { logger } = require('../utils/logger');
+const { authenticateJWT, checkRole } = require('./middleware/security');
 const Joi = require('joi');
 
 // Webhook送信先設定（環境変数またはDBで管理も可）
@@ -27,8 +28,10 @@ async function sendWebhook(event, payload) {
   if (!success) throw new Error('全Webhook送信失敗');
 }
 
-// テスト用API（外部サービス連携確認用）
-router.post('/webhook/test', async (req, res) => {
+// テスト用API（外部サービス連携確認用）— 管理者のみ
+// 無認証だと任意のユーザーが GENERIC_WEBHOOK 宛に任意ペイロードを送信でき、
+// SSRF・スパム・誤った監査ログが生じる。
+router.post('/webhook/test', authenticateJWT, checkRole(['admin']), async (req, res) => {
   const schema = Joi.object({ event: Joi.string().required(), payload: Joi.object().required() });
   const { error, value } = schema.validate(req.body);
   if (error) return res.status(400).json({ error: error.message });

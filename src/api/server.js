@@ -92,8 +92,21 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
-// /metricsエンドポイント（apiLimiter はまだ未マウントのためルートに直接適用しスクレイプDoSを防ぐ）
-app.get('/metrics', apiLimiter, async (req, res) => {
+// /metricsエンドポイント（Prometheus スクレイプ用）。
+// Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
+// METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
+// 未設定時は開発環境として無制限アクセスを許可（本番では必ず設定すること）。
+app.get('/metrics', apiLimiter, (req, res, next) => {
+  const metricsToken = process.env.METRICS_AUTH_TOKEN;
+  if (metricsToken) {
+    const authHeader = req.headers.authorization || '';
+    const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!provided || provided !== metricsToken) {
+      return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
+    }
+  }
+  next();
+}, async (req, res) => {
   await updateLightningMetrics();
   // cacheHitCounter, cacheMissCounter, cachePurgeCounterはprom-clientに自動登録されている
   res.set('Content-Type', client.register.contentType);

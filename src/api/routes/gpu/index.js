@@ -239,7 +239,8 @@ router.get('/my', authenticateJWT, asyncHandler(async (req, res) => {
 
   let gpus = GpuRepository.getAll().filter(g => g.providerId === providerId);
   const total = gpus.length;
-  const page = gpus.slice(offset, offset + limit);
+  // apiKey はプロバイダ自身のレスポンスにも含めない（他タブ・XSS・ログ経由での漏洩防止）
+  const page = gpus.slice(offset, offset + limit).map(({ apiKey, ...g }) => g);
   res.json({ total, limit, offset, gpus: page });
 }));
 

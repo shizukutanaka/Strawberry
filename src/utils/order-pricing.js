@@ -27,13 +27,21 @@ function computeOrderPricing(order, rateInfo = null) {
   const pricePerHour = resolvePricePerHour(order);
   const durationMinutes = order.durationMinutes || 0;
   const pricePer5Min = pricePerHour / 12;
-  // Round totalPrice to whole satoshis to prevent floating-point drift when the
-  // value is used for actual payment amounts (e.g. 100 sats/h × 30 min = 49.999…).
-  // 1 satoshi is Bitcoin's smallest indivisible unit, so any positively-priced
-  // order costs at least 1 sat. This must match the order-creation rule so a
-  // locked order's displayed total never disagrees with the stored/charged amount.
-  const rawTotal = pricePer5Min * (durationMinutes / 5);
-  const totalPrice = rawTotal > 0 ? Math.max(1, Math.round(rawTotal)) : 0;
+
+  // 価格ロック: 注文作成時に確定した totalPrice が保存されている場合はそれを権威値とする。
+  // 再計算すると、プロバイダが注文後に GPU 価格を変更したとき Lightning 請求額が
+  // 合意額より増減する（プロバイダ不正値上げ or 値下げによる損失）。
+  // レガシー注文（totalPrice 未保存）のみ以下の再計算にフォールバックする。
+  let totalPrice;
+  if (order.totalPrice > 0) {
+    totalPrice = order.totalPrice;
+  } else {
+    // Round totalPrice to whole satoshis to prevent floating-point drift when the
+    // value is used for actual payment amounts (e.g. 100 sats/h × 30 min = 49.999…).
+    const rawTotal = pricePer5Min * (durationMinutes / 5);
+    totalPrice = rawTotal > 0 ? Math.max(1, Math.round(rawTotal)) : 0;
+  }
+
   const pricing = { pricePerHour, pricePer5Min, durationMinutes, totalPrice };
   if (rateInfo) {
     pricing.totalPriceJPY = Math.round(totalPrice * rateInfo.rate);

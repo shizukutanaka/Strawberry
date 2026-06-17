@@ -95,8 +95,11 @@ const resolvers = {
       const rate = await getBTCtoJPYRate();
       return typeof rate === 'number' ? rate : (rate && rate.rate) || 0;
     },
-    exchangeRate: async (_, { fresh }) => {
-      const { rate, timestamp, isCache } = await getBTCtoJPYRate(!!fresh, true);
+    exchangeRate: async (_, { fresh }, { user }) => {
+      // fresh=true は外部 HTTPS を最大 4 本叩く。alias 増幅で上流レートを潰せるため
+      // 管理者限定とし、それ以外はキャッシュ値を返す（誤入力でも DoS にしない）。
+      const allowFresh = !!fresh && user && user.role === 'admin';
+      const { rate, timestamp, isCache } = await getBTCtoJPYRate(allowFresh, true);
       return { rate, timestamp, isCache };
     },
   },
@@ -119,10 +122,40 @@ const resolvers = {
   }
 };
 
+// --- 多重・深いクエリ攻撃の遮断 ---
+// 旧実装は深さ・別名上限なし。1 リクエストで `gpus` を 500 alias 並べて
+// gpus.json を 500 回走査する CPU/IO DoS、および exchangeRate(fresh:true) を
+// alias 連打して外部 HTTPS を増幅させる SSRF 増幅が可能だった。
+const MAX_QUERY_DEPTH = 8;
+const MAX_TOTAL_SELECTIONS = 200;
+function depthAndSelectionLimitRule(context) {
+  let totalSelections = 0;
+  return {
+    Field(node, _key, _parent, _path, ancestors) {
+      totalSelections += 1;
+      if (totalSelections > MAX_TOTAL_SELECTIONS) {
+        context.reportError(new (require('graphql').GraphQLError)(
+          `Query exceeds total selection limit (${MAX_TOTAL_SELECTIONS}); reduce aliases/fields and retry.`,
+        ));
+      }
+      let depth = 0;
+      for (const a of ancestors) {
+        if (a && a.kind === 'Field') depth += 1;
+      }
+      if (depth > MAX_QUERY_DEPTH) {
+        context.reportError(new (require('graphql').GraphQLError)(
+          `Query depth ${depth} exceeds limit ${MAX_QUERY_DEPTH}.`,
+        ));
+      }
+    },
+  };
+}
+
 async function setupGraphQL(app) {
   const server = new ApolloServer({
     typeDefs,
     resolvers,
+    validationRules: [depthAndSelectionLimitRule],
     // Disable introspection in production to avoid leaking the full API schema
     // to unauthenticated callers (attackers, crawlers).
     introspection: process.env.NODE_ENV !== 'production',

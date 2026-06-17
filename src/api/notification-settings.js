@@ -56,6 +56,18 @@ function loadSettings() {
 // 全エンドポイントに JWT 認証を要求
 router.use(authenticateJWT);
 
+// :userId は必ず UUID v4 形式に絞る。これがないと admin トークンで `__proto__` や
+// `constructor` のような特殊キーを保存でき、Object.keys 走査時にプロトタイプ
+// メソッドと衝突して notifier の通知配信が壊れる。
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function _requireUuidParam(req, res, next) {
+  if (!_UUID_RE.test(req.params.userId || '')) {
+    return res.status(400).json({ error: 'userId must be a UUID v4' });
+  }
+  next();
+}
+router.use('/notification-settings/:userId', _requireUuidParam);
+
 // 通知設定取得（自分のみ、管理者は任意ユーザー）
 router.get('/notification-settings/:userId', asyncHandler(async (req, res) => {
   const userId = req.params.userId;

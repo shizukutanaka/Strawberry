@@ -597,7 +597,11 @@ router.put('/:id',
     const gpuId = gpu.id;
     logger.info(`Updating GPU: ${gpuId}`);
     // 入力値サニタイズ
-    const sanitized = sanitizeObject(req.body, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available']);
+    // validatedBody は Joi で許可フィールドだけに絞られているため、これを起点にする。
+    // 旧コードは req.body をそのまま spread しており、providerId/attestation/apiKey/id 等の
+    // 任意フィールドをクライアントが上書きできるマスアサインメント脆弱性があった
+    // （GPU 所有権の奪取・偽アテステーション・価格上限回避が可能だった）。
+    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available']);
     // available は boolean のみ許可（任意の型汚染を防ぐ）
     if ('available' in sanitized && typeof sanitized.available !== 'boolean') {
       return res.status(400).json({ error: '"available" must be a boolean' });

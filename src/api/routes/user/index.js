@@ -608,19 +608,45 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
   const OrderRepository = require('../../../db/json/OrderRepository');
   const orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
   const reviewed = orders.filter(o => o.review);
-  const reviewCount = reviewed.length;
+
+  // 同一借り手が5分注文を量産して同一プロバイダに ★1 を撃ち込み続けて
+  // GPU の検索ランクから落とすブリゲーディング攻撃を防ぐため、reviewerId 単位で
+  // dedup（平均化）してから集計する。レビュー数は dedup 後のユニーク評価者数。
+  const ratingByReviewer = new Map();
+  for (const o of reviewed) {
+    const rid = (o.review && o.review.reviewerId) || o.userId;
+    const raw = Number(o.review.rating);
+    if (!Number.isFinite(raw)) continue;
+    const r = Math.min(5, Math.max(1, raw));
+    const cur = ratingByReviewer.get(rid) || { sum: 0, n: 0 };
+    cur.sum += r; cur.n += 1;
+    ratingByReviewer.set(rid, cur);
+  }
+  const perReviewerAverages = Array.from(ratingByReviewer.values()).map(v => v.sum / v.n);
+  const reviewCount = perReviewerAverages.length;
   const ratingAverage = reviewCount > 0
-    ? Math.round((reviewed.reduce((s, o) => s + o.review.rating, 0) / reviewCount) * 10) / 10
+    ? Math.round((perReviewerAverages.reduce((s, x) => s + x, 0) / reviewCount) * 10) / 10
     : null;
   const completedOrders = orders.filter(o => o.status === 'completed').length;
   const rejectedOrders = orders.filter(o => o.cancelReason === 'provider_rejected').length;
 
-  // 借り手としての受領評価（プロバイダ→借り手レビューの集計）。これにより
-  // プロバイダが投稿する借り手評価が実際に閲覧可能になり、難あり借り手が可視化される。
+  // 借り手としての受領評価（プロバイダ→借り手レビューの集計）。同様に reviewerId(providerId)
+  // 単位で dedup し、同一プロバイダが量産した低評価で借り手を不当に落とすのを防ぐ。
   const asRenter = OrderRepository.getAll().filter(o => o.userId === providerId && o.renterReview);
-  const renterReviewCount = asRenter.length;
+  const renterByReviewer = new Map();
+  for (const o of asRenter) {
+    const rid = (o.renterReview && o.renterReview.reviewerId) || o.providerId;
+    const raw = Number(o.renterReview.rating);
+    if (!Number.isFinite(raw)) continue;
+    const r = Math.min(5, Math.max(1, raw));
+    const cur = renterByReviewer.get(rid) || { sum: 0, n: 0 };
+    cur.sum += r; cur.n += 1;
+    renterByReviewer.set(rid, cur);
+  }
+  const renterPerReviewerAverages = Array.from(renterByReviewer.values()).map(v => v.sum / v.n);
+  const renterReviewCount = renterPerReviewerAverages.length;
   const renterRatingAverage = renterReviewCount > 0
-    ? Math.round((asRenter.reduce((s, o) => s + o.renterReview.rating, 0) / renterReviewCount) * 10) / 10
+    ? Math.round((renterPerReviewerAverages.reduce((s, x) => s + x, 0) / renterReviewCount) * 10) / 10
     : null;
 
   const data = {

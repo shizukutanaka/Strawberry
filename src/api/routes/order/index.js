@@ -945,7 +945,10 @@ router.post('/:id/accept',
       matchedAt: now,
       updatedAt: now,
     });
-    if (!acceptResult) {
+    // updateIf は常にオブジェクト({ok, row} or {ok:false, reason, current})を返す。
+    // !acceptResult は決して true にならないため CAS 失敗時に renter に "accepted" 通知が
+    // 飛び、reject 側で cancelled になっているのに matched と返してしまう不整合が出ていた。
+    if (!acceptResult.ok) {
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before accept could complete; please retry', 409);
     }
     const { notifyUser } = require('../../../utils/user-notify');

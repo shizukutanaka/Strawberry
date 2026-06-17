@@ -2,8 +2,15 @@
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
+const { withLock } = require('../../utils/async-lock');
 const { logger } = require('../../utils/logger');
 const ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
+
+// 並行 add/remove で list 全体を read-modify-write しているため、
+// 並行 remove(攻撃者旧アドレス) + add(正規新アドレス) が、片方の読み込んだ古い
+// snapshot で上書きされて削除済み攻撃者アドレスを蘇らせる lost-update が成立する。
+// → 運営手数料の送金先がすり替わる。プロセス内 mutex で直列化する。
+const ADDR_LOCK = 'profit-addresses:global';
 
 // BTC アドレスの構文検証（資金喪失防止）。
 // payout 先は実際の送金対象であり、誤った文字列を保存すると sendBTC の瞬間まで
@@ -39,22 +46,26 @@ function getProfitAddresses() {
   }
 }
 
-function addProfitAddress(address) {
+async function addProfitAddress(address) {
   // fail-fast: 無効なアドレスは保存させない（全呼び出し経路を保護）
   const a = typeof address === 'string' ? address.trim() : address;
   if (!isValidBtcAddress(a)) {
     throw new Error('Invalid Bitcoin address');
   }
-  const arr = getProfitAddresses();
-  if (!arr.includes(a)) {
-    arr.push(a);
-    atomicWriteJSON(ADDR_FILE, arr);
-  }
+  await withLock(ADDR_LOCK, async () => {
+    const arr = getProfitAddresses();
+    if (!arr.includes(a)) {
+      arr.push(a);
+      atomicWriteJSON(ADDR_FILE, arr);
+    }
+  });
 }
 
-function removeProfitAddress(address) {
-  const arr = getProfitAddresses().filter(a => a !== address);
-  atomicWriteJSON(ADDR_FILE, arr);
+async function removeProfitAddress(address) {
+  await withLock(ADDR_LOCK, async () => {
+    const arr = getProfitAddresses().filter(a => a !== address);
+    atomicWriteJSON(ADDR_FILE, arr);
+  });
 }
 
 // 利益分配先をランダム/ラウンドロビンで選択（攻撃耐性向上）

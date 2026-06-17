@@ -21,7 +21,9 @@ describe('profit-addresses: isValidBtcAddress', () => {
     expect(isValidBtcAddress(12345)).toBe(false);
   });
 
-  it('addProfitAddress throws on an invalid address (fail-fast)', () => {
-    expect(() => addProfitAddress('not-a-btc-address')).toThrow(/Invalid Bitcoin address/);
+  it('addProfitAddress rejects on an invalid address (fail-fast)', async () => {
+    // addProfitAddress は並行 add/remove の lost-update を防ぐため withLock 化された
+    // ため async になった。無効入力でも throw は Promise rejection として観測される。
+    await expect(addProfitAddress('not-a-btc-address')).rejects.toThrow(/Invalid Bitcoin address/);
   });
 });

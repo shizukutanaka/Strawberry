@@ -39,7 +39,7 @@ describe('btc-onchain payout recipient resolution (#anti-spoof)', () => {
   let renter, provider, gpuId;
 
   beforeAll(async () => {
-    addProfitAddress(OPERATOR_WALLET);
+    await addProfitAddress(OPERATOR_WALLET);
     renter = await registerAndLogin('btcrent');
     provider = await registerAndLogin('btcprov');
     gpuId = GpuRepository.create({

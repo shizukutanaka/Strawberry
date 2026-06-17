@@ -27,7 +27,7 @@ router.get('/', (req, res) => {
 });
 
 // 追加
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ message: 'address required' });
   // 多層防御: ルート層でも構文検証し、無効入力は 400 で明確に拒否する
@@ -36,7 +36,7 @@ router.post('/', (req, res) => {
     return res.status(400).json({ message: 'Invalid Bitcoin address' });
   }
   try {
-    addProfitAddress(address);
+    await addProfitAddress(address);
     res.json({ message: 'Added', address: String(address).trim() });
   } catch (e) {
     res.status(500).json({ message: 'Failed to add address', error: maskError(e, 'Failed to add address') });
@@ -44,11 +44,11 @@ router.post('/', (req, res) => {
 });
 
 // 削除
-router.delete('/', (req, res) => {
+router.delete('/', async (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ message: 'address required' });
   try {
-    removeProfitAddress(address);
+    await removeProfitAddress(address);
     res.json({ message: 'Removed', address });
   } catch (e) {
     res.status(500).json({ message: 'Failed to remove address', error: maskError(e, 'Failed to remove address') });

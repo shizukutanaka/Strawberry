@@ -4,6 +4,7 @@ const router = express.Router();
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const UserRepository = require('../../../db/json/UserRepository');
 const { APIError, ErrorTypes, asyncHandler } = require('../../../utils/error-handler');
+const { withLock } = require('../../../utils/async-lock');
 
 // JWT認証必須（全ルートに適用）
 router.use(authenticateJWT);
@@ -19,11 +20,16 @@ router.post('/link', asyncHandler(async (req, res) => {
   }
   const user = UserRepository.getById(req.user.id);
   if (!user) throw new APIError(ErrorTypes.NOT_FOUND, 'User not found', 404);
-  const existingOwner = UserRepository.getByPeerId(peerId);
-  if (existingOwner && existingOwner.id !== user.id) {
-    throw new APIError(ErrorTypes.CONFLICT, 'PeerID is already registered to another user', 409);
-  }
-  UserRepository.update(user.id, { peerId });
+  // PeerID は P2P 上の身元そのもの。check-then-write 競合で同一 PeerID を 2 ユーザーが
+  // 取得すると、相手の announceGPU/updateOrder トラフィックをすり替えられる。peerId 単位の
+  // ロックで「重複チェック → 自分への割当」を直列化する。
+  await withLock(`peerid:${peerId}`, async () => {
+    const existingOwner = UserRepository.getByPeerId(peerId);
+    if (existingOwner && existingOwner.id !== user.id) {
+      throw new APIError(ErrorTypes.CONFLICT, 'PeerID is already registered to another user', 409);
+    }
+    UserRepository.update(user.id, { peerId });
+  });
   res.json({ message: 'ピアIDを紐付けました', peerId });
 }));
 

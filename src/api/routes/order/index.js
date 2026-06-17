@@ -66,6 +66,14 @@ class OrderUsageSession {
 // オーダーが削除済みの孤児セッションをここで一括回収する。これがないと、
 // 明示的 /stop を経ずに終了したオーダーのセッションが永久に Map に残る。
 const TERMINAL_SESSION_STATUSES = new Set(['completed', 'cancelled']);
+function _deleteHeartbeatsForOrder(orderId) {
+  // heartbeatTimestamps のキーは `${orderId}:${userId}` 形式。
+  // 該当オーダーの全ハートビートエントリを除去（メモリリーク防止）。
+  const prefix = `${orderId}:`;
+  for (const key of heartbeatTimestamps.keys()) {
+    if (key.startsWith(prefix)) heartbeatTimestamps.delete(key);
+  }
+}
 function reapUsageSessions() {
   // 遅延 require: モジュール末尾で定義される OrderRepository をクロージャ経由で参照する。
   const OrderRepo = require('../../../db/json/OrderRepository');
@@ -75,6 +83,7 @@ function reapUsageSessions() {
     try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
     if (!order || TERMINAL_SESSION_STATUSES.has(order.status)) {
       usageSessions.delete(orderId);
+      _deleteHeartbeatsForOrder(orderId);
     }
   }
 }
@@ -1502,8 +1511,11 @@ router.post('/:id/stop',
         }
       }
 
-      // ハートビートセッションを削除（メモリリーク防止）
+      // ハートビートセッションを削除（メモリリーク防止）。
+      // heartbeatTimestamps の対応エントリも同時に除去（旧実装は usageSessions だけ
+      // 削除し timestamps Map が無限増加していた）。
       usageSessions.delete(orderId);
+      _deleteHeartbeatsForOrder(orderId);
 
       // Atomic compare-and-swap: only write completed if still active.
       // Reputation and escrow settlement only run when this write succeeds,

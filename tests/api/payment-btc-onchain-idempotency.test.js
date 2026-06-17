@@ -37,7 +37,7 @@ describe('btc-onchain payment idempotency and partial-settlement recovery', () =
   let renter, provider, gpuId;
 
   beforeAll(async () => {
-    addProfitAddress(OPERATOR_WALLET);
+    await addProfitAddress(OPERATOR_WALLET);
     renter = await registerAndLogin('idemrent');
     provider = await registerAndLogin('idemprov');
     UserRepository.update(provider.id, { payoutAddress: PROVIDER_WALLET });

@@ -69,13 +69,27 @@ async function pollOnce() {
           });
           logger.info(`Invoice settled: paymentId=${payment.id} orderId=${payment.orderId}`);
 
-          // Advance order to 'matched' if it is still 'pending'
+          // Advance order to 'matched' if it is still 'pending'.
+          // Use updateIf so a concurrent cancel/reject/expire wins definitively:
+          // a plain getById+update race would let the poller resurrect a cancelled
+          // order back to 'matched', corrupting cancelReason/cancelledAt metadata
+          // and re-locking the GPU even though the user-cancel path already issued
+          // an escrow refund.
           if (payment.orderId) {
-            const order = OrderRepository.getById(payment.orderId);
-            if (order && order.status === 'pending') {
-              OrderRepository.update(payment.orderId, { status: 'matched', paidAt: new Date().toISOString() });
+            const writeResult = OrderRepository.updateIf(
+              payment.orderId,
+              (o) => o.status === 'pending',
+              { status: 'matched', paidAt: new Date().toISOString() }
+            );
+            if (writeResult && writeResult.ok) {
               appendAuditLog('order_payment_confirmed', { orderId: payment.orderId });
               logger.info(`Order advanced to matched: orderId=${payment.orderId}`);
+            } else {
+              const curStatus = writeResult && writeResult.current && writeResult.current.status;
+              logger.warn(`Invoice settled but order not pending (status=${curStatus}); skipping match. paymentId=${payment.id}`);
+              appendAuditLog('order_payment_race_skipped', {
+                orderId: payment.orderId, paymentId: payment.id, orderStatus: curStatus,
+              });
             }
           }
         } else if (_isExpired(payment)) {

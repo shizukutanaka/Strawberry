@@ -31,6 +31,9 @@ if (googleOAuthEnabled) {
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackURL: '/master-auth/google/callback',
+    // OAuth2 state パラメータをセッションに保持し、callback で照合する。
+    // これが無いと攻撃者が prep したフローに operator を巻き込む login-CSRF が成立する。
+    state: true,
   }, (accessToken, refreshToken, profile, done) => {
     // 許可されたGoogleアカウントのみ
     if (profile.emails[0].value === process.env.MASTER_GOOGLE_EMAIL) {
@@ -64,8 +67,8 @@ const ensureGoogleEnabled = (req, res, next) => {
   }
   next();
 };
-router.get('/google', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next));
-router.get('/google/callback', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { failureRedirect: '/master-auth/fail' })(req, res, next), (req, res) => {
+router.get('/google', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { scope: ['profile', 'email'], state: true })(req, res, next));
+router.get('/google/callback', ensureGoogleEnabled, (req, res, next) => passport.authenticate('google', { failureRedirect: '/master-auth/fail', state: true })(req, res, next), (req, res) => {
   req.session.regenerate((err) => {
     if (err) return res.status(500).send('セッション初期化エラー');
     req.session.googleAuth = true;

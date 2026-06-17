@@ -6,6 +6,12 @@ const Joi = require('joi');
 const { authenticateJWT } = require('./middleware/security');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
+const { withLock } = require('../utils/async-lock');
+
+// 単一 JSON ファイルに全ユーザーの設定を保持するため、並行 POST/DELETE で
+// read-modify-write のラストライトが他ユーザーの slot を消し飛ばす lost-update が
+// 発生する。プロセスワイドな mutex で書き換えを直列化する。
+const SETTINGS_LOCK = 'notification-settings:global';
 
 // SSRF対策: プライベートIPアドレス・ループバック・メタデータサービスをブロック
 // 設定時（POST）と送信時（notifier.js の sendWebhookNotify）の両方で検証（多層防御）。
@@ -120,9 +126,11 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
       }
     }
   }
-  const settings = loadSettings();
-  settings[userId] = value;
-  atomicWriteJSON(SETTINGS_PATH, settings);
+  await withLock(SETTINGS_LOCK, async () => {
+    const settings = loadSettings();
+    settings[userId] = value;
+    atomicWriteJSON(SETTINGS_PATH, settings);
+  });
   res.json({ success: true });
 }));
 
@@ -132,10 +140,14 @@ router.delete('/notification-settings/:userId', asyncHandler(async (req, res) =>
   if (req.user.id !== userId && req.user.role !== 'admin') {
     throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
   }
-  const settings = loadSettings();
-  if (!settings[userId]) return res.status(404).json({ error: 'Notification settings not found' });
-  delete settings[userId];
-  atomicWriteJSON(SETTINGS_PATH, settings);
+  const result = await withLock(SETTINGS_LOCK, async () => {
+    const settings = loadSettings();
+    if (!settings[userId]) return { notFound: true };
+    delete settings[userId];
+    atomicWriteJSON(SETTINGS_PATH, settings);
+    return { notFound: false };
+  });
+  if (result.notFound) return res.status(404).json({ error: 'Notification settings not found' });
   res.json({ success: true });
 }));
 

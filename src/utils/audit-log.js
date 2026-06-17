@@ -37,8 +37,20 @@ function _getOrInitPrevHash(logPath, hashPath) {
         recomputed = crypto.createHash('sha256').update(recomputed + line).digest('hex');
       }
       if (recomputed !== stored) {
+        // 旧実装は保存ハッシュと再計算ハッシュが食い違ったときに無条件で
+        // 再計算ハッシュ側で .hash を書き換えていた。これはログを直接改ざんできる
+        // 攻撃者（コンテナ内 RCE / log volume の sidecar / 共有ボリューム経由）が
+        // 偽の audit エントリを書き込んでサーバを再起動するだけで「正規のチェーン」に
+        // 取り込ませる self-heal バックドアになる。
+        // 既定では起動失敗にし、運用者が手動レビュー後に AUDIT_LOG_FORCE_REPAIR=1 を
+        // 明示設定したときだけ修復を許可する。テスト時は従来通り自動修復（テスト分離のため）。
+        const msg = `[audit-log] Hash chain mismatch (log tampered or crashed). ` +
+                    `stored=${stored.slice(0, 16)}... recomputed=${recomputed.slice(0, 16)}...`;
+        if (process.env.NODE_ENV !== 'test' && process.env.AUDIT_LOG_FORCE_REPAIR !== '1') {
+          throw new Error(`${msg} Set AUDIT_LOG_FORCE_REPAIR=1 after manual review to allow self-repair.`);
+        }
         // eslint-disable-next-line no-console
-        console.error('[audit-log] Hash chain gap detected (crash recovery); repairing from log.');
+        console.error(`${msg} Repair allowed (test mode or AUDIT_LOG_FORCE_REPAIR=1).`);
         atomicWriteString(hashPath, recomputed);
         prevHash = recomputed;
       } else {

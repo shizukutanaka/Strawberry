@@ -1483,10 +1483,20 @@ router.post('/:id/stop',
       if (!order) {
         throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
       }
+      // /stop は通常完了経路（status='completed', deliveredRatio→100%payout）。
+      // プロバイダがこれを呼べると「accept→renter pay→renter start→provider 即 stop」で
+      // 借り手の支払いを 0 秒の労働で全額受け取れる zero-work theft が成立する。
+      // プロバイダが終了させたい場合は /dispute を使い admin 介在で settle/refund を決める。
       const canStop = req.user.role === 'admin'
-        || order.userId === req.user.id
-        || (order.providerId && order.providerId === req.user.id);
+        || order.userId === req.user.id;
       if (!canStop) {
+        if (order.providerId && order.providerId === req.user.id) {
+          throw new APIError(
+            ErrorTypes.FORBIDDEN,
+            'Provider cannot stop an active order; raise a dispute (POST /:id/dispute) for admin resolution.',
+            403,
+          );
+        }
         throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
       }
       if (order.status !== 'active') {
@@ -1556,11 +1566,15 @@ router.post('/:id/stop',
         const { createEscrowService } = require('../../../payments/escrow-service');
         const escrowSvc = createEscrowService();
         const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
+        // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
+        // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。
+        // settlement-calculator 側の minChargeRatio が下限を担うため、ここでは
+        // measured 値が無いときは 0 を渡し、計算器のポリシーで最低料金が適用される。
         for (const escrow of escrows) {
-          const ratio = usageStats && usageStats.usageSeconds && order.durationMinutes
-            ? Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60))
-            : 1;
-          escrowSvc.settle(escrow.id, { deliveredRatio: ratio, slaUptimePct: 100 });
+          const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
+            ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
+            : 0;
+          escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
           escrowSvc.apply(escrow.id, 'DELIVER_OK');
           logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
         }

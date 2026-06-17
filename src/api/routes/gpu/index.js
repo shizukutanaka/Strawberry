@@ -501,12 +501,34 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
     id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b,
     apiKey: _ak, available: _av, ...specFields  // available を除外 → クローンは常にオンライン
   } = source;
-  const newName = req.body.name || req.query.name
-    ? (req.body.name || req.query.name)
-    : `${source.name} (copy)`;
+  const targetName = String(req.body.name || req.query.name || `${source.name} (copy)`).slice(0, 128);
+  // 重複スペック禁止: 単体 register / PUT は (name, model, vendor, memoryGB, providerId) で
+  // 一意性を強制している。clone はこれを skip していたためマーケット重複・検索順位操作・
+  // 分析データ汚染を起こせた。
+  const duplicate = GpuRepository.getAll().find(g =>
+    g.providerId === req.user.id &&
+    g.name === targetName &&
+    g.model === source.model &&
+    g.vendor === source.vendor &&
+    g.memoryGB === source.memoryGB
+  );
+  if (duplicate) {
+    return res.status(409).json({ error: 'A GPU with this name and spec is already registered for this provider' });
+  }
+  // ソースは旧スキーマで登録されている可能性があるため、register スキーマを丸ごと
+  // 適用すると必須フィールド欠落で 400 が頻発する。stripUnknown + presence:'optional'
+  // で「未知フィールドは捨てる、ただし値が来たものはレンジ検証する」運用に落とす。
+  // 目的は legacy/out-of-band フィールドが新規 GPU レコードに混入するのを防ぐこと。
+  const { error: cloneValErr, value: validatedClone } = schemas.gpu.register
+    .fork(Object.keys(schemas.gpu.register.describe().keys || {}), (s) => s.optional())
+    .validate({ ...specFields, name: targetName }, { abortEarly: false, stripUnknown: true });
+  if (cloneValErr) {
+    return res.status(400).json({
+      error: 'Cloned spec failed validation: ' + cloneValErr.details.map(d => d.message).join('; '),
+    });
+  }
   const cloned = GpuRepository.create({
-    ...specFields,
-    name: String(newName).slice(0, 128),
+    ...validatedClone,
     providerId: req.user.id,
     available: true,  // ソースが offline でもクローンは online 状態で開始
     attestation: { passed: false, score: 0, findings: ['cloned from ' + sourceId + '; re-attest to verify'], verifiedAt: null },
@@ -579,7 +601,30 @@ router.post('/bulk',
       if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
       if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
       if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
-      gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
+      // バルクでも単体登録と同等にアテステーションを処理する。
+      // 旧実装は単に { passed:false } を埋めて recordAttestation を呼ばないため、
+      // 単体登録で attestation 失敗の slashCount を負っているプロバイダがバルクに
+      // 切り替えることでレピュテーション罰則を回避できる reputation laundering 経路だった。
+      if (value.attestationReport) {
+        try {
+          const attResult = await _attestationVerifier.verify(gpuInfo, value.attestationReport);
+          gpuInfo.attestation = {
+            passed: attResult.passed,
+            score: attResult.score,
+            findings: attResult.findings,
+            verifiedAt: new Date().toISOString(),
+          };
+          try { createReputationService().recordAttestation(req.user.id, attResult.passed); } catch (_) {}
+        } catch (attErr) {
+          gpuInfo.attestation = {
+            passed: false, score: 0,
+            findings: ['verifier error: ' + attErr.message],
+            verifiedAt: new Date().toISOString(),
+          };
+        }
+      } else {
+        gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
+      }
       const registered = GpuRepository.create(gpuInfo);
       const { apiKey: _k, ...safe } = registered;
       results.push({ success: true, gpu: safe });

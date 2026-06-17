@@ -31,11 +31,19 @@ router.post('/quote', (req, res) => {
   }
 });
 
+// マッチング/オークション入力の上限。各 providerId/bid あたり reputation 全件ロードが
+// 走る O(N×M) のため、未制限だと一度の 1MB ボディで 5 万 ID を渡してイベントループを
+// 数秒間ブロックできる IO 増幅 DoS が成立する。100 件で打ち切る。
+const MAX_MARKETPLACE_BATCH = 100;
+
 // プロバイダ群をレピュテーション順に並べる（マッチング補助）
 router.post('/rank', (req, res) => {
   const { providerIds, opts } = req.body || {};
   if (!Array.isArray(providerIds)) {
     return res.status(400).json({ error: 'providerIds array is required' });
+  }
+  if (providerIds.length > MAX_MARKETPLACE_BATCH) {
+    return res.status(400).json({ error: `providerIds may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
     return res.json({ ranked: marketplace.rankCandidates(providerIds, opts && typeof opts === 'object' ? opts : {}) });
@@ -50,6 +58,9 @@ router.post('/auction', (req, res) => {
   const { bids, opts } = req.body || {};
   if (!Array.isArray(bids)) {
     return res.status(400).json({ error: 'bids array is required' });
+  }
+  if (bids.length > MAX_MARKETPLACE_BATCH) {
+    return res.status(400).json({ error: `bids may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
     return res.json(marketplace.selectProvider(bids, opts && typeof opts === 'object' ? opts : {}));

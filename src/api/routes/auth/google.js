@@ -36,7 +36,20 @@ router.post('/', authLimiter, asyncHandler(async (req, res) => {
   // ユーザーDBに登録/取得
   let user = UserRepository.getByGoogleId(googleId);
   if (!user) {
-    user = UserRepository.create({ googleId, email, name, picture, role: 'user' });
+    // メール重複チェック: 同じメールでパスワード登録済みの口座が既にあるなら、
+    // Google 紐付けは別フローで明示的に行わせる。これがないと攻撃者が同名 Google
+    // アカウントで新規 user 口座を作り、被害者のメール表示の裏で別 JWT を発行できる
+    // （並行口座なりすまし）。
+    const lowered = (email || '').toLowerCase();
+    const conflict = UserRepository.getByEmail(lowered);
+    if (conflict) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        'Account with this email already exists; sign in with your password and link Google from settings',
+        409,
+      );
+    }
+    user = UserRepository.create({ googleId, email: lowered, name, picture, role: 'user' });
   }
 
   // JWT発行: 共通の signAccessToken を使い jti（logout 失効可能）・type:'access'・

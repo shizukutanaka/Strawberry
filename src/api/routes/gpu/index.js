@@ -275,9 +275,12 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!gpu) {
     return res.status(404).json({ error: 'GPU not found' });
   }
-  // 詳細情報取得（vgpuManager 未導入時は null）
-  const details = vgpuManager ? await vgpuManager.getGPUDetails(gpuId).catch(() => null) : null;
-  const usageStats = vgpuManager ? await vgpuManager.getGPUUsageStats(gpuId).catch(() => null) : null;
+  // 詳細情報取得（vgpuManager 未導入時は null）。
+  // details/usageStats はオーナー/管理者にのみ返す — 借り手の稼働パターン de-anonymize を防ぐ。
+  // /gpus/* は GET 公開のため req.user が無いケース（未認証マーケット閲覧）で必ず安全側に倒す。
+  const viewerIsOwnerOrAdmin = req.user && (req.user.role === 'admin' || gpu.providerId === req.user.id);
+  const details = (vgpuManager && viewerIsOwnerOrAdmin) ? await vgpuManager.getGPUDetails(gpuId).catch(() => null) : null;
+  const usageStats = (vgpuManager && viewerIsOwnerOrAdmin) ? await vgpuManager.getGPUUsageStats(gpuId).catch(() => null) : null;
   const availability = vgpuManager ? await vgpuManager.getGPUAvailability(gpuId).catch(() => null) : null;
   // レーティング集計（TTL キャッシュ付き — 生 O(n) スキャンの繰り返し呼び出しを防ぐ）
   const { avg: ratingAverage, count: ratingCount } = getGpuRating(gpuId);
@@ -840,9 +843,12 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
   });
 }));
 
-// システムが検出したGPUの一覧を取得 (認証必須)
+// システムが検出したGPUの一覧を取得 (管理者のみ)
+// 旧実装は認証必須のみで一般ユーザーがホストの物理 GPU 在庫を列挙できた
+// （ドライバ・ファームウェア・PCI ID 等のサーバー側偵察情報の漏洩）。
 router.get('/system/detected',
   authenticateJWT,
+  checkRole(['admin']),
   asyncHandler(async (req, res) => {
     if (!requireService(gpuDetector, res)) return;
     logger.info('Detecting system GPUs');
@@ -855,9 +861,10 @@ router.get('/system/detected',
   })
 );
 
-// AMD GPUの詳細検出 (認証必須)
+// AMD GPUの詳細検出 (管理者のみ)
 router.get('/system/amd',
   authenticateJWT,
+  checkRole(['admin']),
   asyncHandler(async (req, res) => {
     if (!requireService(gpuDetector, res)) return;
     logger.info('Detecting AMD GPUs with advanced details');
@@ -870,29 +877,39 @@ router.get('/system/amd',
   })
 );
 
-// GPU使用状況の取得
-router.get('/:id/usage', asyncHandler(async (req, res) => {
-  if (!requireService(vgpuManager, res)) return;
-  const gpuId = req.params.id;
-  logger.info(`Fetching usage stats for GPU: ${gpuId}`);
-  const usageStats = await vgpuManager.getGPUUsageStats(gpuId);
-  if (!usageStats) {
-    return res.status(404).json({ error: 'GPU usage stats not found' });
-  }
-  res.json({ message: 'Fetched GPU usage stats', gpuId, usageStats });
-}));
+// GPU使用状況の取得 (オーナー/管理者のみ)
+// 旧実装は無認証で誰でも借り手のライブテレメトリ（CPU/メモリ/利用率/温度）を
+// ポーリングでき、稼働パターンの de-anonymize やサイドチャネル収集が可能だった。
+router.get('/:id/usage',
+  authenticateJWT,
+  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
+  asyncHandler(async (req, res) => {
+    if (!requireService(vgpuManager, res)) return;
+    const gpuId = req.params.id;
+    logger.info(`Fetching usage stats for GPU: ${gpuId}`);
+    const usageStats = await vgpuManager.getGPUUsageStats(gpuId);
+    if (!usageStats) {
+      return res.status(404).json({ error: 'GPU usage stats not found' });
+    }
+    res.json({ message: 'Fetched GPU usage stats', gpuId, usageStats });
+  })
+);
 
-// GPUのベンチマーク結果を取得
-router.get('/:id/benchmark', asyncHandler(async (req, res) => {
-  if (!requireService(vgpuManager, res)) return;
-  const gpuId = req.params.id;
-  logger.info(`Fetching benchmark results for GPU: ${gpuId}`);
-  const benchmarkResults = await vgpuManager.getGPUBenchmarkResults(gpuId);
-  if (!benchmarkResults) {
-    return res.status(404).json({ error: 'GPU benchmark results not found' });
-  }
-  res.json(benchmarkResults);
-}));
+// GPUのベンチマーク結果を取得 (オーナー/管理者のみ — 過去計測値もテレメトリ扱い)
+router.get('/:id/benchmark',
+  authenticateJWT,
+  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
+  asyncHandler(async (req, res) => {
+    if (!requireService(vgpuManager, res)) return;
+    const gpuId = req.params.id;
+    logger.info(`Fetching benchmark results for GPU: ${gpuId}`);
+    const benchmarkResults = await vgpuManager.getGPUBenchmarkResults(gpuId);
+    if (!benchmarkResults) {
+      return res.status(404).json({ error: 'GPU benchmark results not found' });
+    }
+    res.json(benchmarkResults);
+  })
+);
 
 // GPUのベンチマークを実行 (オーナー/管理者のみ)
 // allowOwnerOrAdmin なしだと任意の認証済みユーザーが他プロバイダの GPU で

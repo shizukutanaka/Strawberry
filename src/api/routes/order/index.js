@@ -142,21 +142,31 @@ function invalidateRepCache(userId) {
 // キャッシュは perUser 必須: URL のみをキーにすると先行ユーザーの注文一覧が
 // 他ユーザーに返る（認可バイパス）ため、ユーザーIDをキーに含める。
 
+// Stale-order sweeps are O(N orders) reads + writes per call. Triggering them on
+// every GET /orders amplified into a 4-sweep DoS — a fresh role:'user' token could
+// hammer ?offset=$i (bypassing the perUser cache via varying querystring) and force
+// 4×N IO per request. Throttle to once per SWEEP_THROTTLE_MS process-wide.
+const SWEEP_THROTTLE_MS = process.env.NODE_ENV === 'test' ? 0 : 30_000;
+let _lastOrderSweepAt = 0;
 router.get('/',
   authenticateJWT,
   cacheMiddleware({ perUser: true }),
   asyncHandler(async (req, res, next) => {
     try {
       logger.info('Fetching orders');
-      // 期限切れ pending/matched 注文を失効させてから一覧を返す（遅延スイープ）
-      expireStaleOrders();
-      expireStaleMatchedOrders();
-      expireStaleDisputedOrders();
-      // active タイムアウト: 返された各注文の GPU を解放する（vgpuManager 利用可能時のみ）
-      const timedOutActive = expireStaleActiveOrders();
-      if (vgpuManager && timedOutActive.length > 0) {
-        for (const { id: oid, gpuId } of timedOutActive) {
-          try { await vgpuManager.releaseGPU(gpuId, oid); } catch (_) {}
+      // 期限切れ pending/matched 注文を失効させてから一覧を返す（遅延スイープ）。
+      // 30 秒に 1 回だけ実行し、リクエストごとの 4×N スキャン増幅を遮断する。
+      if (Date.now() - _lastOrderSweepAt > SWEEP_THROTTLE_MS) {
+        _lastOrderSweepAt = Date.now();
+        expireStaleOrders();
+        expireStaleMatchedOrders();
+        expireStaleDisputedOrders();
+        // active タイムアウト: 返された各注文の GPU を解放する（vgpuManager 利用可能時のみ）
+        const timedOutActive = expireStaleActiveOrders();
+        if (vgpuManager && timedOutActive.length > 0) {
+          for (const { id: oid, gpuId } of timedOutActive) {
+            try { await vgpuManager.releaseGPU(gpuId, oid); } catch (_) {}
+          }
         }
       }
       let orders;

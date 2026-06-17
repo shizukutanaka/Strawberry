@@ -27,7 +27,10 @@ function normalizeGroup(group, value) {
 
 const OPENAPI_PATH = path.join(__dirname, '../../openapi.json');
 
-function generateOpenAPISpec() {
+// persist=true は CLI（require.main === module の起動）でのみ true にする。
+// 旧実装はサーバープロセスから呼ばれても atomicWriteJSON で disk へ書き込んでおり、
+// 未認証 /openapi.json リクエストの cold cache でディスク IO が発生していた。
+function generateOpenAPISpec({ persist = false } = {}) {
   // 基本情報
   const openapi = {
     openapi: '3.0.3',
@@ -114,13 +117,15 @@ function generateOpenAPISpec() {
     },
   };
 
-  atomicWriteJSON(OPENAPI_PATH, openapi);
-  console.log('OpenAPI仕様書を自動生成しました:', OPENAPI_PATH);
+  if (persist) {
+    atomicWriteJSON(OPENAPI_PATH, openapi);
+    console.log('OpenAPI仕様書を自動生成しました:', OPENAPI_PATH);
+  }
   return openapi;
 }
 
 if (require.main === module) {
-  generateOpenAPISpec();
+  generateOpenAPISpec({ persist: true });
 }
 
 module.exports = { generateOpenAPISpec };

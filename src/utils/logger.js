@@ -93,9 +93,10 @@ logger.gpuEvent = (event, data) => {
     data: sanitizeSensitiveFields(data),
   };
   fs.appendFileSync(gpuLogPath, JSON.stringify(logEntry) + '\n');
-  logger.info(`GPU Event: ${event}`, sanitizeSensitiveFields(data));
-  // 通常のログにも記録
-  logger.info(`GPU Event: ${event}`, data);
+  // winston のメタデータは format filter が message を object のときしかサニタイズ
+  // しないため、ここで先にサニタイズしてから渡す。旧実装は同じイベントを 2 回 info
+  // し、2 回目は data を生で渡していたため将来 apiKey 等を含む caller が
+  // combined.log にプレーンで漏らす fail-open になっていた。
 };
 
 // ログ統計

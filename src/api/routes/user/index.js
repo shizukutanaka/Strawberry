@@ -19,6 +19,7 @@ const { sanitizeObject } = require('../../../utils/sanitize');
 const { sanitizeUser } = require('../../utils/sanitize-user');
 
 const { authLimiter } = require('../../middleware/rate-limit');
+const { invalidateUserCache } = require('../../middleware/cache');
 
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
@@ -835,6 +836,11 @@ router.put('/:id/role',
       updatedAt: now,
       ...(roleDowngraded ? { sessionsRevokedAt: now } : {}),
     });
+    // 旧ロール時に書かれた per-user キャッシュ（GET /orders 等）を必ず無効化する。
+    // role はキャッシュキーの一部だが、再ログイン後の userId は同一なので
+    // role を変えてもキー衝突しないが、旧 role のエントリ自体が LRU に残ると不要にメモリを
+    // 食う/監査タイムラインを撹乱するため、当該 user の全エントリをここで一掃する。
+    try { invalidateUserCache(userId); } catch (_) {}
     if (roleDowngraded) {
       logger.warn(`Admin role revoked for user ${userId} by ${req.user.id} — sessions invalidated`);
     }

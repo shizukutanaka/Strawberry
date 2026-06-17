@@ -22,19 +22,25 @@ const cache = new LRUCache({
 function cacheMiddleware(options = {}) {
   return (req, res, next) => {
     if (req.method !== 'GET') return next();
+    // role もキーに含める。同一 userId のままロールが降格された後の再ログインで、
+    // 旧 admin として返した全件レスポンスが新 user へ replay される認可リークを防ぐ。
     const key = options.perUser
-      ? `${(req.user && req.user.id) || 'anon'}:${req.originalUrl}`
+      ? `${(req.user && req.user.id) || 'anon'}:${(req.user && req.user.role) || 'anon'}:${req.originalUrl}`
       : req.originalUrl;
     const cached = cache.get(key);
     if (cached) {
       cacheHitCounter.inc();
       res.set('X-Cache', 'HIT');
-      return res.json(cached);
+      return res.status(cached.status || 200).json(cached.body);
     }
-    // レスポンスキャプチャ
+    // レスポンスキャプチャ: 2xx のみキャッシュし、4xx/5xx の一時的エラーは保存しない。
+    // 旧実装はステータスを問わず body だけ保存し、ヒット時に常に 200 で返したため
+    // 過渡的な 500 を 60 秒間 "200 OK で空の orders"  として replay する致命的バグだった。
     const originalJson = res.json.bind(res);
     res.json = (body) => {
-      cache.set(key, body);
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        cache.set(key, { status: res.statusCode, body });
+      }
       cacheMissCounter.inc();
       res.set('X-Cache', 'MISS');
       return originalJson(body);

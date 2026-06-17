@@ -36,6 +36,27 @@ router.post('/', async (req, res) => {
     if (!req.user || (req.user.role !== 'admin' && order.userId !== req.user.id)) {
       return res.status(403).json({ message: 'You do not have permission to pay for this order' });
     }
+    // 注文状態ゲート: cancelled / completed / disputed 注文への二次支払いを拒否。
+    // 旧実装は status を一切見なかったため、renter が
+    //   POST /orders → DELETE /orders/:id → POST /payment/btc
+    // の経路で「キャンセル済み注文の運営宛振替＋プロバイダへの自動 payout」を起こせた
+    // （運営/プロバイダの口座を介した資金移送 + 借り手の元金喪失）。
+    // pending/matched/active のみ許可。
+    const ALLOWED_BTC_PAYMENT_STATUSES = new Set(['pending', 'matched', 'active']);
+    if (!ALLOWED_BTC_PAYMENT_STATUSES.has(order.status)) {
+      return res.status(409).json({
+        message: `Cannot pay for order in '${order.status}' state via BTC on-chain`,
+      });
+    }
+    // 二重決済防止: Lightning など別経路で既に paid 確定している注文に btc-onchain を
+    // 再実行させない（borrowerWallet→operator→lender の追加トリプル送金を発生させない）。
+    const PaymentRepository = require('../../../db/json/PaymentRepository');
+    const paidPayments = (PaymentRepository.getByOrderId(orderId) || []).filter(p => p.status === 'paid');
+    if (paidPayments.length > 0) {
+      return res.status(409).json({
+        message: 'Order has already been paid via another method (Lightning or manual approval)',
+      });
+    }
 
     // 二重課金防止: Lightning 経路と同一の per-order ミューテックスで保護する。
     // ロックなしだと並行リクエストが find(state!==CANCELED)===null を同時に通過し、

@@ -1084,7 +1084,12 @@ router.post('/:id/dispute/resolve',
   checkRole(['admin']),
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
-    const order = OrderRepository.getById(req.params.id);
+    const orderId = req.params.id;
+    // 二重裁定の副作用（reputation slash + credit が両方走る、raiser counter の二重加算など）
+    // を防ぐため、order 単位の mutex で全フローを直列化する。CAS だけだと CAS 前の副作用
+    // （raiser の getById+update、reputation の getById+update）が並行に走り得る。
+    return withLock(`order:${orderId}:dispute-resolve`, async () => {
+    const order = OrderRepository.getById(orderId);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     if (order.status !== 'disputed') {
       throw new APIError(ErrorTypes.VALIDATION, `Only disputed orders can be resolved (current: '${order.status}')`, 400);
@@ -1207,6 +1212,7 @@ router.post('/:id/dispute/resolve',
     invalidateRepCache(order.userId);
     if (order.providerId) invalidateRepCache(order.providerId);
     res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
+    }); // end withLock
   })
 );
 

@@ -53,7 +53,9 @@ describe('btc-onchain payment idempotency and partial-settlement recovery', () =
 
   const makeOrder = () => OrderRepository.create({
     gpuId, userId: renter.id, providerId: provider.id, durationMinutes: 60,
-    status: 'completed', pricePerHour: 100, totalPrice: 100,
+    // btc-onchain は pending/matched/active のみ許可（completed への二次支払いは
+    // 不正資金移動になるためゲートされる — see #1 in audit batch 13）。
+    status: 'pending', pricePerHour: 100, totalPrice: 100,
     createdAt: new Date().toISOString(),
   }).id;
 

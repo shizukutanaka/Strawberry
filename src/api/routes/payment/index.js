@@ -197,6 +197,17 @@ router.post('/order/:id',
     if (order.userId !== req.user.id && req.user.role !== 'admin') {
       throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to pay for this order', 403);
     }
+    // 決済可能なステータスのみ許可。cancelled/completed/disputed 注文に対して
+    // Lightning インボイスを発行すると、資金受取後に対応する注文が存在せず
+    // 返金経路も存在しない（資金喪失）。
+    const PAYABLE_STATUSES = new Set(['pending', 'matched']);
+    if (!PAYABLE_STATUSES.has(order.status)) {
+      throw new APIError(
+        ErrorTypes.VALIDATION,
+        `Cannot create payment for order in '${order.status}' state. Only pending or matched orders accept payment.`,
+        400
+      );
+    }
     // べき等性: 同一注文に対する未払い(pending)かつ未失効の決済が既に存在すれば、
     // 新たに請求書/決済レコードを作らず既存を返す。クライアントのタイムアウト再送で
     // 二重請求書発行・二重支払いが起きるのを防ぐ（決済系で最も避けたい事故）。

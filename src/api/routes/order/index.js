@@ -1171,6 +1171,37 @@ router.post('/:id/dispute/resolve',
       if (!resolveUpholdResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
       }
+      // エスクロー精算（uphold = 仕事は有効 → HELD 資金をプロバイダへ解放）。
+      // refund 側が escrowSvc.cancel で返金するのと対称に、uphold 側でも明示的に
+      // SETTLED へ遷移させないと HELD のまま資金が永久ロックされ、プロバイダは
+      // 正当に裁定勝ちしても入金されない（resolveUphold が status だけ completed に
+      // して escrow を放置していた漏れの修正）。escrow の現状態に応じて正しい
+      // イベント（HELD→DELIVER_OK / DISPUTED→RESOLVE_SETTLE）を選ぶ。
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const escrows = EscrowRepository.getByOrderId(order.id);
+        if (Array.isArray(escrows) && escrows.length > 0) {
+          const { createEscrowService } = require('../../../payments/escrow-service');
+          const escrowSvc = createEscrowService();
+          for (const e of escrows) {
+            if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
+            const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'
+              : e.state === 'HELD' ? 'DELIVER_OK'
+              : null;
+            if (!event) continue; // PENDING 等、まだ入金されていないものは精算対象外
+            try {
+              // 全量納品・SLA 満たしたものとして精算内訳を記録してから SETTLED へ遷移。
+              escrowSvc.settle(e.id, { deliveredRatio: 1, slaUptimePct: 100 });
+              escrowSvc.apply(e.id, event);
+              logger.info(`Escrow ${e.id} settled (dispute uphold) for order ${order.id}`);
+            } catch (err) {
+              logger.warn(`Escrow settle on dispute uphold failed for ${e.id}: ${err.message}`);
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn(`Escrow settlement on dispute uphold failed (order=${order.id}): ${e.message}`);
+      }
       if (order.providerId) {
         try {
           const { createReputationService } = require('../../../reputation/reputation-service');

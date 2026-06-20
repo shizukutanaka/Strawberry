@@ -32,6 +32,13 @@ router.post('/', authLimiter, asyncHandler(async (req, res) => {
   const payload = ticket.getPayload();
   const { sub: googleId, email, name, picture } = payload;
   if (!email) throw new APIError(ErrorTypes.VALIDATION, 'Googleアカウントにメールがありません', 400);
+  // email_verified が true でない Google アカウントを拒否する。
+  // verifyIdToken はシグネチャ/audience/issuer を検証するが email_verified は確認しない。
+  // Workspace 等では email_verified:false のまま有効な ID トークンが発行されるため、
+  // 攻撃者が未確認メールアドレスで victim@corp.com の Strawberry アカウントを先取りできる。
+  if (payload.email_verified !== true) {
+    throw new APIError(ErrorTypes.UNAUTHORIZED, 'Google account email is not verified', 401);
+  }
 
   // ユーザーDBに登録/取得
   let user = UserRepository.getByGoogleId(googleId);

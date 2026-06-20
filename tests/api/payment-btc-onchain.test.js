@@ -58,14 +58,18 @@ describe('btc-onchain payout recipient resolution (#anti-spoof)', () => {
     createdAt: new Date().toISOString(),
   }).id;
 
-  it('rejects self-dealing when the renter sets lenderWallet to the borrowerWallet (no registered address)', async () => {
+  it('rejects payment when provider has no registered payoutAddress (client-supplied lenderWallet is ignored)', async () => {
+    // Previously: bodyLenderWallet was accepted as a fallback, so a renter could
+    // direct the provider's payout to an attacker-controlled wallet.
+    // Now: bodyLenderWallet is completely ignored; only provider.payoutAddress is
+    // used. When that is absent, 400 is returned before any fund movement.
     UserRepository.update(provider.id, { payoutAddress: '' });
     const orderId = makeOrder();
     const res = await request(app).post('/api/v1/payments/btc')
       .set('Authorization', `Bearer ${renter.token}`)
       .send({ orderId, lenderWallet: BORROWER_WALLET, borrowerWallet: BORROWER_WALLET });
     expect(res.statusCode).toBe(400);
-    expect(res.body.message).toMatch(/must differ from borrowerWallet/i);
+    expect(res.body.message).toMatch(/payoutAddress/i);
     expect(sent.length).toBe(0); // no funds moved
   });
 

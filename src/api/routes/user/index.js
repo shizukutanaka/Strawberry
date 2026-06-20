@@ -179,13 +179,22 @@ router.post('/refresh',
     if (!user || user.status === 'deactivated') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
+    // jti ごとにロックし、check→revoke→reissue をアトミックにする。
+    // ロックがないと 2 つの並行リクエストが両方 isRevoked(jti)=false を見てから
+    // それぞれ revoke を呼び、どちらも新しいトークンペアを返す（single-use 破り）。
+    // reuse-detection は次のアクセスで機能するが、攻撃者が先行して rotate した
+    // 連鎖チェーンは生き残り得る。/register や /me/settings と同じパターン。
+    const { isRevoked, revoke } = require('../../middleware/token-denylist');
+    const { isSessionInvalidated } = require('../../utils/session-invalidation');
+    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
+    const lockKey = `refresh:${payload.jti || user.id}`;
+    return withLock(lockKey, async () => {
     // リフレッシュトークン再利用検知（盗難シグナル）:
     // 既に失効済み(= logout または rotation で消費済み)の jti が再提示された場合、
     // 単にこの 1 トークンを 401 で弾くだけでは不十分。rotation で「先に進んだ」攻撃者
     // (または被害者)が保持する新しいリフレッシュトークンは生き残ってしまう。OWASP 推奨に
     // 従い、再利用検知時は当該ユーザーの *全* セッションを失効させ(sessionsRevokedAt を更新)、
     // 攻撃者の連鎖トークンも含めて全て無効化して再ログインを強制する。
-    const { isRevoked, revoke } = require('../../middleware/token-denylist');
     if (payload.jti && isRevoked(payload.jti)) {
       try {
         UserRepository.update(user.id, { sessionsRevokedAt: new Date().toISOString() });
@@ -197,7 +206,6 @@ router.post('/refresh',
     }
     // パスワード変更・全セッション失効より後に発行されたリフレッシュトークンのみ受け付ける
     // （共有ヘルパーで REST/GraphQL と同一ポリシー）。盗まれたトークンはこれらで無効化できる。
-    const { isSessionInvalidated } = require('../../utils/session-invalidation');
     if (isSessionInvalidated(user, payload.iat)) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
@@ -206,11 +214,11 @@ router.post('/refresh',
     if (payload.jti) {
       revoke(payload.jti, (payload.exp || 0) * 1000);
     }
-    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
     const token = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user);
     logger.info(`Access token refreshed for user: ${user.id}`);
     res.json({ message: 'Token refreshed', token, refreshToken: newRefreshToken });
+    }); // end withLock(refresh)
   })
 );
 

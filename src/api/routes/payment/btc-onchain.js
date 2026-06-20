@@ -5,6 +5,7 @@ const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC, getOperatorWal
 const { appendAuditLog } = require('../../../utils/audit-log');
 const { logger } = require('../../../utils/logger');
 const { withLock } = require('../../../utils/async-lock');
+const PaymentRepository = require('../../../db/json/PaymentRepository');
 
 /**
  * POST /payment
@@ -19,7 +20,10 @@ const { withLock } = require('../../../utils/async-lock');
  */
 router.post('/', async (req, res) => {
   try {
-    const { orderId, lenderWallet: bodyLenderWallet, borrowerWallet } = req.body;
+    const { orderId, borrowerWallet } = req.body;
+    // Note: bodyLenderWallet is intentionally NOT destructured. The provider's
+    // payout address is always derived server-side from provider.payoutAddress to
+    // prevent a renter from redirecting the provider's funds to an attacker wallet.
     // priceBTC は受け付けない: ユーザーが任意金額を指定する価格操作を防ぐ。
     // 支払額は注文作成時にロックされた order.totalPrice（サトシ）から一意に決まる。
     if (!orderId || !borrowerWallet) {
@@ -48,11 +52,13 @@ router.post('/', async (req, res) => {
         message: `Cannot pay for order in '${order.status}' state via BTC on-chain`,
       });
     }
-    // 二重決済防止: Lightning など別経路で既に paid 確定している注文に btc-onchain を
-    // 再実行させない（borrowerWallet→operator→lender の追加トリプル送金を発生させない）。
-    const PaymentRepository = require('../../../db/json/PaymentRepository');
-    const paidPayments = (PaymentRepository.getByOrderId(orderId) || []).filter(p => p.status === 'paid');
-    if (paidPayments.length > 0) {
+    // 二重決済防止: Lightning など他経路で paid 確定している注文に btc-onchain を
+    // 再実行させない（追加トリプル送金を防ぐ）。btc_onchain 自身の PaymentRecord は
+    // SETTLED エスクローのキャッシュ復帰パス（下の withLock 内）で処理されるため除外する
+    // （btc_onchain は SETTLED エスクローを見つけて idempotent にキャッシュ済み結果を返す）。
+    const crossMethodPaid = (PaymentRepository.getByOrderId(orderId) || [])
+      .filter(p => p.status === 'paid' && p.method !== 'btc_onchain');
+    if (crossMethodPaid.length > 0) {
       return res.status(409).json({
         message: 'Order has already been paid via another method (Lightning or manual approval)',
       });
@@ -63,10 +69,14 @@ router.post('/', async (req, res) => {
     // EscrowRepository.create() と sendBTC(TX1) を二重実行して借り手に二重課金する。
     return await withLock(`payment:${orderId}`, async () => {
 
-    // 貸し手(プロバイダ)への送金先(lenderWallet)を決定する。
+    // 貸し手(プロバイダ)への送金先(lenderWallet)はサーバーが管理する provider.payoutAddress
+    // のみを使用する。クライアント提供の bodyLenderWallet は一切受け付けない。
+    // 旧実装は provider.payoutAddress 未設定時に bodyLenderWallet へフォールバックしており、
+    // renter が lenderWallet フィールドで任意のウォレットを指定することで
+    // provider の受取分(TX2)を第三者に横取りできた（クライアント制御の資金移送）。
     const UserRepository = require('../../../db/json/UserRepository');
     const provider = order.providerId ? UserRepository.getById(order.providerId) : null;
-    let lenderWallet = (provider && provider.payoutAddress) ? provider.payoutAddress : bodyLenderWallet;
+    const lenderWallet = provider && provider.payoutAddress ? provider.payoutAddress : null;
     if (!lenderWallet) {
       return res.status(400).json({
         message: 'No payout address available for this order. The GPU provider must register a payoutAddress (PUT /users/me) before payouts can be sent.'
@@ -75,10 +85,9 @@ router.post('/', async (req, res) => {
     if (typeof lenderWallet !== 'string' || lenderWallet.length < 10 || lenderWallet.length > 500) {
       return res.status(400).json({ message: 'Invalid lenderWallet format' });
     }
-    // 登録済み payoutAddress が無くボディ値にフォールバックする場合の self-dealing を拒否。
-    if (!(provider && provider.payoutAddress) && lenderWallet === borrowerWallet) {
+    if (lenderWallet === borrowerWallet) {
       return res.status(400).json({
-        message: 'lenderWallet must differ from borrowerWallet. Ask the provider to register a payoutAddress for a verified payout.'
+        message: 'Provider payoutAddress must differ from borrowerWallet; self-dealing is not permitted.'
       });
     }
     // order.totalPrice（サトシ）→ BTC 換算（1 BTC = 1e8 sat）
@@ -188,6 +197,30 @@ router.post('/', async (req, res) => {
       (e) => e.state === 'HELD',
       { state: 'SETTLED', txOperatorToLender: tx2Txid, updatedAt: new Date().toISOString() }
     );
+
+    // PaymentRepository に paid レコードを書く。/orders/:id/start・/stop・/dispute の
+    // hasPaidPayment ゲートは PaymentRepository を参照するため、このレコードがないと
+    // btc-onchain で実際に資金を動かした後もサービス開始・終了・係争が一切できない
+    // （資金喪失のまま注文が宙ぶらりになる）。btc-onchain は idempotent 設計のため
+    // SETTLED 分の重複レコード作成を避けるため既存 paid レコードがある場合はスキップ。
+    try {
+      const existingPaid = (PaymentRepository.getByOrderId(orderId) || []).find(p => p.status === 'paid');
+      if (!existingPaid) {
+        PaymentRepository.create({
+          orderId,
+          userId: req.user.id,
+          amount: Math.round(total * 1e8),
+          status: 'paid',
+          method: 'btc_onchain',
+          txid: tx2Txid,
+          paidAt: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      // 送金は完了しているため、PaymentRecord 書き込み失敗は致命的ではない（監査証跡は
+      // EscrowRepository に残る）が警告する。管理者が手動で reconcile できるよう記録する。
+      logger.warn(`[btc-onchain] PaymentRecord write failed for order ${orderId}: ${e.message}`);
+    }
 
     return res.json({
       message: 'Payment processed with operator fee',

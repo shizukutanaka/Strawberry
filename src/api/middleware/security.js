@@ -43,10 +43,13 @@ const corsOptions = {
   maxAge: 86400, // 24時間
 };
 
-// X-Forwarded-For 偽装によるレート制限回避を防ぐ keyGenerator（rate-limit.js と同じポリシー）
+// X-Forwarded-For 偽装によるレート制限回避を防ぐ keyGenerator（rate-limit.js と同一ポリシー）。
+// TRUST_PROXY は正の整数（hop 数）のみ受け付ける。'true'/'yes' 等のブーリアン文字列は
+// 意図的に拒否: Express が全 XFF hop を信頼してしまい、左端のユーザー制御 IP が req.ip に
+// なるため攻撃者が任意の IP を名乗ってレート制限をバイパスできる。
 const _rlKeyGenerator = (req) => {
-  const trustProxy = process.env.TRUST_PROXY;
-  if (trustProxy && trustProxy !== '0' && trustProxy !== 'false') {
+  const hopCount = parseInt(process.env.TRUST_PROXY, 10);
+  if (Number.isInteger(hopCount) && hopCount > 0) {
     return req.ip || req.socket.remoteAddress || 'unknown';
   }
   return req.socket.remoteAddress || req.ip || 'unknown';

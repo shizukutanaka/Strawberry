@@ -14,6 +14,25 @@ const router = express.Router();
 // メール認証コードの有効期限（10分）
 const MAIL_CODE_TTL_MS = 10 * 60 * 1000;
 
+// TOTP ブルートフォース対策: セッションスコープのカウンタは新セッション開始で
+// リセットできる（バイパス可能）。プロセスレベルの IP ベースカウンタで補完する。
+// 15分ウィンドウで最大10回。セッション側（5回）と合わせて2重防御。
+const _totpIpMap = new Map(); // IP -> { count, windowStart }
+const TOTP_IP_WINDOW_MS = 15 * 60 * 1000;
+const TOTP_IP_MAX = 10;
+
+function _checkTotpIpLimit(ip) {
+  const now = Date.now();
+  const rec = _totpIpMap.get(ip);
+  if (!rec || now - rec.windowStart > TOTP_IP_WINDOW_MS) {
+    _totpIpMap.set(ip, { count: 1, windowStart: now });
+    return false; // not rate-limited
+  }
+  rec.count += 1;
+  if (rec.count > TOTP_IP_MAX) return true; // rate-limited
+  return false;
+}
+
 // タイミング攻撃耐性のある文字列比較（長さが違えば false、同長なら定時間比較）
 function timingSafeStrEqual(a, b) {
   const ab = Buffer.from(String(a == null ? '' : a));
@@ -88,6 +107,12 @@ router.post('/totp', async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string' || !/^\d{6}$/.test(token)) {
     return res.status(400).send('認証コードは6桁の数字を入力してください');
+  }
+  // 2重防御: セッションスコープ（5回）＋ IP スコープ（15分10回）。
+  // セッションスコープだけだと新セッション開始でリセットできるため IP ベースで補完。
+  const clientIp = req.socket.remoteAddress || req.ip || 'unknown';
+  if (_checkTotpIpLimit(clientIp)) {
+    return res.status(429).send('試行回数が多すぎます（IP制限）。しばらく待ってください。');
   }
   req.session.totpAttempts = (req.session.totpAttempts || 0) + 1;
   if (req.session.totpAttempts > 5) {

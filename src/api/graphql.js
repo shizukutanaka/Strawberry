@@ -152,6 +152,13 @@ function depthAndSelectionLimitRule(context) {
 }
 
 async function setupGraphQL(app) {
+  // Apply rate limiting to the GraphQL endpoint.
+  // The /graphql app is a separate Express sub-app mounted before the REST routes,
+  // so the global apiLimiter in server.js does NOT cover it automatically.
+  // Without this, unauthenticated callers can hammer alias-batched queries at full speed.
+  const { apiLimiter } = require('./middleware/security');
+  app.use(apiLimiter);
+
   const server = new ApolloServer({
     typeDefs,
     resolvers,

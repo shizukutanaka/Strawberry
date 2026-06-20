@@ -528,6 +528,15 @@ router.put('/:id',
           "Use POST /:id/dispute to raise a dispute. Setting status to 'disputed' directly is not allowed.",
           400);
       }
+      // 'completed' への直接遷移は POST /:id/stop のみが正規ルート。
+      // admin PUT で active→completed させると escrow 精算・GPU 解放・評価記録が実行されず、
+      // 資金が HELD のまま永久にロックされる（エスクロー不整合）。
+      // admin は /stop を使うか、係争解決経由で completed に誘導すること。
+      if (sanitized.status === 'completed') {
+        throw new APIError(ErrorTypes.VALIDATION,
+          "Use POST /:id/stop to complete an order. Setting status to 'completed' directly is not allowed.",
+          400);
+      }
     }
     // フィールドフィルタ: 明示的な許可リストのみ更新可能。
     // sanitizeObject は req.body の全キーをコピーする（文字列値のみサニタイズ）ため、
@@ -543,6 +552,28 @@ router.put('/:id',
     const updateData = req.user.role === 'admin'
       ? Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_ADMIN.has(k)))
       : Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_OWNER.has(k)));
+    // admin が PUT で status を 'cancelled' にする場合、エスクローを先にキャンセルする。
+    // これが無いと HELD 資金が永久にロックされ借り手は返金を受けられない（escrow 不整合）。
+    // HELD エスクローのキャンセル失敗は致命的: 注文更新を中断してエラーを返す。
+    if (updateData.status === 'cancelled') {
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const escrows = EscrowRepository.getByOrderId(order.id) || [];
+        if (escrows.length > 0) {
+          const { createEscrowService } = require('../../../payments/escrow-service');
+          const escrowSvc = createEscrowService();
+          for (const escrow of escrows) {
+            if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
+            // HELD escrow cancel failure must not be silently swallowed — propagate it.
+            escrowSvc.cancel(escrow.id);
+          }
+        }
+      } catch (e) {
+        throw new APIError(ErrorTypes.INTERNAL,
+          `Cannot cancel order: escrow cancellation failed (${e.message}). Retry or resolve escrow manually.`,
+          502);
+      }
+    }
     // オーダーを更新（update() は内部で merge するため delta のみ渡す。
     // 旧コードの { ...order, ...sanitized } は getById〜update 間の並行書き込みを上書きする
     // stale-spread anti-pattern だった）
@@ -592,7 +623,10 @@ router.delete('/:id',
     if (!['pending', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
     }
-    // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
+    // エスクローが存在する場合は返金キャンセルを試みる。
+    // HELD エスクロー（入金済）のキャンセル失敗は致命的: 注文をキャンセル状態にすると
+    // 資金が HELD のまま永久にロックされるため、失敗時は注文キャンセルを中断してエラーを返す。
+    // PENDING エスクローは未入金なので失敗しても資金喪失はなく、ベストエフォートで扱う。
     try {
       const EscrowRepository = require('../../../db/json/EscrowRepository');
       const escrows = EscrowRepository.getByOrderId(order.id);
@@ -600,15 +634,24 @@ router.delete('/:id',
         const { createEscrowService } = require('../../../payments/escrow-service');
         const escrowSvc = createEscrowService();
         for (const escrow of escrows) {
-          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
+          if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
+          if (escrow.state === 'HELD') {
+            // HELD escrow cancel failure must block the delete — do NOT swallow.
+            escrowSvc.cancel(escrow.id);
+          } else {
+            // PENDING/DISPUTED: best-effort cancel; failure is logged but non-blocking.
             try { escrowSvc.cancel(escrow.id); } catch (e) {
-              logger.warn(`Escrow cancel failed for ${escrow.id}: ${e.message}`);
+              logger.warn(`Non-critical escrow cancel failed for ${escrow.id} (${escrow.state}): ${e.message}`);
             }
           }
         }
       }
     } catch (e) {
-      logger.warn(`Escrow lookup on order delete failed (order=${order.id}): ${e.message}`);
+      if (e.name === 'APIError') throw e;
+      // Escrow lookup failure or HELD cancel failure — block the order cancellation.
+      throw new APIError(ErrorTypes.INTERNAL,
+        `Cannot cancel order: escrow operation failed (${e.message}). Retry or contact support.`,
+        502);
     }
     // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。
     // updateIf で CAS を使う: 並行する /accept が pending→matched へ遷移させた後に

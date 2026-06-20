@@ -508,9 +508,10 @@ describe('API Integration', () => {
       const slot = res.body.blockedSlots[0];
       expect(slot).toHaveProperty('from');
       expect(slot).toHaveProperty('to');
-      // orderId は公開スケジュールから除外（認証なし閲覧者への注文 ID 列挙を防ぐため）
+      // orderId・status は公開スケジュールから除外（セキュリティ: 競合他社による
+      // プロバイダ稼働状況モニタリングおよび注文 ID 列挙を防ぐため）
       expect(slot).not.toHaveProperty('orderId');
-      expect(slot).toHaveProperty('status');
+      expect(slot).not.toHaveProperty('status');
     });
 
     it('GET /gpus/:id/schedule returns 404 for unknown GPU', async () => {

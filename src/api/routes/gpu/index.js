@@ -868,9 +868,11 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
     .map(o => {
       const slotStart = new Date(o.scheduledStartAt || o.createdAt);
       const slotEnd = new Date(slotStart.getTime() + (o.durationMinutes || 0) * 60 * 1000);
-      // orderId は非公開: 認証なし閲覧者への注文 ID 列挙を防ぐ。
-      // スロットの占有期間と状態のみ返す（予約計画には十分）。
-      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), status: o.status, type: 'order' };
+      // orderId・status は非公開: orderId は注文 ID 列挙防止、status は
+      // active/matched/pending を返すと稼働状況の競合情報調査に使われる
+      // （認証不要エンドポイントのため競合他社によるプロバイダ稼働モニタリングが成立する）。
+      // スロットの占有期間のみで予約重複チェックには十分。
+      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), type: 'order' };
     })
     .filter(slot => new Date(slot.from) < to && new Date(slot.to) > from)
     .sort((a, b) => a.from.localeCompare(b.from));

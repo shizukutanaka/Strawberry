@@ -292,9 +292,14 @@ router.delete('/me',
       });
     }
     const anonId = uuidv4();
+    const deactivatedAt = new Date().toISOString();
     UserRepository.update(user.id, {
       status: 'deactivated',
-      deactivatedAt: new Date().toISOString(),
+      deactivatedAt,
+      // 全セッション無効化: 退会時に他デバイスで発行済みのアクセストークンを
+      // isSessionInvalidated() で拒否させる。これがないと、退会後も最大 TTL（1時間）
+      // 分だけ他デバイスのトークンが有効なままになる（盗取済みトークンを含む）。
+      sessionsRevokedAt: deactivatedAt,
       // 個人情報の匿名化（履歴の userId 参照は維持されるため注文・監査は保全される）
       email: `deactivated+${anonId}@invalid.local`,
       username: `deactivated_${anonId.slice(0, 8)}`,

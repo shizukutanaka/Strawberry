@@ -1426,6 +1426,20 @@ router.post('/:id/start',
         return res.status(400).json({ error: 'Order cannot be started', details: `Current status: ${order.status}` });
       }
 
+      // スケジュール開始時刻の検証: 5分の時計ズレ許容を設け、それより前の開始を拒否する。
+      // これがないと、来週予定の注文を今すぐ起動でき、GPU プロバイダの合意時間枠を
+      // 守らずに GPU を早期占有するスロット契約違反が起きる。
+      if (req.user.role !== 'admin' && order.scheduledStartAt) {
+        const schedMs = new Date(order.scheduledStartAt).getTime();
+        const CLOCK_DRIFT_TOLERANCE_MS = 5 * 60 * 1000; // 5分
+        if (!isNaN(schedMs) && Date.now() < schedMs - CLOCK_DRIFT_TOLERANCE_MS) {
+          return res.status(400).json({
+            error: `Order cannot be started before scheduled time`,
+            scheduledStartAt: order.scheduledStartAt,
+          });
+        }
+      }
+
       // 支払い確認: 無償で GPU を起動されないよう、確定済み支払いレコードを要求する。
       // 管理者は手動割り当て・テスト環境のために免除。
       if (req.user.role !== 'admin') {

@@ -789,7 +789,10 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
 
 // GPU 手動ブロック登録（メンテナンス・個人利用等）
 // POST /gpus/:id/block — 認証必須（GPU オーナーまたは管理者）
-router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
+router.post('/:id/block',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
   const gpuId = req.params.id;
   const gpu = GpuRepository.getById(gpuId);
   if (!gpu) return res.status(404).json({ error: 'GPU not found' });
@@ -842,7 +845,10 @@ router.post('/:id/block', authenticateJWT, asyncHandler(async (req, res) => {
 
 // GPU 手動ブロック削除
 // DELETE /gpus/:id/block/:blockId — 認証必須（GPU オーナーまたは管理者）
-router.delete('/:id/block/:blockId', authenticateJWT, asyncHandler(async (req, res) => {
+router.delete('/:id/block/:blockId',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required(), blockId: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
   const gpuId = req.params.id;
   const gpu = GpuRepository.getById(gpuId);
   if (!gpu) return res.status(404).json({ error: 'GPU not found' });

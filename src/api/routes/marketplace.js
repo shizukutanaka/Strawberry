@@ -210,7 +210,8 @@ router.get('/stats', (req, res) => {
     const topGpus = Object.entries(gpuStats)
       .map(([gpuId, s]) => {
         const gpu = GpuRepository.getById(gpuId);
-        return { gpuId, gpuName: gpu ? gpu.name : null, vendor: gpu ? gpu.vendor : null, ...s };
+        // 累積収益は非公開財務情報 — 未認証レスポンスから除外する
+        return { gpuId, gpuName: gpu ? gpu.name : null, vendor: gpu ? gpu.vendor : null, completedOrders: s.completedOrders };
       })
       .sort((a, b) => b.completedOrders - a.completedOrders)
       .slice(0, 10);

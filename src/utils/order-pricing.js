@@ -44,7 +44,10 @@ function computeOrderPricing(order, rateInfo = null) {
 
   const pricing = { pricePerHour, pricePer5Min, durationMinutes, totalPrice };
   if (rateInfo) {
-    pricing.totalPriceJPY = Math.round(totalPrice * rateInfo.rate);
+    const rawJPY = Math.round(totalPrice * rateInfo.rate);
+    // Guard: rateInfo.rate could be NaN/Infinity if the exchange-rate API returns bad data.
+    // Store null instead of NaN so JSON serialization emits null rather than corrupting the field.
+    pricing.totalPriceJPY = Number.isFinite(rawJPY) ? rawJPY : null;
     pricing.exchangeRateTimestamp = rateInfo.timestamp;
   }
   return pricing;

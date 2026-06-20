@@ -815,7 +815,8 @@ router.post('/',
     // 正の生額は最小 1 sat に切り上げる（端数 0.25 sat の注文も実際には 1 sat 課金される）。
     const rawTotal = pricePer5Min * (durationMinutes / 5);
     const totalPrice = rawTotal > 0 ? Math.max(1, Math.round(rawTotal)) : 0;
-    const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+    const rawJPY = Math.round(totalPrice * satoshiToJPY);
+    const totalPriceJPY = Number.isFinite(rawJPY) ? rawJPY : null;
     // ファイル永続化リポジトリで作成
     // 価格ロック: 合意時の時間単価を注文に固定する。これが無いと支払い時の
     // computeOrderPricing が GPU の「現在価格」へフォールバックし、プロバイダが注文後に

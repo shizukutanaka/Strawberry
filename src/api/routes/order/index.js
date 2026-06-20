@@ -772,16 +772,26 @@ router.post('/',
       }
     }
     // 借り手レーティングフロア: GPU に minRenterRating が設定されている場合、
-    // 十分なレビュー実績を持つ借り手はその平均評価が floor を下回ると 422 で拒否される。
-    // レビュー実績がない新規借り手は通過させる（初回拒絶ループ防止）。
+    // 借り手の平均評価が floor を下回ると 422 で拒否される。
+    // レビュー実績がない新規アカウントは rating=0 として扱い、フロアが 0 より高い GPU には
+    // アクセスできない（フレッシュアカウントを使った minRenterRating バイパスを防ぐ）。
+    // minRenterRating を設定しない GPU（undefined/0/null）は全借り手を受け付ける。
     const renterOrders = OrderRepository.getAll().filter(o => o.userId === req.user.id && o.renterReview);
     const renterReviewCount = renterOrders.length;
+    // null = 0件（通知用に null を保持; フロアチェックでは ?? 0 で 0 として扱う）
     const renterRatingAverage = renterReviewCount > 0
       ? renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount
       : null;
-    if (gpu.minRenterRating && renterRatingAverage !== null && renterRatingAverage < gpu.minRenterRating) {
-      throw new APIError(ErrorTypes.VALIDATION,
-        `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${Math.round(renterRatingAverage * 10) / 10})`, 422);
+    if (gpu.minRenterRating) {
+      // no history → treat as 0, not null (null bypass prevention)
+      const effectiveRating = renterRatingAverage ?? 0;
+      if (effectiveRating < gpu.minRenterRating) {
+        const displayRating = renterRatingAverage !== null
+          ? `${Math.round(renterRatingAverage * 10) / 10} (${renterReviewCount} review${renterReviewCount !== 1 ? 's' : ''})`
+          : 'no rating history';
+        throw new APIError(ErrorTypes.VALIDATION,
+          `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${displayRating})`, 422);
+      }
     }
     // 料金計算: GPUのpricePerHour必須
     let pricePerHour = gpu.pricePerHour;

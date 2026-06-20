@@ -93,7 +93,7 @@ const schemas = {
     memoryGB: Joi.number().min(0).max(8192).optional(),
     driverVersion: Joi.string().max(64).optional(),
     firmwareIntegrity: Joi.boolean().optional(),
-    certChain: Joi.string().max(4096).optional(),
+    certChain: Joi.array().items(Joi.string().max(2048)).max(10).optional(),
     timestamp: Joi.string().isoDate().optional(),
     signature: Joi.string().max(2048).optional(),
     measurements: Joi.object({

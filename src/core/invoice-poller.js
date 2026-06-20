@@ -55,6 +55,44 @@ async function pollOnce() {
             continue;
           }
 
+          // 注文状態ゲート: キャンセル/完了済み注文への支払いを拒否。
+          // Lightning インボイスは注文がキャンセルされた後も外部で決済できるため、
+          // ポーラー側で注文状態を再確認して孤立 paid レコードの生成を防ぐ。
+          if (payment.orderId) {
+            const currentOrder = OrderRepository.getById(payment.orderId);
+            const PAYABLE = new Set(['pending', 'matched']);
+            if (!currentOrder || !PAYABLE.has(currentOrder.status)) {
+              PaymentRepository.update(payment.id, {
+                status: 'failed',
+                failedAt: new Date().toISOString(),
+                failReason: 'order_not_payable',
+              });
+              appendAuditLog('payment_order_not_payable', {
+                paymentId: payment.id,
+                orderId: payment.orderId,
+                orderStatus: currentOrder ? currentOrder.status : 'not_found',
+              });
+              logger.warn(`Invoice settled but order not payable (orderId=${payment.orderId} status=${currentOrder ? currentOrder.status : 'missing'}); payment marked failed`);
+              continue;
+            }
+            // クロスメソッド二重支払いガード: 別の方式（BTC on-chain/手動）が
+            // 既に settled している場合、Lightning の paid 記録を作成しない。
+            const alreadyPaid = (PaymentRepository.getByOrderId(payment.orderId) || [])
+              .filter(p => p.status === 'paid' && p.method !== 'lightning');
+            if (alreadyPaid.length > 0) {
+              PaymentRepository.update(payment.id, {
+                status: 'failed',
+                failedAt: new Date().toISOString(),
+                failReason: 'already_paid_via_other_method',
+              });
+              appendAuditLog('payment_cross_method_duplicate_skipped', {
+                paymentId: payment.id, orderId: payment.orderId,
+              });
+              logger.warn(`Invoice settled but order already paid via another method; paymentId=${payment.id}`);
+              continue;
+            }
+          }
+
           // Mark payment paid
           PaymentRepository.update(payment.id, {
             status: 'paid',

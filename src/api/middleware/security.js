@@ -15,7 +15,11 @@ const securityHeaders = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      // 'unsafe-inline' を除去: インライン <script> や onclick= 属性の実行を禁止し、
+      // Stored XSS（displayName/bio/avatar 等のプロフィールフィールド）が
+      // ブラウザで実行される際の最後の防衛線を維持する。
+      // 開発中にインラインスクリプトが必要な場合はノンス(CSP nonce)を使うこと。
+      scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'", 'wss://*'],

@@ -96,8 +96,11 @@ router.use('/auth', authRoutes);
 // 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
 router.use(require('../notification-settings').router);
 
-// Lightningノード情報API
-router.get('/node-info', cacheMiddleware(), async (req, res) => {
+// Lightningノード情報API（管理者のみ: ノード公開鍵・ピア情報・容量を含む）
+// payment/index.js の同等エンドポイントと同じ admin ガードを適用する。
+// 認証済み一般ユーザーがチャネル残高・ピア接続情報を閲覧できると
+// チャネル枯渇・フィースナイプ等の Lightning 攻撃計画を補助する。
+router.get('/node-info', rbac('admin'), cacheMiddleware(), async (req, res) => {
   if (!requireService(lightning, res)) return;
   try {
     const info = await lightning.getNodeInfo();
@@ -107,8 +110,8 @@ router.get('/node-info', cacheMiddleware(), async (req, res) => {
   }
 });
 
-// Lightningチャネル情報API
-router.get('/channels', cacheMiddleware(), async (req, res) => {
+// Lightningチャネル情報API（管理者のみ）
+router.get('/channels', rbac('admin'), cacheMiddleware(), async (req, res) => {
   if (!requireService(lightning, res)) return;
   try {
     const channels = Array.from(lightning.channels.values());

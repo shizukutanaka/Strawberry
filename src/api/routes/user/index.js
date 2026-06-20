@@ -296,10 +296,13 @@ const ALLOWED_PROFILE_FIELDS = {
   // 展開されると Stored XSS になる。空文字（削除）は許可。
   website:     v => v === '' || (typeof v === 'string' && v.length <= 200 && /^https?:\/\//i.test(v)),
   location:    v => typeof v === 'string' && v.length <= 100,
-  // avatar: http/https または data:image/ のみ許可。<img src> で展開される場合に
-  // javascript: や data:text/html が XSS ベクターになる。
+  // avatar: http/https または data:image/(raster) のみ許可。
+  // data:image/svg+xml は SVG 内に <script> を埋め込み可能なため拒否する。
+  // <object>/<embed> で表示されると Stored XSS になる（<img> はブラウザが制限するが完全ではない）。
+  // base64, を必須にして URL エンコードされた SVG インジェクションも防ぐ。
   avatar:      v => v === '' || (typeof v === 'string' && v.length <= 500 &&
-                    (/^https?:\/\//i.test(v) || /^data:image\//i.test(v))),
+                    (/^https?:\/\//i.test(v) ||
+                     /^data:image\/(png|jpeg|jpg|gif|webp|avif);base64,/i.test(v))),
   // payoutAddress: プロバイダ（貸し手）が受取に使う Lightning / on-chain アドレス。
   // 決済(btc-onchain)はこの登録済みアドレスを「正」として使い、リクエストボディで
   // 送金先を差し替えられる詐称・妨害(借り手が貸し手への payout を別アドレスへ流す)を防ぐ。
@@ -308,6 +311,7 @@ const ALLOWED_PROFILE_FIELDS = {
 };
 
 router.put('/me',
+  authLimiter,
   authenticateJWT,
   asyncHandler(async (req, res) => {
     logger.info(`Updating user profile: ${req.user.id}`);
@@ -324,13 +328,17 @@ router.put('/me',
       return res.status(400).json({ error: 'Request body must be a JSON object' });
     }
     // 許可フィールドのみを抽出・検証（値の型も確認）
+    // displayName/bio/location はフリーテキストのため HTML タグを除去してから保存する。
+    // review comment と同じく sanitizeString を適用し、<script> 等の Stored XSS を防ぐ。
+    const { sanitizeString } = require('../../../utils/sanitize');
+    const HTML_TEXT_FIELDS = new Set(['displayName', 'bio', 'location']);
     const updateData = {};
     for (const [field, validate] of Object.entries(ALLOWED_PROFILE_FIELDS)) {
       if (field in req.body) {
         if (!validate(req.body[field])) {
           return res.status(400).json({ error: `Invalid value for field: ${field}` });
         }
-        updateData[field] = req.body[field];
+        updateData[field] = HTML_TEXT_FIELDS.has(field) ? sanitizeString(req.body[field]) : req.body[field];
       }
     }
     if (Object.keys(updateData).length === 0) {

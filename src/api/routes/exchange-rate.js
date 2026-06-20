@@ -29,7 +29,17 @@ router.get('/', _erLimiter, async (req, res) => {
           const jwt = require('jsonwebtoken');
           const { resolveSecret } = require('../middleware/jwt-auth');
           const decoded = jwt.verify(authHeader.slice(7), resolveSecret(), { algorithms: ['HS256'] });
-          if (decoded && decoded.role === 'admin') forceFresh = true;
+          // 失効済み・セッション無効化済みトークンは fresh=true を拒否。
+          // ログアウト・ロール降格後のトークンで上流レート制限を消費できてしまうのを防ぐ。
+          if (decoded && decoded.role === 'admin') {
+            const { isRevoked } = require('../middleware/token-denylist');
+            const { isSessionInvalidated } = require('../utils/session-invalidation');
+            const UserRepository = require('../../db/json/UserRepository');
+            const u = UserRepository.getById(decoded.id);
+            const revoked = decoded.jti && isRevoked(decoded.jti);
+            const invalidated = !u || u.status === 'deactivated' || isSessionInvalidated(u, decoded.iat);
+            if (!revoked && !invalidated) forceFresh = true;
+          }
         } catch (_) { /* invalid token → forceFresh remains false */ }
       }
     }

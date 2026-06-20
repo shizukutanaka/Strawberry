@@ -22,8 +22,12 @@ function load() {
         if (typeof expiryMs === 'number') denylist.set(jti, expiryMs);
       }
     }
-  } catch (_) {
-    // 破損時は空から再開（失効情報の喪失より起動継続を優先。トークンは exp で自然失効する）
+  } catch (err) {
+    // 破損ファイル読み込み失敗 — 空マップで起動継続するが必ず警告する。
+    // 失効済みトークンが一時的に有効扱いになるリスクをオペレーターが把握できるよう記録する。
+    // eslint-disable-next-line no-console
+    console.error(`[token-denylist] WARN: Failed to load revoked-tokens.json (all prior revocations may be temporarily invalid): ${err.message}`);
+    try { require('../../utils/audit-log').appendAuditLog('denylist_load_failure', { error: err.message }); } catch (_) {}
   }
   return denylist;
 }

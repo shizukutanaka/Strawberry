@@ -11,20 +11,23 @@ const { resolveSecret, resolveRefreshSecret } = require('../middleware/jwt-auth'
 const accessTTL = () => process.env.JWT_EXPIRES_IN || config.security.jwtExpiresIn || '1h';
 const refreshTTL = () => process.env.JWT_REFRESH_EXPIRES_IN || config.security.jwtRefreshExpiresIn || '7d';
 
-function signAccessToken(user) {
+// jti may be supplied by caller so the refresh token can embed ati (access token id)
+// and revoke the prior access token when the refresh token is consumed.
+function signAccessToken(user, jti = uuidv4()) {
   return jwt.sign(
-    { id: user.id, role: user.role, type: 'access', jti: uuidv4() },
+    { id: user.id, role: user.role, type: 'access', jti },
     resolveSecret(),
     { expiresIn: accessTTL() }
   );
 }
 
-function signRefreshToken(user) {
-  return jwt.sign(
-    { id: user.id, role: user.role, type: 'refresh', jti: uuidv4() },
-    resolveRefreshSecret(),
-    { expiresIn: refreshTTL() }
-  );
+// ati: the jti of the access token issued alongside this refresh token.
+// Stored so the /refresh endpoint can revoke the paired access token on rotation,
+// preventing a stolen access token from outliving the refresh-token rotation.
+function signRefreshToken(user, ati) {
+  const payload = { id: user.id, role: user.role, type: 'refresh', jti: uuidv4() };
+  if (ati) payload.ati = ati;
+  return jwt.sign(payload, resolveRefreshSecret(), { expiresIn: refreshTTL() });
 }
 
 module.exports = { signAccessToken, signRefreshToken, accessTTL, refreshTTL };

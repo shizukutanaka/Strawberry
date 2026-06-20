@@ -220,11 +220,14 @@ describe('dispute/resolve lock: uses order:${id} key (source check)', () => {
     expect(lockMatches.length).toBeGreaterThanOrEqual(2); // dispute-resolve + at least one other
   });
 
-  it('order/index.js uses withLock for dispute-raise per user', () => {
+  it('order/index.js uses withLock for dispute-raise per order (not per user)', () => {
+    // The lock must be per-order so renter+provider concurrent disputes are serialized.
+    // A per-user key would allow them to race each other on the same order.
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
     );
-    expect(src).toMatch(/withLock\(`user:\$\{req\.user\.id\}:dispute-raise`/);
+    expect(src).toMatch(/withLock\(`order:\$\{order\.id\}:dispute`/);
+    expect(src).not.toMatch(/withLock\(`user:\$\{req\.user\.id\}:dispute-raise`/);
   });
 });
 

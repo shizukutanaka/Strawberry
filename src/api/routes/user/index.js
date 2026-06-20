@@ -145,9 +145,10 @@ router.post('/login',
     // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。
     // jti は logout 時の失効に使用。type で両者を厳密分離。
     const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
-    const token = signAccessToken(user);
-    const refreshToken = signRefreshToken(user);
-    user.lastLogin = new Date().toISOString();
+    const accessJti = uuidv4();
+    const token = signAccessToken(user, accessJti);
+    const refreshToken = signRefreshToken(user, accessJti);
+    UserRepository.update(user.id, { lastLogin: new Date().toISOString() });
     logger.info(`Login success: ${email}`);
     // パスワードやAPIキーは絶対にレスポンス・ログに含めない
     res.json({
@@ -221,8 +222,14 @@ router.post('/refresh',
     // 同じトークンを再利用したリプレイアタックを防ぐ。
     // jti は上で必須チェック済みのため条件分岐不要。
     revoke(payload.jti, payload.exp ? payload.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
-    const token = signAccessToken(user);
-    const newRefreshToken = signRefreshToken(user);
+    // ati: refresh token 発行時にペアだったアクセストークンの jti を失効させる。
+    // これにより、盗難されたアクセストークンが rotation 後も生き続けるのを防ぐ。
+    if (payload.ati) {
+      revoke(payload.ati, Date.now() + 60 * 60 * 1000);
+    }
+    const newAccessJti = uuidv4();
+    const token = signAccessToken(user, newAccessJti);
+    const newRefreshToken = signRefreshToken(user, newAccessJti);
     logger.info(`Access token refreshed for user: ${user.id}`);
     res.json({ message: 'Token refreshed', token, refreshToken: newRefreshToken });
     }); // end withLock(refresh)

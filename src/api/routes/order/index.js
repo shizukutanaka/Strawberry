@@ -638,8 +638,12 @@ router.delete('/:id',
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can cancel an order via DELETE. Providers must use POST /:id/reject.', 403);
     }
     logger.info(`Deleting order: ${order.id}`);
-    // 状態チェック
-    if (!['pending', 'matched'].includes(order.status)) {
+    // 注文単位の mutex: 並行するキャンセルリクエストが escrowSvc.cancel() を
+    // 二重呼出しする前に updateIf CAS が実行されるよう直列化する。
+    return withLock(`order:${order.id}:cancel`, async () => {
+    // 状態チェック（ロック内で再読み込みして最新状態を確認）
+    const freshOrder = OrderRepository.getById(order.id);
+    if (!freshOrder || !['pending', 'matched'].includes(freshOrder.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
     }
     // エスクローが存在する場合は返金キャンセルを試みる。
@@ -707,6 +711,7 @@ router.delete('/:id',
     invalidateUserCache(req.user.id);
     if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
     res.json({ message: 'Order cancelled', orderId: order.id });
+    }); // end withLock(cancel)
   })
 );
 
@@ -1111,9 +1116,10 @@ router.post('/:id/dispute',
     // プロバイダ評判が成功「率」(Bayesian)で測られるのと対称に、申請者も棄却「率」で測る。
     // 正当な係争(vindicated)を起こせば率が下がり回復できる＝単調な永久ペナルティにしない。
     // ゲート発火条件: 解決済み係争が最小サンプル以上 かつ 棄却率が閾値以上（管理者は対象外）。
-    // 未解決係争カウント + updateIf をユーザー単位の mutex でシリアライズ。
-    // 並行リクエストが全て count=0 を読んで上限を迂回するのを防ぐ。
-    return withLock(`user:${req.user.id}:dispute-raise`, async () => {
+    // 注文単位の mutex: renter と provider が同時に同じ注文へ係争を申請した場合に
+    // 相互排除する（per-user key では異なるユーザー間で serialization されない）。
+    // per-user open-disputes カウントは内側でチェックするため保護される。
+    return withLock(`order:${order.id}:dispute`, async () => {
       if (req.user.role !== 'admin') {
         const MIN_RESOLVED = Number(process.env.MIN_RESOLVED_DISPUTES) || 3;
         const MAX_DENIED_RATE = Number(process.env.MAX_DENIED_DISPUTE_RATE) || 0.67;

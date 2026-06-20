@@ -18,6 +18,7 @@ const _attestationVerifier = createMockAttestationVerifier();
 const { createReputationService } = require('../../../reputation/reputation-service');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
+const { appendAuditLog } = require('../../../utils/audit-log');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
 // TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
@@ -669,6 +670,16 @@ router.put('/:id',
       if (duplicate) {
         return res.status(409).json({ error: 'Duplicate GPU name already registered by this provider' });
       }
+    }
+    // Audit minRenterRating changes: providers can use this field to selectively
+    // block specific renters. Log every change for admin review.
+    if (sanitized.minRenterRating !== undefined && sanitized.minRenterRating !== gpu.minRenterRating) {
+      appendAuditLog('gpu_min_renter_rating_changed', {
+        gpuId,
+        previousValue: gpu.minRenterRating ?? null,
+        newValue: sanitized.minRenterRating,
+        providerId: req.user.id,
+      }, req.user.id);
     }
     // GPU情報を更新
     const updatedGPU = GpuRepository.update(gpuId, sanitized);

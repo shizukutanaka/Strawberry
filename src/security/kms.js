@@ -7,24 +7,20 @@ class KMSProvider {
   }
 
   // 鍵の取得
+  // Returning a hardcoded constant would silently allow callers to encrypt with a
+  // well-known value — trivially decryptable by any attacker. Fail loudly instead.
   async getKey(keyId) {
-    // 実装例: KMS API呼び出しで鍵取得
-    // return await kmsClient.getKey(keyId);
-    return 'dummy-key-value';
+    throw new Error(`KMS not configured: cannot retrieve key "${keyId}". Implement a real KMS backend.`);
   }
 
   // 鍵の生成
   async createKey(params) {
-    // 実装例: KMS API呼び出しで鍵生成
-    // return await kmsClient.createKey(params);
-    return { keyId: 'dummy', ...params };
+    throw new Error('KMS not configured: cannot create key. Implement a real KMS backend.');
   }
 
   // 鍵のローテーション
   async rotateKey(keyId) {
-    // 実装例: KMS API呼び出しでローテーション
-    // return await kmsClient.rotateKey(keyId);
-    return true;
+    throw new Error(`KMS not configured: cannot rotate key "${keyId}". Implement a real KMS backend.`);
   }
 }
 

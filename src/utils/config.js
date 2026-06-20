@@ -74,7 +74,9 @@ const defaultConfig = {
   
   // セキュリティ設定
   security: {
-    jwtSecret: requireSecret('JWT_SECRET'),
+    // RFC 7518 §3.2: HMAC-SHA256 requires a key of at least 256 bits (32 bytes).
+    // 16-char default was insufficient; enforce 32-char minimum.
+    jwtSecret: requireSecret('JWT_SECRET', { minLength: 32 }),
     // アクセストークンは短命にする。漏洩した場合の悪用期間を最大 1 時間に限定する。
     // 長時間セッション（GPU レンタル）はリフレッシュトークンローテーションで維持する。
     // 本番環境では JWT_EXPIRES_IN=15m など環境変数でさらに短縮することを推奨。

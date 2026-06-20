@@ -5,7 +5,7 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { config } = require('../../utils/config');
-const { resolveSecret } = require('../middleware/jwt-auth');
+const { resolveSecret, resolveRefreshSecret } = require('../middleware/jwt-auth');
 
 // TTL は呼出し毎に env を解決（テスト・運用での動的変更に対応）
 const accessTTL = () => process.env.JWT_EXPIRES_IN || config.security.jwtExpiresIn || '1h';
@@ -22,7 +22,7 @@ function signAccessToken(user) {
 function signRefreshToken(user) {
   return jwt.sign(
     { id: user.id, role: user.role, type: 'refresh', jti: uuidv4() },
-    resolveSecret(),
+    resolveRefreshSecret(),
     { expiresIn: refreshTTL() }
   );
 }

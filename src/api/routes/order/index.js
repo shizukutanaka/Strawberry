@@ -1037,7 +1037,7 @@ router.post('/:id/accept',
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
 
-    // order.providerId は注文作成時に確定させる（GPU 再代入後の乗っ取りを防ぐ）
+    // order.providerId は注文作成時に確定させる（注文作成後の GPU 乗っ取り防止）。
     const isProvider = order.providerId && order.providerId === req.user.id;
     if (req.user.role !== 'admin' && !isProvider) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can accept an order', 403);
@@ -1046,6 +1046,12 @@ router.post('/:id/accept',
       throw new APIError(ErrorTypes.VALIDATION, `Cannot accept order in '${order.status}' state (only pending orders can be accepted)`, 400);
     }
     const gpu = GpuRepository.getById(order.gpuId);
+    // GPU ownership re-check: if an admin reassigned this GPU after the order was
+    // created, the ex-provider's order.providerId still matches but they no longer
+    // own the GPU. Block accept until an admin resolves the ownership conflict.
+    if (req.user.role !== 'admin' && gpu && gpu.providerId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'GPU ownership has changed since this order was created; contact an admin to resolve', 403);
+    }
     const now = new Date().toISOString();
     // TOCTOU防止: accept と reject/DELETE が同時実行された場合どちらか一方のみ通過させる。
     const acceptResult = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {

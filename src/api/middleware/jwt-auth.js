@@ -13,6 +13,15 @@ function resolveSecret() {
   return process.env.JWT_SECRET || config.security.jwtSecret;
 }
 
+// Refresh tokens use a separate secret when JWT_REFRESH_SECRET is set.
+// This prevents cross-type substitution: a stolen refresh token cannot be used
+// as an access token even if the type check is skipped somewhere.
+// Falls back to the access-token secret for backward compatibility with
+// deployments that have not configured a separate refresh secret.
+function resolveRefreshSecret() {
+  return process.env.JWT_REFRESH_SECRET || resolveSecret();
+}
+
 module.exports = function(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) {
@@ -49,3 +58,4 @@ module.exports = function(req, res, next) {
 };
 
 module.exports.resolveSecret = resolveSecret;
+module.exports.resolveRefreshSecret = resolveRefreshSecret;

@@ -893,6 +893,11 @@ router.put('/:id/role',
     if (!role || !['user', 'provider', 'admin'].includes(role)) {
       return res.status(400).json({ error: 'Valid role is required' });
     }
+    // 操作者のアクティブ状態を DB から再確認（停止済み管理者の古いトークンによる操作を防ぐ）
+    const actingAdmin = UserRepository.getById(req.user.id);
+    if (!actingAdmin || actingAdmin.status === 'deactivated' || actingAdmin.status === 'suspended') {
+      return res.status(403).json({ error: 'Your account is not active' });
+    }
     // 自分自身の降格禁止
     if (userId === req.user.id && role !== 'admin') {
       return res.status(400).json({ error: 'You cannot remove your own admin role' });

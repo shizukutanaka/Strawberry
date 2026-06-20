@@ -1285,6 +1285,7 @@ router.post('/:id/dispute/resolve',
       const resolveUpholdResult = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', {
         status: 'completed',
         stoppedAt: resolvedAt,
+        completedAt: resolvedAt,
         dispute: { ...order.dispute, resolution },
       });
       if (!resolveUpholdResult.ok) {
@@ -1386,8 +1387,10 @@ router.post('/:id/review',
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
     }
     // レビュー期限: 完了から 30 日以内のみ受け付ける（完了後の嫌がらせ・サクラ投稿を抑止）
-    if (order.completedAt) {
-      const daysSinceCompletion = (Date.now() - new Date(order.completedAt).getTime()) / (1000 * 60 * 60 * 24);
+    // completedAt がない旧レコード（stoppedAt のみ）にも対応する多層防御フォールバック
+    const reviewWindowAnchor = order.completedAt || order.stoppedAt;
+    if (reviewWindowAnchor) {
+      const daysSinceCompletion = (Date.now() - new Date(reviewWindowAnchor).getTime()) / (1000 * 60 * 60 * 24);
       if (daysSinceCompletion > 30) {
         throw new APIError(ErrorTypes.VALIDATION, 'Reviews must be submitted within 30 days of order completion', 400);
       }
@@ -1463,8 +1466,10 @@ router.post('/:id/renter-review',
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
     }
     // レビュー期限: 完了から 30 日以内のみ受け付ける（完了後の嫌がらせ・サクラ投稿を抑止）
-    if (order.completedAt) {
-      const daysSinceCompletion = (Date.now() - new Date(order.completedAt).getTime()) / (1000 * 60 * 60 * 24);
+    // completedAt がない旧レコード（stoppedAt のみ）にも対応する多層防御フォールバック
+    const renterReviewWindowAnchor = order.completedAt || order.stoppedAt;
+    if (renterReviewWindowAnchor) {
+      const daysSinceCompletion = (Date.now() - new Date(renterReviewWindowAnchor).getTime()) / (1000 * 60 * 60 * 24);
       if (daysSinceCompletion > 30) {
         throw new APIError(ErrorTypes.VALIDATION, 'Renter reviews must be submitted within 30 days of order completion', 400);
       }
@@ -1737,7 +1742,8 @@ router.post('/:id/stop',
       // Atomic compare-and-swap: only write completed if still active.
       // Reputation and escrow settlement only run when this write succeeds,
       // preventing double-increment if a second concurrent stop somehow slipped through.
-      const updateData = { status: 'completed', stoppedAt: new Date().toISOString(), usageStats };
+      const now43g = new Date().toISOString();
+      const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
       const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);
       if (!result.ok) {
         return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });

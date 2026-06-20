@@ -174,6 +174,12 @@ router.post('/refresh',
     if (payload.type !== 'refresh') {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
+    // jti がないリフレッシュトークンは single-use 強制・再利用検知が機能しない（fix probe 35）。
+    // 正規発行トークンは必ず jti を持つ（signRefreshToken → uuidv4）。
+    // jti なしトークンは手動署名か旧バージョン発行の可能性が高く、永続的に再利用できてしまう。
+    if (!payload.jti) {
+      return res.status(401).json({ error: 'Invalid refresh token: missing token identifier' });
+    }
     // ユーザーが削除/無効化されていないか確認（最新のロールも反映）
     const user = UserRepository.getById(payload.id);
     if (!user || user.status === 'deactivated') {
@@ -187,7 +193,7 @@ router.post('/refresh',
     const { isRevoked, revoke } = require('../../middleware/token-denylist');
     const { isSessionInvalidated } = require('../../utils/session-invalidation');
     const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
-    const lockKey = `refresh:${payload.jti || user.id}`;
+    const lockKey = `refresh:${payload.jti}`; // jti is guaranteed non-null (checked above)
     return withLock(lockKey, async () => {
     // リフレッシュトークン再利用検知（盗難シグナル）:
     // 既に失効済み(= logout または rotation で消費済み)の jti が再提示された場合、
@@ -211,9 +217,8 @@ router.post('/refresh',
     }
     // 使い切り（single-use）: 使用済みリフレッシュトークンの jti を失効させることで
     // 同じトークンを再利用したリプレイアタックを防ぐ。
-    if (payload.jti) {
-      revoke(payload.jti, payload.exp ? payload.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
-    }
+    // jti は上で必須チェック済みのため条件分岐不要。
+    revoke(payload.jti, payload.exp ? payload.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     const token = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user);
     logger.info(`Access token refreshed for user: ${user.id}`);
@@ -227,15 +232,23 @@ router.post('/logout',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     const { revoke } = require('../../middleware/token-denylist');
-    // リフレッシュトークンが提供されていれば併せて失効（漏洩リフレッシュの無効化）
     const { refreshToken } = req.body || {};
     if (refreshToken && typeof refreshToken === 'string') {
+      // リフレッシュトークンが提供されていれば jti を即時失効させる。
       try {
         const rp = jwt.verify(refreshToken, resolveSecret(), { algorithms: ['HS256'] });
         if (rp.type === 'refresh' && rp.jti) {
           revoke(rp.jti, rp.exp ? rp.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
         }
       } catch (_) { /* 無効なリフレッシュトークンは無視（logout は冪等に成功させる） */ }
+    } else {
+      // リフレッシュトークンが提供されなかった場合: クライアントが意図的に省略した場合や
+      // リフレッシュトークンを保持していない場合でも、sessionsRevokedAt を更新することで
+      // 既存の全リフレッシュトークンを無効化し、盗難トークンによるポストログアウト利用を防ぐ。
+      // トレードオフ: 他デバイスのセッションも同時に失効する（"log out everywhere" 動作）。
+      try {
+        UserRepository.update(req.user.id, { sessionsRevokedAt: new Date().toISOString() });
+      } catch (_) { /* 更新失敗はログアウト自体を妨げない */ }
     }
     if (req.user.jti) {
       // exp（秒）をミリ秒に変換して保持期限とする。それ以降は自然失効するため保持不要。

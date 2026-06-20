@@ -83,7 +83,13 @@ router.get('/notification-settings/:userId', asyncHandler(async (req, res) => {
     throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
   }
   const settings = loadSettings();
-  res.json(settings[userId] || {});
+  const raw = settings[userId] || {};
+  // Mask the bearer token: a stored lineToken is a bearer credential for LINE Notify.
+  // Returning it in plaintext exposes it to XSS, CSRF, and admin-log readers.
+  // The caller only needs to know whether a token is set, not its value.
+  const safe = { ...raw };
+  if (safe.lineToken) safe.lineToken = '***';
+  res.json(safe);
 }));
 
 // 通知設定保存/更新（自分のみ、管理者は任意ユーザー）

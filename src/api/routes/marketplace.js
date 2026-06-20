@@ -37,8 +37,10 @@ router.post('/quote', (req, res) => {
 const MAX_MARKETPLACE_BATCH = 100;
 
 // プロバイダ群をレピュテーション順に並べる（マッチング補助）
+// opts は呼び出し元から受け付けない: 攻撃者が slashPenaltyPerEvent=0 等を指定して
+// スラッシュ済みプロバイダを上位に誘導したり競合を下位へ押し込むのを防ぐ。
 router.post('/rank', (req, res) => {
-  const { providerIds, opts } = req.body || {};
+  const { providerIds } = req.body || {};
   if (!Array.isArray(providerIds)) {
     return res.status(400).json({ error: 'providerIds array is required' });
   }
@@ -46,7 +48,7 @@ router.post('/rank', (req, res) => {
     return res.status(400).json({ error: `providerIds may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
-    return res.json({ ranked: marketplace.rankCandidates(providerIds, opts && typeof opts === 'object' ? opts : {}) });
+    return res.json({ ranked: marketplace.rankCandidates(providerIds, {}) });
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });
   }
@@ -54,8 +56,9 @@ router.post('/rank', (req, res) => {
 
 // 逆オークションでプロバイダを選定（Akash/Golem 型マッチング）
 // bid に reputationScore が無ければ reputationService から自動補完される
+// opts は /rank と同様に呼び出し元から受け付けない。
 router.post('/auction', (req, res) => {
-  const { bids, opts } = req.body || {};
+  const { bids } = req.body || {};
   if (!Array.isArray(bids)) {
     return res.status(400).json({ error: 'bids array is required' });
   }
@@ -63,7 +66,7 @@ router.post('/auction', (req, res) => {
     return res.status(400).json({ error: `bids may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
-    return res.json(marketplace.selectProvider(bids, opts && typeof opts === 'object' ? opts : {}));
+    return res.json(marketplace.selectProvider(bids, {}));
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });
   }

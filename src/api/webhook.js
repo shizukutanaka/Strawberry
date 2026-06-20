@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { appendAuditLog } = require('../utils/audit-log');
+const { assertPublicUrl } = require('../utils/ssrf-guard');
 const { logger } = require('../utils/logger');
 const { authenticateJWT, checkRole } = require('./middleware/security');
 const Joi = require('joi');
@@ -15,6 +16,13 @@ async function sendWebhook(event, payload) {
   const body = { event, payload, timestamp: new Date().toISOString() };
   let success = false;
   for (const url of WEBHOOK_URLS) {
+    try {
+      await assertPublicUrl(url);
+    } catch (ssrfErr) {
+      logger.warn('Webhook SSRF blocked', { url, event, error: ssrfErr.message });
+      appendAuditLog('webhook_ssrf_blocked', { url, event, error: ssrfErr.message });
+      continue;
+    }
     try {
       await axios.post(url, body);
       logger.info('Webhook送信成功', { url, event });

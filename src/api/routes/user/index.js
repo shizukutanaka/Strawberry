@@ -20,6 +20,7 @@ const { sanitizeUser } = require('../../utils/sanitize-user');
 
 const { authLimiter } = require('../../middleware/rate-limit');
 const { invalidateUserCache } = require('../../middleware/cache');
+const { appendAuditLog } = require('../../../utils/audit-log');
 
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
@@ -396,6 +397,10 @@ router.put('/me',
       ...updateData,
       updatedAt: new Date().toISOString()
     });
+    // Audit log for security-sensitive field changes (payout address, username).
+    if (updateData.payoutAddress !== undefined) {
+      appendAuditLog('user_payout_address_changed', { userId: req.user.id }, req.user.id);
+    }
     res.json({
       message: 'User profile updated successfully',
       user: sanitizeUser(updatedUser)
@@ -453,6 +458,7 @@ router.put('/me/password',
       if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     } catch (_) { /* denylist 失敗は更新を妨げない */ }
     logger.info(`Password changed for user: ${req.user.id}`);
+    appendAuditLog('user_password_changed', { userId: req.user.id }, req.user.id);
     res.json({ message: 'Password changed successfully' });
   })
 );
@@ -901,6 +907,12 @@ router.put('/:id/role',
       newRole: role,
       changedBy: req.user.id
     });
+    appendAuditLog('user_role_changed', {
+      targetUserId: userId,
+      previousRole: target.role,
+      newRole: role,
+      changedBy: req.user.id,
+    }, req.user.id);
     res.json({
       message: 'User role updated successfully',
       user: {

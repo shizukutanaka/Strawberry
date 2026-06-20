@@ -1,6 +1,7 @@
 // 多重通知・冗長化通知ユーティリティ
 const axios = require('axios');
 const { logger } = require('./logger');
+const { assertPublicUrl } = require('./ssrf-guard');
 
 const CHANNELS = [
   { type: 'line', url: process.env.LINE_NOTIFY_URL, token: process.env.LINE_TOKEN },
@@ -22,6 +23,15 @@ async function resilientNotify(message, options = {}) {
   let errors = [];
   for (const ch of CHANNELS) {
     if (!ch.url) continue;
+    // Env-var URLs are admin-configured but could point to internal services if the
+    // deployment pipeline is compromised. Guard against SSRF before dispatching.
+    try {
+      await assertPublicUrl(ch.url);
+    } catch (ssrfErr) {
+      logger.warn(`SSRF blocked: skipping ${ch.type} notification channel (${ssrfErr.message})`);
+      errors.push({ channel: ch.type, error: `SSRF blocked: ${ssrfErr.message}` });
+      continue;
+    }
     try {
       if (ch.type === 'line') {
         await axios.post(ch.url, `message=${encodeURIComponent(message)}`, {

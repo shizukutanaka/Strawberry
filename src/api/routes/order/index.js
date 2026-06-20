@@ -94,6 +94,7 @@ if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
+const { appendAuditLog } = require('../../../utils/audit-log');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
 
@@ -582,6 +583,19 @@ router.put('/:id',
     logger.info(`Order updated: ${order.id}`);
     invalidateUserCache(req.user.id);
     if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
+    // Admin status overrides must be audit-logged with the acting admin's ID.
+    // Without this, a malicious or compromised admin can silently alter order states
+    // (e.g., cancel a disputed order to deny a renter's refund) with no tamper-evident record.
+    if (updateData.status && updateData.status !== prevStatus && req.user.role === 'admin') {
+      appendAuditLog('admin_order_status_override', {
+        orderId: order.id,
+        previousStatus: prevStatus,
+        newStatus: updateData.status,
+        adminId: req.user.id,
+        orderUserId: order.userId,
+        orderProviderId: order.providerId,
+      }, req.user.id);
+    }
     // ステータスが matched または active に変わった場合は借り手へ通知
     if (updateData.status && updateData.status !== prevStatus) {
       try {

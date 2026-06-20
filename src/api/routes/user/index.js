@@ -32,6 +32,30 @@ const peeridRouter = require('./peerid');
 // Generated once at startup so the cost is paid upfront, not on first login attempt.
 const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', 10);
 
+// アカウント単位のブルートフォース抑制（IPを迂回した辞書攻撃対策）。
+// スライディングウィンドウ: 15分以内に10回失敗 → 429。成功でリセット。
+const _loginFailures = new Map(); // email → { count, windowStart }
+const _LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const _LOGIN_MAX_FAILURES = 10;
+function _recordLoginFailure(email) {
+  const now = Date.now();
+  const entry = _loginFailures.get(email) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > _LOGIN_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count += 1;
+  _loginFailures.set(email, entry);
+  return entry.count;
+}
+function _resetLoginFailures(email) { _loginFailures.delete(email); }
+function _isLoginLocked(email) {
+  const entry = _loginFailures.get(email);
+  if (!entry) return false;
+  if (Date.now() - entry.windowStart > _LOGIN_WINDOW_MS) { _loginFailures.delete(email); return false; }
+  return entry.count >= _LOGIN_MAX_FAILURES;
+}
+
 // ユーザー登録
 router.post('/register',
   authLimiter,
@@ -47,28 +71,26 @@ router.post('/register',
     // 自己登録では 'user' または 'provider' のみ許可（admin への昇格は管理者が行う）
     const assignedRole = (role === 'provider') ? 'provider' : 'user';
     logger.info(`Registering new user: ${username}`);
-    // メールアドレス・ユーザー名の重複チェック
-    if (UserRepository.getByEmail(email)) {
-      return res.status(409).json({ error: 'Email already registered' });
-    }
-    if (UserRepository.getByUsername(username)) {
-      return res.status(409).json({ error: 'Username already taken' });
-    }
-    // パスワードハッシュ化
+    // bcrypt はロック外で先に計算（重い演算をロック保持中に行わないため）。
+    // ロック内で重複チェック＋作成を不可分に実行し、同一メール同時登録 TOCTOU を閉じる。
     const salt = await bcrypt.genSalt(config.security.bcryptRounds);
     const hashedPassword = await bcrypt.hash(password, salt);
-    // 新規ユーザー作成
-    const newUser = UserRepository.create({
-      username,
-      email,
-      password: hashedPassword,
-      role: assignedRole,
-      lastLogin: null,
-      settings: {
-        notifications: true,
-        theme: 'light'
-      }
+    let newUser;
+    const registerConflict = await withLock(`register:${email}`, async () => {
+      if (UserRepository.getByEmail(email)) return 'email';
+      if (UserRepository.getByUsername(username)) return 'username';
+      newUser = UserRepository.create({
+        username,
+        email,
+        password: hashedPassword,
+        role: assignedRole,
+        lastLogin: null,
+        settings: { notifications: true, theme: 'light' }
+      });
+      return null;
     });
+    if (registerConflict === 'email') return res.status(409).json({ error: 'Email already registered' });
+    if (registerConflict === 'username') return res.status(409).json({ error: 'Username already taken' });
     // レスポンス用にパスワードを削除
     const userResponse = { ...newUser };
     delete userResponse.password;
@@ -93,6 +115,10 @@ router.post('/login',
     const { password } = req.validatedBody;
     const email = typeof req.validatedBody.email === 'string' ? req.validatedBody.email.toLowerCase() : req.validatedBody.email;
     logger.info(`Login attempt: ${email}`);
+    // アカウント単位ロックアウト（IPを迂回した辞書攻撃対策）
+    if (_isLoginLocked(email)) {
+      return res.status(429).json({ error: 'Too many failed login attempts. Please try again later.' });
+    }
     // ユーザーを検索（永続化対応）
     const user = UserRepository.getByEmail(email);
     // Always run bcrypt.compare even when user is not found to prevent
@@ -101,8 +127,10 @@ router.post('/login',
     const hashToCompare = (user && user.password) || _DUMMY_HASH;
     const validPassword = await bcrypt.compare(password, hashToCompare);
     if (!user || !validPassword) {
-      if (!user) logger.warn(`Login failed: user not found (${email})`);
-      else logger.warn(`Login failed: wrong password (${email})`);
+      // ログメッセージを統一して「ユーザー不在」と「誤パスワード」を区別しない。
+      // ログ閲覧権限を持つオペレータによるメールアドレス列挙を防ぐ。
+      logger.warn(`Login failed (${email})`);
+      _recordLoginFailure(email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // 無効化済みアカウントはログイン不可（メール匿名化に加えた多層防御）
@@ -110,6 +138,8 @@ router.post('/login',
       logger.warn(`Login failed: account deactivated (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+    // ログイン成功 → 失敗カウントをリセット
+    _resetLoginFailures(email);
     // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。
     // jti は logout 時の失効に使用。type で両者を厳密分離。
     const { signAccessToken, signRefreshToken } = require('../../utils/tokens');

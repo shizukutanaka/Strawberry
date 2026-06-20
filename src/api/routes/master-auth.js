@@ -35,11 +35,13 @@ if (googleOAuthEnabled) {
     // これが無いと攻撃者が prep したフローに operator を巻き込む login-CSRF が成立する。
     state: true,
   }, (accessToken, refreshToken, profile, done) => {
-    // 許可されたGoogleアカウントのみ
-    if (profile.emails[0].value === process.env.MASTER_GOOGLE_EMAIL) {
+    // 許可されたGoogleアカウントのみ。email_verified もチェックする:
+    // 未確認メールアドレスを持つアカウントが同じメールアドレス文字列を持てる。
+    const emailEntry = profile.emails && profile.emails[0];
+    if (emailEntry && emailEntry.value === process.env.MASTER_GOOGLE_EMAIL && emailEntry.verified === true) {
       return done(null, profile);
     } else {
-      return done(null, false, { message: 'Not master account' });
+      return done(null, false, { message: 'Not master account or email not verified' });
     }
   }));
   passport.serializeUser((user, done) => done(null, user));

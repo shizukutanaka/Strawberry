@@ -16,7 +16,7 @@ const { createMockAttestationVerifier } = require('../../../security/gpu-attesta
 const _attestationVerifier = createMockAttestationVerifier();
 // プロバイダ・レピュテーション記録（アテステーション結果の反映）
 const { createReputationService } = require('../../../reputation/reputation-service');
-const { sanitizeObject } = require('../../../utils/sanitize');
+const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
@@ -501,7 +501,12 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
     id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b,
     apiKey: _ak, available: _av, ...specFields  // available を除外 → クローンは常にオンライン
   } = source;
-  const targetName = String(req.body.name || req.query.name || `${source.name} (copy)`).slice(0, 128);
+  // Sanitize and type-check: req.query.name may be an array (HTTP param pollution
+  // via ?name[]=foo&name[]=<xss>). Only accept string values; sanitize against XSS.
+  const rawName = (typeof req.body.name === 'string' ? req.body.name : null)
+    || (typeof req.query.name === 'string' ? req.query.name : null)
+    || `${source.name} (copy)`;
+  const targetName = sanitizeString(rawName).slice(0, 128);
   // 重複スペック禁止: 単体 register / PUT は (name, model, vendor, memoryGB, providerId) で
   // 一意性を強制している。clone はこれを skip していたためマーケット重複・検索順位操作・
   // 分析データ汚染を起こせた。

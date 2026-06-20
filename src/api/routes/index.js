@@ -57,7 +57,11 @@ router.use(rateLimit);
 // 必ず除外する。これらを保護下に置くと「トークンを得るためにトークンが要る」という
 // 鶏卵問題でログイン/登録が一切不可能になる（実際にそうなっていた既存バグ）。
 const PUBLIC_PATHS = new Set([
-  '/system/info',      // 後続で rbac('admin') により保護
+  // '/system/info' を除外: admin 専用エンドポイントを PUBLIC_PATHS に含めると
+  // グローバル jwtAuth がスキップされ、ルート内の inline jwtAuth が唯一の防衛線になる。
+  // その inline jwtAuth が将来削除された瞬間に完全認証バイパスとなる構造的罠。
+  // rbac('admin') が !req.user で 401 を返すため現時点は突破されないが、
+  // 「認証不要パス」に admin エンドポイントを置くこと自体が設計上の誤り。
   '/users/register',   // 新規登録（公開）
   '/users/login',      // ログイン（公開, トークン発行元）
   '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
@@ -238,7 +242,9 @@ router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (
 }));
 
 // システム情報取得（adminのみ許可）
-router.get('/system/info', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+// /system/info は PUBLIC_PATHS から除外されたため、グローバル jwtAuth が先に動作する。
+// 冗長な inline jwtAuth は不要。
+router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
   // システム情報を取得
   const systemInfo = {
     platform: process.platform,

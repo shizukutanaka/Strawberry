@@ -6,6 +6,12 @@ const { atomicWriteString } = require('../db/json/atomicWrite');
 
 const DEFAULT_LOG_PATH = path.join(__dirname, '../../logs/audit.log');
 
+// ディスク枯渇防止: ログファイルがこのサイズを超えたら新規エントリを拒否し警告を出す。
+// 認証済みユーザーが監査対象アクション（異常検知・webhook 失敗等）を連打することで
+// ディスクをフルにし、audit.log のサイレント失敗と引き換えにサービス全体を落とせる。
+const MAX_AUDIT_LOG_BYTES = (process.env.MAX_AUDIT_LOG_MB
+  ? parseInt(process.env.MAX_AUDIT_LOG_MB, 10) : 50) * 1024 * 1024;
+
 // ログ/ハッシュのパスは呼び出し時に解決する。AUDIT_LOG_PATH を設定すると差し替え可能で、
 // テストが各自の隔離ファイルを使えるため、並列実行時に共有 audit.log を汚染し合って
 // ハッシュチェーン検証が壊れる問題を避けられる。ハッシュは既定でログの隣に .hash で置く。
@@ -82,14 +88,27 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     // prevHash: 起動時に1回だけディスクから読み込み、以降はキャッシュを使う（O(1)）。
     const prevHash = _getOrInitPrevHash(logPath, hashPath);
     const hash = crypto.createHash('sha256').update(prevHash + entryStr).digest('hex');
+    // ディスク枯渇防止: ファイルサイズが上限を超えていたら書き込みをスキップして警告。
+    // ENOSPC で例外が飛んでもサイレントに飲み込むと監査証跡がダークになるため、
+    // 上限手前で先んじてアラートを出し、運用者が対処できるようにする。
+    try {
+      const stat = fs.statSync(logPath);
+      if (stat.size >= MAX_AUDIT_LOG_BYTES) {
+        // eslint-disable-next-line no-console
+        console.error(`[audit-log] ALERT: audit log has reached size limit (${Math.round(stat.size / 1024 / 1024)}MB >= ${MAX_AUDIT_LOG_BYTES / 1024 / 1024}MB). Entry dropped: ${action}`);
+        return;
+      }
+    } catch (_statErr) { /* file may not exist yet — that's fine */ }
     fs.appendFileSync(logPath, entryStr + '\n');
     atomicWriteString(hashPath, hash);
     // キャッシュ更新: 次回呼び出しのための prevHash
     _hashCache.set(logPath, { prevHash: hash });
   } catch (e) {
-    // 監査ログ書き込み失敗はサイレントに記録し、呼び出し元をクラッシュさせない
+    // 監査ログ書き込み失敗はサイレントに記録し、呼び出し元をクラッシュさせない。
+    // ENOSPC（ディスクフル）の場合は特に目立つメッセージで警告。
+    const isEnospc = e && (e.code === 'ENOSPC' || (e.message && e.message.includes('ENOSPC')));
     // eslint-disable-next-line no-console
-    console.error('[audit-log] Failed to write audit entry:', action, e && e.message);
+    console.error(`[audit-log] ${isEnospc ? 'CRITICAL DISK FULL — ' : ''}Failed to write audit entry: ${action}`, e && e.message);
   }
 }
 

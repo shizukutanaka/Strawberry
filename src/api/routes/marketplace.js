@@ -141,26 +141,31 @@ router.post('/escrow/:id/verify', adminOnly, async (req, res) => {
 });
 
 // 係争の解決（settle / refund）
-router.post('/escrow/:id/resolve', adminOnly, (req, res) => {
+// withLock で同一エスクローへの並行呼び出しによる二重 reputation slash を防ぐ（/verify と同様）
+router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
   const { decision, providerId } = req.body || {};
   if (decision !== 'settle' && decision !== 'refund') {
     return res.status(400).json({ error: "decision must be 'settle' or 'refund'" });
   }
   try {
-    // providerId が渡された場合、エスクローの注文に記録された実際のプロバイダと一致するか検証する。
-    // 不一致を許すと admin が任意の providerId を指定して無関係プロバイダの reputation を slash できてしまう。
-    if (providerId) {
-      const escrow = marketplace.getEscrow(req.params.id);
-      if (!escrow) return res.status(404).json({ error: 'escrow not found' });
-      const OrderRepository = require('../../db/json/OrderRepository');
-      const order = OrderRepository.getById(escrow.orderId);
-      if (order && order.providerId && order.providerId !== providerId) {
-        return res.status(400).json({ error: 'providerId does not match the escrow order provider' });
+    const result = await withLock(`escrow:${req.params.id}:resolve`, async () => {
+      // providerId が渡された場合、エスクローの注文に記録された実際のプロバイダと一致するか検証する。
+      // 不一致を許すと admin が任意の providerId を指定して無関係プロバイダの reputation を slash できてしまう。
+      if (providerId) {
+        const escrow = marketplace.getEscrow(req.params.id);
+        if (!escrow) throw Object.assign(new Error('escrow not found'), { status: 404 });
+        const OrderRepository = require('../../db/json/OrderRepository');
+        const order = OrderRepository.getById(escrow.orderId);
+        if (order && order.providerId && order.providerId !== providerId) {
+          throw Object.assign(new Error('providerId does not match the escrow order provider'), { status: 400 });
+        }
       }
-    }
-    return res.json(marketplace.resolveDispute(req.params.id, decision, providerId || null));
+      return marketplace.resolveDispute(req.params.id, decision, providerId || null);
+    });
+    return res.json(result);
   } catch (e) {
-    return res.status(500).json({ error: internalError(e) });
+    const status = e.status || 500;
+    return res.status(status).json({ error: status < 500 ? e.message : internalError(e) });
   }
 });
 

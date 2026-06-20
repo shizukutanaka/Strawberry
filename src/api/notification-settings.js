@@ -50,13 +50,15 @@ const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)
 const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
 
 function loadSettings() {
-  try {
-    return require('fs').existsSync(SETTINGS_PATH)
-      ? JSON.parse(require('fs').readFileSync(SETTINGS_PATH, 'utf-8'))
-      : {};
-  } catch (_) {
-    return {};
+  if (!require('fs').existsSync(SETTINGS_PATH)) return {};
+  const raw = require('fs').readFileSync(SETTINGS_PATH, 'utf-8');
+  // JSON.parse を素通りさせる: parse 失敗は throw し呼び出し元で 500 にする。
+  // 旧実装の catch→{} では POST が即座に上書きして全ユーザーの設定を消去していた。
+  const parsed = JSON.parse(raw);
+  if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+    throw new Error('[notification-settings] settings file is corrupt: expected a JSON object');
   }
+  return parsed;
 }
 
 // 全エンドポイントに JWT 認証を要求

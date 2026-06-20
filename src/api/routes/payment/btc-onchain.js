@@ -5,6 +5,7 @@ const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC, getOperatorWal
 const { appendAuditLog } = require('../../../utils/audit-log');
 const { logger } = require('../../../utils/logger');
 const { withLock } = require('../../../utils/async-lock');
+const { authenticateJWT } = require('../../middleware/security');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 
 /**
@@ -18,7 +19,7 @@ const PaymentRepository = require('../../../db/json/PaymentRepository');
  * これにより tx2 の一時障害で資金が運営に滞留した場合、呼び出し元が同じリクエストを
  * 再送するだけで自動回復できる（手動照合不要）。
  */
-router.post('/', async (req, res) => {
+router.post('/', authenticateJWT, async (req, res) => {
   try {
     const { orderId, borrowerWallet } = req.body;
     // Note: bodyLenderWallet is intentionally NOT destructured. The provider's

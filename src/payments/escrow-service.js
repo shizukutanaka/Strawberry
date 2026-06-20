@@ -139,7 +139,7 @@ function createEscrowService({ repository } = {}) {
       // (e.g., /verify racing /resolve after the lock key unification) already wrote.
       // The predicate re-checks the current state to ensure we still own the write.
       const writeResult = repo.updateIf
-        ? repo.updateIf(escrow.id, (e) => !['SETTLED', 'CANCELED'].includes(e.state) || !e.settlement, {
+        ? repo.updateIf(escrow.id, (e) => !['SETTLED', 'CANCELED'].includes(e.state) && !e.settlement, {
             settlement,
             updatedAt: now,
             history: [

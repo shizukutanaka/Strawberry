@@ -228,10 +228,15 @@ router.get('/',
       orders = orders.slice(offset, offset + limit);
       // リアルタイムBTC/JPY換算（レートは一覧全体で1回だけ取得して使い回す）
       const rateInfo = await fetchRateInfo();
-      const ordersWithPricing = orders.map(order => ({
-        ...order,
-        ...computeOrderPricing(order, rateInfo)
-      }));
+      const ordersWithPricing = orders.map(order => {
+        const o = { ...order, ...computeOrderPricing(order, rateInfo) };
+        // Strip reviewerId from review sub-objects: it is the reviewer's internal UUID.
+        // Exposing it to the counterparty breaks reviewer anonymity — they can cross-reference
+        // with GET /users/:id/renter-profile to identify who left a specific review.
+        if (o.review) o.review = { ...o.review, reviewerId: undefined };
+        if (o.renterReview) o.renterReview = { ...o.renterReview, reviewerId: undefined };
+        return o;
+      });
       res.json({
         message: 'Fetched orders',
         total,

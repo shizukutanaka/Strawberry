@@ -92,18 +92,17 @@ router.post('/register',
     });
     if (registerConflict === 'email') return res.status(409).json({ error: 'Email already registered' });
     if (registerConflict === 'username') return res.status(409).json({ error: 'Username already taken' });
-    // レスポンス用にパスワードを削除
-    const userResponse = { ...newUser };
-    delete userResponse.password;
     // ユーザー登録をログに記録（既存バグ: 未定義の userId を参照し登録毎にクラッシュしていた）
     logger.info(`User registered: ${newUser.id}`, {
       userId: newUser.id,
       username,
       role: newUser.role
     });
+    // Use sanitizeUser() to strip password, apiKey, jti, and any other secret fields.
+    // The previous manual `delete password` left apiKey in the response body.
     res.status(201).json({
       message: 'User registered successfully',
-      user: userResponse
+      user: sanitizeUser(newUser)
     });
   })
 );

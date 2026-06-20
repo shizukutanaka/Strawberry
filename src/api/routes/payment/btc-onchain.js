@@ -41,13 +41,14 @@ router.post('/', authenticateJWT, async (req, res) => {
     if (!req.user || (req.user.role !== 'admin' && order.userId !== req.user.id)) {
       return res.status(403).json({ message: 'You do not have permission to pay for this order' });
     }
-    // 注文状態ゲート: cancelled / completed / disputed 注文への二次支払いを拒否。
-    // 旧実装は status を一切見なかったため、renter が
-    //   POST /orders → DELETE /orders/:id → POST /payment/btc
-    // の経路で「キャンセル済み注文の運営宛振替＋プロバイダへの自動 payout」を起こせた
-    // （運営/プロバイダの口座を介した資金移送 + 借り手の元金喪失）。
-    // pending/matched/active のみ許可。
-    const ALLOWED_BTC_PAYMENT_STATUSES = new Set(['pending', 'matched', 'active']);
+    // 注文状態ゲート: cancelled / completed / disputed / active 注文への支払いを拒否。
+    // active を含めない理由: active な注文はすでに /start が完了しており、/start は
+    // hasPaidPayment を確認するため active になった時点で支払いは完了しているはずである。
+    // active 注文に対して再度 POST /payment/btc を許可すると、Lightning で支払い済みの
+    // 注文に btc_onchain エスクローが新たに作成されて二重課金になる可能性がある。
+    // TX1失敗後の再試行（idempotent resume）は HELD エスクローで保護されており、
+    // active ゲート除去後も HELD → SETTLED の resume は pending/matched 状態のうちに完了する。
+    const ALLOWED_BTC_PAYMENT_STATUSES = new Set(['pending', 'matched']);
     if (!ALLOWED_BTC_PAYMENT_STATUSES.has(order.status)) {
       return res.status(409).json({
         message: `Cannot pay for order in '${order.status}' state via BTC on-chain`,

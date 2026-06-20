@@ -441,6 +441,20 @@ router.post('/manual/approve/:id',
     if (payment.method === 'lightning') {
       throw new APIError(ErrorTypes.VALIDATION, 'Lightning payments cannot be manually approved', 400);
     }
+    // Guard: approving a payment on a cancelled/completed order creates an orphaned
+    // paid record that can confuse reconciliation and future hasPaidPayment checks.
+    // Only approve if the associated order is in a payable state.
+    if (payment.orderId) {
+      const OrderRepository = require('../../../db/json/OrderRepository');
+      const order = OrderRepository.getById(payment.orderId);
+      if (order && !['pending', 'matched'].includes(order.status)) {
+        throw new APIError(
+          ErrorTypes.VALIDATION,
+          `Cannot approve payment: associated order is in '${order.status}' state (only pending/matched orders accept payment approval)`,
+          409
+        );
+      }
+    }
     // Atomic compare-and-swap: check status and write in one synchronous section to
     // prevent two concurrent admin approvals from both seeing status!=='paid' and
     // double-approving the same payment.

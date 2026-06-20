@@ -589,6 +589,9 @@ router.get('/me/activity',
     if (!typeFilter || typeFilter === 'review_received') {
       for (const order of allOrders) {
         // 借り手として受けたレビュー（提供者→借り手）
+        // reviewedBy は Probe 33 fix の bypassを防ぐため除去:
+        // order.providerId をここで返すとレビュー投稿者の UUID が露出し、
+        // /orders 一覧側で reviewerId を剥がした効果が失われる。
         if (order.userId === userId && order.renterReview) {
           events.push({
             type: 'review_received',
@@ -596,7 +599,6 @@ router.get('/me/activity',
             orderId: order.id,
             rating: order.renterReview.rating,
             comment: order.renterReview.comment || null,
-            reviewedBy: order.providerId || null,
           });
         }
         // 提供者として受けたレビュー（借り手→提供者）
@@ -607,7 +609,6 @@ router.get('/me/activity',
             orderId: order.id,
             rating: order.review.rating,
             comment: order.review.comment || null,
-            reviewedBy: order.userId || null,
           });
         }
       }
@@ -774,7 +775,10 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
   const recentReviews = renterOrders
     .sort((a, b) => (b.renterReview.reviewedAt || '').localeCompare(a.renterReview.reviewedAt || ''))
     .slice(0, 5)
-    .map(o => ({ orderId: o.id, rating: o.renterReview.rating, comment: o.renterReview.comment || null, reviewedAt: o.renterReview.reviewedAt }));
+    // orderId is omitted: returning the order ID on an unauthenticated endpoint
+    // lets any caller enumerate a renter's full order history and correlate with
+    // GPU IDs, exposing rental patterns without any authentication.
+    .map(o => ({ rating: o.renterReview.rating, comment: o.renterReview.comment || null, reviewedAt: o.renterReview.reviewedAt }));
 
   const completedOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.status === 'completed').length;
 

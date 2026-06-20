@@ -1,6 +1,6 @@
 // tests/payments/escrow-state-machine.test.js
 const {
-  STATES, isTerminal, initial, transition, decideSettlement, applyDecision,
+  STATES, isTerminal, initial, transition, tryTransition, decideSettlement, applyDecision,
 } = require('../../src/payments/escrow-state-machine');
 
 describe('escrow-state-machine: transitions', () => {
@@ -57,6 +57,27 @@ describe('escrow-state-machine: transitions', () => {
     a.actions.push('mutated');
     const b = transition(STATES.PENDING, 'PAY');
     expect(b.actions).not.toContain('mutated');
+  });
+
+  it('DISPUTED has a DEADLINE exit (refund the renter) so it cannot deadlock', () => {
+    const t = transition(STATES.DISPUTED, 'DEADLINE');
+    expect(t.state).toBe(STATES.CANCELED);
+    expect(t.actions).toContain('refund_renter');
+  });
+});
+
+describe('escrow-state-machine: tryTransition (non-throwing)', () => {
+  it('returns ok:true with state/actions for a legal transition', () => {
+    const r = tryTransition(STATES.HELD, 'DELIVER_OK');
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe(STATES.SETTLED);
+    expect(Array.isArray(r.actions)).toBe(true);
+  });
+
+  it('returns ok:false instead of throwing on illegal/unknown', () => {
+    expect(tryTransition(STATES.PENDING, 'DELIVER_OK')).toEqual({ ok: false, reason: 'invalid_transition' });
+    expect(tryTransition(STATES.SETTLED, 'PAY')).toEqual({ ok: false, reason: 'terminal_state' });
+    expect(tryTransition('NOPE', 'PAY')).toEqual({ ok: false, reason: 'unknown_state' });
   });
 });
 

@@ -36,11 +36,30 @@ const TRANSITIONS = {
   [STATES.DISPUTED]: {
     RESOLVE_SETTLE: { to: STATES.SETTLED, actions: ['reveal_preimage', 'payout_provider', 'collect_fee'] },
     RESOLVE_REFUND: { to: STATES.CANCELED, actions: ['cancel_invoice', 'refund_renter', 'slash_provider'] },
+    // 管理者・自動裁定が一定期間到来しなかった場合の安全出口。これが無いと DISPUTED は
+    // FSM レベルで永久にロックされ、order-expiry 側が escrow を生 update する迂回
+    // （状態desync の温床）を強いられていた。既定は借り手保護で返金側へ倒す。
+    DEADLINE: { to: STATES.CANCELED, actions: ['cancel_invoice', 'refund_renter', 'slash_provider'] },
   },
 };
 
 function isTerminal(state) {
   return TERMINAL.has(state);
+}
+
+/**
+ * 非 throw 版の遷移計算。許可されない遷移・未知状態では例外を投げず
+ * { ok: false, reason } を返す。try/catch で包まれていない呼び出し側が
+ * 想定外イベント 1 つで決済フロー全体をクラッシュさせないためのガード版。
+ * @returns {{ok:true, state:string, actions:string[]} | {ok:false, reason:string}}
+ */
+function tryTransition(state, event) {
+  if (!TRANSITIONS[state]) {
+    return { ok: false, reason: isTerminal(state) ? 'terminal_state' : 'unknown_state' };
+  }
+  const t = TRANSITIONS[state][event];
+  if (!t) return { ok: false, reason: 'invalid_transition' };
+  return { ok: true, state: t.to, actions: [...t.actions] };
 }
 
 function initial() {
@@ -101,4 +120,4 @@ function applyDecision(state, ctx = {}) {
   return { ...next, event };
 }
 
-module.exports = { STATES, isTerminal, initial, transition, decideSettlement, applyDecision };
+module.exports = { STATES, isTerminal, initial, transition, tryTransition, decideSettlement, applyDecision };

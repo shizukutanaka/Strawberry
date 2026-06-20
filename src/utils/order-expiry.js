@@ -150,12 +150,28 @@ function expireStaleDisputedOrders() {
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', updates);
     if (!result.ok) continue; // 既に他経路で解決済み（冪等）
 
-    // エスクロー精算（状態確定後にのみ実行。失敗してもログのみ）
+    // エスクロー精算（状態確定後にのみ実行。失敗してもログのみ）。
+    // 重要: 旧実装は decision を問わず一律 state='SETTLED'（=プロバイダへ払い出し）に
+    // 生 update していた。refund 決定（借り手返金）なのに資金フローが逆転し、かつ
+    // 状態機械の CAS を迂回して CANCELED 等を踏み潰す危険があった。
+    // 必ず FSM 経由で遷移させる: HELD からの正規イベントは
+    //   refund → CANCEL（cancel_invoice + refund_renter → CANCELED）
+    //   uphold → DELIVER_OK（reveal_preimage + payout_provider → SETTLED）。
     try {
       const EscrowRepository = require('../db/json/EscrowRepository');
+      const { createEscrowService } = require('../payments/escrow-service');
+      const escrowSvc = createEscrowService();
       const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
       for (const esc of escrows) {
-        EscrowRepository.update(esc.id, { state: 'SETTLED', settledAt: resolution.resolvedAt });
+        try {
+          if (decision === 'refund') {
+            escrowSvc.cancel(esc.id);            // HELD → CANCELED（借り手へ返金）
+          } else {
+            escrowSvc.apply(esc.id, 'DELIVER_OK'); // HELD → SETTLED（プロバイダへ払い出し）
+          }
+        } catch (inner) {
+          logger.warn(`Auto-dispute escrow transition failed (escrow=${esc.id}, decision=${decision}): ${inner.message}`);
+        }
       }
     } catch (e) {
       logger.warn(`Auto-dispute escrow settle failed (order=${order.id}, decision=${decision}): ${e.message}`);

@@ -810,7 +810,20 @@ strawberry-gpu-proxy --port ${accessPort} --vgpu ${safeVgpuId}
     }
 
     async releaseNativeAccess(vgpu, allocation) {
-        // プロキシプロセス終了
+        // プロキシプロセス終了。setupNativeAccess で記録した allocation.proxyPid を
+        // 第一手段とする。pkill -f パターンは「同一 vgpuId の別割当を巻き込む / 再 exec で
+        // cmdline が変わり取り逃す」リスクがあり、孤児プロキシとバインドポートをリークさせる。
+        const pid = allocation && allocation.proxyPid;
+        if (pid) {
+            try {
+                process.kill(pid, 'SIGTERM');
+                return;
+            } catch (error) {
+                // 既に終了済み(ESRCH)なら成功扱い。それ以外は pkill にフォールバック。
+                if (error && error.code === 'ESRCH') return;
+                logger.debug(`process.kill(${pid}) failed, falling back to pkill:`, error);
+            }
+        }
         try {
             await exec(`pkill -f "strawberry-gpu-proxy.*${sanitizeId(vgpu.id)}"`);
         } catch (error) {

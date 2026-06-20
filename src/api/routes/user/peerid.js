@@ -49,8 +49,10 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 // [GET] /api/v1/users/peerid/admin/all - 管理者のみ全ユーザーのピアID一覧取得
+// email は返さない: P2P identity (peerId) とメールアドレスを紐付けると全ユーザーの匿名性を
+// 一括で破壊できる（管理者も最小権限原則に従い必要以上の PII を取得しない）。
 router.get('/admin/all', checkRole(['admin']), asyncHandler(async (req, res) => {
-  const all = UserRepository.getAll().map(u => ({ id: u.id, email: u.email, peerId: u.peerId || null, role: u.role }));
+  const all = UserRepository.getAll().map(u => ({ id: u.id, peerId: u.peerId || null, role: u.role }));
   res.json({ users: all });
 }));
 

@@ -114,7 +114,7 @@ describe('notification-settings: loadSettings() fail-closed on corrupt JSON', ()
     fs.writeFileSync(SETTINGS_PATH, '{INVALID JSON!!!', 'utf-8');
 
     const res = await asAdmin(request(app).post(`/api/v1/notification-settings/${adminId}`))
-      .send({ lineToken: 'test-token' });
+      .send({ lineToken: 'A'.repeat(40) }); // valid-format 40-char token so Joi passes
     expect(res.statusCode).toBe(500);
 
     // Settings file should NOT have been overwritten with just this user's data
@@ -132,7 +132,7 @@ describe('notification-settings: loadSettings() fail-closed on corrupt JSON', ()
     fs.writeFileSync(SETTINGS_PATH, '["corrupted","array"]', 'utf-8');
 
     const res = await asAdmin(request(app).post(`/api/v1/notification-settings/${adminId}`))
-      .send({ lineToken: 'another-token' });
+      .send({ lineToken: 'B'.repeat(40) }); // valid-format 40-char token so Joi passes
     expect(res.statusCode).toBe(500);
   });
 

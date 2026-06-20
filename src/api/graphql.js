@@ -156,9 +156,12 @@ async function setupGraphQL(app) {
     typeDefs,
     resolvers,
     validationRules: [depthAndSelectionLimitRule],
-    // Disable introspection in production to avoid leaking the full API schema
-    // to unauthenticated callers (attackers, crawlers).
-    introspection: process.env.NODE_ENV !== 'production',
+    // 明示的なオプトインのみでイントロスペクションを有効化。
+    // NODE_ENV !== 'production' という条件は NODE_ENV 未設定（undefined）の場合も
+    // true となり、設定漏れの本番環境でスキーマが露出するリスクがあった。
+    // GRAPHQL_INTROSPECTION=true を設定した環境のみで有効化することで
+    // オプトアウト方式（デフォルト公開）をオプトイン方式（デフォルト非公開）に変更する。
+    introspection: process.env.GRAPHQL_INTROSPECTION === 'true',
     context: ({ req }) => {
       const auth = req.headers.authorization || '';
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;

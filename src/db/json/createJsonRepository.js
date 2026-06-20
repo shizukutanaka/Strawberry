@@ -16,6 +16,18 @@ const { v4: uuidv4 } = require('uuid');
 const { atomicWriteJSON } = require('./atomicWrite');
 
 function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
+  // fileName はリテラル文字列のみを期待する（呼び出し側は全てコード内定数）。
+  // path.resolve の仕様上 fileName が絶対パスであれば data/ プレフィックスを無効化できる
+  // ため、将来の開発者が誤って変数を渡した場合のパストラバーサルを事前に排除する。
+  if (
+    typeof fileName !== 'string' ||
+    fileName.includes('/') ||
+    fileName.includes('\\') ||
+    fileName.includes('\0') ||
+    !fileName.endsWith('.json')
+  ) {
+    throw new Error(`[json-repo] invalid fileName: "${fileName}". Must be a plain .json filename without path separators.`);
+  }
   const filePath = path.resolve(__dirname, '../../../data', fileName);
 
   const audit = (action, detail) => {

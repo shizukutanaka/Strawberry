@@ -468,6 +468,7 @@ const SETTINGS_SCHEMA = {
 
 // ユーザー設定更新 (認証必須)
 router.put('/me/settings',
+  authLimiter,
   authenticateJWT,
   asyncHandler(async (req, res) => {
     if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {

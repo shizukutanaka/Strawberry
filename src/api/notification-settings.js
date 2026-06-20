@@ -93,7 +93,10 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
     throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
   }
   const schema = Joi.object({
-    lineToken: Joi.string().allow('').optional(),
+    // LINE Notify トークンは英数字・アンダースコア・ハイフンのみの固定長文字列。
+    // 制約がないと CRLF シーケンス(\r\n)を含む値を Bearer ヘッダに注入でき、
+    // 送信先 api.line.me へのリクエストにヘッダを追加するリスクがある。
+    lineToken: Joi.string().allow('').pattern(/^[A-Za-z0-9_-]{30,60}$/).max(60).optional(),
     discordWebhook: safeWebhookUrl.allow('').optional(),
     slackWebhook: safeWebhookUrl.allow('').optional(),
     // Telegram bot token は notifier 側で `https://api.telegram.org/bot${token}/sendMessage`

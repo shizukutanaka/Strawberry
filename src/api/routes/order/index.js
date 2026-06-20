@@ -529,12 +529,19 @@ router.put('/:id',
           400);
       }
     }
-    // フィールドフィルタ: 非管理者は description/notes のみ変更可能。
-    // これがないと借り手が { totalPrice: 1, pricePerHour: 0.001 } を PUT して
-    // 合意済み金額を事後改竄できてしまう（管理者は status 含む全フィールドを操作可）。
+    // フィールドフィルタ: 明示的な許可リストのみ更新可能。
+    // sanitizeObject は req.body の全キーをコピーする（文字列値のみサニタイズ）ため、
+    // 許可リストなしで admin が sanitized をそのまま update() に渡すと
+    // { totalPrice: 1, providerId: 'other', userId: 'victim' } 等の任意フィールドを
+    // DB に書き込む mass-assignment 脆弱性になる。
+    // 一般ユーザー: description/notes のみ。
+    // 管理者: description/notes + status（status は上の isValidOrderTransition ゲート済み）。
+    // 金融フィールド(totalPrice, pricePerHour)・所有権フィールド(userId, providerId, gpuId)は
+    // いずれも変更不可（専用エンドポイントが担う）。
     const MUTABLE_BY_OWNER = new Set(['description', 'notes']);
+    const MUTABLE_BY_ADMIN = new Set(['description', 'notes', 'status']);
     const updateData = req.user.role === 'admin'
-      ? sanitized
+      ? Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_ADMIN.has(k)))
       : Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_OWNER.has(k)));
     // オーダーを更新（update() は内部で merge するため delta のみ渡す。
     // 旧コードの { ...order, ...sanitized } は getById〜update 間の並行書き込みを上書きする

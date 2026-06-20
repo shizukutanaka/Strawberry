@@ -17,7 +17,8 @@
  * @returns {boolean}
  */
 function isSessionInvalidated(user, iat) {
-  if (!user || typeof iat !== 'number') return false;
+  if (!user) return false;
+  if (!Number.isFinite(iat)) return true; // NaN/Infinity iat is suspicious — reject
   for (const field of ['passwordChangedAt', 'sessionsRevokedAt']) {
     const ts = user[field];
     if (!ts) continue;

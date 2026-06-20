@@ -48,7 +48,12 @@ function revoke(jti, expiryMs) {
   if (!jti) return;
   const map = load();
   prune(map);
-  map.set(jti, Number.isFinite(expiryMs) ? expiryMs : Date.now() + 24 * 60 * 60 * 1000);
+  // Guard: if expiryMs is 0/past/NaN/null, use a 24h fallback so the entry
+  // isn't pruned immediately (exp=0 bypass prevention).
+  const safeExpiry = (Number.isFinite(expiryMs) && expiryMs > Date.now())
+    ? expiryMs
+    : Date.now() + 24 * 60 * 60 * 1000;
+  map.set(jti, safeExpiry);
   persist(map);
 }
 

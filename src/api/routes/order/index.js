@@ -610,12 +610,26 @@ router.delete('/:id',
     } catch (e) {
       logger.warn(`Escrow lookup on order delete failed (order=${order.id}): ${e.message}`);
     }
-    // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）
-    OrderRepository.update(order.id, {
-      status: 'cancelled',
-      cancelReason: 'user_cancelled',
-      cancelledAt: new Date().toISOString(),
-    });
+    // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。
+    // updateIf で CAS を使う: 並行する /accept が pending→matched へ遷移させた後に
+    // DELETE の status=pending 確認（req.resource は snapshot）が通過し、
+    // 盲目的な update() が matched を上書きキャンセルするのを防ぐ。
+    const cancelResult = OrderRepository.updateIf(
+      order.id,
+      (o) => ['pending', 'matched'].includes(o.status),
+      {
+        status: 'cancelled',
+        cancelReason: 'user_cancelled',
+        cancelledAt: new Date().toISOString(),
+      }
+    );
+    if (!cancelResult.ok) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `Order status changed concurrently (now '${cancelResult.current?.status}'). Only pending or matched orders can be cancelled.`,
+        409
+      );
+    }
     // プロバイダへキャンセル通知（予約した GPU が開放されたことを即時連絡）
     if (order.providerId) {
       try {
@@ -708,8 +722,17 @@ router.post('/',
       throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
     }
 
+    // 為替レートを先にフェッチ（キャッシュ活用）。以下の全チェックと create() は
+    // 同期的に実行される（await なし）ため、この await の後に事前予約/二重予約の
+    // TOCTOU レースウィンドウが生じない。
+    // 旧実装: fetchRateInfo を洪水チェックと二重予約チェックの「間」に置いていた。
+    // これにより Node.js イベントループが yield し、並行リクエストが洪水チェックを通過した
+    // 後・二重予約チェック前に create() を実行できた（GPU 二重予約）。
+    // 修正: fetchRateInfo を全チェックより前に移動。洪水上限超過時は若干余分なキャッシュ
+    // 参照が発生するが、fetchRateInfo はほぼ常にキャッシュヒットするため許容範囲。
+    const { rate: satoshiToJPY } = await fetchRateInfo();
+
     // 洪水防止: 2 段階チェック（単一 getAll() で両チェックを完結させ余分な I/O を避ける）。
-    // fetchRateInfo より先にチェックし、上限超過の場合は高コストなネットワーク I/O を回避。
     const MAX_GLOBAL_PENDING_PER_USER = Number(process.env.MAX_PENDING_ORDERS_PER_USER) || 50;
     const MAX_PENDING_ORDERS_PER_USER_GPU = 5;
     const userBlockingOrders = OrderRepository.getAll().filter(
@@ -731,15 +754,11 @@ router.post('/',
       );
     }
 
-    // 冗長化為替APIで換算（キャッシュ活用）— await を競合チェックの前に移動して
-    // チェック→作成の間にイベントループの yield が発生しないようにし、二重予約レースを防ぐ。
-    const { rate: satoshiToJPY } = await fetchRateInfo();
-
     // 二重予約チェック: 期限切れ pending を先に失効させ、時間帯の重複を確認する。
     // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
     // 指定がない場合は即時予約として全 BLOCKING 注文と重複とみなす。
-    // 重要: このチェックから OrderRepository.create() までの間に await を置かないこと。
-    // Node.js のシングルスレッドモデルにより、同期処理は割り込みなしに実行される。
+    // このブロックは同期的（await なし）— fetchRateInfo() が上で済んでいるため
+    // ここから OrderRepository.create() までイベントループの yield は発生しない。
     expireStaleOrders();
     expireStaleMatchedOrders();
     // Reject scheduledStartAt more than 5 minutes in the past (allows clock-drift
@@ -1023,59 +1042,63 @@ router.post('/:id/dispute',
     // プロバイダ評判が成功「率」(Bayesian)で測られるのと対称に、申請者も棄却「率」で測る。
     // 正当な係争(vindicated)を起こせば率が下がり回復できる＝単調な永久ペナルティにしない。
     // ゲート発火条件: 解決済み係争が最小サンプル以上 かつ 棄却率が閾値以上（管理者は対象外）。
-    if (req.user.role !== 'admin') {
-      const MIN_RESOLVED = Number(process.env.MIN_RESOLVED_DISPUTES) || 3;
-      const MAX_DENIED_RATE = Number(process.env.MAX_DENIED_DISPUTE_RATE) || 0.67;
-      const UserRepository = require('../../../db/json/UserRepository');
-      const me = UserRepository.getById(req.user.id);
-      const denied = (me && me.deniedDisputeCount) || 0;
-      const vindicated = (me && me.vindicatedDisputeCount) || 0;
-      const resolved = denied + vindicated;
-      if (resolved >= MIN_RESOLVED && denied / resolved >= MAX_DENIED_RATE) {
-        throw new APIError(ErrorTypes.FORBIDDEN,
-          `Too high a share of your disputes have been denied (${denied}/${resolved}); raise legitimate disputes or contact support`, 403);
+    // 未解決係争カウント + updateIf をユーザー単位の mutex でシリアライズ。
+    // 並行リクエストが全て count=0 を読んで上限を迂回するのを防ぐ。
+    return withLock(`user:${req.user.id}:dispute-raise`, async () => {
+      if (req.user.role !== 'admin') {
+        const MIN_RESOLVED = Number(process.env.MIN_RESOLVED_DISPUTES) || 3;
+        const MAX_DENIED_RATE = Number(process.env.MAX_DENIED_DISPUTE_RATE) || 0.67;
+        const UserRepository = require('../../../db/json/UserRepository');
+        const me = UserRepository.getById(req.user.id);
+        const denied = (me && me.deniedDisputeCount) || 0;
+        const vindicated = (me && me.vindicatedDisputeCount) || 0;
+        const resolved = denied + vindicated;
+        if (resolved >= MIN_RESOLVED && denied / resolved >= MAX_DENIED_RATE) {
+          throw new APIError(ErrorTypes.FORBIDDEN,
+            `Too high a share of your disputes have been denied (${denied}/${resolved}); raise legitimate disputes or contact support`, 403);
+        }
+        // 未解決係争の絶対数上限: 解決歴がないアカウントでも複数の未解決係争でプロバイダを
+        // DoS できるため（1件/注文の制限はあるが多数の注文で迂回可能）。
+        const MAX_OPEN_DISPUTES = Number(process.env.MAX_OPEN_DISPUTES_PER_USER) || 3;
+        const openDisputes = OrderRepository.getAll().filter(
+          (o) => o.dispute && o.dispute.raisedBy === req.user.id && o.status === 'disputed'
+        ).length;
+        if (openDisputes >= MAX_OPEN_DISPUTES) {
+          throw new APIError(ErrorTypes.CONFLICT,
+            `You already have ${MAX_OPEN_DISPUTES} open disputes. Wait for existing disputes to be resolved before raising new ones.`,
+            409
+          );
+        }
       }
-      // 未解決係争の絶対数上限: 解決歴がないアカウントでも複数の未解決係争でプロバイダを
-      // DoS できるため（1件/注文の制限はあるが多数の注文で迂回可能）。
-      const MAX_OPEN_DISPUTES = Number(process.env.MAX_OPEN_DISPUTES_PER_USER) || 3;
-      const openDisputes = OrderRepository.getAll().filter(
-        (o) => o.dispute && o.dispute.raisedBy === req.user.id && o.status === 'disputed'
-      ).length;
-      if (openDisputes >= MAX_OPEN_DISPUTES) {
-        throw new APIError(ErrorTypes.CONFLICT,
-          `You already have ${MAX_OPEN_DISPUTES} open disputes. Wait for existing disputes to be resolved before raising new ones.`,
-          409
-        );
+      const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 1000) : '';
+      const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
+      // TOCTOU防止: 並行 dispute リクエストや stop との競合を防ぐ。
+      const disputeResult = OrderRepository.updateIf(
+        order.id,
+        (o) => ['active', 'matched'].includes(o.status) && !o.dispute,
+        { status: 'disputed', dispute }
+      );
+      if (!disputeResult.ok) {
+        throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before dispute could be raised; please retry', 409);
       }
-    }
-    const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 1000) : '';
-    const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
-    // TOCTOU防止: 並行 dispute リクエストや stop との競合を防ぐ。
-    const disputeResult = OrderRepository.updateIf(
-      order.id,
-      (o) => ['active', 'matched'].includes(o.status) && !o.dispute,
-      { status: 'disputed', dispute }
-    );
-    if (!disputeResult.ok) {
-      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before dispute could be raised; please retry', 409);
-    }
 
-    // 管理者・運営側へ通知（ユーザー通知設定経由）
-    const { notifyUser } = require('../../../utils/user-notify');
-    const gpu = GpuRepository.getById(order.gpuId);
-    const gpuName = gpu ? gpu.name : order.gpuId;
-    notifyUser(order.userId, 'order_dispute_raised',
-      `【Strawberry】注文 #${order.id} に係争が申請されました。\nGPU: ${gpuName}${reason ? `\n理由: ${reason}` : ''}`,
-      { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
-    if (order.providerId && order.providerId !== req.user.id) {
-      notifyUser(order.providerId, 'order_dispute_raised',
-        `【Strawberry】あなたの GPU 注文に係争が申請されました。\n注文: #${order.id}\nGPU: ${gpuName}`,
+      // 管理者・運営側へ通知（ユーザー通知設定経由）
+      const { notifyUser } = require('../../../utils/user-notify');
+      const gpu = GpuRepository.getById(order.gpuId);
+      const gpuName = gpu ? gpu.name : order.gpuId;
+      notifyUser(order.userId, 'order_dispute_raised',
+        `【Strawberry】注文 #${order.id} に係争が申請されました。\nGPU: ${gpuName}${reason ? `\n理由: ${reason}` : ''}`,
         { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
-    }
-    logger.info(`Dispute raised for order: ${order.id}`, { orderId: order.id, raisedBy: req.user.id });
-    invalidateUserCache(order.userId);
-    if (order.providerId) invalidateUserCache(order.providerId);
-    res.status(201).json({ message: 'Dispute raised', orderId: order.id, dispute });
+      if (order.providerId && order.providerId !== req.user.id) {
+        notifyUser(order.providerId, 'order_dispute_raised',
+          `【Strawberry】あなたの GPU 注文に係争が申請されました。\n注文: #${order.id}\nGPU: ${gpuName}`,
+          { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
+      }
+      logger.info(`Dispute raised for order: ${order.id}`, { orderId: order.id, raisedBy: req.user.id });
+      invalidateUserCache(order.userId);
+      if (order.providerId) invalidateUserCache(order.providerId);
+      res.status(201).json({ message: 'Dispute raised', orderId: order.id, dispute });
+    });
   })
 );
 
@@ -1095,7 +1118,11 @@ router.post('/:id/dispute/resolve',
     // 二重裁定の副作用（reputation slash + credit が両方走る、raiser counter の二重加算など）
     // を防ぐため、order 単位の mutex で全フローを直列化する。CAS だけだと CAS 前の副作用
     // （raiser の getById+update、reputation の getById+update）が並行に走り得る。
-    return withLock(`order:${orderId}:dispute-resolve`, async () => {
+    // ロックキーを `order:${orderId}` に統一: /start・/stop と同一 mutex を共有することで、
+    // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が escrow 精算を
+    // 並行実行し GPU が二重解放・二重精算されるリスクを排除する（旧: dispute-resolve
+    // キーが /start・/stop と別 namespace で完全な排他になっていなかった）。
+    return withLock(`order:${orderId}`, async () => {
     const order = OrderRepository.getById(orderId);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
     if (order.status !== 'disputed') {

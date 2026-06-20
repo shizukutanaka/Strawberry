@@ -212,7 +212,7 @@ router.post('/refresh',
     // 使い切り（single-use）: 使用済みリフレッシュトークンの jti を失効させることで
     // 同じトークンを再利用したリプレイアタックを防ぐ。
     if (payload.jti) {
-      revoke(payload.jti, (payload.exp || 0) * 1000);
+      revoke(payload.jti, payload.exp ? payload.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     }
     const token = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user);
@@ -233,13 +233,13 @@ router.post('/logout',
       try {
         const rp = jwt.verify(refreshToken, resolveSecret(), { algorithms: ['HS256'] });
         if (rp.type === 'refresh' && rp.jti) {
-          revoke(rp.jti, (rp.exp || 0) * 1000);
+          revoke(rp.jti, rp.exp ? rp.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
         }
       } catch (_) { /* 無効なリフレッシュトークンは無視（logout は冪等に成功させる） */ }
     }
     if (req.user.jti) {
       // exp（秒）をミリ秒に変換して保持期限とする。それ以降は自然失効するため保持不要。
-      revoke(req.user.jti, (req.user.exp || 0) * 1000);
+      revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
       logger.info(`User logged out (token revoked): ${req.user.id}`);
       return res.json({ message: 'Logged out successfully' });
     }
@@ -318,7 +318,7 @@ router.delete('/me',
     // 現在のアクセストークンを失効（exp まで保持）。本人の能動的ロックアウト。
     try {
       const { revoke } = require('../../middleware/token-denylist');
-      if (req.user.jti) revoke(req.user.jti, (req.user.exp || 0) * 1000);
+      if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     } catch (e) {
       logger.warn(`token revoke on self-deactivation failed (user=${user.id}): ${e.message}`);
     }
@@ -450,7 +450,7 @@ router.put('/me/password',
     // 本リクエストで使ったトークンは iat が同秒になる可能性があるため denylist でも対処）
     try {
       const { revoke } = require('../../middleware/token-denylist');
-      if (req.user.jti) revoke(req.user.jti, (req.user.exp || 0) * 1000);
+      if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     } catch (_) { /* denylist 失敗は更新を妨げない */ }
     logger.info(`Password changed for user: ${req.user.id}`);
     res.json({ message: 'Password changed successfully' });

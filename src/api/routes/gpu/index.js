@@ -285,11 +285,20 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const availability = vgpuManager ? await vgpuManager.getGPUAvailability(gpuId).catch(() => null) : null;
   // レーティング集計（TTL キャッシュ付き — 生 O(n) スキャンの繰り返し呼び出しを防ぐ）
   const { avg: ratingAverage, count: ratingCount } = getGpuRating(gpuId);
-  // レスポンスを構築（apiKey等除外）
-  const { apiKey, ...gpuSafe } = gpu;
+  // レスポンスを構築。
+  // providerId: 公開エンドポイントで返すとプロバイダ身元列挙に使われる（リスト側と同じ扱い）。
+  //   オーナー/管理者には返す（本人は自分の ID を知る必要がある）。
+  // manualBlocks: 予約空き状況の内部スケジュールデータ — 公開しない（リスト側と同じ扱い）。
+  // apiKey: 常に除外。
+  const { apiKey, providerId, manualBlocks, ...gpuSafe } = gpu;
   const response = {
     message: 'Fetched GPU detail',
-    gpu: { ...gpuSafe, details, usageStats, availability, rating: { average: ratingAverage, count: ratingCount } }
+    gpu: {
+      ...gpuSafe,
+      ...(viewerIsOwnerOrAdmin ? { providerId, manualBlocks } : {}),
+      details, usageStats, availability,
+      rating: { average: ratingAverage, count: ratingCount }
+    }
   };
   res.json(response);
 }));

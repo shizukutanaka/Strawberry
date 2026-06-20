@@ -95,15 +95,21 @@ try {
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
-// 未設定時は開発環境として無制限アクセスを許可（本番では必ず設定すること）。
+// 未設定かつ本番環境では 503 を返す（fail-closed）。テスト環境では素通り。
 app.get('/metrics', apiLimiter, (req, res, next) => {
   const metricsToken = process.env.METRICS_AUTH_TOKEN;
-  if (metricsToken) {
-    const authHeader = req.headers.authorization || '';
-    const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    if (!provided || provided !== metricsToken) {
-      return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
+  if (!metricsToken) {
+    // コメントに「本番では必ず設定すること」と書いても見落とされる。
+    // 設定なしで本番稼働したら即座に運用KPIが公開されるため fail-closed にする。
+    if (process.env.NODE_ENV !== 'test') {
+      return res.status(503).end('Metrics endpoint requires METRICS_AUTH_TOKEN');
     }
+    return next();
+  }
+  const authHeader = req.headers.authorization || '';
+  const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!provided || provided !== metricsToken) {
+    return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
   }
   next();
 }, async (req, res) => {

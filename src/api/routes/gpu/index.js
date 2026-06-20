@@ -686,9 +686,11 @@ router.delete('/:id',
     const gpuId = req.params.id;
     logger.info(`Removing GPU: ${gpuId}`);
 
-    // アクティブな注文がある場合は削除を拒否（孤立注文を防ぐ）
+    // アクティブ・係争中の注文がある場合は削除を拒否（孤立注文・証拠隠滅を防ぐ）
+    // 'disputed' を含めることでプロバイダが係争中に GPU を削除して管理者の裁定材料を
+    // 消滅させる griefing パスを塞ぐ。
     const OrderRepository = require('../../../db/json/OrderRepository');
-    const BLOCKING = new Set(['pending', 'matched', 'active']);
+    const BLOCKING = new Set(['pending', 'matched', 'active', 'disputed']);
     const activeOrders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && BLOCKING.has(o.status));
     if (activeOrders.length > 0) {
       return res.status(409).json({

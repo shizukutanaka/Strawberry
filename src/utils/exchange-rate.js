@@ -129,6 +129,12 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
   appendAuditLog('exchange_rate_fallback', { fallback: DEFAULT_RATE });
   try { await notifyExternalAlert('exchange_rate_fallback', { fallback: DEFAULT_RATE }); } catch {}
   endTimer();
+  // 本番環境ではキャッシュも実レートも存在しない状態で DEFAULT_RATE（固定値）を
+  // 使って注文を作成すると、実市場レートと最大30%以上乖離した価格で決済されてしまう。
+  // プロバイダ/借り手のどちらかが必ず損をするため、失敗として伝播させ 503 を返す方が安全。
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Exchange rate unavailable: all providers failed and no cache exists');
+  }
   if (withTimestamp) {
     // フォールバック既定値も新規算出でありキャッシュ由来ではない。
     return { rate: DEFAULT_RATE, timestamp: Date.now(), isCache: false };

@@ -1385,6 +1385,13 @@ router.post('/:id/review',
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
     }
+    // レビュー期限: 完了から 30 日以内のみ受け付ける（完了後の嫌がらせ・サクラ投稿を抑止）
+    if (order.completedAt) {
+      const daysSinceCompletion = (Date.now() - new Date(order.completedAt).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceCompletion > 30) {
+        throw new APIError(ErrorTypes.VALIDATION, 'Reviews must be submitted within 30 days of order completion', 400);
+      }
+    }
     // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
     if (req.user.role !== 'admin') {
       const PaymentRepository = require('../../../db/json/PaymentRepository');
@@ -1454,6 +1461,13 @@ router.post('/:id/renter-review',
     }
     if (order.status !== 'completed') {
       throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
+    }
+    // レビュー期限: 完了から 30 日以内のみ受け付ける（完了後の嫌がらせ・サクラ投稿を抑止）
+    if (order.completedAt) {
+      const daysSinceCompletion = (Date.now() - new Date(order.completedAt).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceCompletion > 30) {
+        throw new APIError(ErrorTypes.VALIDATION, 'Renter reviews must be submitted within 30 days of order completion', 400);
+      }
     }
     // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
     if (req.user.role !== 'admin') {

@@ -7,6 +7,15 @@ const { logger } = require('./logger');
 // 送信時 SSRF ガード: ホスト名を実際に名前解決して内部/予約アドレスを遮断する。
 const { assertPublicUrl } = require('./ssrf-guard');
 
+// Webhook/外部HTTP呼び出し共通安全設定。
+// タイムアウトなし・レスポンスサイズ無制限だと、攻撃者管理のエンドポイントが
+// 無限レスポンスを返すことで Node.js ヒープを枯渇させ DoS できる。
+const AXIOS_SAFE_CONFIG = Object.freeze({
+  timeout: 10_000,               // 10 秒でタイムアウト
+  maxContentLength: 1_048_576,   // レスポンスボディ上限 1 MiB
+  maxBodyLength: 1_048_576,      // リクエストボディ上限 1 MiB
+});
+
 // 通知タイプ定義
 const NotifyType = {
   LINE: 'line',
@@ -113,7 +122,7 @@ async function sendLineNotify(message, { token }) {
   return withRetry(async () => {
     const res = await axios.post('https://notify-api.line.me/api/notify',
       new URLSearchParams({ message }),
-      { headers: { 'Authorization': `Bearer ${token}` } }
+      { headers: { 'Authorization': `Bearer ${token}` }, ...AXIOS_SAFE_CONFIG }
     );
     return res.data;
   });
@@ -124,7 +133,7 @@ async function sendDiscordNotify(message, { webhookUrl }) {
   if (!webhookUrl) throw new Error('Discord Webhook URL未設定');
   await assertPublicUrl(webhookUrl); // 送信時に名前解決して内部アドレスを遮断
   return withRetry(async () => {
-    const res = await axios.post(webhookUrl, { content: message });
+    const res = await axios.post(webhookUrl, { content: message }, AXIOS_SAFE_CONFIG);
     return res.data;
   });
 }
@@ -134,7 +143,7 @@ async function sendSlackNotify(message, { webhookUrl }) {
   if (!webhookUrl) throw new Error('Slack Webhook URL未設定');
   await assertPublicUrl(webhookUrl); // 送信時に名前解決して内部アドレスを遮断
   return withRetry(async () => {
-    const res = await axios.post(webhookUrl, { text: message });
+    const res = await axios.post(webhookUrl, { text: message }, AXIOS_SAFE_CONFIG);
     return res.data;
   });
 }
@@ -153,7 +162,7 @@ async function sendTelegramNotify(message, { botToken, chatId }) {
   }
   return withRetry(async () => {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    const res = await axios.post(url, { chat_id: chatId, text: message });
+    const res = await axios.post(url, { chat_id: chatId, text: message }, AXIOS_SAFE_CONFIG);
     return res.data;
   });
 }
@@ -192,7 +201,7 @@ async function sendWebhookNotify(message, { webhookUrl, payload = {} }) {
   if (!webhookUrl) throw new Error('Webhook URL未設定');
   await assertPublicUrl(webhookUrl);
   return withRetry(async () => {
-    const res = await axios.post(webhookUrl, { message, ...payload });
+    const res = await axios.post(webhookUrl, { message, ...payload }, AXIOS_SAFE_CONFIG);
     return res.data;
   });
 }

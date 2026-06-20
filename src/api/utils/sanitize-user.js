@@ -18,6 +18,9 @@ const SENSITIVE_USER_FIELDS = Object.freeze([
   // 「いつパスワードが変更されたか」を攻撃者が確認できてしまう（侵害後の検知タイミングを把握される）。
   'sessionsRevokedAt',
   'passwordChangedAt',
+  // 紛争統計: 承認/棄却件数は内部モデレーション情報。公開すると嫌がらせターゲット選定に使われる。
+  'deniedDisputeCount',
+  'vindicatedDisputeCount',
 ]);
 
 /**

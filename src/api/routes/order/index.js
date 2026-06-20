@@ -1737,10 +1737,19 @@ router.post('/:id/stop',
         // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。
         // settlement-calculator 側の minChargeRatio が下限を担うため、ここでは
         // measured 値が無いときは 0 を渡し、計算器のポリシーで最低料金が適用される。
+        // Fallback delivered ratio: when vgpuManager is absent (no usageStats),
+        // use wall-clock elapsed time rather than 0. Without this a renter could
+        // call /start then /stop immediately, receive measured=0, and pay near
+        // nothing if the minChargeRatio floor is below 1.0.
+        const elapsedSeconds = order.startedAt
+          ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
+          : 0;
         for (const escrow of escrows) {
           const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
             ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
-            : 0;
+            : order.durationMinutes
+              ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
+              : 0;
           escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
           escrowSvc.apply(escrow.id, 'DELIVER_OK');
           logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);

@@ -25,10 +25,15 @@ async function resilientNotify(message, options = {}) {
     if (!ch.url) continue;
     // Env-var URLs are admin-configured but could point to internal services if the
     // deployment pipeline is compromised. Guard against SSRF before dispatching.
+    // Strip newlines from channel type and error messages before logging to prevent
+    // log injection: an attacker-controlled webhook response body in err.message
+    // or a poisoned ch.type could otherwise forge arbitrary log lines.
+    const safeType = String(ch.type || '').replace(/[\n\r]/g, '');
     try {
       await assertPublicUrl(ch.url);
     } catch (ssrfErr) {
-      logger.warn(`SSRF blocked: skipping ${ch.type} notification channel (${ssrfErr.message})`);
+      const safeErrMsg = String(ssrfErr.message || '').replace(/[\n\r]/g, ' ');
+      logger.warn(`SSRF blocked: skipping ${safeType} notification channel (${safeErrMsg})`);
       errors.push({ channel: ch.type, error: `SSRF blocked: ${ssrfErr.message}` });
       continue;
     }
@@ -53,8 +58,9 @@ async function resilientNotify(message, options = {}) {
       logger.info(`通知成功: ${ch.type}`);
       break; // どこか1つ成功したら終了
     } catch (err) {
+      const safeErrMsg = String(err.message || '').replace(/[\n\r]/g, ' ');
       errors.push({ channel: ch.type, error: err.message });
-      logger.warn(`通知失敗: ${ch.type} (${err.message})`);
+      logger.warn(`通知失敗: ${safeType} (${safeErrMsg})`);
       continue; // 次のチャネルへ切替
     }
   }

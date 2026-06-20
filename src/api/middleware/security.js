@@ -23,8 +23,15 @@ const securityHeaders = helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'", 'wss://*'],
+      // frame-ancestors: prevents clickjacking by disallowing Strawberry UI from
+      // being embedded in cross-origin iframes. Same-origin embedding is allowed.
+      // This is the CSP-level equivalent of X-Frame-Options: SAMEORIGIN.
+      frameAncestors: ["'self'"],
     },
   },
+  // Explicit frameguard in addition to CSP for older browsers that don't honour
+  // frame-ancestors (IE11, some Safari versions < 10).
+  frameguard: { action: 'sameorigin' },
   xssFilter: true,
   noSniff: true,
   referrerPolicy: { policy: 'same-origin' },

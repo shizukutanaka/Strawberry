@@ -19,11 +19,14 @@
 function isSessionInvalidated(user, iat) {
   if (!user) return false;
   if (!Number.isFinite(iat)) return true; // NaN/Infinity iat is suspicious — reject
+  const now = Math.floor(Date.now() / 1000);
   for (const field of ['passwordChangedAt', 'sessionsRevokedAt']) {
     const ts = user[field];
     if (!ts) continue;
     const cutoff = Math.floor(Date.parse(ts) / 1000);
-    if (Number.isFinite(cutoff) && iat <= cutoff) return true;
+    // cutoff <= now ガード: 未来タイムスタンプ（時計スキュー・DB 汚染）を無視する。
+    // 未来の cutoff は iat <= cutoff を常に真にし、全トークンを永続失効させてしまう。
+    if (Number.isFinite(cutoff) && cutoff <= now && iat <= cutoff) return true;
   }
   return false;
 }

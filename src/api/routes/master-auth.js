@@ -118,10 +118,18 @@ router.post('/totp', async (req, res) => {
   if (req.session.totpAttempts > 5) {
     return res.status(429).send('試行回数が多すぎます。Google認証からやり直してください。');
   }
+  // コード再利用防止: 同一 30 秒ウィンドウ内で同じカウンタが既に使用済みなら拒否。
+  // window:1 は隣接ウィンドウを許容する（時計ずれ対策）が、1度使ったカウンタ値を
+  // 同ウィンドウ内で繰り返し受け付けると rate-limit をかいくぐった replay が成立する。
+  const currentTotpCounter = Math.floor(Date.now() / 1000 / 30);
+  if (req.session.lastTotpCounter === currentTotpCounter) {
+    return res.status(400).send('このTOTPコードは既に使用済みです。次のウィンドウ（最大30秒後）をお待ちください。');
+  }
   const valid = verifyTOTP(process.env.MASTER_TOTP_SECRET, token);
   if (!valid) {
     return res.status(401).send('TOTP認証失敗');
   }
+  req.session.lastTotpCounter = currentTotpCounter;
   req.session.totpAttempts = 0;
   req.session.totpAuth = true;
   // メール認証コード発行（暗号論的乱数。Math.random は予測可能で不可）

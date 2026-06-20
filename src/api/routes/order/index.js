@@ -1068,12 +1068,19 @@ router.post('/:id/accept',
       throw new APIError(ErrorTypes.FORBIDDEN, 'GPU ownership has changed since this order was created; contact an admin to resolve', 403);
     }
     const now = new Date().toISOString();
-    // TOCTOU防止: accept と reject/DELETE が同時実行された場合どちらか一方のみ通過させる。
-    const acceptResult = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
-      status: 'matched',
-      matchedAt: now,
-      updatedAt: now,
-    });
+    // TOCTOU防止: accept と reject/DELETE が同時実行、または accept-ownership-check と
+    // GPU 所有権移転が競合した場合にどちらか一方のみ通過させる。
+    // GPU 所有権を updateIf 述語の中で再確認し、チェック→書込みの間に admin が
+    // GPU を他プロバイダへ移管した場合でも旧プロバイダの accept が通らないようにする。
+    const acceptingUserId = req.user.id;
+    const acceptResult = OrderRepository.updateIf(order.id,
+      (o) => o.status === 'pending' &&
+        (req.user.role === 'admin' || (() => {
+          const freshGpu = GpuRepository.getById(o.gpuId);
+          return freshGpu && freshGpu.providerId === acceptingUserId;
+        })()),
+      { status: 'matched', matchedAt: now, updatedAt: now }
+    );
     // updateIf は常にオブジェクト({ok, row} or {ok:false, reason, current})を返す。
     // !acceptResult は決して true にならないため CAS 失敗時に renter に "accepted" 通知が
     // 飛び、reject 側で cancelled になっているのに matched と返してしまう不整合が出ていた。

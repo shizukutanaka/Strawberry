@@ -244,7 +244,7 @@ router.post('/order/:id',
       // 現金/銀行振込など
       const paymentRecord = PaymentRepository.create({
         orderId,
-        userId: req.user.id,
+        userId: order.userId,
         providerId: null,
         amount: totalPrice,
         status: 'pending', // 管理者承認後に'paid'へ
@@ -287,7 +287,7 @@ router.post('/order/:id',
     const expiresAt = new Date(Date.now() + (config.lightning.invoiceExpirySeconds || 3600) * 1000).toISOString();
     const paymentRecord = PaymentRepository.create({
       orderId,
-      userId: req.user.id,
+      userId: order.userId,
       providerId: null,
       amount: totalPrice,
       status: 'pending',

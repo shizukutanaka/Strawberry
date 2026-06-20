@@ -1453,9 +1453,22 @@ router.post('/:id/match',
       matchedAt: new Date().toISOString()
     };
     // Atomic write: guards against /accept or a second /match completing while
-    // p2pNetwork.matchOrder() was awaiting above.
-    const matchWriteResult = OrderRepository.updateIf(orderId, o => o.status === 'pending', updateData);
+    // p2pNetwork.matchOrder() was awaiting above. Also double-booking check:
+    // serialize all booking writes for this GPU under a per-GPU lock so that
+    // two concurrent /match calls can't both observe "GPU is free" and both commit.
+    const matchWriteResult = await withLock(`gpu:${matchedGpuId}:book`, async () => {
+      const existingForGpu = OrderRepository.getAll().filter(
+        o => o.gpuId === matchedGpuId && o.id !== orderId && BLOCKING_ORDER_STATUSES.has(o.status)
+      );
+      if (existingForGpu.length > 0) {
+        return { ok: false, reason: 'gpu_double_booked' };
+      }
+      return OrderRepository.updateIf(orderId, o => o.status === 'pending', updateData);
+    });
     if (!matchWriteResult.ok) {
+      if (matchWriteResult.reason === 'gpu_double_booked') {
+        return res.status(409).json({ error: 'GPU is already booked by another order; match aborted' });
+      }
       return res.status(409).json({ error: 'Order status changed while matching; match aborted', details: `Current status: ${(matchWriteResult.current || {}).status}` });
     }
     if (typeof p2pNetwork.updateOrder === 'function') {

@@ -148,7 +148,7 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
     return res.status(400).json({ error: "decision must be 'settle' or 'refund'" });
   }
   try {
-    const result = await withLock(`escrow:${req.params.id}:resolve`, async () => {
+    const result = await withLock(`escrow:${req.params.id}`, async () => {
       // providerId が渡された場合、エスクローの注文に記録された実際のプロバイダと一致するか検証する。
       // 不一致を許すと admin が任意の providerId を指定して無関係プロバイダの reputation を slash できてしまう。
       if (providerId) {

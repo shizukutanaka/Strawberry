@@ -135,15 +135,24 @@ function createEscrowService({ repository } = {}) {
         opts,
       );
       const now = new Date().toISOString();
-      const saved = repo.update(escrow.id, {
-        settlement,
-        updatedAt: now,
-        history: [
-          ...(escrow.history || []),
-          { event: 'SETTLEMENT_COMPUTED', settlement, state: escrow.state, at: now },
-        ],
-      });
-      return { escrow: saved, settlement };
+      // updateIf guards against overwriting a settlement that a concurrent path
+      // (e.g., /verify racing /resolve after the lock key unification) already wrote.
+      // The predicate re-checks the current state to ensure we still own the write.
+      const writeResult = repo.updateIf
+        ? repo.updateIf(escrow.id, (e) => !['SETTLED', 'CANCELED'].includes(e.state) || !e.settlement, {
+            settlement,
+            updatedAt: now,
+            history: [
+              ...(escrow.history || []),
+              { event: 'SETTLEMENT_COMPUTED', settlement, state: escrow.state, at: now },
+            ],
+          })
+        : { ok: true, row: repo.update(escrow.id, { settlement, updatedAt: now,
+            history: [...(escrow.history || []), { event: 'SETTLEMENT_COMPUTED', settlement, state: escrow.state, at: now }] }) };
+      if (!writeResult.ok) {
+        throw Object.assign(new Error('Settlement already written by a concurrent operation'), { code: 'CONCURRENT_SETTLE' });
+      }
+      return { escrow: writeResult.row, settlement };
     },
 
     apply,

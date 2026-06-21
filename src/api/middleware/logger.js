@@ -25,12 +25,15 @@ morgan.token('body', (req) => {
 // - 確定した ID を X-Request-Id レスポンスヘッダに反映し、クライアント/プロキシが
 //   同一リクエストを相関できるようにする（障害時の問い合わせ ID になる）。
 const { v4: uuidv4 } = require('uuid');
+const { runWithContext } = require('../../utils/request-context');
 const _REQUEST_ID_SAFE = /^[A-Za-z0-9._-]{1,128}$/;
 const requestId = (req, res, next) => {
   const inbound = req.headers['x-request-id'];
   req.id = (typeof inbound === 'string' && _REQUEST_ID_SAFE.test(inbound)) ? inbound : uuidv4();
   res.setHeader('X-Request-Id', req.id);
-  next();
+  // 以降のミドルウェア/ハンドラを requestId コンテキスト下で実行し、その中の
+  // すべての logger.* が自動的に requestId を持つようにする（AsyncLocalStorage）。
+  runWithContext({ requestId: req.id }, () => next());
 };
 
 // リクエストロガー

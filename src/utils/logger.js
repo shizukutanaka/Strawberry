@@ -3,6 +3,7 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 const { sanitizeSensitiveFields } = require('./sanitize');
+const { getRequestId } = require('./request-context');
 
 // ログディレクトリ
 const logDir = path.join(__dirname, '../../logs');
@@ -77,6 +78,18 @@ function redactLogInfo(info) {
   return info;
 }
 
+// AsyncLocalStorage に requestId があれば、未設定のログレコードへ自動付与する。
+// これにより、リクエスト処理中の任意の logger.* がアクセスログ（morgan :id）と
+// 相関可能になる。明示的に requestId を渡した呼び出し（error-handler 等）は尊重し、
+// コンテキスト外（起動時ログ・バックグラウンドジョブ）では何もしない。
+function stampRequestId(info) {
+  if (info.requestId === undefined) {
+    const rid = getRequestId();
+    if (rid !== undefined) info.requestId = rid;
+  }
+  return info;
+}
+
 // ロガー設定
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -107,6 +120,7 @@ const logger = winston.createLogger({
       tailable: true,
       format: winston.format.combine(
         winston.format.timestamp(),
+        winston.format((info) => stampRequestId(info))(),
         // サニタイズは json() より前（出力直列化前）に適用する。
         winston.format((info) => redactLogInfo(info))(),
         winston.format.json()
@@ -119,6 +133,7 @@ const logger = winston.createLogger({
       tailable: true,
       format: winston.format.combine(
         winston.format.timestamp(),
+        winston.format((info) => stampRequestId(info))(),
         winston.format((info) => redactLogInfo(info))(),
         winston.format.json()
       )
@@ -197,4 +212,4 @@ logger.getStats = async () => {
   }
 };
 
-module.exports = { logger, redactLogInfo };
+module.exports = { logger, redactLogInfo, stampRequestId };

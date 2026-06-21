@@ -187,13 +187,14 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-9 | JSON リポジトリの書き込みチョークポイント（create/update/updateIf）で `__proto__`/`constructor`/`prototype` キーを除去（`stripDangerousKeys`）。プロトタイプ汚染の深層防御を全7リポジトリに一括適用 | probe53 / Qiita・Zenn プロトタイプ汚染調査 |
 | I-10 | 通知設定 `enabled` を任意キー許可（`pattern(/.*/)`）から消費側が実際に参照する6チャネルの明示スキーマに厳格化。Joi 既定の unknown:false で未知キー（`constructor` 等）を 400 拒否。`notification-settings.json` はリポジトリ層の `stripDangerousKeys` を経由しない別保存経路のため、入力スキーマ側で塞ぐ | probe54 / Qiita・Zenn 任意キー調査 |
 | I-11 | リクエスト相関 ID を強化（D-2 の一部）。`X-Request-Id` を (1) 上流の安全な値があれば再利用、(2) 不正・過長値はフォールバックで UUID 採番、(3) レスポンスヘッダに反映、(4) エラーログにも `requestId` を付与してアクセスログと相関 | probe55 / Qiita・Zenn request-id 調査 |
+| I-12 | `AsyncLocalStorage` でリクエストコンテキストを伝播し、リクエスト処理中の**全** `logger.*` 呼び出しへ `requestId` を自動付与（`stampRequestId` フォーマット）。明示指定は尊重、コンテキスト外（起動時・バックグラウンド）は no-op。D-2 をほぼ完了 | probe56 / Qiita・Zenn request-id 伝播調査 |
 
 ### フォローアップ（未実装）
 
 | ID | 内容 | 優先度 |
 |----|------|--------|
 | D-1 | データ層を PostgreSQL（または Prisma）へ移行し、マルチプロセス・トランザクション・行ロックを獲得 | 高 |
-| D-2 | （部分実装 I-11）残: 分散トレース（W3C Trace Context / traceparent 伝播）と APM 連携、`req.id` を全 `logger.*` 呼び出しへ自動付与する AsyncLocalStorage コンテキスト | 中 |
+| D-2 | （ほぼ完了 I-11/I-12）残: 分散トレース（W3C Trace Context / traceparent 伝播）と外部 APM 連携 | 低 |
 | D-3 | `npm audit` の CI 統合と依存の継続的脆弱性チェック（Zenn「Node.js 脆弱性チェック」参照） | 中 |
 | D-4 | 孤立モジュール（`*-fixed.js`）の削除と未使用依存の整理、サービスの DI 化 | 中 |
 | D-5 | CSP nonce 導入（インラインスクリプトが必要になった場合）と CSP レポート収集 | 低 |

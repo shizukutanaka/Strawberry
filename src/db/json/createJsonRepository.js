@@ -15,6 +15,26 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { atomicWriteJSON } = require('./atomicWrite');
 
+// プロトタイプ汚染対策（深層防御）。全リポジトリの create/update/updateIf がこの
+// チョークポイントを通るため、ここで危険キーを一括除去する。
+// オブジェクトスプレッド（{ ...a, ...b }）自体は "__proto__" を own プロパティとして
+// コピーするだけで Object.prototype を汚染しないが、JSON.parse 由来の
+// "__proto__"/"constructor"/"prototype" キーがそのまま data/*.json に永続化されると、
+// 読み戻し後の別経路（bracket 代入・deep merge 等）で汚染の起点になりうる。
+// 上流の Joi 検証に依存せず、書き込み直前で確実に弾く。
+const DANGEROUS_KEYS = ['__proto__', 'constructor', 'prototype'];
+function stripDangerousKeys(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+  let cleaned = obj;
+  for (const k of DANGEROUS_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      if (cleaned === obj) cleaned = { ...obj };
+      delete cleaned[k];
+    }
+  }
+  return cleaned;
+}
+
 function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
   // fileName はリテラル文字列のみを期待する（呼び出し側は全てコード内定数）。
   // path.resolve の仕様上 fileName が絶対パスであれば data/ プレフィックスを無効化できる
@@ -79,7 +99,8 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
     },
     create: (rec) => {
       const rows = load();
-      const row = { ...rec, id: uuidv4(), createdAt: rec.createdAt || new Date().toISOString() };
+      const safeRec = stripDangerousKeys(rec);
+      const row = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
       rows.push(row);
       atomicWriteJSON(filePath, rows);
       audit('create', { id: row.id });
@@ -92,7 +113,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         audit('update', { id, result: 'not_found' });
         return null;
       }
-      rows[idx] = { ...rows[idx], ...updates };
+      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
       atomicWriteJSON(filePath, rows);
       audit('update', { id, updates });
       return rows[idx];
@@ -111,7 +132,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         audit('updateIf', { id, result: 'condition_failed' });
         return { ok: false, reason: 'condition_failed', current: rows[idx] };
       }
-      rows[idx] = { ...rows[idx], ...updates };
+      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
       atomicWriteJSON(filePath, rows);
       audit('updateIf', { id, updates });
       return { ok: true, row: rows[idx] };
@@ -143,4 +164,4 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
   return repo;
 }
 
-module.exports = { createJsonRepository };
+module.exports = { createJsonRepository, stripDangerousKeys };

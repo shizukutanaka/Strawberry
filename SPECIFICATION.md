@@ -182,7 +182,8 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-5 | CSP に `object-src 'none'` / `base-uri 'self'` / `form-action 'self'` を追加 | Qiita/Zenn の CSP ベストプラクティス調査（OWASP 準拠） |
 | I-6 | TOTP カウンタ計算テストを window 整列タイムスタンプ化（フレーク除去） | probe48 安定化 |
 | I-7 | パスワードを 8〜72 文字に制限（register/newPassword）。bcrypt の 72 バイト切り詰めによる「73文字目以降が無視され、先頭72バイトが同じ別パスワードが同一認証される」問題を防止。login は既存長パスワード救済のため上限なし | probe51 / Qiita・Zenn bcrypt 調査 |
-| I-8 | ログのマスキングを (1) metadata splat（`logger.x('msg',{body})`）にも拡張し、(2) `json()` の **前段** に移動。旧実装は object 形式 message のみ、かつ json() の後に適用していたため、メタデータ内の password/apiKey/token が `combined.log` に素通りしていた（fail-open） | probe52 / Qiita・Zenn 構造化ログ調査 |
+| I-8 | ログのマスキングを (1) metadata splat（`logger.x('msg',{body})`）にも拡張し、(2) `json()` の **前段** に移動。旧実装は object 形式 message のみ、かつ json() の後に適用していたため、メタデータ内の password/apiKey/token が `combined.log` に素通りしていた（fail-open）。マスカーは循環安全・深さ制限付き | probe52 / Qiita・Zenn 構造化ログ調査 |
+| I-9 | JSON リポジトリの書き込みチョークポイント（create/update/updateIf）で `__proto__`/`constructor`/`prototype` キーを除去（`stripDangerousKeys`）。プロトタイプ汚染の深層防御を全7リポジトリに一括適用 | probe53 / Qiita・Zenn プロトタイプ汚染調査 |
 
 ### フォローアップ（未実装）
 
@@ -212,3 +213,5 @@ OWASP の指針に基づく:
 - [Expressでのエラーハンドリング ベストプラクティス（Qiita）](https://qiita.com/nyandora/items/cd4f12eb62295c10269c)
 - [Node.jsでwinstonを使ってログを収集する方法（Zenn）](https://zenn.dev/tatsuyasusukida/articles/nodejs-winston-logging)
 - [JavaScriptで始めるユーザー認証：パスワードの安全な管理とbcryptの活用（Qiita）](https://qiita.com/arihori13/items/61aaf2c223dfd99a87f0)
+- [JavaScriptのプロトタイプ汚染攻撃対策は難しい（Qiita）](https://qiita.com/shellyln/items/af200a1953991de1698d)
+- [JavaScriptのPrototype Pollution（プロトタイプ汚染）について（Zenn）](https://zenn.dev/wasabina67/articles/52-denk75fn30miqt9u)

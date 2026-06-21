@@ -181,6 +181,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-4 | block 削除の `blockId` を不透明文字列化（不在は 404、UUID 厳格化は GPU id のみ） | 契約矛盾の是正 |
 | I-5 | CSP に `object-src 'none'` / `base-uri 'self'` / `form-action 'self'` を追加 | Qiita/Zenn の CSP ベストプラクティス調査（OWASP 準拠） |
 | I-6 | TOTP カウンタ計算テストを window 整列タイムスタンプ化（フレーク除去） | probe48 安定化 |
+| I-7 | パスワードを 8〜72 文字に制限（register/newPassword）。bcrypt の 72 バイト切り詰めによる「73文字目以降が無視され、先頭72バイトが同じ別パスワードが同一認証される」問題を防止。login は既存長パスワード救済のため上限なし | probe51 / Qiita・Zenn bcrypt 調査 |
 
 ### フォローアップ（未実装）
 
@@ -206,3 +207,5 @@ OWASP の指針に基づく:
 - [【セキュリティ】JWTで発生する「機密情報漏えい」の典型パターン（Qiita）](https://qiita.com/nozomi2025/items/ab5aa51275a53a07ed20)
 - [ExpressにおけるRate Limitの実装ガイド（Qiita）](https://qiita.com/GorillaSwe/items/5e78d8f3cd35420b35ef)
 - [IAMセキュリティ: 基礎から高度な保護まで（ベストプラクティス 2025）（Qiita）](https://qiita.com/logto/items/1ae6c4fbb4853f9fcb34)
+- [Bcryptでパスワードのハッシュ化と照合を行う（Zenn）](https://zenn.dev/groove_harbor/scraps/d54f4bc5785341)
+- [Expressでのエラーハンドリング ベストプラクティス（Qiita）](https://qiita.com/nyandora/items/cd4f12eb62295c10269c)

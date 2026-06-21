@@ -437,6 +437,8 @@ router.put('/me/password',
     currentPassword: Joi.string().required(),
     newPassword: Joi.string()
       .min(8)
+      // bcrypt の 72 バイト切り詰め対策（register と同一ポリシー）。
+      .max(72)
       .pattern(/[a-z]/, 'lowercase')
       .pattern(/[A-Z]/, 'uppercase')
       .pattern(/[0-9]/, 'number')
@@ -444,7 +446,8 @@ router.put('/me/password',
       .required()
       .messages({
         'string.pattern.name': 'Password must include at least one {#name} character',
-        'string.min': 'Password must be at least 8 characters long'
+        'string.min': 'Password must be at least 8 characters long',
+        'string.max': 'Password must be at most 72 characters long'
       })
   }), 'body'),
   asyncHandler(async (req, res) => {

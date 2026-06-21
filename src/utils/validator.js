@@ -220,6 +220,12 @@ const schemas = {
       email: Joi.string().email().required(),
       password: Joi.string()
         .min(8)
+        // bcrypt は入力を 72 バイトで切り詰める。上限を設けないと「73文字目以降は
+        // 無視される」ことにユーザーが気付けず、先頭72バイトが同じ別パスワードが
+        // 同一として認証される。OWASP/bcrypt 推奨に従い 8〜72 文字に制限する。
+        // （login 側は上限なし: 既存の長いパスワードも bcrypt.compare が同じく
+        //  72 バイト切り詰めで一致するため、後付けの上限で締め出さない）
+        .max(72)
         .pattern(/[a-z]/, 'lowercase')
         .pattern(/[A-Z]/, 'uppercase')
         .pattern(/[0-9]/, 'number')
@@ -227,7 +233,8 @@ const schemas = {
         .required()
         .messages({
           'string.pattern.name': 'Password must include at least one {#name} character',
-          'string.min': 'Password must be at least 8 characters long'
+          'string.min': 'Password must be at least 8 characters long',
+          'string.max': 'Password must be at most 72 characters long'
         }),
       role: Joi.string().valid('user', 'provider').optional()
     }),

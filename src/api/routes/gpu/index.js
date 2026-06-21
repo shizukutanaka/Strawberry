@@ -847,7 +847,11 @@ router.post('/:id/block',
 // DELETE /gpus/:id/block/:blockId — 認証必須（GPU オーナーまたは管理者）
 router.delete('/:id/block/:blockId',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required(), blockId: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  // id は実際の DB ルックアップキーなので UUID で厳格に検証する。
+  // blockId は manualBlocks の .find() 文字列比較にしか使われず（注入面なし）、
+  // 存在しない blockId は 404 Not Found として返すのが正しい意味論。よって UUID 厳格化
+  // ではなく長さ上限付きの不透明文字列として受け入れ、ハンドラに 404 判定を委ねる。
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required(), blockId: Joi.string().max(128).required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
   const gpuId = req.params.id;
   const gpu = GpuRepository.getById(gpuId);

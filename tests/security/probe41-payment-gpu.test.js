@@ -2,7 +2,9 @@
 // Probe 41 regression tests:
 // 41a-2: invoice-poller checks order status before marking payment paid (no orphaned paid on cancelled order)
 // 41a-1: invoice-poller checks for cross-method paid records before marking Lightning paid
-// 41b-3: minRenterRating null bypass fixed — new accounts treated as rating=0
+// 41b-3: minRenterRating floor blocks renters with a KNOWN average below the floor.
+//        Unrated newcomers are allowed by default (marketplace onboarding); providers
+//        can opt into Sybil-resistant strictness with gpu.rejectUnratedRenters:true.
 // 41b-2: certChain schema accepts array (matches verifier expectation)
 
 const request = require('supertest');
@@ -67,26 +69,25 @@ describe('invoice-poller: cross-method paid guard prevents double-pay', () => {
   });
 });
 
-// ─── 41b-3: minRenterRating null bypass fixed ────────────────────────────────
-describe('order creation: minRenterRating enforced for accounts with no review history', () => {
-  it('order/index.js: effectiveRating uses null-coalescing to 0 (null bypass prevention)', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    // The floor check must use effectiveRating (ratingAverage ?? 0), not the raw null value
-    expect(src).toMatch(/effectiveRating.*renterRatingAverage.*\?\?.*0/);
-    expect(src).toMatch(/effectiveRating < gpu\.minRenterRating/);
-    // Comment must state the intent
-    expect(src).toMatch(/null bypass prevention/);
+// ─── 41b-3: minRenterRating floor (known-below-floor blocked; unrated opt-in) ──
+describe('order creation: minRenterRating floor policy', () => {
+  const src = require('fs').readFileSync(
+    require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+  );
+
+  it('order/index.js: floor blocks renters whose KNOWN average is below the floor', () => {
+    // The floor must compare the real average (not a null-coalesced 0) and gate on history
+    expect(src).toMatch(/hasRatingHistory\s*=\s*renterRatingAverage\s*!==\s*null/);
+    expect(src).toMatch(/knownBelowFloor\s*=\s*hasRatingHistory\s*&&\s*renterRatingAverage\s*<\s*gpu\.minRenterRating/);
   });
 
-  it('order/index.js: renterRatingAverage is null-coalesced to 0 in floor check', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    // Floor check must use effectiveRating via null-coalescing, not raw average
-    expect(src).toMatch(/renterRatingAverage \?\? 0/);
-    expect(src).not.toMatch(/renterRatingAverage < gpu\.minRenterRating/);
+  it('order/index.js: unrated renters are allowed unless rejectUnratedRenters opt-in is set', () => {
+    // Sybil-resistance is now opt-in via gpu.rejectUnratedRenters (not a forced 0 floor)
+    expect(src).toMatch(/unratedAndRejected\s*=\s*!hasRatingHistory\s*&&\s*gpu\.rejectUnratedRenters\s*===\s*true/);
+    expect(src).toMatch(/if\s*\(knownBelowFloor\s*\|\|\s*unratedAndRejected\)/);
+    // The old forced-0 bypass-prevention form must be gone
+    expect(src).not.toMatch(/renterRatingAverage \?\? 0/);
+    expect(src).not.toMatch(/null bypass prevention/);
   });
 });
 

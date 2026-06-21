@@ -772,21 +772,32 @@ router.post('/',
       }
     }
     // 借り手レーティングフロア: GPU に minRenterRating が設定されている場合、
-    // 借り手の平均評価が floor を下回ると 422 で拒否される。
-    // レビュー実績がない新規アカウントは rating=0 として扱い、フロアが 0 より高い GPU には
-    // アクセスできない（フレッシュアカウントを使った minRenterRating バイパスを防ぐ）。
+    // 「既知の平均評価が floor を下回る」借り手を 422 で拒否する。
+    //
+    // 新規（レビュー実績ゼロ）の借り手の扱いには設計上のトレードオフがある:
+    //   - 厳格: 新規=評価0 とみなし floor>0 の GPU を一律拒否 → Sybil（捨てアカウントで
+    //     低評価を回避）に強いが、正当な新規借り手の参入を全プロバイダが阻害でき、
+    //     二面市場のオンボーディングを殺す。
+    //   - 寛容（既定）: 新規は「未評価」として通し、プロバイダの accept ゲートで判断させる。
+    //     注文作成は pending を生むだけでプロバイダの明示承認が必要なため、Sybil の実害は
+    //     accept 時点で抑止できる。
+    // 既定は寛容とし、Sybil 耐性を必須としたいプロバイダは gpu.rejectUnratedRenters:true で
+    // 明示的にオプトインできる（未評価の借り手も floor 扱いで拒否）。
     // minRenterRating を設定しない GPU（undefined/0/null）は全借り手を受け付ける。
     const renterOrders = OrderRepository.getAll().filter(o => o.userId === req.user.id && o.renterReview);
     const renterReviewCount = renterOrders.length;
-    // null = 0件（通知用に null を保持; フロアチェックでは ?? 0 で 0 として扱う）
+    // null = 0件（通知用に null を保持。フロアチェックでは「未評価」として明示的に扱う）
     const renterRatingAverage = renterReviewCount > 0
       ? renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount
       : null;
     if (gpu.minRenterRating) {
-      // no history → treat as 0, not null (null bypass prevention)
-      const effectiveRating = renterRatingAverage ?? 0;
-      if (effectiveRating < gpu.minRenterRating) {
-        const displayRating = renterRatingAverage !== null
+      const hasRatingHistory = renterRatingAverage !== null;
+      // 既知の評価が floor 未満 → 拒否（★2 の借り手など）
+      const knownBelowFloor = hasRatingHistory && renterRatingAverage < gpu.minRenterRating;
+      // 未評価 かつ プロバイダが未評価拒否をオプトイン → 拒否（Sybil 対策）
+      const unratedAndRejected = !hasRatingHistory && gpu.rejectUnratedRenters === true;
+      if (knownBelowFloor || unratedAndRejected) {
+        const displayRating = hasRatingHistory
           ? `${Math.round(renterRatingAverage * 10) / 10} (${renterReviewCount} review${renterReviewCount !== 1 ? 's' : ''})`
           : 'no rating history';
         throw new APIError(ErrorTypes.VALIDATION,

@@ -85,17 +85,19 @@ describe('master-auth TOTP: code reuse prevention', () => {
   });
 
   it('TOTP counter math: same code in same 30s window has identical counter', () => {
-    const now = Date.now();
-    const counter1 = Math.floor(now / 1000 / 30);
-    const counter2 = Math.floor((now + 5000) / 1000 / 30); // 5 seconds later, same window
+    // Anchor to a deterministic window start (Date.now() could straddle a boundary
+    // and make this flaky). windowStart .. windowStart+29999ms share one counter.
+    const windowStart = Math.floor(Date.now() / 30000) * 30000;
+    const counter1 = Math.floor(windowStart / 1000 / 30);
+    const counter2 = Math.floor((windowStart + 29000) / 1000 / 30); // 29s later, same window
     expect(counter1).toBe(counter2);
   });
 
   it('TOTP counter math: code in next 30s window has different counter', () => {
-    const now = Date.now();
-    const windowBoundary = Math.ceil(now / 30000) * 30000; // start of next window
-    const counter1 = Math.floor(now / 1000 / 30);
-    const counter2 = Math.floor(windowBoundary / 1000 / 30);
+    // Use a window-aligned base so the "next window" is strictly +30000ms away.
+    const windowStart = Math.floor(Date.now() / 30000) * 30000;
+    const counter1 = Math.floor(windowStart / 1000 / 30);
+    const counter2 = Math.floor((windowStart + 30000) / 1000 / 30); // start of next window
     expect(counter2).toBeGreaterThan(counter1);
   });
 });

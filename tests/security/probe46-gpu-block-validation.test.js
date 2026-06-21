@@ -1,7 +1,10 @@
 // tests/security/probe46-gpu-block-validation.test.js
 // Probe 46 regression tests:
 // 46e-2a: POST /gpus/:id/block validates GPU ID as UUID (rejects non-UUID param)
-// 46e-2b: DELETE /gpus/:id/block/:blockId validates both ID and blockId as UUIDs
+// 46e-2b: DELETE /gpus/:id/block/:blockId validates the GPU id as UUID, but treats
+//         blockId as a bounded opaque string. blockId is only used in a string .find()
+//         (no injection surface), and a non-existent blockId must return 404 Not Found —
+//         strict UUID validation would mask that as a 400 and break the contract.
 // 46a-1/46a-2: live reference false positive — confirmed no in-memory cache;
 //              load() reads fresh from disk and withLock serializes concurrent ops
 
@@ -27,15 +30,19 @@ describe('POST /gpus/:id/block: requires valid UUID for GPU id', () => {
     expect(postBlockIdx).toBeGreaterThan(-1);
   });
 
-  it('gpu/index.js: DELETE /block/:blockId route has validateMiddleware for both id and blockId', () => {
+  it('gpu/index.js: DELETE /block/:blockId validates GPU id as UUID, blockId as bounded string', () => {
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
     );
-    const deleteBlockIdx = src.indexOf("'/:id/block/:blockId',\n  authenticateJWT,\n  validateMiddleware");
+    const deleteBlockIdx = src.indexOf("router.delete('/:id/block/:blockId'");
     expect(deleteBlockIdx).toBeGreaterThan(-1);
-    // blockId must also be validated as UUID
-    const deleteBlock = src.slice(deleteBlockIdx, deleteBlockIdx + 300);
-    expect(deleteBlock).toMatch(/blockId.*uuid|uuid.*blockId/s);
+    const deleteBlock = src.slice(deleteBlockIdx, deleteBlockIdx + 700);
+    // GPU id (the real lookup key) is strictly UUID-validated
+    expect(deleteBlock).toMatch(/id:\s*Joi\.string\(\)\.uuid/);
+    // blockId is a bounded opaque string (NOT UUID) so non-existent ids reach the
+    // handler and return 404 rather than 400
+    expect(deleteBlock).toMatch(/blockId:\s*Joi\.string\(\)\.max\(\d+\)/);
+    expect(deleteBlock).not.toMatch(/blockId:\s*Joi\.string\(\)\.uuid/);
   });
 });
 

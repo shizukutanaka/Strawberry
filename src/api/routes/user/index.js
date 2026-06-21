@@ -471,6 +471,11 @@ router.put('/me/password',
       password: hashedPassword,
       updatedAt: changedAt,
       passwordChangedAt: changedAt,
+      // sessionsRevokedAt も同時更新（多層防御）: passwordChangedAt だけでも
+      // isSessionInvalidated() が全既存トークンを弾くが、sessionsRevokedAt を
+      // 独立フィールドとして同時に立てることで、将来いずれかのフィールドが
+      // クリアされても無効化が維持される。
+      sessionsRevokedAt: changedAt,
     });
     // 現在のアクセストークンも即時失効（他セッションは passwordChangedAt で弾かれるが、
     // 本リクエストで使ったトークンは iat が同秒になる可能性があるため denylist でも対処）

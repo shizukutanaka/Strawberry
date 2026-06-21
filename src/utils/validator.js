@@ -85,6 +85,9 @@ const schemas = {
     hashrate: Joi.number().min(0).max(100000000)
   }),
   minRenterRating: Joi.number().min(1).max(5).optional(),
+  // 未評価（レビュー履歴ゼロ）の借り手を minRenterRating フロアで拒否するか。
+  // 既定 false（新規借り手を許可）。Sybil 耐性を必須とするプロバイダがオプトインする。
+  rejectUnratedRenters: Joi.boolean().optional(),
   // アテステーションレポート（任意）— 許可フィールドを明示的に列挙し unknown を拒否する。
   // req.body から直接読むと攻撃者が任意のフィールドを注入できるため Joi を通す。
   attestationReport: Joi.object({
@@ -115,6 +118,7 @@ const schemas = {
         daysAvailable: Joi.array().items(Joi.number().min(0).max(6))
       }).unknown(false).optional(),
       minRenterRating: Joi.number().min(1).max(5).optional(),
+      rejectUnratedRenters: Joi.boolean().optional(),
       available: Joi.boolean().optional()
     }),
 

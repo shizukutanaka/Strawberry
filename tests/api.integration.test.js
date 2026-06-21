@@ -1701,6 +1701,20 @@ describe('API Integration', () => {
       expect(res.body.error.message || res.body.error).toMatch(/rating/i);
     });
 
+    it('GPU with rejectUnratedRenters opt-in blocks a new renter with no reviews (422)', async () => {
+      // Providers who need Sybil resistance can opt in: unrated newcomers are then
+      // treated as below the floor (the strict behaviour, now explicit per-GPU).
+      const gpu = GpuRepository.create({
+        name: 'Strict Floor GPU', vendor: 'NVIDIA', model: 'RTX-STRICT', memoryGB: 8, pricePerHour: 0.2,
+        providerId, minRenterRating: 4, rejectUnratedRenters: true,
+      });
+      const res = await request(app).post('/api/v1/orders')
+        .set('Authorization', `Bearer ${renterToken}`)
+        .send({ gpuId: gpu.id, durationMinutes: 30 });
+      expect(res.statusCode).toBe(422);
+      expect(res.body.error.message || res.body.error).toMatch(/rating/i);
+    });
+
     it('GPU with no floor policy allows low-rated renter (201)', async () => {
       const gpu = GpuRepository.create({
         name: 'No Floor GPU', vendor: 'AMD', model: 'RX-NOFLOOR', memoryGB: 8, pricePerHour: 0.2,

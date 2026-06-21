@@ -182,6 +182,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-5 | CSP に `object-src 'none'` / `base-uri 'self'` / `form-action 'self'` を追加 | Qiita/Zenn の CSP ベストプラクティス調査（OWASP 準拠） |
 | I-6 | TOTP カウンタ計算テストを window 整列タイムスタンプ化（フレーク除去） | probe48 安定化 |
 | I-7 | パスワードを 8〜72 文字に制限（register/newPassword）。bcrypt の 72 バイト切り詰めによる「73文字目以降が無視され、先頭72バイトが同じ別パスワードが同一認証される」問題を防止。login は既存長パスワード救済のため上限なし | probe51 / Qiita・Zenn bcrypt 調査 |
+| I-8 | ログのマスキングを (1) metadata splat（`logger.x('msg',{body})`）にも拡張し、(2) `json()` の **前段** に移動。旧実装は object 形式 message のみ、かつ json() の後に適用していたため、メタデータ内の password/apiKey/token が `combined.log` に素通りしていた（fail-open） | probe52 / Qiita・Zenn 構造化ログ調査 |
 
 ### フォローアップ（未実装）
 
@@ -209,3 +210,5 @@ OWASP の指針に基づく:
 - [IAMセキュリティ: 基礎から高度な保護まで（ベストプラクティス 2025）（Qiita）](https://qiita.com/logto/items/1ae6c4fbb4853f9fcb34)
 - [Bcryptでパスワードのハッシュ化と照合を行う（Zenn）](https://zenn.dev/groove_harbor/scraps/d54f4bc5785341)
 - [Expressでのエラーハンドリング ベストプラクティス（Qiita）](https://qiita.com/nyandora/items/cd4f12eb62295c10269c)
+- [Node.jsでwinstonを使ってログを収集する方法（Zenn）](https://zenn.dev/tatsuyasusukida/articles/nodejs-winston-logging)
+- [JavaScriptで始めるユーザー認証：パスワードの安全な管理とbcryptの活用（Qiita）](https://qiita.com/arihori13/items/61aaf2c223dfd99a87f0)

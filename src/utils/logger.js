@@ -12,6 +12,71 @@ if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
 }
 
+// winston のログレコード（info）を機密マスキングする共通フィルタ。
+// 重要な2点を担保する:
+//  1) metadata splat の対象化: logger.error('msg', { body: req.body }) のように
+//     第2引数で渡されたメタデータは info.message ではなく info 直下のキーに展開される。
+//     旧実装は info.message が object のときしか見ておらず、メタdata 内の password/
+//     apiKey 等がファイルログに素通りしていた（fail-open）。ここで info 直下の
+//     メタデータキーも再帰的にマスクする。
+//  2) json() より前に適用する: format.combine は左→右に適用され、json() が時点の info を
+//     直列化して出力シンボルに焼き込む。json() の *後* にサニタイズしても出力には反映され
+//     ないため、必ず json() の前段に置く。
+const _LOG_SENSITIVE_LOWER = [
+  'password','secret','token','apikey','privatekey','email',
+  'refreshtoken','accesstoken','jwt','macaroon','mnemonic','seed'
+];
+const _RESERVED_LOG_KEYS = new Set(['level', 'message', 'timestamp', 'service', 'label', 'ms']);
+const _MASK_MAX_DEPTH = 6;
+
+// 機密キーを in-place でマスクする巡回・深さ安全な再帰。
+// 重要: メタデータには axios のエラー（error.request ⇄ error.response の循環参照）など
+// 巨大・循環するオブジェクトが渡されうる。無制限再帰は "Maximum call stack size exceeded"
+// を引き起こし、ログ呼び出し自体を例外化してリクエストを巻き添えにする。よって
+//  - WeakSet で訪問済みオブジェクトを記録して循環を断ち、
+//  - 深さ上限を設け、
+//  - プレーンオブジェクト/配列のみを降下対象にする（Error/Buffer/Stream 等の exotic
+//    オブジェクトは循環の温床なので降下しない）。
+function _maskInPlace(obj, seen, depth) {
+  if (obj === null || typeof obj !== 'object' || depth > _MASK_MAX_DEPTH) return;
+  if (seen.has(obj)) return;
+  seen.add(obj);
+  const isArray = Array.isArray(obj);
+  if (!isArray) {
+    const proto = Object.getPrototypeOf(obj);
+    if (proto !== Object.prototype && proto !== null) return; // プレーンオブジェクトのみ降下
+  }
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (!isArray && _LOG_SENSITIVE_LOWER.includes(k.toLowerCase())) {
+      obj[k] = '[MASKED]';
+    } else if (v && typeof v === 'object') {
+      _maskInPlace(v, seen, depth + 1);
+    }
+  }
+}
+
+function redactLogInfo(info) {
+  const seen = new WeakSet();
+  // object 形式の message を再帰サニタイズ（in-place）
+  if (info.message && typeof info.message === 'object') {
+    _maskInPlace(info.message, seen, 0);
+  }
+  // metadata splat（info 直下のキー）を in-place でマスク。
+  // winston は level/message を Symbol キーでも保持するため、info を新オブジェクトに
+  // 置き換えず必ず in-place で変更する（Symbol メタを失わないため）。
+  for (const k of Object.keys(info)) {
+    if (_RESERVED_LOG_KEYS.has(k)) continue;
+    const v = info[k];
+    if (_LOG_SENSITIVE_LOWER.includes(k.toLowerCase())) {
+      info[k] = '[MASKED]';
+    } else if (v && typeof v === 'object') {
+      _maskInPlace(v, seen, 1);
+    }
+  }
+  return info;
+}
+
 // ロガー設定
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
@@ -42,13 +107,9 @@ const logger = winston.createLogger({
       tailable: true,
       format: winston.format.combine(
         winston.format.timestamp(),
-        winston.format.json(),
-        winston.format((info) => {
-          if (typeof info.message === 'object') {
-            info.message = sanitizeSensitiveFields(info.message);
-          }
-          return info;
-        })()
+        // サニタイズは json() より前（出力直列化前）に適用する。
+        winston.format((info) => redactLogInfo(info))(),
+        winston.format.json()
       )
     }),
     new winston.transports.File({
@@ -58,13 +119,8 @@ const logger = winston.createLogger({
       tailable: true,
       format: winston.format.combine(
         winston.format.timestamp(),
-        winston.format.json(),
-        winston.format((info) => {
-          if (typeof info.message === 'object') {
-            info.message = sanitizeSensitiveFields(info.message);
-          }
-          return info;
-        })()
+        winston.format((info) => redactLogInfo(info))(),
+        winston.format.json()
       )
     })
   ]
@@ -141,4 +197,4 @@ logger.getStats = async () => {
   }
 };
 
-module.exports = { logger };
+module.exports = { logger, redactLogInfo };

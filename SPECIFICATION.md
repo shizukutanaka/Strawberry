@@ -188,6 +188,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-10 | 通知設定 `enabled` を任意キー許可（`pattern(/.*/)`）から消費側が実際に参照する6チャネルの明示スキーマに厳格化。Joi 既定の unknown:false で未知キー（`constructor` 等）を 400 拒否。`notification-settings.json` はリポジトリ層の `stripDangerousKeys` を経由しない別保存経路のため、入力スキーマ側で塞ぐ | probe54 / Qiita・Zenn 任意キー調査 |
 | I-11 | リクエスト相関 ID を強化（D-2 の一部）。`X-Request-Id` を (1) 上流の安全な値があれば再利用、(2) 不正・過長値はフォールバックで UUID 採番、(3) レスポンスヘッダに反映、(4) エラーログにも `requestId` を付与してアクセスログと相関 | probe55 / Qiita・Zenn request-id 調査 |
 | I-12 | `AsyncLocalStorage` でリクエストコンテキストを伝播し、リクエスト処理中の**全** `logger.*` 呼び出しへ `requestId` を自動付与（`stampRequestId` フォーマット）。明示指定は尊重、コンテキスト外（起動時・バックグラウンド）は no-op。D-2 をほぼ完了 | probe56 / Qiita・Zenn request-id 伝播調査 |
+| I-13 | `notifyExternalAlert` の通知モジュール `require` を env ゲートの**内側**へ移動。旧実装は env チェック前に `scripts/sentry-notify.js`→`@sentry/node`（未導入）を解決しようとし、アラートごとに「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋没）。未設定チャネルは完全に無音化 | probe57 / 運用ログ衛生 |
 
 ### フォローアップ（未実装）
 

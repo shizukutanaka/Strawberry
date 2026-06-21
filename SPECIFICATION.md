@@ -184,6 +184,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-7 | パスワードを 8〜72 文字に制限（register/newPassword）。bcrypt の 72 バイト切り詰めによる「73文字目以降が無視され、先頭72バイトが同じ別パスワードが同一認証される」問題を防止。login は既存長パスワード救済のため上限なし | probe51 / Qiita・Zenn bcrypt 調査 |
 | I-8 | ログのマスキングを (1) metadata splat（`logger.x('msg',{body})`）にも拡張し、(2) `json()` の **前段** に移動。旧実装は object 形式 message のみ、かつ json() の後に適用していたため、メタデータ内の password/apiKey/token が `combined.log` に素通りしていた（fail-open）。マスカーは循環安全・深さ制限付き | probe52 / Qiita・Zenn 構造化ログ調査 |
 | I-9 | JSON リポジトリの書き込みチョークポイント（create/update/updateIf）で `__proto__`/`constructor`/`prototype` キーを除去（`stripDangerousKeys`）。プロトタイプ汚染の深層防御を全7リポジトリに一括適用 | probe53 / Qiita・Zenn プロトタイプ汚染調査 |
+| I-10 | 通知設定 `enabled` を任意キー許可（`pattern(/.*/)`）から消費側が実際に参照する6チャネルの明示スキーマに厳格化。Joi 既定の unknown:false で未知キー（`constructor` 等）を 400 拒否。`notification-settings.json` はリポジトリ層の `stripDangerousKeys` を経由しない別保存経路のため、入力スキーマ側で塞ぐ | probe54 / Qiita・Zenn 任意キー調査 |
 
 ### フォローアップ（未実装）
 

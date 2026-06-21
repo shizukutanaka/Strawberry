@@ -113,7 +113,19 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
     telegramChatId: Joi.string().pattern(/^-?\d+$|^@[A-Za-z0-9_]{5,32}$/).allow('').optional(),
     email: Joi.string().email().allow('').optional(),
     genericWebhook: safeWebhookUrl.allow('').optional(),
-    enabled: Joi.object().pattern(/.*/, Joi.boolean()).optional(),
+    // enabled は資料消費側（user-notify.js resolveChannels）が参照する既知の6チャネルに
+    // 厳格化する。旧実装の .pattern(/.*/, Joi.boolean()) は任意キー（__proto__/constructor
+    // 含む）を boolean 値であれば受理し、notification-settings.json（リポジトリ層の
+    // stripDangerousKeys を経由しない別保存経路）にそのまま永続化していた。明示キー＋
+    // Joi 既定の unknown:false で未知キーを 400 拒否し、実際に使われる項目だけ保存する。
+    enabled: Joi.object({
+      line: Joi.boolean(),
+      discord: Joi.boolean(),
+      slack: Joi.boolean(),
+      telegram: Joi.boolean(),
+      email: Joi.boolean(),
+      webhook: Joi.boolean(),
+    }).optional(),
     webhooks: Joi.array().items(Joi.object({
       event: Joi.string().max(64).required(),
       url: safeWebhookUrl.required(),

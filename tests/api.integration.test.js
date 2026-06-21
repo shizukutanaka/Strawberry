@@ -794,7 +794,7 @@ describe('API Integration', () => {
       const res = await request(app)
         .post(`/api/v1/notification-settings/${userId}`)
         .set('Authorization', `Bearer ${userToken}`)
-        .send({ email: 'notify@example.com', enabled: { order_matched: true } });
+        .send({ email: 'notify@example.com', enabled: { email: true } });
       expect(res.statusCode).toBe(200);
       expect(res.body.success).toBe(true);
     });

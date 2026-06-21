@@ -3,7 +3,7 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 const { sanitizeSensitiveFields } = require('./sanitize');
-const { getRequestId } = require('./request-context');
+const { getRequestId, getTraceId } = require('./request-context');
 
 // ログディレクトリ
 const logDir = path.join(__dirname, '../../logs');
@@ -86,6 +86,11 @@ function stampRequestId(info) {
   if (info.requestId === undefined) {
     const rid = getRequestId();
     if (rid !== undefined) info.requestId = rid;
+  }
+  // W3C trace-id があればログにも付与し、サービス横断の分散トレースと相関させる。
+  if (info.traceId === undefined) {
+    const tid = getTraceId();
+    if (tid) info.traceId = tid;
   }
   return info;
 }

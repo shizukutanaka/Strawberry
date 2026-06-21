@@ -104,9 +104,11 @@ function errorMiddleware(err, req, res, next) {
   // APIエラーに変換
   const apiError = convertToAPIError(err);
   
-  // エラーをログに記録
+  // エラーをログに記録。requestId を含めることでアクセスログ（morgan :id）と
+  // エラーログを同一リクエストとして相関できる（障害調査の起点）。
   if (apiError.statusCode >= 500) {
     logger.error(`${apiError.type}: ${apiError.message}`, {
+      requestId: req.id,
       path: req.path,
       method: req.method,
       statusCode: apiError.statusCode,
@@ -114,6 +116,7 @@ function errorMiddleware(err, req, res, next) {
     });
   } else {
     logger.warn(`${apiError.type}: ${apiError.message}`, {
+      requestId: req.id,
       path: req.path,
       method: req.method,
       statusCode: apiError.statusCode

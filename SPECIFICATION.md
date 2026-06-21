@@ -166,8 +166,9 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
    モジュールや未使用依存（knex/sqlite3/pg/ioredis）が残る。
 4. **テスト実行の分断**: probe テストのみを個別実行していたため、統合テストとの **契約矛盾**
    （minRenterRating / block 404）が長く検出されなかった（本サイクルで是正）。
-5. **可観測性の不足**: 構造化ログはあるが、相関 ID（request-id）やトレースが未整備で、
-   分散障害の追跡が難しい。
+5. **可観測性の不足（一部改善）**: 構造化ログに加え相関 ID（`X-Request-Id`）を導入し
+   （I-11）、アクセスログとエラーログを相関できるようになった。残課題は分散トレース
+   （traceparent 伝播）と、`req.id` を全ログ呼び出しへ自動付与するコンテキスト伝播。
 
 ## 8. 改善点（Improvements）
 
@@ -185,13 +186,14 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-8 | ログのマスキングを (1) metadata splat（`logger.x('msg',{body})`）にも拡張し、(2) `json()` の **前段** に移動。旧実装は object 形式 message のみ、かつ json() の後に適用していたため、メタデータ内の password/apiKey/token が `combined.log` に素通りしていた（fail-open）。マスカーは循環安全・深さ制限付き | probe52 / Qiita・Zenn 構造化ログ調査 |
 | I-9 | JSON リポジトリの書き込みチョークポイント（create/update/updateIf）で `__proto__`/`constructor`/`prototype` キーを除去（`stripDangerousKeys`）。プロトタイプ汚染の深層防御を全7リポジトリに一括適用 | probe53 / Qiita・Zenn プロトタイプ汚染調査 |
 | I-10 | 通知設定 `enabled` を任意キー許可（`pattern(/.*/)`）から消費側が実際に参照する6チャネルの明示スキーマに厳格化。Joi 既定の unknown:false で未知キー（`constructor` 等）を 400 拒否。`notification-settings.json` はリポジトリ層の `stripDangerousKeys` を経由しない別保存経路のため、入力スキーマ側で塞ぐ | probe54 / Qiita・Zenn 任意キー調査 |
+| I-11 | リクエスト相関 ID を強化（D-2 の一部）。`X-Request-Id` を (1) 上流の安全な値があれば再利用、(2) 不正・過長値はフォールバックで UUID 採番、(3) レスポンスヘッダに反映、(4) エラーログにも `requestId` を付与してアクセスログと相関 | probe55 / Qiita・Zenn request-id 調査 |
 
 ### フォローアップ（未実装）
 
 | ID | 内容 | 優先度 |
 |----|------|--------|
 | D-1 | データ層を PostgreSQL（または Prisma）へ移行し、マルチプロセス・トランザクション・行ロックを獲得 | 高 |
-| D-2 | リクエスト相関 ID（request-id ミドルウェア）と構造化ログ連携、分散トレース | 中 |
+| D-2 | （部分実装 I-11）残: 分散トレース（W3C Trace Context / traceparent 伝播）と APM 連携、`req.id` を全 `logger.*` 呼び出しへ自動付与する AsyncLocalStorage コンテキスト | 中 |
 | D-3 | `npm audit` の CI 統合と依存の継続的脆弱性チェック（Zenn「Node.js 脆弱性チェック」参照） | 中 |
 | D-4 | 孤立モジュール（`*-fixed.js`）の削除と未使用依存の整理、サービスの DI 化 | 中 |
 | D-5 | CSP nonce 導入（インラインスクリプトが必要になった場合）と CSP レポート収集 | 低 |
@@ -216,3 +218,6 @@ OWASP の指針に基づく:
 - [JavaScriptで始めるユーザー認証：パスワードの安全な管理とbcryptの活用（Qiita）](https://qiita.com/arihori13/items/61aaf2c223dfd99a87f0)
 - [JavaScriptのプロトタイプ汚染攻撃対策は難しい（Qiita）](https://qiita.com/shellyln/items/af200a1953991de1698d)
 - [JavaScriptのPrototype Pollution（プロトタイプ汚染）について（Zenn）](https://zenn.dev/wasabina67/articles/52-denk75fn30miqt9u)
+- [正規表現の落とし穴（ReDoS - Regular Expressions DoS）（Qiita）](https://qiita.com/prograti/items/9b54cf82a08302a5d2c7)
+- [【Node.js】ログにリクエストIDを記録する（Qiita）](https://qiita.com/satoshio/items/9f3ad092a9ea690fcd60)
+- [リクエストIDを追加して調査を快適にする（Zenn）](https://zenn.dev/spacemarket/articles/send-request-id-from-gateway)

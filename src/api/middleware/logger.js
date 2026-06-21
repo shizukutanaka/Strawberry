@@ -17,10 +17,19 @@ morgan.token('body', (req) => {
   return JSON.stringify(body);
 });
 
-// リクエストIDを生成するミドルウェア
+// リクエストIDを生成するミドルウェア。
+// - 上流（プロキシ/ゲートウェイ）が付与した X-Request-Id があれば、安全な書式
+//   （英数字・._- のみ、1〜128文字）の場合に限り再利用し、サービス間トレースを連結する。
+//   不正・過長な値は採用しない（ログ injection / ヘッダ汚染を避ける）。
+// - 無ければ UUID v4 を採番する。
+// - 確定した ID を X-Request-Id レスポンスヘッダに反映し、クライアント/プロキシが
+//   同一リクエストを相関できるようにする（障害時の問い合わせ ID になる）。
+const { v4: uuidv4 } = require('uuid');
+const _REQUEST_ID_SAFE = /^[A-Za-z0-9._-]{1,128}$/;
 const requestId = (req, res, next) => {
-  const uuid = require('uuid');
-  req.id = uuid.v4();
+  const inbound = req.headers['x-request-id'];
+  req.id = (typeof inbound === 'string' && _REQUEST_ID_SAFE.test(inbound)) ? inbound : uuidv4();
+  res.setHeader('X-Request-Id', req.id);
   next();
 };
 

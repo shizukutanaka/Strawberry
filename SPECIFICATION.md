@@ -190,6 +190,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-12 | `AsyncLocalStorage` でリクエストコンテキストを伝播し、リクエスト処理中の**全** `logger.*` 呼び出しへ `requestId` を自動付与（`stampRequestId` フォーマット）。明示指定は尊重、コンテキスト外（起動時・バックグラウンド）は no-op。D-2 をほぼ完了 | probe56 / Qiita・Zenn request-id 伝播調査 |
 | I-13 | `notifyExternalAlert` の通知モジュール `require` を env ゲートの**内側**へ移動。旧実装は env チェック前に `scripts/sentry-notify.js`→`@sentry/node`（未導入）を解決しようとし、アラートごとに「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋没）。未設定チャネルは完全に無音化 | probe57 / 運用ログ衛生 |
 | I-14 | W3C Trace Context（`traceparent`）取り込み。上流の有効な trace-id を厳格検証して ALS コンテキストに伝播し、全ログへ自動付与（`stampRequestId`）。version ff・全ゼロ・書式不正は拒否。D-2 を完了 | probe58 / Qiita・Zenn W3C Trace Context 調査 |
+| I-15 | プロセスレベルの最終防衛ライン（`registerProcessGuards`）。`unhandledRejection` は文脈付きでログし API を落とさず継続、`uncaughtException` はログ後にサーバを閉じて exit(1)（状態不定での継続を避け再起動はオーケストレータに委ねる）。従来ハンドラは未使用の `core/logger.js` 内にあり実サーバに未登録だった | probe59 / Qiita・Zenn プロセス管理調査 |
 
 ### フォローアップ（未実装）
 
@@ -226,3 +227,5 @@ OWASP の指針に基づく:
 - [リクエストIDを追加して調査を快適にする（Zenn）](https://zenn.dev/spacemarket/articles/send-request-id-from-gateway)
 - [W3C の Trace Context の翻訳（Qiita）](https://qiita.com/TsuyoshiUshio@github/items/49c58608ccff168ee05e)
 - [W3C Trace Contextについて（Qiita）](https://qiita.com/sukatsu1222/items/82819461921deba761b9)
+- [Nodeのエラーハンドリング（unhandledRejectionとuncaughtException）について（Qiita）](https://qiita.com/103ma2/items/9cfab6604f813720d482)
+- [Express (Node.js) の Graceful shutdown（Qiita）](https://qiita.com/megmogmog1965/items/86da1dcb42cb5c6a4d14)

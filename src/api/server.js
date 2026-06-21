@@ -301,6 +301,11 @@ if (require.main === module) {
   };
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // プロセスレベルの最終防衛ライン（未処理例外/リジェクションのログ記録＋安全終了）。
+  // main 実行時のみ登録し、テスト（require 経由）では登録しない（テストランナーを落とさない）。
+  const { registerProcessGuards } = require('../utils/process-guards');
+  registerProcessGuards({ logger, getServer: () => server });
 }
 
 module.exports = { app, server, graphqlReady };

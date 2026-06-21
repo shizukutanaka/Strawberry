@@ -23,6 +23,15 @@ const securityHeaders = helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'", 'wss://*'],
+      // object-src 'none': レガシープラグイン（Flash/<object>/<embed>）経由の
+      // スクリプト実行・データ持ち出しを禁止。OWASP CSP 推奨の基本ハードニング。
+      objectSrc: ["'none'"],
+      // base-uri 'self': 攻撃者が注入した <base href> で全相対 URL（スクリプト/
+      // フォーム送信先）を外部に向け直す base-tag ハイジャックを防ぐ。
+      baseUri: ["'self'"],
+      // form-action 'self': <form> の送信先を自オリジンに限定し、注入フォームによる
+      // 資格情報の外部送信（CSRF 的なデータ持ち出し）を防ぐ。
+      formAction: ["'self'"],
       // frame-ancestors: prevents clickjacking by disallowing Strawberry UI from
       // being embedded in cross-origin iframes. Same-origin embedding is allowed.
       // This is the CSP-level equivalent of X-Frame-Options: SAMEORIGIN.

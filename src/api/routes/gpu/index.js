@@ -19,6 +19,9 @@ const { createReputationService } = require('../../../reputation/reputation-serv
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
+// 価格ウォッチ（値下げアラート）
+const WatchRepository = require('../../../db/json/WatchRepository');
+const { notifyPriceWatchers } = require('../../../services/price-watch');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
 // TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
@@ -691,8 +694,11 @@ router.put('/:id',
       }, req.user.id);
     }
     // GPU情報を更新
+    const previousPrice = gpu.pricePerHour;
     const updatedGPU = GpuRepository.update(gpuId, sanitized);
     logger.info(`GPU updated: ${gpuId}`);
+    // 値下げ検知: fire-and-forget（通知失敗で更新レスポンスをブロックしない）
+    setImmediate(() => notifyPriceWatchers(updatedGPU, previousPrice));
     // apiKey等の機密情報を除外
     const { apiKey, ...gpuSafe } = updatedGPU;
     return res.json({
@@ -1016,6 +1022,75 @@ router.post('/:id/benchmark',
       jobId: benchmarkJob.id,
       estimatedCompletionTime: benchmarkJob.estimatedCompletionTime
     });
+  })
+);
+
+// GPU 価格ウォッチ登録（値下げアラート）
+// POST /gpus/:id/watch — 認証必須（自分が提供していないGPUのみ登録可）
+router.post('/:id/watch',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const gpuId = req.params.id;
+    const gpu = GpuRepository.getById(gpuId);
+    if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+    if (gpu.providerId === req.user.id) {
+      return res.status(403).json({ error: 'Providers cannot watch their own GPUs' });
+    }
+    const { targetPrice } = req.body;
+    if (typeof targetPrice !== 'number' || !Number.isFinite(targetPrice) || targetPrice <= 0) {
+      return res.status(400).json({ error: '"targetPrice" must be a positive number' });
+    }
+    return withLock(`watch:${req.user.id}:${gpuId}`, async () => {
+      const existing = WatchRepository.getAll().find(w => w.userId === req.user.id && w.gpuId === gpuId);
+      let watch;
+      if (existing) {
+        watch = WatchRepository.update(existing.id, { targetPrice, lastNotifiedPrice: null, lastNotifiedAt: null });
+        return res.status(200).json({ watch });
+      }
+      const { v4: uuidv4 } = require('uuid');
+      watch = WatchRepository.create({
+        id: uuidv4(),
+        userId: req.user.id,
+        gpuId,
+        targetPrice,
+        lastNotifiedPrice: null,
+        lastNotifiedAt: null,
+        createdAt: new Date().toISOString(),
+      });
+      return res.status(201).json({ watch });
+    });
+  })
+);
+
+// GPU 価格ウォッチ削除
+// DELETE /gpus/:id/watch — 認証必須（自分のウォッチのみ削除可）
+router.delete('/:id/watch',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const gpuId = req.params.id;
+    const gpu = GpuRepository.getById(gpuId);
+    if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+    const existing = WatchRepository.getAll().find(w => w.userId === req.user.id && w.gpuId === gpuId);
+    if (!existing) return res.status(404).json({ error: 'Watch not found' });
+    WatchRepository.delete(existing.id);
+    return res.status(200).json({ message: 'Watch removed' });
+  })
+);
+
+// 自分の GPU ウォッチ取得
+// GET /gpus/:id/watch — 認証必須
+router.get('/:id/watch',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const gpuId = req.params.id;
+    const gpu = GpuRepository.getById(gpuId);
+    if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+    const watch = WatchRepository.getAll().find(w => w.userId === req.user.id && w.gpuId === gpuId);
+    if (!watch) return res.status(404).json({ error: 'Watch not found' });
+    return res.json({ watch });
   })
 );
 

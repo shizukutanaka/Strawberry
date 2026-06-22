@@ -965,6 +965,17 @@ router.put('/:id/role',
 // ピアID管理 /api/v1/users/peerid/*
 router.use('/peerid', peeridRouter);
 
+// 自分の GPU 価格ウォッチ一覧
+// GET /users/me/watches — 認証必須
+router.get('/me/watches',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const WatchRepository = require('../../../db/json/WatchRepository');
+    const watches = WatchRepository.getByUser(req.user.id) || [];
+    return res.json({ watches });
+  })
+);
+
 // スラッシュ・係争解決・レビュー投稿後にレピュテーションキャッシュを即座に無効化する。
 // order/index.js から直接呼び出す（循環依存を避けるためルーターではなく関数のみエクスポート）。
 function invalidateReputationCache(userId) {

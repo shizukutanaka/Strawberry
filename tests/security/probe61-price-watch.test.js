@@ -337,3 +337,88 @@ describe('GET /api/v1/users/me/watches', () => {
     expect(gpuIds).toContain(gpu2.id);
   });
 });
+
+// ── Hardening: per-user cap + orphan cleanup ───────────────────────────────
+
+describe('watch resource limits and lifecycle', () => {
+  const WatchRepository = require('../../src/db/json/WatchRepository');
+  const GpuRepo = require('../../src/db/json/GpuRepository');
+
+  it('enforces a per-user watch cap (429) and does not persist the over-limit watch', async () => {
+    const provider = await registerAndLogin('provcap');
+    const renter = await registerAndLogin('rentcap');
+    // Seed the user at the cap directly in the repo (fast — avoids 200 HTTP calls).
+    const MAX = 200;
+    for (let i = 0; i < MAX; i++) {
+      WatchRepository.create({
+        userId: renter.id,
+        gpuId: `seed-${renter.id}-${i}`,
+        targetPrice: 1.0,
+        lastNotifiedPrice: null,
+        lastNotifiedAt: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    const gpu = createGpu(provider.id, 3.0);
+    const res = await request(app)
+      .post(`/api/v1/gpus/${gpu.id}/watch`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ targetPrice: 2.0 });
+    expect(res.status).toBe(429);
+    // The new GPU must not have produced a persisted watch.
+    const after = WatchRepository.getByUser(renter.id) || [];
+    expect(after.find(w => w.gpuId === gpu.id)).toBeUndefined();
+    expect(after.length).toBe(MAX);
+  });
+
+  it('upsert at the cap still succeeds (does not count against the limit)', async () => {
+    const provider = await registerAndLogin('provcap2');
+    const renter = await registerAndLogin('rentcap2');
+    const gpu = createGpu(provider.id, 3.0);
+    // One real watch on the target GPU.
+    await request(app)
+      .post(`/api/v1/gpus/${gpu.id}/watch`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ targetPrice: 2.0 });
+    // Fill the rest up to the cap.
+    for (let i = 0; i < 199; i++) {
+      WatchRepository.create({
+        userId: renter.id,
+        gpuId: `seed2-${renter.id}-${i}`,
+        targetPrice: 1.0,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    // Re-POST the same GPU → upsert, must succeed (200) even though at cap.
+    const res = await request(app)
+      .post(`/api/v1/gpus/${gpu.id}/watch`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ targetPrice: 1.5 });
+    expect(res.status).toBe(200);
+    expect(res.body.watch.targetPrice).toBe(1.5);
+  });
+
+  it('deleting a GPU cleans up its orphaned watches', async () => {
+    const provider = await registerAndLogin('provorph');
+    const renter1 = await registerAndLogin('rentorph1');
+    const renter2 = await registerAndLogin('rentorph2');
+    const gpu = createGpu(provider.id, 3.0);
+    await request(app)
+      .post(`/api/v1/gpus/${gpu.id}/watch`)
+      .set('Authorization', `Bearer ${renter1.token}`)
+      .send({ targetPrice: 2.0 });
+    await request(app)
+      .post(`/api/v1/gpus/${gpu.id}/watch`)
+      .set('Authorization', `Bearer ${renter2.token}`)
+      .send({ targetPrice: 1.5 });
+    expect((WatchRepository.getByGpu(gpu.id) || []).length).toBe(2);
+
+    // Owner deletes the GPU.
+    const del = await request(app)
+      .delete(`/api/v1/gpus/${gpu.id}`)
+      .set('Authorization', `Bearer ${provider.token}`);
+    expect(del.status).toBe(200);
+    // Orphaned watches for that GPU must be gone.
+    expect((WatchRepository.getByGpu(gpu.id) || []).length).toBe(0);
+  });
+});

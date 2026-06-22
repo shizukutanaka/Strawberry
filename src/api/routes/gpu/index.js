@@ -739,6 +739,14 @@ router.delete('/:id',
     if (p2pNetwork && typeof p2pNetwork.removeGPU === 'function') {
       try { await p2pNetwork.removeGPU(gpuId); } catch (_) {}
     }
+    // 価格ウォッチの後始末: GPU が消えたウォッチは二度と発火せず、watches.json に
+    // 永久に残るストレージリークになる。削除と同時に孤児ウォッチを除去する。
+    try {
+      const orphaned = WatchRepository.getByGpu(gpuId) || [];
+      for (const w of orphaned) {
+        try { WatchRepository.delete(w.id); } catch (_) {}
+      }
+    } catch (_) { /* ウォッチ後始末の失敗で GPU 削除レスポンスを妨げない */ }
     // GPUイベントをログに記録
     logger.gpuEvent('gpu_removed', {
       gpuId: gpuId,
@@ -1041,12 +1049,21 @@ router.post('/:id/watch',
     if (typeof targetPrice !== 'number' || !Number.isFinite(targetPrice) || targetPrice <= 0) {
       return res.status(400).json({ error: '"targetPrice" must be a positive number' });
     }
-    return withLock(`watch:${req.user.id}:${gpuId}`, async () => {
-      const existing = WatchRepository.getAll().find(w => w.userId === req.user.id && w.gpuId === gpuId);
+    // 1ユーザーあたりのウォッチ上限。無制限だと watches.json を無限に膨張させる
+    // リソース枯渇（DoS）経路になるため、manualBlocks と同様に上限を設ける。
+    // ロックはユーザー単位（gpu 単位ではない）にして、別 GPU への並行登録が
+    // 上限チェックを同時通過して cap を超過する TOCTOU を防ぐ。
+    const MAX_WATCHES_PER_USER = 200;
+    return withLock(`watch:${req.user.id}`, async () => {
+      const userWatches = WatchRepository.getByUser(req.user.id) || [];
+      const existing = userWatches.find(w => w.gpuId === gpuId);
       let watch;
       if (existing) {
         watch = WatchRepository.update(existing.id, { targetPrice, lastNotifiedPrice: null, lastNotifiedAt: null });
         return res.status(200).json({ watch });
+      }
+      if (userWatches.length >= MAX_WATCHES_PER_USER) {
+        return res.status(429).json({ error: `Cannot watch more than ${MAX_WATCHES_PER_USER} GPUs. Remove an existing watch first.` });
       }
       const { v4: uuidv4 } = require('uuid');
       watch = WatchRepository.create({

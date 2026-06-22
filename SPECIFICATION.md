@@ -129,6 +129,9 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
   access+refresh の2種＋リフレッシュトークンローテーション、再利用検知で全セッション失効。
 - **CSP（helmet）**: `default-src 'self'`, `script-src 'self'`（`unsafe-inline` 除去）,
   `frame-ancestors 'self'`, **`object-src 'none'`**, **`base-uri 'self'`**, **`form-action 'self'`**。
+- **その他レスポンスヘッダ**: HSTS / X-Content-Type-Options / X-Frame-Options / COOP / CORP
+  （helmet 既定）に加え、**`Permissions-Policy`** で未使用ブラウザ機能（camera/mic/geolocation/
+  payment/usb 等）を全拒否。
 - **CORS**: ワイルドカード時は `credentials:false` を強制（仕様違反の `*`+credentials を回避）。
 - **レート制限**: `TRUST_PROXY` を正整数 hop のみ受理し、XFF 偽装によるバイパスを防止。
 - **決済の健全性**: 送金失敗は例外送出（`dummy-txid` を成功偽装しない）。invoice-poller は
@@ -191,6 +194,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-13 | `notifyExternalAlert` の通知モジュール `require` を env ゲートの**内側**へ移動。旧実装は env チェック前に `scripts/sentry-notify.js`→`@sentry/node`（未導入）を解決しようとし、アラートごとに「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋没）。未設定チャネルは完全に無音化 | probe57 / 運用ログ衛生 |
 | I-14 | W3C Trace Context（`traceparent`）取り込み。上流の有効な trace-id を厳格検証して ALS コンテキストに伝播し、全ログへ自動付与（`stampRequestId`）。version ff・全ゼロ・書式不正は拒否。D-2 を完了 | probe58 / Qiita・Zenn W3C Trace Context 調査 |
 | I-15 | プロセスレベルの最終防衛ライン（`registerProcessGuards`）。`unhandledRejection` は文脈付きでログし API を落とさず継続、`uncaughtException` はログ後にサーバを閉じて exit(1)（状態不定での継続を避け再起動はオーケストレータに委ねる）。従来ハンドラは未使用の `core/logger.js` 内にあり実サーバに未登録だった | probe59 / Qiita・Zenn プロセス管理調査 |
+| I-16 | `Permissions-Policy` ヘッダを追加（helmet 7 は未設定）。camera/microphone/geolocation/payment/usb 等の未使用ブラウザ機能を全拒否し、XSS・埋め込み時の悪用攻撃面を削る（最小権限）。I-5 の CSP と並ぶレスポンスヘッダ多層化 | probe60 / セキュリティヘッダ調査 |
 
 ### フォローアップ（未実装）
 

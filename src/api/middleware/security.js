@@ -46,6 +46,21 @@ const securityHeaders = helmet({
   referrerPolicy: { policy: 'same-origin' },
 });
 
+// Permissions-Policy（旧 Feature-Policy）。helmet 7 はこのヘッダを設定しないため明示する。
+// Strawberry は GPU マーケットプレイスの Web API/SPA であり、カメラ・マイク・位置情報・
+// 決済 API・USB 等の強力なブラウザ機能を一切使わない。これらを () で全オリジン拒否し、
+// 万一の XSS や埋め込み時にこれらの機能が悪用される攻撃面を削る（最小権限）。
+const PERMISSIONS_POLICY = [
+  'accelerometer=()', 'autoplay=()', 'camera=()', 'display-capture=()',
+  'encrypted-media=()', 'fullscreen=(self)', 'geolocation=()', 'gyroscope=()',
+  'magnetometer=()', 'microphone=()', 'midi=()', 'payment=()', 'usb=()',
+  'xr-spatial-tracking=()',
+].join(', ');
+const permissionsPolicy = (req, res, next) => {
+  res.setHeader('Permissions-Policy', PERMISSIONS_POLICY);
+  next();
+};
+
 // CORS設定
 // 重要: CORS 仕様上、origin が '*'（ワイルドカード）のとき credentials:true は不正で、
 // ブラウザはレスポンスを拒否する（Cookie/Authorization を伴うリクエストが全滅）。
@@ -261,6 +276,7 @@ const allowOwnerOrAdmin = (getResource) => async (req, res, next) => {
 
 module.exports = {
   securityHeaders,
+  permissionsPolicy,
   corsMiddleware: cors(corsOptions),
   apiLimiter,
   authenticateJWT,

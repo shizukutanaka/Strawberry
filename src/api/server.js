@@ -10,6 +10,7 @@ const { logger } = require('../utils/logger');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
 const {
   securityHeaders,
+  permissionsPolicy,
   corsMiddleware,
   apiLimiter
 } = require('./middleware/security');
@@ -206,6 +207,7 @@ app.use(requestId);
 
 // セキュリティミドルウェア
 app.use(securityHeaders);
+app.use(permissionsPolicy);
 app.use(corsMiddleware);
 
 // レート制限（DoS対策）

@@ -27,16 +27,37 @@ function readTail(file, maxBytes = 1024 * 1024) {
   }
 }
 
+// ローテーション耐性: winston(tailable) は maxsize 超過で combined.log を combined1.log,
+// combined2.log... へ送り出す。マーカー書込み直後にローテーションが起きると、現行の
+// combined.log には無く combined1.log に移る。フル並列実行ではこれが起きやすく旧テストの
+// flakiness の原因だった。現行ファイルとローテーション兄弟（combined.log / combined1.log /
+// …）を全て走査して、いずれかにマーカーがあれば一致とみなす。
+function candidateFiles(file) {
+  const dir = path.dirname(file);
+  const ext = path.extname(file);                 // ".log"
+  const base = path.basename(file, ext);          // "combined"
+  const re = new RegExp(`^${base}\\d*${ext.replace(/\./g, '\\.')}$`); // combined.log, combined1.log...
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((f) => re.test(f)); } catch (_) { /* ignore */ }
+  if (!names.includes(path.basename(file))) names.push(path.basename(file));
+  return names.map((f) => path.join(dir, f));
+}
+
+function markerInAnyFile(file, marker) {
+  for (const f of candidateFiles(file)) {
+    try {
+      if (fs.existsSync(f) && readTail(f).includes(marker)) return true;
+    } catch (_) { /* 書込み途中の読取りは無視 */ }
+  }
+  return false;
+}
+
 function waitForMatch(file, marker, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const tick = () => {
-      try {
-        if (fs.existsSync(file) && readTail(file).includes(marker)) {
-          return resolve(true);
-        }
-      } catch (_) { /* 書込み途中の読取りは無視 */ }
-      if (Date.now() - start > timeoutMs) return reject(new Error(`marker not found in ${path.basename(file)}: ${marker}`));
+      if (markerInAnyFile(file, marker)) return resolve(true);
+      if (Date.now() - start > timeoutMs) return reject(new Error(`marker not found in ${path.basename(file)}(+rotations): ${marker}`));
       setTimeout(tick, 25);
     };
     tick();

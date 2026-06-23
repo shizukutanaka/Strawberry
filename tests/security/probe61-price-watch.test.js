@@ -507,6 +507,11 @@ describe('GET /api/v1/users/me/watches', () => {
     // Each watch must include an enriched gpu snapshot
     expect(w1.gpu).toMatchObject({ id: gpu1.id, pricePerHour: 3.0 });
     expect(w2.gpu).toMatchObject({ id: gpu2.id, pricePerHour: 4.0 });
+    // available must be normalized to an explicit boolean (not undefined/null).
+    // The marketplace uses available!==false as the rentable predicate; clients
+    // that test ===true would wrongly mark legacy GPUs as non-rentable without normalization.
+    expect(typeof w1.gpu.available).toBe('boolean');
+    expect(typeof w2.gpu.available).toBe('boolean');
     // Sensitive fields must be absent from the gpu snapshot
     expect(w1.gpu).not.toHaveProperty('apiKey');
     expect(w1.gpu).not.toHaveProperty('providerId');

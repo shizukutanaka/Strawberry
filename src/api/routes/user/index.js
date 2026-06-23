@@ -986,7 +986,11 @@ router.get('/me/watches',
         vendor: raw.vendor,
         memoryGB: raw.memoryGB,
         pricePerHour: raw.pricePerHour,
-        available: raw.available,
+        // マーケットプレイスの rentable 述語は available !== false（undefined は rentable 扱い）。
+        // API クライアントがこの内部規約を知らずに available === true で判定すると
+        // 未設定 GPU を全部「借りられない」と誤判定する。スナップショットでは
+        // 明示的な boolean に正規化して呼び出し側の誤判定リスクを排除する。
+        available: raw.available !== false,
       } : null;
       return { ...w, gpu };
     });

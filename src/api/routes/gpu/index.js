@@ -815,6 +815,92 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
   });
 }));
 
+// 借り手資格事前チェック（認証必須）
+// GET /gpus/:id/eligibility
+// 現在のユーザーがこの GPU を注文できる資格を持つか事前に確認できる。
+// rejectUnratedRenters / minRenterRating に引っかかる借り手は注文作成前に
+// この API で理由を確認し、不要な 422 を避けられる。
+router.get('/:id/eligibility', authenticateJWT, asyncHandler(async (req, res) => {
+  const gpuId = req.params.id;
+  const gpu = GpuRepository.getById(gpuId);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+
+  // 自己取引は不可
+  if (gpu.providerId === req.user.id) {
+    return res.json({
+      eligible: false,
+      reason: 'self_trade',
+      message: 'You cannot rent your own GPU',
+      requirements: {
+        minRenterRating: gpu.minRenterRating || null,
+        rejectUnratedRenters: gpu.rejectUnratedRenters === true,
+      },
+      renterRating: null,
+    });
+  }
+
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const renterOrders = OrderRepository.getAll().filter(o => o.userId === req.user.id && o.renterReview);
+  const renterReviewCount = renterOrders.length;
+  const renterRatingAverage = renterReviewCount > 0
+    ? Math.round(
+        (renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount) * 10
+      ) / 10
+    : null;
+  const hasRatingHistory = renterRatingAverage !== null;
+
+  const requirements = {
+    minRenterRating: gpu.minRenterRating || null,
+    rejectUnratedRenters: gpu.rejectUnratedRenters === true,
+  };
+  const renterRating = {
+    average: renterRatingAverage,
+    count: renterReviewCount,
+    hasHistory: hasRatingHistory,
+  };
+
+  // Unrated renter blocked
+  if (gpu.rejectUnratedRenters === true && !hasRatingHistory) {
+    return res.json({
+      eligible: false,
+      reason: 'no_rating_history',
+      message: 'This GPU requires renters to have a rating history. Complete at least one rental on another GPU first.',
+      requirements,
+      renterRating,
+    });
+  }
+
+  // Known-below-floor
+  if (gpu.minRenterRating && hasRatingHistory && renterRatingAverage < gpu.minRenterRating) {
+    return res.json({
+      eligible: false,
+      reason: 'below_rating_floor',
+      message: `This GPU requires a renter rating of at least ${gpu.minRenterRating}. Your current rating is ${renterRatingAverage}.`,
+      requirements,
+      renterRating,
+    });
+  }
+
+  // GPU not available
+  if (gpu.available === false) {
+    return res.json({
+      eligible: false,
+      reason: 'not_available',
+      message: 'This GPU is currently not available for booking.',
+      requirements,
+      renterRating,
+    });
+  }
+
+  return res.json({
+    eligible: true,
+    reason: null,
+    message: 'You are eligible to rent this GPU.',
+    requirements,
+    renterRating,
+  });
+}));
+
 // GPU 手動ブロック登録（メンテナンス・個人利用等）
 // POST /gpus/:id/block — 認証必須（GPU オーナーまたは管理者）
 router.post('/:id/block',

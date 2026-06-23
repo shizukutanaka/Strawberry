@@ -151,6 +151,66 @@ describe('notifyPriceWatchers unit', () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  // ── Availability-restore path ──────────────────────────────────────────
+
+  it('notifies on availability restore when price is already at or below target', () => {
+    // Scenario: provider dropped price while GPU was offline, then brought it back.
+    // The price-drop event was suppressed (available:false). The restore event must
+    // fire so the watcher is not silently locked out of an actionable opportunity.
+    const gpu = makeGpu({ pricePerHour: 1.0, available: true });
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: null })];
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    const notify = jest.fn();
+    // Pass previousAvailable:false to signal restore event (price unchanged)
+    const count = notifyPriceWatchers(gpu, { previousPrice: 1.0, previousAvailable: false }, { repo, notify });
+    expect(count).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toBe('gpu_available_restored');
+  });
+
+  it('no notification on availability restore when price is still above target', () => {
+    const gpu = makeGpu({ pricePerHour: 3.0, available: true });
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: null })];
+    const repo = { getByGpu: () => watches };
+    const notify = jest.fn();
+    expect(notifyPriceWatchers(gpu, { previousPrice: 3.0, previousAvailable: false }, { repo, notify })).toBe(0);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('availability restore ignores lastNotifiedPrice suppression (offline broke actionability)', () => {
+    // Watcher was previously notified at price 1.0. GPU went offline, came back at same price.
+    // Price-drop path would suppress (lastNotifiedPrice 1.0 <= newPrice 1.0).
+    // Availability-restore path must NOT suppress — GPU being offline means the prior
+    // notification window was lost; restore is independently actionable.
+    const gpu = makeGpu({ pricePerHour: 1.0, available: true });
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: 1.0 })];
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    const notify = jest.fn();
+    const count = notifyPriceWatchers(gpu, { previousPrice: 1.0, previousAvailable: false }, { repo, notify });
+    expect(count).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('when both isPriceDrop and isAvailabilityRestore, uses gpu_price_drop event type', () => {
+    // Price dropped AND GPU became available simultaneously.
+    const gpu = makeGpu({ pricePerHour: 1.0, available: true });
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: null })];
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    const notify = jest.fn();
+    notifyPriceWatchers(gpu, { previousPrice: 2.5, previousAvailable: false }, { repo, notify });
+    expect(notify.mock.calls[0][1]).toBe('gpu_price_drop');
+  });
+
+  it('backward compatible with numeric previousInfo (legacy callers)', () => {
+    const gpu = makeGpu({ pricePerHour: 1.0 });
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: null })];
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    const notify = jest.fn();
+    // Old call style: notifyPriceWatchers(gpu, 2.5, deps)
+    expect(notifyPriceWatchers(gpu, 2.5, { repo, notify })).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
   it('updates lastNotifiedPrice and lastNotifiedAt after notification', () => {
     const gpu = makeGpu({ pricePerHour: 1.0 });
     const watches = [makeWatch({ id: 'w99', targetPrice: 2.0, lastNotifiedPrice: null })];

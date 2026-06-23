@@ -695,10 +695,11 @@ router.put('/:id',
     }
     // GPU情報を更新
     const previousPrice = gpu.pricePerHour;
+    const previousAvailable = gpu.available;
     const updatedGPU = GpuRepository.update(gpuId, sanitized);
     logger.info(`GPU updated: ${gpuId}`);
-    // 値下げ検知: fire-and-forget（通知失敗で更新レスポンスをブロックしない）
-    setImmediate(() => notifyPriceWatchers(updatedGPU, previousPrice));
+    // 値下げ / 空き復帰を検知: fire-and-forget（通知失敗で更新レスポンスをブロックしない）
+    setImmediate(() => notifyPriceWatchers(updatedGPU, { previousPrice, previousAvailable }));
     // apiKey等の機密情報を除外
     const { apiKey, ...gpuSafe } = updatedGPU;
     return res.json({

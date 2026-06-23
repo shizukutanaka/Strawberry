@@ -82,9 +82,9 @@ describe('order creation: minRenterRating floor policy', () => {
   });
 
   it('order/index.js: unrated renters are allowed unless rejectUnratedRenters opt-in is set', () => {
-    // Sybil-resistance is now opt-in via gpu.rejectUnratedRenters (not a forced 0 floor)
-    expect(src).toMatch(/unratedAndRejected\s*=\s*!hasRatingHistory\s*&&\s*gpu\.rejectUnratedRenters\s*===\s*true/);
-    expect(src).toMatch(/if\s*\(knownBelowFloor\s*\|\|\s*unratedAndRejected\)/);
+    // Sybil-resistance is opt-in via gpu.rejectUnratedRenters as an independent check
+    // (not combined with minRenterRating - it works even without a rating floor)
+    expect(src).toMatch(/gpu\.rejectUnratedRenters\s*===\s*true\s*&&\s*!hasRatingHistory/);
     // The old forced-0 bypass-prevention form must be gone
     expect(src).not.toMatch(/renterRatingAverage \?\? 0/);
     expect(src).not.toMatch(/null bypass prevention/);

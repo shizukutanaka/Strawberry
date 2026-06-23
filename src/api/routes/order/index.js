@@ -790,19 +790,17 @@ router.post('/',
     const renterRatingAverage = renterReviewCount > 0
       ? renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount
       : null;
-    if (gpu.minRenterRating) {
-      const hasRatingHistory = renterRatingAverage !== null;
-      // 既知の評価が floor 未満 → 拒否（★2 の借り手など）
-      const knownBelowFloor = hasRatingHistory && renterRatingAverage < gpu.minRenterRating;
-      // 未評価 かつ プロバイダが未評価拒否をオプトイン → 拒否（Sybil 対策）
-      const unratedAndRejected = !hasRatingHistory && gpu.rejectUnratedRenters === true;
-      if (knownBelowFloor || unratedAndRejected) {
-        const displayRating = hasRatingHistory
-          ? `${Math.round(renterRatingAverage * 10) / 10} (${renterReviewCount} review${renterReviewCount !== 1 ? 's' : ''})`
-          : 'no rating history';
-        throw new APIError(ErrorTypes.VALIDATION,
-          `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${displayRating})`, 422);
-      }
+    const hasRatingHistory = renterRatingAverage !== null;
+    // 未評価拒否オプトイン: minRenterRating なしでも単独で機能する独立チェック
+    if (gpu.rejectUnratedRenters === true && !hasRatingHistory) {
+      throw new APIError(ErrorTypes.VALIDATION,
+        'This GPU rejects unrated renters (no rating history)', 422);
+    }
+    const knownBelowFloor = hasRatingHistory && renterRatingAverage < gpu.minRenterRating;
+    if (gpu.minRenterRating && knownBelowFloor) {
+      const displayRating = `${Math.round(renterRatingAverage * 10) / 10} (${renterReviewCount} review${renterReviewCount !== 1 ? 's' : ''})`;
+      throw new APIError(ErrorTypes.VALIDATION,
+        `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${displayRating})`, 422);
     }
     // 料金計算: GPUのpricePerHour必須
     let pricePerHour = gpu.pricePerHour;

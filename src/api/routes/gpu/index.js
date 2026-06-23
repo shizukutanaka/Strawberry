@@ -394,7 +394,8 @@ router.post('/',
     const gpuInfo = sanitizeObject(req.validatedBody, [
       'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
       'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
-      'features', 'capabilities', 'location', 'performance', 'minRenterRating'
+      'features', 'capabilities', 'location', 'performance', 'minRenterRating',
+      'rejectUnratedRenters',
     ]);
     logger.info(`[GPU登録] ${gpuInfo.vendor} ${gpuInfo.model} (${gpuInfo.apiType}) by ${req.user.id}`);
 
@@ -667,7 +668,11 @@ router.put('/:id',
     // 旧コードは req.body をそのまま spread しており、providerId/attestation/apiKey/id 等の
     // 任意フィールドをクライアントが上書きできるマスアサインメント脆弱性があった
     // （GPU 所有権の奪取・偽アテステーション・価格上限回避が可能だった）。
-    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available']);
+    // rejectUnratedRenters はスキーマ (schemas.gpu.update) で許可済みだが
+    // 旧 allowlist に含まれておらずサニタイズで無言に剥落し、機能が完全に
+    // 死んでいた（gpu.rejectUnratedRenters は常に undefined → 注文時チェックが
+    // 素通り）。allowlist に追加して機能を正常化する。
+    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available', 'rejectUnratedRenters']);
     // available は boolean のみ許可（任意の型汚染を防ぐ）
     if ('available' in sanitized && typeof sanitized.available !== 'boolean') {
       return res.status(400).json({ error: '"available" must be a boolean' });
@@ -683,13 +688,21 @@ router.put('/:id',
         return res.status(409).json({ error: 'Duplicate GPU name already registered by this provider' });
       }
     }
-    // Audit minRenterRating changes: providers can use this field to selectively
-    // block specific renters. Log every change for admin review.
+    // Audit minRenterRating / rejectUnratedRenters changes: providers can use
+    // these fields to selectively block renters. Log every change for admin review.
     if (sanitized.minRenterRating !== undefined && sanitized.minRenterRating !== gpu.minRenterRating) {
       appendAuditLog('gpu_min_renter_rating_changed', {
         gpuId,
         previousValue: gpu.minRenterRating ?? null,
         newValue: sanitized.minRenterRating,
+        providerId: req.user.id,
+      }, req.user.id);
+    }
+    if (sanitized.rejectUnratedRenters !== undefined && sanitized.rejectUnratedRenters !== gpu.rejectUnratedRenters) {
+      appendAuditLog('gpu_reject_unrated_renters_changed', {
+        gpuId,
+        previousValue: gpu.rejectUnratedRenters ?? false,
+        newValue: sanitized.rejectUnratedRenters,
         providerId: req.user.id,
       }, req.user.id);
     }

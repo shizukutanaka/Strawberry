@@ -625,4 +625,30 @@ describe('watch resource limits and lifecycle', () => {
     // Orphaned watches for that GPU must be gone.
     expect((WatchRepository.getByGpu(gpu.id) || []).length).toBe(0);
   });
+
+  it('deactivating a user account cleans up that user\'s watches', async () => {
+    // Symmetric counterpart to GPU-delete cleanup: a deactivated user can never
+    // log in again, so their watches are dead weight that also waste notify cycles.
+    const provider = await registerAndLogin('provdeact');
+    const renter = await registerAndLogin('rentdeact');
+    const gpu1 = createGpu(provider.id, 3.0);
+    const gpu2 = createGpu(provider.id, 4.0);
+    await request(app)
+      .post(`/api/v1/gpus/${gpu1.id}/watch`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ targetPrice: 2.0 });
+    await request(app)
+      .post(`/api/v1/gpus/${gpu2.id}/watch`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ targetPrice: 2.5 });
+    expect((WatchRepository.getByUser(renter.id) || []).length).toBe(2);
+
+    // User deletes (deactivates) their own account.
+    const del = await request(app)
+      .delete('/api/v1/users/me')
+      .set('Authorization', `Bearer ${renter.token}`);
+    expect(del.status).toBe(200);
+    // The user's watches must be gone.
+    expect((WatchRepository.getByUser(renter.id) || []).length).toBe(0);
+  });
 });

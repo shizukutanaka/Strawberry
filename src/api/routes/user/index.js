@@ -344,6 +344,18 @@ router.delete('/me',
     } catch (e) {
       logger.warn(`token revoke on self-deactivation failed (user=${user.id}): ${e.message}`);
     }
+    // 価格ウォッチの後始末: 退会したユーザーのウォッチは二度と行動可能にならず
+    // （ログイン不可）、watches.json に永久に残るストレージリークになる。さらに
+    // notifyPriceWatchers が値下げ毎に死んだアカウントへの通知を試み続け無駄が生じる。
+    // GPU 削除時の孤児ウォッチ掃除（gpu/index.js DELETE /:id）と対称の後始末。
+    try {
+      const WatchRepository = require('../../../db/json/WatchRepository');
+      const userWatches = WatchRepository.getByUser(user.id) || [];
+      for (const w of userWatches) {
+        try { WatchRepository.delete(w.id); } catch (_) {}
+      }
+    } catch (_) { /* ウォッチ後始末の失敗で退会レスポンスを妨げない */ }
+
     logger.info(`User self-deactivated account: ${user.id}`);
     res.json({ message: 'Account deactivated', userId: user.id });
   })

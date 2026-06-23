@@ -139,6 +139,28 @@ function invalidateRepCache(userId) {
   if (userId && typeof _invalidateRepCache === 'function') _invalidateRepCache(userId);
 }
 
+// 注文作成のユーザー別レートリミット（IP ベースのグローバル制限を補完）。
+// 認証済みユーザーが在庫チェック・価格計算の重いパスを連打して DB を圧迫するのを防ぐ。
+// グローバル IP リミットだけでは：同一ユーザーが異なる IP (Tor/VPN) から来た場合に効果がなく、
+// また共有 IP (NAT) では無関係ユーザーを巻き込んでしまう。
+// ここでは id ベースの滑動ウィンドウで「ユーザー単位」の短時間爆発を抑制する。
+const _orderCreateRateState = new Map(); // userId → { count, windowStart }
+const ORDER_CREATE_RATE_LIMIT = Number(process.env.ORDER_CREATE_RATE_LIMIT) || 10;  // per window
+const ORDER_CREATE_RATE_WINDOW_MS = 60_000; // 1 minute sliding window
+function _checkOrderCreateRateLimit(userId) {
+  const now = Date.now();
+  let s = _orderCreateRateState.get(userId);
+  if (!s || now - s.windowStart >= ORDER_CREATE_RATE_WINDOW_MS) {
+    _orderCreateRateState.set(userId, { count: 1, windowStart: now });
+    return true;
+  }
+  if (s.count >= ORDER_CREATE_RATE_LIMIT) return false;
+  s.count++;
+  return true;
+}
+// 単体テストが Map を直接リセットできるよう公開（プロセス再起動が不要）
+_checkOrderCreateRateLimit._state = _orderCreateRateState;
+
 // オーダー一覧取得 (認証必須)
 // キャッシュは perUser 必須: URL のみをキーにすると先行ユーザーの注文一覧が
 // 他ユーザーに返る（認可バイパス）ため、ユーザーIDをキーに含める。
@@ -720,6 +742,11 @@ router.post('/',
   authenticateJWT,
   validateMiddleware(schemas.order.create),
   asyncHandler(async (req, res) => {
+    // ユーザー別レートリミット（IP ベースグローバル制限の補完）
+    if (!_checkOrderCreateRateLimit(req.user.id)) {
+      throw new APIError(ErrorTypes.CONFLICT,
+        `Too many order creation requests. Limit: ${ORDER_CREATE_RATE_LIMIT} per minute per user.`, 429);
+    }
     // 入力値サニタイズ
     const orderData = sanitizeObject(req.validatedBody, ['description']);
     logger.info('Creating new order');
@@ -1833,3 +1860,4 @@ module.exports = router;
 module.exports._usageSessions = usageSessions;
 module.exports._reapUsageSessions = reapUsageSessions;
 module.exports._OrderUsageSession = OrderUsageSession;
+module.exports._checkOrderCreateRateLimit = _checkOrderCreateRateLimit;

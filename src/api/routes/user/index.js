@@ -965,14 +965,32 @@ router.put('/:id/role',
 // ピアID管理 /api/v1/users/peerid/*
 router.use('/peerid', peeridRouter);
 
-// 自分の GPU 価格ウォッチ一覧
+// 自分の GPU 価格ウォッチ一覧（GPU スナップショット付き）
 // GET /users/me/watches — 認証必須
+// N+1 問題の解消: クライアントが各 gpuId に対して GET /gpus/:id を個別に
+// 呼ぶ（N+1 往復）のではなく、サーバー側で GPU 情報をジョインして返す。
+// 削除済み GPU のウォッチは gpu:null として返す（クライアントが 404 を個別処理不要）。
 router.get('/me/watches',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     const WatchRepository = require('../../../db/json/WatchRepository');
+    const GpuRepository = require('../../../db/json/GpuRepository');
     const watches = WatchRepository.getByUser(req.user.id) || [];
-    return res.json({ watches });
+    const enriched = watches.map(w => {
+      const raw = GpuRepository.getById(w.gpuId);
+      // apiKey・providerId など機密/内部フィールドを除外し、表示に必要な公開フィールドのみ返す
+      const gpu = raw ? {
+        id: raw.id,
+        name: raw.name,
+        model: raw.model,
+        vendor: raw.vendor,
+        memoryGB: raw.memoryGB,
+        pricePerHour: raw.pricePerHour,
+        available: raw.available,
+      } : null;
+      return { ...w, gpu };
+    });
+    return res.json({ watches: enriched });
   })
 );
 

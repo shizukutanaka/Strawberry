@@ -493,16 +493,47 @@ describe('GET /api/v1/users/me/watches', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns all watches for the authenticated user', async () => {
+  it('returns enriched watches with GPU snapshot (N+1 elimination)', async () => {
     const res = await request(app)
       .get('/api/v1/users/me/watches')
       .set('Authorization', `Bearer ${renterToken}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.watches)).toBe(true);
     expect(res.body.watches.length).toBeGreaterThanOrEqual(2);
-    const gpuIds = res.body.watches.map(w => w.gpuId);
-    expect(gpuIds).toContain(gpu1.id);
-    expect(gpuIds).toContain(gpu2.id);
+    const w1 = res.body.watches.find(w => w.gpuId === gpu1.id);
+    const w2 = res.body.watches.find(w => w.gpuId === gpu2.id);
+    expect(w1).toBeDefined();
+    expect(w2).toBeDefined();
+    // Each watch must include an enriched gpu snapshot
+    expect(w1.gpu).toMatchObject({ id: gpu1.id, pricePerHour: 3.0 });
+    expect(w2.gpu).toMatchObject({ id: gpu2.id, pricePerHour: 4.0 });
+    // Sensitive fields must be absent from the gpu snapshot
+    expect(w1.gpu).not.toHaveProperty('apiKey');
+    expect(w1.gpu).not.toHaveProperty('providerId');
+  });
+
+  it('returns gpu:null for watches on deleted GPUs (orphan handling)', async () => {
+    const WatchRepository = require('../../src/db/json/WatchRepository');
+    const { v4: uuidv4 } = require('uuid');
+    const provider = await registerAndLogin('prov61null');
+    const renter = await registerAndLogin('rent61null');
+    const deletedGpuId = uuidv4(); // never actually exists
+    // Seed a watch for a non-existent GPU directly (simulates orphan after delete)
+    WatchRepository.create({
+      userId: renter.id,
+      gpuId: deletedGpuId,
+      targetPrice: 1.0,
+      lastNotifiedPrice: null,
+      lastNotifiedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+    const res = await request(app)
+      .get('/api/v1/users/me/watches')
+      .set('Authorization', `Bearer ${renter.token}`);
+    expect(res.status).toBe(200);
+    const orphan = res.body.watches.find(w => w.gpuId === deletedGpuId);
+    expect(orphan).toBeDefined();
+    expect(orphan.gpu).toBeNull(); // graceful null — no 404 needed
   });
 });
 

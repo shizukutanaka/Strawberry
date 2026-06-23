@@ -106,6 +106,29 @@ describe('notifyPriceWatchers unit', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it('does not notify when the GPU is not rentable (available === false)', () => {
+    // New viewpoint: an alert is only valuable if the GPU can actually be rented.
+    // A drop on an available:false GPU is a false signal (it is hidden from the
+    // marketplace), so it must be suppressed even though price and target match.
+    const gpu = makeGpu({ pricePerHour: 1.0, available: false });
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: null })];
+    const notify = jest.fn();
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    expect(notifyPriceWatchers(gpu, 3.0, { repo, notify })).toBe(0);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('still notifies when available is undefined (legacy GPUs default to rentable)', () => {
+    // available !== false is the marketplace's "rentable" predicate, so a GPU with
+    // no available field must NOT be treated as unavailable.
+    const gpu = makeGpu({ pricePerHour: 1.0 }); // no `available` key
+    const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: null })];
+    const notify = jest.fn();
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    expect(notifyPriceWatchers(gpu, 3.0, { repo, notify })).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
   it('suppresses re-notification when lastNotifiedPrice <= newPrice', () => {
     const gpu = makeGpu({ pricePerHour: 1.0 });
     const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: 1.0 })];

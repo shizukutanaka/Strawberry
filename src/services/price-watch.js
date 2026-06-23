@@ -21,6 +21,10 @@ function notifyPriceWatchers(gpu, previousPrice, deps = {}) {
   const newPrice = gpu.pricePerHour;
   // 値下げ時のみ作動（同額・値上げ・不正値は無視）
   if (!(typeof previousPrice === 'number' && newPrice < previousPrice)) return 0;
+  // レンタル不可（available===false）の GPU は通知しない。マーケットプレイスは
+  // この GPU を一覧・詳細から除外しており（available!==false でフィルタ）、借りられない
+  // GPU の値下げ通知は「行動できない偽シグナル」でありアラートの信頼性を損なう。
+  if (gpu.available === false) return 0;
 
   let watches;
   try {

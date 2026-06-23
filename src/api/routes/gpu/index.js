@@ -21,7 +21,7 @@ const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
 // 価格ウォッチ（値下げアラート）
 const WatchRepository = require('../../../db/json/WatchRepository');
-const { notifyPriceWatchers } = require('../../../services/price-watch');
+const { notifyPriceWatchers, notifyWatchJustCreated } = require('../../../services/price-watch');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
 // TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
@@ -1061,6 +1061,8 @@ router.post('/:id/watch',
       let watch;
       if (existing) {
         watch = WatchRepository.update(existing.id, { targetPrice, lastNotifiedPrice: null, lastNotifiedAt: null });
+        // ウォッチ更新後も即時チェック: 新 targetPrice が現在価格以下なら即時通知
+        setImmediate(() => notifyWatchJustCreated(gpu, watch));
         return res.status(200).json({ watch });
       }
       if (userWatches.length >= MAX_WATCHES_PER_USER) {
@@ -1076,6 +1078,10 @@ router.post('/:id/watch',
         lastNotifiedAt: null,
         createdAt: new Date().toISOString(),
       });
+      // ウォッチ作成直後: 現在価格がすでに目標以下なら即時通知。
+      // notifyPriceWatchers は「価格が変化した瞬間」にのみ発火するため、
+      // 登録時点で目標達成済みだと以後価格変動がなければ永久に沈黙する UX バグを修正。
+      setImmediate(() => notifyWatchJustCreated(gpu, watch));
       return res.status(201).json({ watch });
     });
   })

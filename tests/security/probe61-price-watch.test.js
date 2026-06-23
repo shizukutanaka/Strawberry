@@ -9,7 +9,7 @@
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
-const { notifyPriceWatchers } = require('../../src/services/price-watch');
+const { notifyPriceWatchers, notifyWatchJustCreated } = require('../../src/services/price-watch');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 const UserRepository = require('../../src/db/json/UserRepository');
 
@@ -232,6 +232,75 @@ describe('notifyPriceWatchers unit', () => {
   });
 });
 
+// ── notifyWatchJustCreated unit tests ─────────────────────────────────────
+
+describe('notifyWatchJustCreated unit', () => {
+  function makeGpu(overrides) {
+    return { id: 'gpu-1', name: 'G1', pricePerHour: 1.0, providerId: 'provider-1', available: true, ...overrides };
+  }
+  function makeWatch(overrides) {
+    return { id: 'w1', userId: 'user-1', gpuId: 'gpu-1', targetPrice: 2.0, ...overrides };
+  }
+
+  it('returns false when gpu is null', () => {
+    expect(notifyWatchJustCreated(null, makeWatch())).toBe(false);
+  });
+
+  it('returns false when watch is null', () => {
+    expect(notifyWatchJustCreated(makeGpu(), null)).toBe(false);
+  });
+
+  it('notifies (true) when price is already at or below targetPrice', () => {
+    // Core scenario: GPU is $1.00, watcher sets target $2.00 → already met → immediate alert
+    const notify = jest.fn();
+    const repo = { update: jest.fn() };
+    const result = notifyWatchJustCreated(makeGpu({ pricePerHour: 1.0 }), makeWatch({ targetPrice: 2.0 }), { repo, notify });
+    expect(result).toBe(true);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][1]).toBe('gpu_watch_price_already_met');
+  });
+
+  it('notifies when price exactly equals targetPrice', () => {
+    const notify = jest.fn();
+    const repo = { update: jest.fn() };
+    expect(notifyWatchJustCreated(makeGpu({ pricePerHour: 2.0 }), makeWatch({ targetPrice: 2.0 }), { repo, notify })).toBe(true);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify when price is above targetPrice (watch not yet triggered)', () => {
+    const notify = jest.fn();
+    expect(notifyWatchJustCreated(makeGpu({ pricePerHour: 3.0 }), makeWatch({ targetPrice: 2.0 }), { notify })).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('does not notify when GPU is unavailable (available === false)', () => {
+    const notify = jest.fn();
+    expect(notifyWatchJustCreated(
+      makeGpu({ pricePerHour: 1.0, available: false }),
+      makeWatch({ targetPrice: 2.0 }),
+      { notify }
+    )).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('does not notify when watcher is the provider (self-watch guard)', () => {
+    const notify = jest.fn();
+    expect(notifyWatchJustCreated(
+      makeGpu({ pricePerHour: 1.0, providerId: 'user-1' }),
+      makeWatch({ userId: 'user-1', targetPrice: 2.0 }),
+      { notify }
+    )).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('updates lastNotifiedPrice after immediate notification', () => {
+    const updateSpy = jest.fn();
+    const repo = { update: updateSpy };
+    notifyWatchJustCreated(makeGpu({ pricePerHour: 1.0 }), makeWatch({ id: 'w42', targetPrice: 2.0 }), { repo, notify: jest.fn() });
+    expect(updateSpy).toHaveBeenCalledWith('w42', expect.objectContaining({ lastNotifiedPrice: 1.0 }));
+  });
+});
+
 // ── Watch API integration tests ────────────────────────────────────────────
 
 describe('POST /api/v1/gpus/:id/watch', () => {
@@ -306,6 +375,22 @@ describe('POST /api/v1/gpus/:id/watch', () => {
       .send({ targetPrice: 1.5 });
     expect(res.status).toBe(200);
     expect(res.body.watch.targetPrice).toBe(1.5);
+  });
+
+  it('watch response 201 even when GPU price already meets targetPrice (immediate-notify path)', async () => {
+    // Scenario: GPU is at $3.00, renter sets targetPrice $5.00 (GPU is already below target).
+    // The POST must still return 201 (fire-and-forget notifyWatchJustCreated runs async).
+    const provider2 = await registerAndLogin('prov61imm');
+    const renter2 = await registerAndLogin('rent61imm');
+    const cheapGpu = createGpu(provider2.id, 1.0); // price $1.00
+    const res = await request(app)
+      .post(`/api/v1/gpus/${cheapGpu.id}/watch`)
+      .set('Authorization', `Bearer ${renter2.token}`)
+      .send({ targetPrice: 5.0 }); // target well above current price
+    expect(res.status).toBe(201);
+    expect(res.body.watch.targetPrice).toBe(5.0);
+    // notifyWatchJustCreated ran in setImmediate; lastNotifiedPrice is set asynchronously.
+    // We cannot assert on it synchronously here, but the route must not error.
   });
 });
 

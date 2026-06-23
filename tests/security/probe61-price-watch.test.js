@@ -129,13 +129,15 @@ describe('notifyPriceWatchers unit', () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
-  it('suppresses re-notification when lastNotifiedPrice <= newPrice', () => {
+  it('re-notifies when price drops from above lastNotifiedPrice back to lastNotifiedPrice (price rose in between)', () => {
+    // lNP=$1, previousPrice=$3 (price rose above lNP since last notify), newPrice=$1.
+    // The price rising above lNP signals the prior notification is stale — re-notify on the new drop.
     const gpu = makeGpu({ pricePerHour: 1.0 });
     const watches = [makeWatch({ targetPrice: 2.0, lastNotifiedPrice: 1.0 })];
-    const repo = { getByGpu: () => watches };
+    const repo = { getByGpu: () => watches, update: jest.fn() };
     const notify = jest.fn();
-    expect(notifyPriceWatchers(gpu, 3.0, { repo, notify })).toBe(0);
-    expect(notify).not.toHaveBeenCalled();
+    expect(notifyPriceWatchers(gpu, 3.0, { repo, notify })).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 
   it('re-notifies when price drops further below lastNotifiedPrice', () => {
@@ -147,6 +149,33 @@ describe('notifyPriceWatchers unit', () => {
     };
     const notify = jest.fn();
     const count = notifyPriceWatchers(gpu, 3.0, { repo, notify });
+    expect(count).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-notifies when price rose above lastNotifiedPrice and then dropped back to the same level', () => {
+    // Scenario: price $5→$2 (notified, lastNotifiedPrice=$2) → $2→$5 (no notification)
+    // → $5→$2 (price drop again, previousPrice=$5, newPrice=$2, lastNotifiedPrice=$2).
+    // The watcher should be re-notified: price rose above lastNotifiedPrice between events,
+    // so the "price is $2 again" is independently actionable news.
+    const gpu = makeGpu({ pricePerHour: 2.0 });
+    const watches = [makeWatch({ targetPrice: 3.0, lastNotifiedPrice: 2.0 })];
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    const notify = jest.fn();
+    // previousPrice=5.0 > lastNotifiedPrice=2.0 signals that price went up since last notify
+    const count = notifyPriceWatchers(gpu, { previousPrice: 5.0, previousAvailable: undefined }, { repo, notify });
+    expect(count).toBe(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-notifies when previousPrice exceeded lastNotifiedPrice (price rose between notifications)', () => {
+    // lNP=1.0, previousPrice=1.5, newPrice=1.0: price went .0→.5→.0.
+    // previousPrice (.5) > lNP (.0) signals price rose above last notify level — fresh drop.
+    const gpu = makeGpu({ pricePerHour: 1.0 });
+    const watches = [makeWatch({ targetPrice: 3.0, lastNotifiedPrice: 1.0 })];
+    const repo = { getByGpu: () => watches, update: jest.fn() };
+    const notify = jest.fn();
+    const count = notifyPriceWatchers(gpu, { previousPrice: 1.5 }, { repo, notify });
     expect(count).toBe(1);
     expect(notify).toHaveBeenCalledTimes(1);
   });

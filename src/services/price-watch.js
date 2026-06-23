@@ -66,8 +66,19 @@ function notifyPriceWatchers(gpu, previousInfo, deps = {}) {
     if (newPrice > w.targetPrice) continue;         // 目標価格に届いていない
 
     if (isPriceDrop && !isAvailabilityRestore) {
-      // 価格変動パス: 同額/より高い価格で通知済みなら抑制
-      if (typeof w.lastNotifiedPrice === 'number' && w.lastNotifiedPrice <= newPrice) continue;
+      // 価格変動パス: 同額/より高い価格で通知済みなら抑制。
+      // ただし価格が一度 lastNotifiedPrice を上回った後に再度同じ価格に下がった場合は
+      // 「価格が上がって戻った」独立イベントとして通知する。
+      // 抑制条件: (1) lNP <= newPrice かつ (2) previousPrice <= lNP（価格がlNPを超えなかった）
+      // 注: isPriceDrop(newPrice < previousPrice) と合わせると
+      //   previousPrice <= lNP <= newPrice < previousPrice → previousPrice < previousPrice（矛盾）
+      // となるため事実上 lNP > newPrice（新安値）以外では suppress されない。
+      // 換言: previousPrice > lNP のとき (「一度上昇」あり) は必ず通知する。
+      if (typeof w.lastNotifiedPrice === 'number') {
+        const alreadyAtOrBelow = w.lastNotifiedPrice <= newPrice;
+        const noRiseSinceNotify = typeof previousPrice !== 'number' || previousPrice <= w.lastNotifiedPrice;
+        if (alreadyAtOrBelow && noRiseSinceNotify) continue;
+      }
     }
     // 空き復帰パス: lastNotifiedPrice を抑制に使わない。
     // ウォッチャーは前回の通知時に GPU がオフラインで借りられなかった可能性がある。

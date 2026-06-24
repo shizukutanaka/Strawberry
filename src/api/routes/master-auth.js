@@ -33,12 +33,19 @@ function _checkTotpIpLimit(ip) {
   return false;
 }
 
-// タイミング攻撃耐性のある文字列比較（長さが違えば false、同長なら定時間比較）
+// タイミング攻撃耐性のある文字列比較。
+// 長さチェックを先行させると、長さが違う時点でショートサーキットして即 false を返すため、
+// 応答時間から秘密値の「長さ」を推測できるタイミングオラクルになる（現状の呼び出しは
+// 固定長 6 桁コードなので実害は無いが、汎用ヘルパーとして将来の可変長秘密比較に耐えるよう
+// ここで塞ぐ）。security.js の API キー比較と同じ Double-HMAC 方式に統一する:
+// ランダム nonce で両入力を HMAC-SHA256 の固定長(32B)ダイジェストに正規化してから
+// timingSafeEqual する。これにより (1) 長さが漏れない (2) 長さ不一致で timingSafeEqual が
+// throw しない、の両方を満たす。
 function timingSafeStrEqual(a, b) {
-  const ab = Buffer.from(String(a == null ? '' : a));
-  const bb = Buffer.from(String(b == null ? '' : b));
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
+  const nonce = crypto.randomBytes(32);
+  const aHash = crypto.createHmac('sha256', nonce).update(String(a == null ? '' : a)).digest();
+  const bHash = crypto.createHmac('sha256', nonce).update(String(b == null ? '' : b)).digest();
+  return crypto.timingSafeEqual(aHash, bHash);
 }
 
 // --- Google OAuth2 設定 ---
@@ -191,3 +198,5 @@ function requireMasterAuth(req, res, next) {
 }
 
 module.exports = { router, requireMasterAuth };
+// テスト用フック: タイミングセーフ比較ヘルパーを直接検証する。
+module.exports._timingSafeStrEqual = timingSafeStrEqual;

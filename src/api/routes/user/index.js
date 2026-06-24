@@ -33,7 +33,13 @@ const peeridRouter = require('./peerid');
 // Without this, an attacker can enumerate valid emails by measuring whether the
 // response takes ~1ms (no user) vs ~100ms (wrong password, bcrypt ran).
 // Generated once at startup so the cost is paid upfront, not on first login attempt.
-const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', 10);
+//
+// 重要: コストファクタは必ず本物のパスワードハッシュと同じ config.security.bcryptRounds を
+// 使う。ここを定数（例: 10）で固定すると、運用者が BCRYPT_ROUNDS を 12 等に引き上げた
+// 瞬間に「実在ユーザー = cost 12（遅い）」「不在ユーザー = ダミー cost 10（速い）」の
+// タイミング差が生じ、ダミーハッシュ本来の目的（アカウント列挙のタイミング遮断）が
+// 静かに破れる。両者のコストを常に一致させることでこの再発リスクを断つ。
+const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', config.security.bcryptRounds);
 
 // アカウント単位のブルートフォース抑制（IPを迂回した辞書攻撃対策）。
 // スライディングウィンドウ: 15分以内に10回失敗 → 429。成功でリセット。

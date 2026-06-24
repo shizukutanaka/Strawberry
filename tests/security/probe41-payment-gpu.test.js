@@ -70,21 +70,60 @@ describe('invoice-poller: cross-method paid guard prevents double-pay', () => {
 });
 
 // ─── 41b-3: minRenterRating floor (known-below-floor blocked; unrated opt-in) ──
+// The eligibility rule now lives in a single source of truth: renter-eligibility.js,
+// shared by POST /orders and GET /gpus/:id/eligibility. These tests exercise the
+// module's behavior directly (more robust than source-pattern matching).
 describe('order creation: minRenterRating floor policy', () => {
-  const src = require('fs').readFileSync(
-    require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-  );
+  const { computeRenterRating, evaluateRenterEligibility } = require('../../src/services/renter-eligibility');
 
-  it('order/index.js: floor blocks renters whose KNOWN average is below the floor', () => {
-    // The floor must compare the real average (not a null-coalesced 0) and gate on history
-    expect(src).toMatch(/hasRatingHistory\s*=\s*renterRatingAverage\s*!==\s*null/);
-    expect(src).toMatch(/knownBelowFloor\s*=\s*hasRatingHistory\s*&&\s*renterRatingAverage\s*<\s*gpu\.minRenterRating/);
+  function ratingFor(average, count) {
+    if (count === 0) return { average: null, count: 0, hasHistory: false };
+    return { average, count, hasHistory: true };
+  }
+
+  it('floor blocks renters whose KNOWN average is below the floor', () => {
+    const gpu = { id: 'g1', providerId: 'prov', minRenterRating: 4.0, available: true };
+    const res = evaluateRenterEligibility(gpu, 'renter', ratingFor(2.5, 3));
+    expect(res.eligible).toBe(false);
+    expect(res.reason).toBe('below_rating_floor');
   });
 
-  it('order/index.js: unrated renters are allowed unless rejectUnratedRenters opt-in is set', () => {
-    // Sybil-resistance is opt-in via gpu.rejectUnratedRenters as an independent check
-    // (not combined with minRenterRating - it works even without a rating floor)
-    expect(src).toMatch(/gpu\.rejectUnratedRenters\s*===\s*true\s*&&\s*!hasRatingHistory/);
+  it('floor allows renters whose KNOWN average meets the floor', () => {
+    const gpu = { id: 'g1', providerId: 'prov', minRenterRating: 4.0, available: true };
+    const res = evaluateRenterEligibility(gpu, 'renter', ratingFor(4.5, 3));
+    expect(res.eligible).toBe(true);
+  });
+
+  it('unrated renters are allowed unless rejectUnratedRenters opt-in is set', () => {
+    // Without opt-in, an unrated renter is eligible even with a floor set.
+    const gpuNoOptIn = { id: 'g1', providerId: 'prov', minRenterRating: 4.0, available: true };
+    expect(evaluateRenterEligibility(gpuNoOptIn, 'renter', ratingFor(null, 0)).eligible).toBe(true);
+
+    // With opt-in, an unrated renter is blocked — independent of minRenterRating presence.
+    const gpuOptIn = { id: 'g1', providerId: 'prov', rejectUnratedRenters: true, available: true };
+    const res = evaluateRenterEligibility(gpuOptIn, 'renter', ratingFor(null, 0));
+    expect(res.eligible).toBe(false);
+    expect(res.reason).toBe('no_rating_history');
+  });
+
+  it('computeRenterRating clamps ratings to 1-5 and averages correctly', () => {
+    const orders = [
+      { userId: 'r', renterReview: { rating: 5 } },
+      { userId: 'r', renterReview: { rating: 1 } },
+      { userId: 'other', renterReview: { rating: 3 } }, // different user, ignored
+    ];
+    const r = computeRenterRating(orders, 'r');
+    expect(r.count).toBe(2);
+    expect(r.average).toBe(3.0);
+    expect(r.hasHistory).toBe(true);
+  });
+
+  it('order/index.js delegates the eligibility check to the shared module', () => {
+    const src = require('fs').readFileSync(
+      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+    );
+    // Must use the single source of truth, not a re-implemented inline check.
+    expect(src).toMatch(/evaluateRenterEligibility/);
     // The old forced-0 bypass-prevention form must be gone
     expect(src).not.toMatch(/renterRatingAverage \?\? 0/);
     expect(src).not.toMatch(/null bypass prevention/);

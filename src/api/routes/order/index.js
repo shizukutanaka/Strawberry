@@ -798,8 +798,8 @@ router.post('/',
           `GPU is manually blocked during the requested period (blocked until ${blocked.to})`, 409);
       }
     }
-    // 借り手レーティングフロア: GPU に minRenterRating が設定されている場合、
-    // 「既知の平均評価が floor を下回る」借り手を 422 で拒否する。
+    // 借り手レーティング資格チェック: ルールは renter-eligibility に集約（注文作成と
+    // GET /gpus/:id/eligibility 事前チェックで同一ロジックを共有し、ドリフトを防ぐ）。
     //
     // 新規（レビュー実績ゼロ）の借り手の扱いには設計上のトレードオフがある:
     //   - 厳格: 新規=評価0 とみなし floor>0 の GPU を一律拒否 → Sybil（捨てアカウントで
@@ -811,23 +811,15 @@ router.post('/',
     // 既定は寛容とし、Sybil 耐性を必須としたいプロバイダは gpu.rejectUnratedRenters:true で
     // 明示的にオプトインできる（未評価の借り手も floor 扱いで拒否）。
     // minRenterRating を設定しない GPU（undefined/0/null）は全借り手を受け付ける。
-    const renterOrders = OrderRepository.getAll().filter(o => o.userId === req.user.id && o.renterReview);
-    const renterReviewCount = renterOrders.length;
-    // null = 0件（通知用に null を保持。フロアチェックでは「未評価」として明示的に扱う）
-    const renterRatingAverage = renterReviewCount > 0
-      ? renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount
-      : null;
-    const hasRatingHistory = renterRatingAverage !== null;
-    // 未評価拒否オプトイン: minRenterRating なしでも単独で機能する独立チェック
-    if (gpu.rejectUnratedRenters === true && !hasRatingHistory) {
-      throw new APIError(ErrorTypes.VALIDATION,
-        'This GPU rejects unrated renters (no rating history)', 422);
-    }
-    const knownBelowFloor = hasRatingHistory && renterRatingAverage < gpu.minRenterRating;
-    if (gpu.minRenterRating && knownBelowFloor) {
-      const displayRating = `${Math.round(renterRatingAverage * 10) / 10} (${renterReviewCount} review${renterReviewCount !== 1 ? 's' : ''})`;
-      throw new APIError(ErrorTypes.VALIDATION,
-        `This GPU requires a minimum renter rating of ${gpu.minRenterRating} (your current rating: ${displayRating})`, 422);
+    const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
+    const _allOrdersForRating = OrderRepository.getAll();
+    const renterRating = computeRenterRating(_allOrdersForRating, req.user.id);
+    const renterRatingAverage = renterRating.average; // 通知メッセージで使用
+    const renterReviewCount = renterRating.count;
+    // self_trade は上で専用メッセージ済みなので、ここではレーティング系の判定のみ強制する。
+    const _elig = evaluateRenterEligibility(gpu, req.user.id, renterRating);
+    if (!_elig.eligible && (_elig.reason === 'no_rating_history' || _elig.reason === 'below_rating_floor')) {
+      throw new APIError(ErrorTypes.VALIDATION, _elig.message, 422);
     }
     // 料金計算: GPUのpricePerHour必須
     let pricePerHour = gpu.pricePerHour;

@@ -3,6 +3,8 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
+// レート制限キー生成（XFF 偽装耐性 + IPv6 /64 畳み込み）は ip-key.js に集約。
+const { rateLimitKeyGenerator: _rlKeyGeneratorShared } = require('./ip-key');
 const { config } = require('../../utils/config');
 const { APIError, ErrorTypes } = require('../../utils/error-handler');
 // シークレット解決は jwt-auth.js と共有する（process.env.JWT_SECRET 優先）。
@@ -74,17 +76,10 @@ const corsOptions = {
   maxAge: 86400, // 24時間
 };
 
-// X-Forwarded-For 偽装によるレート制限回避を防ぐ keyGenerator（rate-limit.js と同一ポリシー）。
-// TRUST_PROXY は正の整数（hop 数）のみ受け付ける。'true'/'yes' 等のブーリアン文字列は
-// 意図的に拒否: Express が全 XFF hop を信頼してしまい、左端のユーザー制御 IP が req.ip に
-// なるため攻撃者が任意の IP を名乗ってレート制限をバイパスできる。
-const _rlKeyGenerator = (req) => {
-  const hopCount = parseInt(process.env.TRUST_PROXY, 10);
-  if (Number.isInteger(hopCount) && hopCount > 0) {
-    return req.ip || req.socket.remoteAddress || 'unknown';
-  }
-  return req.socket.remoteAddress || req.ip || 'unknown';
-};
+// X-Forwarded-For 偽装によるレート制限回避を防ぐ keyGenerator。
+// rate-limit.js と同一ポリシーを共有するため ip-key.js に集約した実装へ委譲する
+// （TRUST_PROXY を整数 hop 数として厳格解釈 + IPv6 を /64 サブネットに畳み込み）。
+const _rlKeyGenerator = _rlKeyGeneratorShared;
 
 // レート制限設定
 const apiLimiter = rateLimit({

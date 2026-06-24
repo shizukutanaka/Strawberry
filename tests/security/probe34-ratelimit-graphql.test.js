@@ -6,27 +6,40 @@
 // 4. master-auth.js has _checkTotpIpLimit before session counter
 
 describe('Rate limiting: keyGenerator XFF bypass fix', () => {
-  it('security.js: _rlKeyGenerator uses parseInt(TRUST_PROXY) not truthy string check', () => {
+  it('ip-key.js: rawClientIp uses parseInt(TRUST_PROXY) not truthy string check', () => {
+    // The TRUST_PROXY parsing now lives in the shared ip-key.js (single source of truth).
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/middleware/security.js'), 'utf-8'
+      require.resolve('../../src/api/middleware/ip-key.js'), 'utf-8'
     );
-    // Must use parseInt-based check (same as rate-limit.js)
     expect(src).toMatch(/parseInt\(process\.env\.TRUST_PROXY,\s*10\)/);
     expect(src).toMatch(/Number\.isInteger\(hopCount\) && hopCount > 0/);
     // Must NOT use the old vulnerable truthy-string check
     expect(src).not.toMatch(/trustProxy !== '0' && trustProxy !== 'false'/);
   });
 
-  it('rate-limit.js and security.js use the same TRUST_PROXY parsing strategy', () => {
+  it('rate-limit.js and security.js both delegate to the shared ip-key keyGenerator', () => {
     const secSrc = require('fs').readFileSync(
       require.resolve('../../src/api/middleware/security.js'), 'utf-8'
     );
     const rlSrc = require('fs').readFileSync(
       require.resolve('../../src/api/middleware/rate-limit.js'), 'utf-8'
     );
-    // Both must use parseInt and isInteger checks
-    expect(secSrc).toMatch(/parseInt\(process\.env\.TRUST_PROXY,\s*10\)/);
-    expect(rlSrc).toMatch(/parseInt\(process\.env\.TRUST_PROXY,\s*10\)/);
+    // Both must import the shared keyGenerator from ip-key (no duplicated parsing logic).
+    expect(secSrc).toMatch(/require\(['"]\.\/ip-key['"]\)/);
+    expect(rlSrc).toMatch(/require\(['"]\.\/ip-key['"]\)/);
+    // Neither should re-implement the TRUST_PROXY parsing inline anymore.
+    expect(secSrc).not.toMatch(/parseInt\(process\.env\.TRUST_PROXY,\s*10\)/);
+    expect(rlSrc).not.toMatch(/parseInt\(process\.env\.TRUST_PROXY,\s*10\)/);
+  });
+
+  it('shared keyGenerator is wired into both limiters', () => {
+    // Behavioral: the same module function backs both middleware.
+    const { rateLimitKeyGenerator } = require('../../src/api/middleware/ip-key');
+    expect(typeof rateLimitKeyGenerator).toBe('function');
+    // IPv6 /64 folding is active (the new bypass defense).
+    const a = rateLimitKeyGenerator({ socket: { remoteAddress: '2001:db8:9:9:1::1' } });
+    const b = rateLimitKeyGenerator({ socket: { remoteAddress: '2001:db8:9:9:2::2' } });
+    expect(a).toBe(b);
   });
 });
 

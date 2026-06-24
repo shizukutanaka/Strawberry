@@ -10,10 +10,18 @@ const { assertPublicUrl } = require('./ssrf-guard');
 // Webhook/外部HTTP呼び出し共通安全設定。
 // タイムアウトなし・レスポンスサイズ無制限だと、攻撃者管理のエンドポイントが
 // 無限レスポンスを返すことで Node.js ヒープを枯渇させ DoS できる。
+//
+// maxRedirects:0 が SSRF 対策上重要: assertPublicUrl() は「最初の URL」のホスト名を
+// 名前解決して内部アドレスを遮断するが、axios 既定（maxRedirects:5）だと、検証を通過した
+// 公開 URL が 30x で http://127.0.0.1/ や 169.254.169.254（クラウドメタデータ）へ
+// リダイレクトした場合に axios が自動追従し、ガードを迂回されてしまう。
+// Webhook 送信先（Discord/Slack/Telegram/汎用）は正常時 2xx を直接返しリダイレクトしないため、
+// リダイレクトを一切追わない（30x はエラー扱い）ことで攻撃面を塞ぐ。
 const AXIOS_SAFE_CONFIG = Object.freeze({
   timeout: 10_000,               // 10 秒でタイムアウト
   maxContentLength: 1_048_576,   // レスポンスボディ上限 1 MiB
   maxBodyLength: 1_048_576,      // リクエストボディ上限 1 MiB
+  maxRedirects: 0,               // リダイレクト追従禁止（SSRF リダイレクト迂回を遮断）
 });
 
 // 通知タイプ定義

@@ -47,9 +47,14 @@ router.post('/', async (req, res) => {
 router.delete('/', async (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ message: 'address required' });
+  // POST と対称に DELETE でも構文検証: 攻撃者がパスを通る address="__proto__" 等の
+  // 異常値で removeProfitAddress を呼び出せないようにする。
+  if (!isValidBtcAddress(address)) {
+    return res.status(400).json({ message: 'Invalid Bitcoin address' });
+  }
   try {
     await removeProfitAddress(address);
-    res.json({ message: 'Removed', address });
+    res.json({ message: 'Removed', address: String(address).trim() });
   } catch (e) {
     res.status(500).json({ message: 'Failed to remove address', error: maskError(e, 'Failed to remove address') });
   }

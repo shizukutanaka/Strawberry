@@ -55,6 +55,13 @@ router.get('/', asyncHandler(async (req, res) => {
   // クエリパラメータからフィルタリング条件を取得
   let parsedFeatures = null;
   if (req.query.features) {
+    // HPP（HTTP Parameter Pollution）対策: 同一パラメータが複数回送られると Express は
+    // 配列にする（例: ?features=A&features=B → req.query.features = ['A','B']）。
+    // 配列に対する .length は要素数であり文字数でないため、512 バイト上限チェックを
+    // すり抜けてしまう。文字列型以外は早期拒否する。
+    if (typeof req.query.features !== 'string') {
+      return res.status(400).json({ error: '"features" query param must be provided once' });
+    }
     // サイズ制限: 未認証呼び出し元が巨大な JSON を送り O(keys × GPUs) の CPU DoS を起こせる。
     // 512 バイト超 or 20 キー超は拒否する。
     if (req.query.features.length > 512) {
@@ -192,12 +199,18 @@ router.get('/', asyncHandler(async (req, res) => {
       reviewMap.set(o.gpuId, cur);
     }
   }
-  const minRatingRaw = parseFloat(req.query.minRating);
-  if (!isNaN(minRatingRaw) && minRatingRaw > 0) {
+  // minRating: 1–5 の範囲で検証。負値を渡すと `> 0` のガードをすり抜けてフィルタが
+  // スキップされ全 GPU が返ってしまう（minMemoryGB の旧バグと同じパターン）。
+  // 範囲外は明示的に 400 を返して曖昧な結果を防ぐ。
+  if (req.query.minRating !== undefined) {
+    const _minRating = parseFloat(req.query.minRating);
+    if (!Number.isFinite(_minRating) || _minRating < 1 || _minRating > 5) {
+      return res.status(400).json({ error: 'minRating must be a number between 1 and 5' });
+    }
     gpus = gpus.filter(gpu => {
       const r = reviewMap.get(gpu.id);
       if (!r || r.count === 0) return false;
-      return (r.sum / r.count) >= minRatingRaw;
+      return (r.sum / r.count) >= _minRating;
     });
   }
   // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|availability(空き優先)

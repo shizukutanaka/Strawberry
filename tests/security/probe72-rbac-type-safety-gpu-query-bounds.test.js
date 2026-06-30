@@ -115,4 +115,23 @@ describe('gpu/index.js source: minMemoryGB and maxPrice bound checks', () => {
   it('no longer uses the bare isNaN+parseInt pattern for minMemoryGB', () => {
     expect(src).not.toMatch(/isNaN\(parseInt\(req\.query\.minMemoryGB/);
   });
+
+  it('minRating validates lower bound 1 (rejects negative bypass)', () => {
+    // Negative minRating would skip the filter entirely under the old `> 0` guard
+    expect(src).toMatch(/_minRating\s*<\s*1/);
+  });
+
+  it('minRating validates upper bound 5', () => {
+    expect(src).toMatch(/_minRating\s*>\s*5/);
+  });
+
+  it('minRating uses Number.isFinite (rejects NaN/Infinity)', () => {
+    expect(src).toMatch(/Number\.isFinite\(_minRating\)/);
+  });
+
+  it('features query param rejects arrays (HPP protection)', () => {
+    // Duplicate ?features=A&features=B results in an array. The array.length
+    // would be the element count, not byte count, bypassing the 512-char limit.
+    expect(src).toMatch(/typeof req\.query\.features\s*!==\s*'string'/);
+  });
 });

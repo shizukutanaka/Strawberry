@@ -73,16 +73,27 @@ router.get('/', asyncHandler(async (req, res) => {
       return res.status(400).json({ error: '"features" must be a JSON object' });
     }
   }
-  if (req.query.minMemoryGB && isNaN(parseInt(req.query.minMemoryGB, 10))) {
-    return res.status(400).json({ error: 'minMemoryGB must be a number' });
+  // minMemoryGB: 整数 0–8192 GB。負値はフィルタが `> 0` チェックで無視され、
+  // 全 GPU を返してしまうバイパスになる。上限も GPU の最大 VRAM を超える値は無意味。
+  let _minMemGB = 0;
+  if (req.query.minMemoryGB !== undefined) {
+    _minMemGB = parseInt(req.query.minMemoryGB, 10);
+    if (!Number.isInteger(_minMemGB) || isNaN(_minMemGB) || _minMemGB < 0 || _minMemGB > 8192) {
+      return res.status(400).json({ error: 'minMemoryGB must be an integer between 0 and 8192' });
+    }
   }
-  if (req.query.maxPrice && isNaN(parseFloat(req.query.maxPrice))) {
-    return res.status(400).json({ error: 'maxPrice must be a number' });
+  // maxPrice: 正の有限数のみ許可。0 や負値は意味がない（全 GPU が除外される）。
+  let _maxPrice = null;
+  if (req.query.maxPrice !== undefined) {
+    _maxPrice = parseFloat(req.query.maxPrice);
+    if (!Number.isFinite(_maxPrice) || _maxPrice <= 0) {
+      return res.status(400).json({ error: 'maxPrice must be a positive number' });
+    }
   }
   const filters = {
-    minMemoryGB: req.query.minMemoryGB ? parseInt(req.query.minMemoryGB, 10) : 0,
+    minMemoryGB: _minMemGB,
     vendor: req.query.vendor ? String(req.query.vendor).slice(0, 64) : null,
-    maxPrice: req.query.maxPrice ? parseFloat(req.query.maxPrice) : null,
+    maxPrice: _maxPrice,
     features: parsedFeatures,
     country: req.query.country ? String(req.query.country).slice(0, 4).toUpperCase() : null,
     apiType: req.query.apiType ? String(req.query.apiType).slice(0, 16) : null,

@@ -73,18 +73,27 @@ function convertToAPIError(err) {
   if (err.message) {
     const msg = err.message.toLowerCase();
 
+    // キーワードマッチで 4xx に再分類する場合は、raw な内部エラーメッセージ
+    // （ファイルパス・DBスキーマ名等）をクライアントに渡さずジェネリックな文言に
+    // 差し替える。元メッセージは errorMiddleware がログに記録済み。
+    // toJSON の maskInternal は statusCode >= 500 にしか効かないため、
+    // 再分類後の 4xx はここで明示的に無害化しなければ本番で情報漏洩する。
     if (msg.includes('not found') || msg.includes('does not exist')) {
       type = ErrorTypes.NOT_FOUND;
       statusCode = 404;
+      message = 'Resource not found';
     } else if (msg.includes('unauthorized') || msg.includes('authentication')) {
       type = ErrorTypes.UNAUTHORIZED;
       statusCode = 401;
+      message = 'Authentication required';
     } else if (msg.includes('permission') || msg.includes('forbidden')) {
       type = ErrorTypes.FORBIDDEN;
       statusCode = 403;
+      message = 'Access denied';
     } else if (msg.includes('conflict') || msg.includes('duplicate')) {
       type = ErrorTypes.CONFLICT;
       statusCode = 409;
+      message = 'Resource conflict';
     }
     // 旧: msg.includes('validation') || msg.includes('invalid') → 400
     // 削除理由: 内部エラー（UV_EINVAL, "invalid cursor state"等）を誤って 400 へ格下げし

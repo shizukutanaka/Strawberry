@@ -107,18 +107,40 @@ async function monitorServices() {
   }
 }
 
+// startMonitor() が生成する setInterval のハンドルを保持する。unref() 済みなので
+// 単体では本番のプロセス終了を妨げないが、明示的に止める手段が無いと、同一
+// Node プロセス内で server.js が繰り返し require される場面（典型的には Jest が
+// 多数のテストファイルで `require('../../src/api/server')` する場合。Jest は
+// テストファイルごとにモジュールレジストリを分離するため、各ファイルが
+// 独自の setInterval を作るが、実タイマー自体は同一プロセスのイベントループに
+// 残り続ける）で際限なく積み上がる。`npm test` は `--forceExit` でプロセスごと
+// 強制終了するため症状が隠れるが、`--forceExit` なしで `jest` を直接実行すると
+// 蓄積したタイマーが 10 秒ごとに発火し続け、audit log が際限なく肥大化し、
+// プロセスが実質ハングしたように見える（実際に数時間規模で観測: audit/error
+// ログが数百MBまで成長）。stopMonitor() で明示的に止められるようにする。
+let _timer = null;
+
 // 10秒ごとに監視
 function startMonitor() {
   const interval = parseInt(process.env.SERVICE_MONITOR_INTERVAL_MS, 10) || 10000;
   // unref: テスト等でプロセス終了を妨げない
-  const timer = setInterval(monitorServices, interval);
-  if (timer.unref) timer.unref();
+  _timer = setInterval(monitorServices, interval);
+  if (_timer.unref) _timer.unref();
   logger.info(`[Monitor] Service monitor started (interval=${interval}ms)`);
+}
+
+function stopMonitor() {
+  if (_timer) {
+    clearInterval(_timer);
+    _timer = null;
+  }
+  services = {};
 }
 
 module.exports = {
   setServices,
   startMonitor,
+  stopMonitor,
   monitorServices,
   isServiceHealthy,
   notifyExternalAlert,

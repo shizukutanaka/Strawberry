@@ -294,43 +294,56 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async createInvoice(amount, memo) {
+    // 実際の呼び出し元（src/api/routes/payment/index.js）は常に
+    // { value, memo, expiry } オブジェクトを渡し、value は satoshi 建てで確定済みの
+    // 注文総額（order-pricing.js が算出）である。旧実装は (amount, memo) の位置引数
+    // を期待し amount を「米ドル」とみなして convertUSDToSats() で再変換していたため、
+    // オブジェクトを渡すと amount がオブジェクトのまま演算され NaN が生成され、
+    // 結果の BOLT11 風文字列に "NaN" がそのまま埋め込まれる不正インボイスになっていた
+    // （実 LND 接続時も value:"NaN" を渡すことになり同様に失敗する）。
+    // LND の実 AddInvoice API は value を satoshi でそのまま受け取るため、USD 変換は
+    // 不要かつ誤り。sats をそのまま渡す。
+    async createInvoice({ value, memo, expiry } = {}) {
         try {
-            // 金額をsatoshiに変換（入力は米ドル）
-            const amountSats = await this.convertUSDToSats(amount);
-            
+            const amountSats = Math.round(Number(value));
+            if (!Number.isFinite(amountSats) || amountSats <= 0) {
+                throw new Error(`createInvoice: value must be a positive finite number of satoshis (got ${value})`);
+            }
+            const expirySeconds = Number.isFinite(Number(expiry)) && Number(expiry) > 0 ? Number(expiry) : 3600;
+
             const invoice = await new Promise((resolve, reject) => {
                 this.lnd.addInvoice({
                     value: amountSats.toString(),
                     memo: memo,
-                    expiry: 3600, // 1時間
+                    expiry: expirySeconds,
                     private: false
                 }, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
             });
-            
+
+            const paymentHash = invoice.r_hash.toString('hex');
             const invoiceData = {
-                paymentHash: invoice.r_hash.toString('hex'),
+                id: paymentHash,
+                paymentHash,
                 paymentRequest: invoice.payment_request,
-                amount: amount,
                 amountSats: amountSats,
                 memo: memo,
                 createdAt: Date.now(),
-                expiresAt: Date.now() + (3600 * 1000),
+                expiresAt: Date.now() + (expirySeconds * 1000),
                 status: 'pending',
                 addIndex: invoice.add_index
             };
-            
+
             this.invoices.set(invoiceData.paymentHash, invoiceData);
-            
-            logger.info(`Created invoice: ${invoiceData.paymentHash.substring(0, 16)}... for $${amount}`);
-            
+
+            logger.info(`Created invoice: ${invoiceData.paymentHash.substring(0, 16)}... for ${amountSats} sats`);
+
             this.emit('invoice:created', invoiceData);
-            
+
             return invoiceData;
-            
+
         } catch (error) {
             logger.error('Failed to create invoice:', error);
             throw error;

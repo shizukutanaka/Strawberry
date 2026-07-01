@@ -212,7 +212,27 @@ class LightningService extends EventEmitter {
                     }
                 });
             },
-            
+
+            // モック環境には実際の支払者が存在しないため、作成されたインボイスが
+            // 自然に決済されることはない。this.invoices（addInvoice が登録する
+            // 内部 Map）を参照して一貫した「未決済」を返す — 将来テスト用の
+            // 強制決済フックを追加する場合はここに反映される。
+            lookupInvoice: (request, callback) => {
+                const hashBuf = request && request.r_hash;
+                const paymentHash = Buffer.isBuffer(hashBuf) ? hashBuf.toString('hex') : String(hashBuf || '');
+                const tracked = this.invoices.get(paymentHash);
+                if (!tracked) {
+                    return callback(new Error(`invoice not found: ${paymentHash}`));
+                }
+                const settled = tracked.status === 'paid' || tracked.status === 'settled';
+                callback(null, {
+                    settled,
+                    amt_paid_sat: settled ? String(tracked.amountPaid || tracked.amountSats || 0) : '0',
+                    value: String(tracked.amountSats || 0),
+                    settle_date: settled ? String(Math.floor((tracked.settledAt || Date.now()) / 1000)) : '0',
+                });
+            },
+
             listChannels: (callback) => {
                 callback(null, {
                     channels: [
@@ -346,6 +366,42 @@ class LightningService extends EventEmitter {
 
         } catch (error) {
             logger.error('Failed to create invoice:', error);
+            throw error;
+        }
+    }
+
+    // src/core/invoice-poller.js が 15 秒間隔で全 pending Lightning 決済を確認するために
+    // 呼び出す（この呼び出しが唯一 PaymentRepository の 'paid' 遷移をトリガーする経路）。
+    // 以前はこのメソッド自体が存在せず、ポーラーが毎回 TypeError を送出して
+    // try/catch に握りつぶされていた — つまり Lightning 決済は一度も自動確定せず、
+    // 全ての注文が支払い済みでも invoiceExpiresAt 経過で単に failed になっていた。
+    // LND の実 gRPC API lookupInvoice をラップし、ポーラーが期待する
+    // { settled, amountPaid, value, settleDate } 形式へ正規化する。
+    async checkInvoice(paymentHash) {
+        try {
+            // サーバー起動直後、invoice-poller が LND 接続完了より先に最初の pollOnce() を
+            // 実行できるレース（server.js が invoicePoller.start() を同期的に呼ぶ一方、
+            // lightning.initialize()/connectToLND() は非同期）。this.lnd が未設定のまま
+            // lookupInvoice を呼ぶと素の TypeError になり原因が分かりにくいため、
+            // 明示的なエラーメッセージにする（呼び出し元のポーラーは try/catch 済みで
+            // 次の 15 秒後のサイクルで自然に回復する）。
+            if (!this.lnd) {
+                throw new Error('Lightning client not yet connected; retry on next poll cycle');
+            }
+            const response = await new Promise((resolve, reject) => {
+                this.lnd.lookupInvoice({ r_hash: Buffer.from(paymentHash, 'hex') }, (error, resp) => {
+                    if (error) reject(error);
+                    else resolve(resp);
+                });
+            });
+            return {
+                settled: !!response.settled,
+                amountPaid: response.amt_paid_sat != null ? parseInt(response.amt_paid_sat, 10) : undefined,
+                value: response.value != null ? parseInt(response.value, 10) : undefined,
+                settleDate: response.settle_date != null ? parseInt(response.settle_date, 10) : undefined,
+            };
+        } catch (error) {
+            logger.error(`Failed to check invoice ${paymentHash}:`, error);
             throw error;
         }
     }

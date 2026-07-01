@@ -177,7 +177,15 @@ class LightningService extends EventEmitter {
     setupMockLND() {
         // 開発/テスト用のモックLND
         this.lnd = {
-            getInfo: (callback) => {
+            // 実呼び出し側（getInfo()）は real gRPC の呼び出し規約に合わせ
+            // this.lnd.getInfo({}, callback) と2引数で呼ぶ。旧モックは (callback) の
+            // 1引数のみを受け取っていたため、呼び出し側が渡す第1引数({})が
+            // callback パラメータに束縛され、渡された本物のコールバック関数は
+            // 無視される。結果、モック内の callback(null, {...}) は「{} を関数として
+            // 呼ぶ」ことになり TypeError: callback is not a function で落ちていた
+            // （updateNodeInfo() 経由の起動時ノード情報取得・service-monitor の
+            // 自動復旧リトライが常に失敗する原因）。
+            getInfo: (_request, callback) => {
                 callback(null, {
                     identity_pubkey: 'mock_pubkey_' + crypto.randomBytes(16).toString('hex'),
                     alias: 'Strawberry Mock Node',
@@ -233,7 +241,11 @@ class LightningService extends EventEmitter {
                 });
             },
 
-            listChannels: (callback) => {
+            // getInfo と同じ理由（実呼び出しは (request, callback) の2引数）でシグネチャを
+            // 揃える。total_satoshis_sent/received・unsettled_balance も updateChannels()
+            // が parseInt() する必須フィールドのため、欠落による NaN → Joi バリデーション
+            // 失敗（チャネルがサイレントに 0 件扱いされる）を防ぐため含める。
+            listChannels: (_request, callback) => {
                 callback(null, {
                     channels: [
                         {
@@ -243,7 +255,10 @@ class LightningService extends EventEmitter {
                             chan_id: '123456789',
                             capacity: '10000000',
                             local_balance: '5000000',
-                            remote_balance: '5000000'
+                            remote_balance: '5000000',
+                            total_satoshis_sent: '0',
+                            total_satoshis_received: '0',
+                            unsettled_balance: '0'
                         }
                     ]
                 });
@@ -312,6 +327,26 @@ class LightningService extends EventEmitter {
             logger.error('Failed to update node info:', error);
             throw error;
         }
+    }
+
+    // src/api/routes/index.js と src/api/routes/payment/index.js の /node-info
+    // エンドポイントが呼ぶ公開 API。このメソッド自体が存在しなかったため、両ルートは
+    // 呼び出す度に必ず `lightning.getNodeInfo is not a function` の 500 を返していた
+    // （updateNodeInfo() という別名の内部メソッドはあるが、外部公開されておらず
+    // 戻り値も返さない）。毎回最新情報を取得してから返す。
+    async getNodeInfo() {
+        await this.updateNodeInfo();
+        return this.nodeInfo;
+    }
+
+    // src/api/routes/payment/index.js の GET /channels エンドポイントが呼ぶ公開 API。
+    // getNodeInfo() と同じ理由で存在しなかった（内部メソッドは updateChannels() という
+    // 別名で、Map に格納するのみで配列を返さない）。呼び出し側は channel.channelId を
+    // 期待するが、内部ストレージのフィールド名は chanId（Joi スキーマ側もこの名前で
+    // 検証しているため、内部命名は変更せずここでエイリアスを追加するに留める）。
+    async listChannels() {
+        await this.updateChannels();
+        return Array.from(this.channels.values()).map((c) => ({ ...c, channelId: c.chanId }));
     }
 
     // 実際の呼び出し元（src/api/routes/payment/index.js）は常に

@@ -429,15 +429,19 @@ router.post('/',
       const n = Number(raw);
       return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
     })();
+    // getAll() は呼び出す度に gpus.json を同期読み込み+パースするためキャッシュしない。
+    // クォータチェックと重複チェックで別々に呼ぶと 1 リクエストで 2 回のディスク I/O が
+    // 発生するため、1 回のロードを両方のチェックで再利用する。
+    const allGpus = GpuRepository.getAll();
     if (req.user.role !== 'admin') {
-      const providerGpuCount = GpuRepository.getAll().filter(g => g.providerId === req.user.id).length;
+      const providerGpuCount = allGpus.filter(g => g.providerId === req.user.id).length;
       if (providerGpuCount >= MAX_GPUS) {
         return res.status(429).json({ error: `GPU registration limit reached (max ${MAX_GPUS} per provider)` });
       }
     }
 
     // 重複登録チェック（model, vendor, providerId, memoryGB）
-    const duplicate = GpuRepository.getAll().find(g =>
+    const duplicate = allGpus.find(g =>
       g.name === gpuInfo.name &&
       g.model === gpuInfo.model &&
       g.vendor === gpuInfo.vendor &&
@@ -523,6 +527,10 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
   if (req.user.role !== 'admin' && source.providerId !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  // getAll() は呼ぶ度に gpus.json を同期読み込み+パースする（キャッシュなし）。
+  // 上限チェックと重複チェックで別々に呼ぶと 1 リクエストで 2 回のディスク I/O が
+  // 発生するため、1 回のロードを両方のチェックで再利用する。
+  const allGpusForClone = GpuRepository.getAll();
   // GPU 上限チェック: clone も新規登録と同等の制限を受ける（clone での上限迂回を防ぐ）
   if (req.user.role !== 'admin') {
     const MAX_GPUS_CLONE = (() => {
@@ -530,7 +538,7 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
       const n = Number(raw);
       return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
     })();
-    const providerGpuCount = GpuRepository.getAll().filter(g => g.providerId === req.user.id).length;
+    const providerGpuCount = allGpusForClone.filter(g => g.providerId === req.user.id).length;
     if (providerGpuCount >= MAX_GPUS_CLONE) {
       return res.status(429).json({ error: `GPU registration limit reached (max ${MAX_GPUS_CLONE} per provider)` });
     }
@@ -548,7 +556,7 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
   // 重複スペック禁止: 単体 register / PUT は (name, model, vendor, memoryGB, providerId) で
   // 一意性を強制している。clone はこれを skip していたためマーケット重複・検索順位操作・
   // 分析データ汚染を起こせた。
-  const duplicate = GpuRepository.getAll().find(g =>
+  const duplicate = allGpusForClone.find(g =>
     g.providerId === req.user.id &&
     g.name === targetName &&
     g.model === source.model &&
@@ -601,8 +609,14 @@ router.post('/bulk',
       const n = Number(raw);
       return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
     })();
+    // getAll() は呼ぶ度に gpus.json を同期読み込み+パースする（キャッシュなし）。
+    // 旧実装はループ内で毎エントリ getAll() を再呼び出しし、20件バッチで最大21回
+    // 同じファイルを読み直していた。バッチ内の重複は below の batchKeys（name|model|
+    // vendor|memoryGB — 既存重複チェックと同一の一致条件）で完全にカバーされるため、
+    // 既存データに対する重複チェックはループ開始前の1回のスナップショットで十分。
+    const allGpusSnapshot = GpuRepository.getAll();
     if (req.user.role !== 'admin') {
-      const currentCount = GpuRepository.getAll().filter(g => g.providerId === req.user.id).length;
+      const currentCount = allGpusSnapshot.filter(g => g.providerId === req.user.id).length;
       if (currentCount + entries.length > MAX_GPUS_BULK) {
         return res.status(429).json({
           error: `Would exceed GPU registration limit. Current: ${currentCount}, limit: ${MAX_GPUS_BULK}, requested: ${entries.length}`,
@@ -629,7 +643,7 @@ router.post('/bulk',
         results.push({ success: false, id: entry.id || null, error: 'Duplicate GPU spec within this batch' });
         continue;
       }
-      const duplicate = GpuRepository.getAll().find(g =>
+      const duplicate = allGpusSnapshot.find(g =>
         g.name === gpuInfo.name && g.model === gpuInfo.model &&
         g.vendor === gpuInfo.vendor && g.memoryGB === gpuInfo.memoryGB &&
         g.providerId === req.user.id

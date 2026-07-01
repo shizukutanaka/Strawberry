@@ -44,7 +44,11 @@ function computeOrderPricing(order, rateInfo = null) {
 
   const pricing = { pricePerHour, pricePer5Min, durationMinutes, totalPrice };
   if (rateInfo) {
-    const rawJPY = Math.round(totalPrice * rateInfo.rate);
+    // rateInfo.rate は「1 BTC あたりの JPY」（getBTCtoJPYRate の単位）。totalPrice は
+    // satoshi（1 BTC = 1e8 sat）なので、そのまま掛けると 1e8 倍に水増しされる
+    // （例: 1 sat × 10,000,000 JPY/BTC = 10,000,000円 と表示される致命的な単位不一致）。
+    // sat → BTC へ変換してから乗算する。
+    const rawJPY = Math.round((totalPrice / 1e8) * rateInfo.rate);
     // Guard: rateInfo.rate could be NaN/Infinity if the exchange-rate API returns bad data.
     // Store null instead of NaN so JSON serialization emits null rather than corrupting the field.
     pricing.totalPriceJPY = Number.isFinite(rawJPY) ? rawJPY : null;

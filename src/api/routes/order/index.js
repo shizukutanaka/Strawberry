@@ -835,7 +835,10 @@ router.post('/',
     // 後・二重予約チェック前に create() を実行できた（GPU 二重予約）。
     // 修正: fetchRateInfo を全チェックより前に移動。洪水上限超過時は若干余分なキャッシュ
     // 参照が発生するが、fetchRateInfo はほぼ常にキャッシュヒットするため許容範囲。
-    const { rate: satoshiToJPY } = await fetchRateInfo();
+    // fetchRateInfo().rate は「1 BTC あたりの JPY」（getBTCtoJPYRate の単位）。
+    // 変数名 satoshiToJPY は誤解を招く（実体は BTC あたりのレート）— sat→JPY 換算は
+    // totalPrice(sat) を 1e8 で割って BTC に変換してから乗じる必要がある（下記参照）。
+    const { rate: btcToJPY } = await fetchRateInfo();
 
     // 洪水防止: 2 段階チェック（単一 getAll() で両チェックを完結させ余分な I/O を避ける）。
     const MAX_GLOBAL_PENDING_PER_USER = Number(process.env.MAX_PENDING_ORDERS_PER_USER) || 50;
@@ -920,7 +923,9 @@ router.post('/',
     // 正の生額は最小 1 sat に切り上げる（端数 0.25 sat の注文も実際には 1 sat 課金される）。
     const rawTotal = pricePer5Min * (durationMinutes / 5);
     const totalPrice = rawTotal > 0 ? Math.max(1, Math.round(rawTotal)) : 0;
-    const rawJPY = Math.round(totalPrice * satoshiToJPY);
+    // totalPrice は satoshi、btcToJPY は BTC あたりのレートなので、1e8 で割って
+    // BTC に変換してから乗じる（そのまま掛けると 1e8 倍に水増しされる単位不一致バグ）。
+    const rawJPY = Math.round((totalPrice / 1e8) * btcToJPY);
     const totalPriceJPY = Number.isFinite(rawJPY) ? rawJPY : null;
     // ファイル永続化リポジトリで作成
     // 価格ロック: 合意時の時間単価を注文に固定する。これが無いと支払い時の

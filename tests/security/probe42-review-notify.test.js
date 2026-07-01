@@ -53,14 +53,19 @@ describe('sanitizeUser: dispute counts hidden from API responses', () => {
 
 // ─── 42a-3/42a-4: ratingAverage clamped in renter-profile ────────────────
 describe('renter-profile: ratingAverage clamped to [1, 5]', () => {
-  it('user/index.js: ratingAverage uses Math.min(5,...) and Math.max(1,...) for clamping', () => {
+  it('user/index.js: each renter-profile review rating is clamped to [1,5] before averaging', () => {
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
     );
-    // Should see both clamps applied to each individual review rating before averaging
-    expect(src).toMatch(/Math\.min\(5.*Math\.max\(1.*renterReview\.rating/s);
-    // Final average should also be clamped
-    expect(src).toMatch(/Math\.min\(5,\s*Math\.max\(1,\s*Math\.round/);
+    // Probe74 fix: per-review clamping happens via validRatings.map(Math.min(5, Math.max(1, r))),
+    // applied only to Number.isFinite-validated ratings (invalid ratings excluded, not
+    // defaulted to 1). Averaging already-clamped [1,5] values can never leave [1,5], so an
+    // additional outer clamp on the final average is redundant and was removed.
+    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
+    expect(idx).toBeGreaterThan(-1);
+    const block = src.slice(idx, idx + 700);
+    expect(block).toMatch(/Math\.min\(5,\s*Math\.max\(1,\s*r\)\)/);
+    expect(block).toMatch(/Number\.isFinite\(r\)/);
   });
 
   it('user/index.js: raw renterReview.rating not used directly in sum without clamping', () => {

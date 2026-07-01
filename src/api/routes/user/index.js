@@ -800,9 +800,16 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
 
   const OrderRepository = require('../../../db/json/OrderRepository');
   const renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview);
-  const reviewCount = renterOrders.length;
+  // 不正な rating（null/非数値）は `|| 1` で 1 に丸めず件数から除外する。旧実装は
+  // 不正データを 1 点として合算に含めてしまい、レガシー破損レコードが平均を
+  // 不当に押し下げていた（reputation-service の同種計算と同じ Number.isFinite 方式に統一）。
+  const validRatings = renterOrders
+    .map(o => Number(o.renterReview.rating))
+    .filter(r => Number.isFinite(r))
+    .map(r => Math.min(5, Math.max(1, r)));
+  const reviewCount = validRatings.length;
   const ratingAverage = reviewCount > 0
-    ? Math.min(5, Math.max(1, Math.round((renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / reviewCount) * 10) / 10))
+    ? Math.round((validRatings.reduce((s, r) => s + r, 0) / reviewCount) * 10) / 10
     : null;
   // 直近5件のレビュー（最新順）
   const recentReviews = renterOrders

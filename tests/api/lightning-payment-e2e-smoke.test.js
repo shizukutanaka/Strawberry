@@ -127,15 +127,57 @@ describe('Lightning payment E2E smoke: order -> accept -> pay -> settle -> poll 
     expect(res.body.status).toBe('paid');
   });
 
-  it('order/:id/start no longer blocks on "no confirmed payment" (payment gate passes)', async () => {
-    // We don't assert start() fully succeeds here (it also requires a real/
-    // virtual GPU allocation via vgpuManager, which is a separate concern —
-    // see the GPU-access-delivery gap discussed in this session). We only
-    // assert the payment gate itself — the thing this test suite is about —
-    // is satisfied and the failure, if any, is NOT the 402 payment gate.
+  it('order/:id/start succeeds end-to-end (GPU access delivery lazy-registration fix)', async () => {
+    // Previously: vgpuManager.virtualGPUs only ever contained physically-detected
+    // hardware, so allocateGPU() always failed with "Virtual GPU not found" for a
+    // marketplace-listed GPU. The route now passes the GPU record through so
+    // vgpuManager can lazily register a minimal entry keyed by the marketplace
+    // gpuId (see virtual-gpu-manager.js ensureVirtualGPU()).
     const res = await request(app).post(`/api/v1/orders/${orderId}/start`)
       .set('Authorization', `Bearer ${renter.token}`);
-    expect(res.statusCode).not.toBe(402);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.allocationDetails.success).toBe(true);
+    // Honest accessInfo: no fake endpoint pointing at a proxy that was never
+    // spawned (the old setupNativeAccess() spawned a nonexistent
+    // strawberry-gpu-proxy binary and returned a URL nothing was listening on).
+    expect(res.body.allocationDetails.accessInfo.deliveryImplemented).toBe(false);
+    expect(res.body.allocationDetails.accessInfo.endpoint).toBeNull();
+
+    const order = OrderRepository.getById(orderId);
+    expect(order.status).toBe('active');
+  });
+
+  it('heartbeat succeeds for both renter and lender roles on the active order', async () => {
+    const renterHb = await request(app).post(`/api/v1/orders/${orderId}/heartbeat`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ role: 'renter' });
+    expect(renterHb.statusCode).toBe(200);
+    expect(typeof renterHb.body.usageSeconds).toBe('number');
+
+    const lenderHb = await request(app).post(`/api/v1/orders/${orderId}/heartbeat`)
+      .set('Authorization', `Bearer ${provider.token}`)
+      .send({ role: 'lender' });
+    expect(lenderHb.statusCode).toBe(200);
+  });
+
+  it('order/:id/stop completes the rental and transitions the order to completed', async () => {
+    const res = await request(app).post(`/api/v1/orders/${orderId}/stop`)
+      .set('Authorization', `Bearer ${renter.token}`);
+    expect(res.statusCode).toBe(200);
+
+    const order = OrderRepository.getById(orderId);
+    expect(order.status).toBe('completed');
+  });
+
+  it('renter can submit a review on the completed order', async () => {
+    const res = await request(app).post(`/api/v1/orders/${orderId}/review`)
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ rating: 5, comment: 'E2E smoke test review' });
+    expect(res.statusCode).toBe(201);
+    expect(res.body.review.rating).toBe(5);
+
+    const order = OrderRepository.getById(orderId);
+    expect(order.review.rating).toBe(5);
   });
 });
 

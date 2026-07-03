@@ -1679,7 +1679,13 @@ router.post('/:id/start',
 
       // GPU割り当てには vgpuManager が必要
       if (!requireService(vgpuManager, res)) return;
-      const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
+      // vgpuManager.virtualGPUs は物理検出（nvidia-smi 等）を経た GPU のみを保持する。
+      // marketplace 経由で登録された GPU（他プロバイダのマシン上に実在する GPU を含む）は
+      // このノードのローカル検出には現れないため、allocateGPU は常に
+      // "Virtual GPU not found" で失敗していた。GPU レコードを渡し、未登録なら
+      // marketplace のスペックから最小限のエントリを遅延登録させる。
+      const gpu = GpuRepository.getById(order.gpuId);
+      const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId, gpu);
       if (!allocation || !allocation.success) {
         throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation && allocation.message });
       }

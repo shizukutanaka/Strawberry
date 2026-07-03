@@ -211,13 +211,26 @@ class LightningService extends EventEmitter {
             },
             
             sendPaymentSync: (request, callback) => {
+                const amt = (request && request.amt) || 0;
                 callback(null, {
                     payment_error: '',
                     payment_preimage: crypto.randomBytes(32),
                     payment_route: {
-                        total_fees: Math.floor(request.amt * 0.001),
-                        total_amt: request.amt
+                        total_fees: Math.floor(amt * 0.001),
+                        total_amt: amt
                     }
+                });
+            },
+
+            // sendPayment()/decodePaymentRequest() が呼ぶ。モックには存在しなかったため、
+            // POST /payments/pay（実ルート）はモックLND環境で常に
+            // "this.lnd.decodePayReq is not a function" で失敗していた
+            // （getNodeInfo/listChannels と同じ、モック側のメソッド欠落パターン）。
+            decodePayReq: (request, callback) => {
+                callback(null, {
+                    destination: 'mock_dest_' + crypto.randomBytes(16).toString('hex'),
+                    payment_hash: crypto.randomBytes(32).toString('hex'),
+                    num_satoshis: '1000',
                 });
             },
 
@@ -441,13 +454,24 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async sendPayment(paymentRequest, maxFee = null) {
+    // maxFeePercent はインボイス額に対する手数料上限の割合（例: 1 = 1%）。
+    // 呼び出し元（src/api/routes/payment/index.js）は schemas.payment.pay で
+    // 0-10 の範囲・デフォルト1に検証済みのパーセンテージを渡す。
+    // 旧実装は第2引数を「USD建て手数料上限額」として扱い convertUSDToSats() で
+    // sats へ再変換していたが、実際に渡されていたのは決済額そのもの(amount, sats建て)
+    // だったため、これを USD とみなして再度為替変換する二重誤変換になっていた
+    // （呼び出し側の maxFeePercent は payInvoice(paymentRequest, maxFee) の2引数
+    // シグネチャでは受け取れず黙って捨てられてもいた）。
+    async sendPayment(paymentRequest, maxFeePercent = null) {
         try {
             // 請求書デコード
             const decodedInvoice = await this.decodePaymentRequest(paymentRequest);
-            
-            // 最大手数料設定
-            const maxFeeSats = maxFee ? await this.convertUSDToSats(maxFee) : Math.floor(decodedInvoice.num_satoshis * 0.01);
+
+            // 最大手数料設定（インボイス額の割合。sats建てで完結し外部レート変換は不要）
+            const feePercent = typeof maxFeePercent === 'number' && Number.isFinite(maxFeePercent) && maxFeePercent >= 0
+                ? maxFeePercent
+                : 1;
+            const maxFeeSats = Math.ceil(decodedInvoice.num_satoshis * (feePercent / 100));
             
             const payment = await new Promise((resolve, reject) => {
                 this.lnd.sendPaymentSync({
@@ -688,89 +712,6 @@ class LightningService extends EventEmitter {
         });
         
         return pending;
-    }
-
-    async convertUSDToSats(usdAmount) {
-        try {
-            // ビットコイン価格取得（実際の実装では外部APIを使用）
-            const btcPrice = await this.getBTCPrice();
-            const btcAmount = usdAmount / btcPrice;
-            const satsAmount = Math.floor(btcAmount * 100000000);
-            
-            return satsAmount;
-            
-        } catch (error) {
-            logger.error('Failed to convert USD to sats:', error);
-            // フォールバック: 固定レート使用
-            const fallbackRate = 50000; // $50,000/BTC
-            return Math.floor((usdAmount / fallbackRate) * 100000000);
-        }
-    }
-
-    async getBTCPrice() {
-        try {
-            // 価格キャッシュチェック
-            if (this.priceCache && Date.now() - this.priceCache.timestamp < 60000) {
-                return this.priceCache.price;
-            }
-            
-            // 実際の実装では CoinGecko/CoinMarketCap API を使用
-            const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-            const data = await response.json();
-            const price = data.bitcoin.usd;
-            
-            // キャッシュ更新
-            this.priceCache = {
-                price: price,
-                timestamp: Date.now()
-            };
-            
-            return price;
-            
-        } catch (error) {
-            logger.error('Failed to get BTC price:', error);
-            return 50000; // フォールバック価格
-        }
-    }
-
-    async createHoldInvoice(amount, memo, preimageHash) {
-        // HODL請求書作成（条件付き支払い）
-        try {
-            const amountSats = await this.convertUSDToSats(amount);
-            
-            const invoice = await new Promise((resolve, reject) => {
-                this.lnd.addHoldInvoice({
-                    hash: preimageHash,
-                    value: amountSats.toString(),
-                    memo: memo,
-                    expiry: 3600
-                }, (error, response) => {
-                    if (error) reject(error);
-                    else resolve(response);
-                });
-            });
-            
-            const holdInvoiceData = {
-                paymentHash: preimageHash.toString('hex'),
-                paymentRequest: invoice.payment_request,
-                amount: amount,
-                amountSats: amountSats,
-                memo: memo,
-                createdAt: Date.now(),
-                expiresAt: Date.now() + (3600 * 1000),
-                status: 'hold',
-                type: 'hold'
-            };
-            
-            this.invoices.set(holdInvoiceData.paymentHash, holdInvoiceData);
-            
-            return holdInvoiceData;
-            
-        } catch (error) {
-            logger.error('Failed to create hold invoice:', error);
-            // フォールバック: 通常の請求書
-            return await this.createInvoice(amount, memo);
-        }
     }
 
     async settleHoldInvoice(preimage) {
@@ -1027,14 +968,13 @@ class LightningService extends EventEmitter {
         return { active, inactive, pending, totalCapacity };
     }
 
-    async generateInvoice(amount, memo, expiry = 3600) {
-        // 請求書生成のラッパー関数
-        return await this.createInvoice(amount, memo);
-    }
-
-    async payInvoice(paymentRequest, maxFee) {
+    // amount 引数は現状未使用（インボイス自体に金額がエンコード済みで decodePaymentRequest
+    // が実額を取得するため）だが、呼び出し規約を維持するため受け取る。
+    // maxFeePercent は sendPayment へそのまま委譲する（sats建て手数料上限の算出は
+    // sendPayment 側で完結する）。
+    async payInvoice(paymentRequest, amount, maxFeePercent) {
         // 支払いのラッパー関数
-        return await this.sendPayment(paymentRequest, maxFee);
+        return await this.sendPayment(paymentRequest, maxFeePercent);
     }
 
     async shutdown() {

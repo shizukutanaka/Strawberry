@@ -569,13 +569,48 @@ nvidia-cuda-mps-control -d
     // クラス本来の API は allocateVirtualGPU/releaseVirtualGPU/getVirtualGPUStats。
     // 名前・シグネチャの差異により vgpu 有効時は必ず TypeError になっていた。
     // ここで薄いアダプタを提供し、呼び出し側の規約（{success} 返却・gpuId 起点の解放）を吸収する。
-    async allocateGPU(gpuId, rentalId) {
+    // gpuRecord は呼び出し元（order/index.js の /start）が既に持っている marketplace
+    // GPU レコード。省略時（既存呼び出し規約テスト・未知IDの検証等）は遅延登録を行わず、
+    // 従来通り未登録 GPU への割り当ては {success:false} で失敗する。
+    async allocateGPU(gpuId, rentalId, gpuRecord = null) {
         try {
+            if (gpuRecord) {
+                this.ensureVirtualGPU(gpuId, gpuRecord);
+            }
             const allocation = await this.allocateVirtualGPU(gpuId, rentalId);
             return { success: true, allocationId: allocation.id, ...allocation };
         } catch (e) {
             return { success: false, message: e.message };
         }
+    }
+
+    // marketplace GPU（このノードの物理検出を経ていない GPU — 他プロバイダのマシン上に
+    // 実在する可能性がある）用の最小限の仮想GPUエントリを遅延登録する。
+    // createVirtualGPU()/createNativeVirtualGPU() は nvidia-smi 等の実ハードウェア操作を
+    // 伴うため使えない（そのGPUは本ノード上に物理的に存在しない）。
+    // ルート互換アダプタ（allocateGPU/releaseGPU 等）は gpuId をそのまま vgpuId として
+    // this.virtualGPUs を検索するため、必ず gpuId をキーとして登録する。
+    ensureVirtualGPU(gpuId, gpuRecord) {
+        if (this.virtualGPUs.has(gpuId)) return this.virtualGPUs.get(gpuId);
+        const virtualGPU = {
+            id: gpuId,
+            physicalGPUId: gpuId,
+            name: gpuRecord.name || 'Marketplace GPU',
+            type: 'marketplace',
+            config: {},
+            resources: {
+                vram: typeof gpuRecord.memoryGB === 'number' ? gpuRecord.memoryGB : null,
+                compute: null,
+                bandwidth: null,
+            },
+            status: 'available',
+            createdAt: Date.now(),
+            platform: this.platform,
+            platformData: null,
+        };
+        this.virtualGPUs.set(gpuId, virtualGPU);
+        logger.info(`Lazily registered marketplace GPU as virtual GPU: ${gpuId}`);
+        return virtualGPU;
     }
 
     async releaseGPU(gpuId, rentalId) {
@@ -751,45 +786,23 @@ nvidia-cuda-mps-control -d
     }
 
     async setupNativeAccess(vgpu, allocation) {
-        // ネイティブアクセス設定
-        const accessPort = 8080 + Math.floor(Math.random() * 1000);
-
-        // 生成したトークンは下のレスポンスでも返す（旧コードは process.env.ACCESS_TOKEN を
-        // 返しており、クライアントへ無効な認証情報を渡していた）。
+        // ネイティブアクセス設定。
+        // 旧実装は実在しない `strawberry-gpu-proxy` バイナリを spawn し、誰も listen して
+        // いない endpoint URL を「成功」として返していた（renter は支払い後に接続できない
+        // 空約束を受け取っていた）。実プロキシ配線は別途のフォローアップ課題とし、ここでは
+        // 割り当て自体（課金・スケジューリング・状態遷移）を正しく完了させることを優先する。
+        // トークンは実際に発行して記録するが、endpoint は null にし
+        // deliveryImplemented:false で「まだ配信未実装」であることを明示する。
         const accessToken = this.generateAccessToken();
-        // シェルスクリプトへ埋め込む識別子はインジェクション防止のため検証する。
-        const safeVgpuId = sanitizeId(vgpu.id);
-        const gpuIndex = this.getGPUIndex(vgpu.physicalGPUId);
-
-        // アクセスプロキシ起動
-        const proxyScript = `#!/bin/bash
-export CUDA_VISIBLE_DEVICES=${gpuIndex}
-export VGPU_ID=${safeVgpuId}
-export ACCESS_TOKEN=${accessToken}
-
-strawberry-gpu-proxy --port ${accessPort} --vgpu ${safeVgpuId}
-`;
-
-        const proxyPath = `/var/lib/strawberry/proxy/${sanitizeId(allocation.id)}`;
-        await fs.mkdir(proxyPath, { recursive: true });
-        await fs.writeFile(`${proxyPath}/start-proxy.sh`, proxyScript, { mode: 0o755 });
-
-        // プロキシ起動。PID を allocation に保持し、解放時に確実に kill できるようにする
-        // （旧コードはハンドルを捨てており、パターンマッチ kill に依存してゾンビ化していた）。
-        const { spawn } = require('child_process');
-        const proxy = spawn(`${proxyPath}/start-proxy.sh`, [], {
-            detached: true,
-            stdio: 'ignore'
-        });
-        proxy.unref();
-        allocation.proxyPid = proxy.pid;
 
         return {
             type: 'native',
-            endpoint: `http://localhost:${accessPort}`,
+            endpoint: null,
             credentials: {
                 token: accessToken
-            }
+            },
+            deliveryImplemented: false,
+            message: 'GPU access delivery is not yet implemented for native allocations. Billing, scheduling, and rental state are fully active.',
         };
     }
 

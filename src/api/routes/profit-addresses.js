@@ -4,12 +4,19 @@ const router = express.Router();
 const { getProfitAddresses, addProfitAddress, removeProfitAddress, isValidBtcAddress } = require('../utils/profit-addresses');
 const jwtAuth = require('../middleware/jwt-auth');
 const rbac = require('../middleware/rbac');
+const { masterSession } = require('../middleware/master-session');
+const { requireMasterAuth } = require('./master-auth');
 const { logger } = require('../../utils/logger');
 
-// 運営利益受取アドレスは資金フローに直結するため、
-// 認証(JWT) + 管理者ロール(admin) を必須とする。
+// 運営利益受取アドレスは資金フローに直結するため、認証(JWT) + 管理者ロール(admin) に加え、
+// Google OAuth→TOTP→メール の3段階認証（/master-auth/* で完了済みのセッション）も必須とする。
+// requireMasterAuth は req.session.masterAuth を見るため、master-auth.js の
+// /master-auth/* ルートと同一の session ミドルウェアインスタンス（masterSession）を
+// ここでも通す必要がある（さもないと req.session が undefined になり必ず 403 になる）。
+router.use(masterSession);
 router.use(jwtAuth);
 router.use(rbac('admin'));
+router.use(requireMasterAuth);
 
 const maskError = (e, msg) => {
   logger.error(msg, e);

@@ -7,11 +7,15 @@
 ## 実体は何か
 
 - **本体は Node.js / Express の Web API サーバ**（`src/api/server.js`、`npm start`）。
-- Electron 用の `preload.js` / `react-app.tsx` は存在するが **`ipcMain` ハンドラが無く未配線**。
-  現状デスクトップアプリとしては動作しない。
+- Electron 用の `preload.js` / `react-app.tsx`（`ipcMain` ハンドラ無く未配線・デスクトップ
+  アプリとして未成立）は削除済み（2026-07）。デスクトップアプリを実装する場合は
+  `ipcMain`/`ipcRenderer` の配線から新規に設計すること。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
-  `prisma/`、`knex`/`sqlite3`、`pg`/`ioredis`(`src/core/database.js`) も存在するが
-  **未配線・未使用**（三重化）。当面 JSON のみが正。
+  `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
+  （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`
+  （`ioredis`/`rate-limiter-flexible` も未インストール）はどこからも import されず、
+  かつ依存先パッケージ自体が存在しないため import すれば即座に失敗するコードだった。
+  `knex`/`sqlite3` 依存とあわせて削除済み（2026-07）。当面 JSON のみが正。
 
 ## 起動パスとサービス
 

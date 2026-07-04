@@ -3,11 +3,10 @@ const express = require('express');
 const crypto = require('crypto');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const session = require('express-session');
 const speakeasy = require('speakeasy');
 const { verifyTOTP } = require('../utils/totp');
 const { sendMail } = require('../utils/mailer');
-const { requireSecret } = require('../../utils/config');
+const { masterSession } = require('../middleware/master-session');
 
 const router = express.Router();
 
@@ -75,16 +74,11 @@ if (googleOAuthEnabled) {
 }
 
 // --- セッション ---
-router.use(session({
-  secret: requireSecret('SESSION_SECRET'),
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
-  }
-}));
+// 共有インスタンス（src/api/middleware/master-session.js）を使う。ここで独自に
+// session(...) を呼ぶと、profit-addresses.js 等が requireMasterAuth のために
+// 別途 session(...) を呼んだ場合に別々の MemoryStore を持ってしまい、
+// このルートで確立したセッションを他ルートの req.session から参照できなくなる。
+router.use(masterSession);
 router.use(passport.initialize());
 router.use(passport.session());
 

@@ -5,6 +5,9 @@ import { getUser, isAuthenticated, clearSession } from './auth.js';
 import * as loginPage from './pages/login.js';
 import * as registerPage from './pages/register.js';
 import * as notFoundPage from './pages/not-found.js';
+import * as marketPage from './pages/market.js';
+import * as gpuNewPage from './pages/gpu-new.js';
+import * as myGpusPage from './pages/my-gpus.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -71,8 +74,9 @@ renderNav();
 // ---------- Routes ----------
 route('#/login', { render: loginPage.render });
 route('#/register', { render: registerPage.render });
+route('#/market', { render: marketPage.render });
+route('#/gpus/new', { render: gpuNewPage.render, auth: true, roles: ['provider', 'admin'] });
+route('#/my-gpus', { render: myGpusPage.render, auth: true, roles: ['provider', 'admin'] });
 setNotFound(notFoundPage.render);
 
-// NOTE: '#/market' is the intended landing page but is added in increment 2;
-// default to '#/login' until then.
-start('#/login');
+start('#/market');

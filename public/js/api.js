@@ -67,8 +67,11 @@ export const api = {
   me: () => request('/api/v1/users/me'),
 
   // --- gpus ---
-  listGpus: (filters) => request('/api/v1/gpus', { query: filters }),
+  listGpus: (filters) => request('/api/v1/gpus', { query: filters, auth: false }),
+  getGpu: (id) => request(`/api/v1/gpus/${id}`, { auth: false }),
+  myGpus: (query) => request('/api/v1/gpus/my', { query }),
   createGpu: (payload) => request('/api/v1/gpus', { method: 'POST', body: payload }),
+  updateGpu: (id, updates) => request(`/api/v1/gpus/${id}`, { method: 'PUT', body: updates }),
 
   // --- orders ---
   listOrders: (query) => request('/api/v1/orders', { query }),

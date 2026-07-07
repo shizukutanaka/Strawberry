@@ -8,6 +8,8 @@ import * as notFoundPage from './pages/not-found.js';
 import * as marketPage from './pages/market.js';
 import * as gpuNewPage from './pages/gpu-new.js';
 import * as myGpusPage from './pages/my-gpus.js';
+import * as ordersPage from './pages/orders.js';
+import * as orderDetailPage from './pages/order-detail.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -77,6 +79,8 @@ route('#/register', { render: registerPage.render });
 route('#/market', { render: marketPage.render });
 route('#/gpus/new', { render: gpuNewPage.render, auth: true, roles: ['provider', 'admin'] });
 route('#/my-gpus', { render: myGpusPage.render, auth: true, roles: ['provider', 'admin'] });
+route('#/orders', { render: ordersPage.render, auth: true });
+route('#/orders/:id', { render: orderDetailPage.render, auth: true });
 setNotFound(notFoundPage.render);
 
 start('#/market');

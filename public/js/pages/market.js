@@ -139,7 +139,14 @@ export async function render(container) {
     )
   );
 
+  // Guards against an out-of-order response: the initial unfiltered load (large
+  // payload, e.g. 70+ GPUs) can resolve AFTER a subsequent filtered/narrower
+  // search triggered by the user, silently clobbering the correct narrow
+  // result with the stale broad one a moment later. Only the response to the
+  // most recently issued request is allowed to render.
+  let loadSeq = 0;
   async function load() {
+    const seq = ++loadSeq;
     grid.replaceChildren(skeleton('card', 6));
     try {
       const [gpuRes, rateInfo] = await Promise.all([
@@ -151,6 +158,7 @@ export async function render(container) {
         }),
         getRate(),
       ]);
+      if (seq !== loadSeq) return; // a newer load() superseded this one
       grid.replaceChildren();
       if (!gpuRes.gpus.length) {
         grid.replaceChildren(emptyState('🖥️', '該当するGPUがありません', '条件を変えて再度お試しください。'));
@@ -166,6 +174,7 @@ export async function render(container) {
         }));
       });
     } catch (err) {
+      if (seq !== loadSeq) return;
       grid.replaceChildren(emptyState('⚠️', 'GPU一覧の取得に失敗しました', err instanceof ApiError ? err.message : ''));
     }
   }

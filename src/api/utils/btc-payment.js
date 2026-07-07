@@ -1,5 +1,10 @@
 // BTC支払い最適化・利益自動控除ユーティリティ
 const FEE_RATE = parseFloat(process.env.BTC_FEE_RATE || '0.015');
+// FEE_RATE が NaN / 負値 / ≥1 の場合、calcTotalWithFee が NaN を返して
+// Lightning API 呼び出しが無効金額となる。起動時にフェイルファストで検出する。
+if (!Number.isFinite(FEE_RATE) || FEE_RATE < 0 || FEE_RATE >= 1) {
+  throw new Error(`Invalid BTC_FEE_RATE: "${process.env.BTC_FEE_RATE}". Must be a finite number in [0, 1).`);
+}
 
 // 支払総額（借り手→運営）を計算
 function calcTotalWithFee(amount) {

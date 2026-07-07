@@ -74,8 +74,15 @@ const defaultConfig = {
   
   // セキュリティ設定
   security: {
-    jwtSecret: requireSecret('JWT_SECRET'),
-    jwtExpiresIn: '24h',
+    // RFC 7518 §3.2: HMAC-SHA256 requires a key of at least 256 bits (32 bytes).
+    // 16-char default was insufficient; enforce 32-char minimum.
+    jwtSecret: requireSecret('JWT_SECRET', { minLength: 32 }),
+    // アクセストークンは短命にする。漏洩した場合の悪用期間を最大 1 時間に限定する。
+    // 長時間セッション（GPU レンタル）はリフレッシュトークンローテーションで維持する。
+    // 本番環境では JWT_EXPIRES_IN=15m など環境変数でさらに短縮することを推奨。
+    jwtExpiresIn: '1h',
+    // リフレッシュトークンの有効期限（短命アクセストークン + 長命リフレッシュの構成）
+    jwtRefreshExpiresIn: '7d',
     bcryptRounds: 10,
     rateLimitEnabled: true,
     corsEnabled: true,
@@ -96,14 +103,28 @@ const defaultConfig = {
 function loadFromEnv() {
   const config = JSON.parse(JSON.stringify(defaultConfig)); // ディープコピー
   
+  // 整数環境変数の安全パース（NaN を無視してデフォルトを維持）
+  function safeInt(name, min, max) {
+    const raw = process.env[name];
+    if (!raw) return undefined;
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < min || n > max) {
+      logger.warn(`Invalid ${name}="${raw}", expected integer ${min}–${max}; using default`);
+      return undefined;
+    }
+    return n;
+  }
+
   // サーバー設定
-  if (process.env.PORT) config.server.port = parseInt(process.env.PORT, 10);
+  const port = safeInt('PORT', 1, 65535);
+  if (port !== undefined) config.server.port = port;
   if (process.env.HOST) config.server.host = process.env.HOST;
   if (process.env.API_PREFIX) config.server.apiPrefix = process.env.API_PREFIX;
   if (process.env.CORS_ORIGINS) config.server.corsOrigins = process.env.CORS_ORIGINS;
-  
+
   // P2P設定
-  if (process.env.P2P_PORT) config.p2p.port = parseInt(process.env.P2P_PORT, 10);
+  const p2pPort = safeInt('P2P_PORT', 1, 65535);
+  if (p2pPort !== undefined) config.p2p.port = p2pPort;
   if (process.env.P2P_BOOTSTRAP_NODES) {
     try {
       config.p2p.bootstrapNodes = JSON.parse(process.env.P2P_BOOTSTRAP_NODES);
@@ -113,12 +134,10 @@ function loadFromEnv() {
   }
   
   // GPU設定
-  if (process.env.GPU_MIN_MEMORY_GB) {
-    config.gpu.minMemoryGB = parseInt(process.env.GPU_MIN_MEMORY_GB, 10);
-  }
-  if (process.env.GPU_SCAN_INTERVAL_MS) {
-    config.gpu.scanIntervalMs = parseInt(process.env.GPU_SCAN_INTERVAL_MS, 10);
-  }
+  const minMemGB = safeInt('GPU_MIN_MEMORY_GB', 1, 10000);
+  if (minMemGB !== undefined) config.gpu.minMemoryGB = minMemGB;
+  const scanMs = safeInt('GPU_SCAN_INTERVAL_MS', 1000, 86400000);
+  if (scanMs !== undefined) config.gpu.scanIntervalMs = scanMs;
   if (process.env.VIRTUAL_GPU_ENABLED) {
     config.gpu.virtualGpuEnabled = process.env.VIRTUAL_GPU_ENABLED === 'true';
   }
@@ -138,9 +157,11 @@ function loadFromEnv() {
   // セキュリティ設定
   if (process.env.JWT_SECRET) config.security.jwtSecret = process.env.JWT_SECRET;
   if (process.env.JWT_EXPIRES_IN) config.security.jwtExpiresIn = process.env.JWT_EXPIRES_IN;
-  if (process.env.BCRYPT_ROUNDS) {
-    config.security.bcryptRounds = parseInt(process.env.BCRYPT_ROUNDS, 10);
-  }
+  if (process.env.JWT_REFRESH_EXPIRES_IN) config.security.jwtRefreshExpiresIn = process.env.JWT_REFRESH_EXPIRES_IN;
+  // Minimum 10 rounds enforced: below 10 makes brute-force trivially fast
+  // (cost doubles per round; rounds=1 is ~0.1ms vs rounds=10's ~100ms per hash).
+  const bcryptRounds = safeInt('BCRYPT_ROUNDS', 10, 31);
+  if (bcryptRounds !== undefined) config.security.bcryptRounds = bcryptRounds;
   
   // ログ設定
   if (process.env.LOG_LEVEL) config.logging.level = process.env.LOG_LEVEL;

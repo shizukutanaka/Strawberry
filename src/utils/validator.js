@@ -34,18 +34,19 @@ const schemas = {
   gpu: {
     // GPU登録用スキーマ
     register: Joi.object({
-  id: Joi.string().required(),
-  name: Joi.string().required(),
+  // id はサーバー側で UUID v4 生成するため、クライアントからの送信は不要かつ無視される。
+  // スキーマに id を残すと「自分の ID を選べる」と誤解させる API 契約の破綻になるため削除。
+  name: Joi.string().max(128).required(),
   vendor: Joi.string().valid('NVIDIA', 'AMD', 'Intel').required(),
-  model: Joi.string().required(),
+  model: Joi.string().max(128).required(),
   apiType: Joi.string().valid('CUDA', 'ROCm', 'oneAPI', 'OpenCL').required(),
-  driverVersion: Joi.string().required(),
-  os: Joi.string().required(),
+  driverVersion: Joi.string().max(64).required(),
+  os: Joi.string().max(64).required(),
   arch: Joi.string().valid('x86_64', 'arm64', 'aarch64', 'x86', 'arm').required(),
-  memoryGB: Joi.number().min(1).required(),
-  clockMHz: Joi.number().min(100).required(),
-  powerWatt: Joi.number().min(1).required(),
-  pricePerHour: Joi.number().min(0.00001).required(),
+  memoryGB: Joi.number().min(1).max(8192).required(),
+  clockMHz: Joi.number().min(100).max(20000).required(),
+  powerWatt: Joi.number().min(1).max(20000).required(),
+  pricePerHour: Joi.number().min(0.00001).max(1000000).required(),
   availability: Joi.object({
     startTime: Joi.date().iso(),
     endTime: Joi.date().iso(),
@@ -75,12 +76,52 @@ const schemas = {
     longitude: Joi.number().min(-180).max(180)
   }),
   performance: Joi.object({
-    benchmarkScore: Joi.number(),
-    teraflops: Joi.number(),
-    hashrate: Joi.number()
-  })
+    // 上限値: プロバイダが自己申告スコアを架空に水増しして検索順位を操作するのを防ぐ。
+    // benchmarkScore: 一般的な GPU ベンチ上位は数万点台（RTX4090 ≈ 35000）。余裕を持って 10M 上限。
+    // teraflops: H100 の FP32 ピーク ≈ 67 TFLOPS。余裕を持って 100000 TFLOPS 上限。
+    // hashrate: MH/s 単位。単一 GPU の最大は数百 GH/s 未満。100000000 MH/s (=100 PH/s) で上限。
+    benchmarkScore: Joi.number().min(0).max(10000000),
+    teraflops: Joi.number().min(0).max(100000),
+    hashrate: Joi.number().min(0).max(100000000)
+  }),
+  minRenterRating: Joi.number().min(1).max(5).optional(),
+  // 未評価（レビュー履歴ゼロ）の借り手を minRenterRating フロアで拒否するか。
+  // 既定 false（新規借り手を許可）。Sybil 耐性を必須とするプロバイダがオプトインする。
+  rejectUnratedRenters: Joi.boolean().optional(),
+  // アテステーションレポート（任意）— 許可フィールドを明示的に列挙し unknown を拒否する。
+  // req.body から直接読むと攻撃者が任意のフィールドを注入できるため Joi を通す。
+  attestationReport: Joi.object({
+    model: Joi.string().max(128).optional(),
+    vendor: Joi.string().max(64).optional(),
+    memoryGB: Joi.number().min(0).max(8192).optional(),
+    driverVersion: Joi.string().max(64).optional(),
+    firmwareIntegrity: Joi.boolean().optional(),
+    certChain: Joi.array().items(Joi.string().max(2048)).max(10).optional(),
+    timestamp: Joi.string().isoDate().optional(),
+    signature: Joi.string().max(2048).optional(),
+    measurements: Joi.object({
+      tempC: Joi.number().min(-273).max(300).optional(),
+      powerW: Joi.number().min(0).max(20000).optional(),
+      utilizationPct: Joi.number().min(0).max(100).optional(),
+    }).unknown(false).optional(),
+  }).unknown(false).optional(),
 }),
-    
+
+    // GPU更新用スキーマ（全フィールドオプション — 部分更新）
+    update: Joi.object({
+      name: Joi.string().max(128).optional(),
+      pricePerHour: Joi.number().min(0.00001).max(1000000).optional(),
+      availability: Joi.object({
+        startTime: Joi.date().iso(),
+        endTime: Joi.date().iso(),
+        hoursPerDay: Joi.number().min(1).max(24),
+        daysAvailable: Joi.array().items(Joi.number().min(0).max(6))
+      }).unknown(false).optional(),
+      minRenterRating: Joi.number().min(1).max(5).optional(),
+      rejectUnratedRenters: Joi.boolean().optional(),
+      available: Joi.boolean().optional()
+    }),
+
     // GPU検索用スキーマ
     search: Joi.object({
       minMemoryGB: Joi.number().min(1),
@@ -116,33 +157,31 @@ const schemas = {
   // オーダー関連
   order: {
     // オーダー作成用スキーマ
+    // 重要: 旧スキーマは gpuRequirements/duration{hours}/maxPricePerHour を要求していたが、
+    // ハンドラ(routes/order/index.js)が読むのは gpuId/durationMinutes であり、かつ
+    // validate は stripUnknown:true で未知キーを除去する。このため gpuId/durationMinutes が
+    // 必ず欠落し、注文作成が常に 400 で失敗していた（プロダクト中核機能が動作不能）。
+    // ハンドラの実契約に合わせて再定義する。
     create: Joi.object({
-      userId: Joi.string().required(),
-      gpuRequirements: Joi.object({
-        minMemoryGB: Joi.number().min(1).required(),
-        minClockMHz: Joi.number().min(100),
-        features: Joi.object({
-          cudaSupport: Joi.boolean(),
-          openCLSupport: Joi.boolean(),
-          directXSupport: Joi.boolean(),
-          tensorCores: Joi.boolean(),
-          rayTracingCores: Joi.boolean()
-        })
-      }).required(),
-      duration: Joi.object({
-        hours: Joi.number().min(1).required(),
-        startTime: Joi.date().iso(),
-        endTime: Joi.date().iso()
-      }).required(),
-      maxPricePerHour: Joi.number().min(0.00001).required(),
-      paymentMethod: Joi.string().valid('lightning', 'onchain').required(),
+      // userId はトークン(req.user.id)から設定するため body では任意（送られても無視）
+      userId: Joi.string().optional(),
+      gpuId: Joi.string().uuid().required(),
+      // ハンドラは正の整数かつ 5 の倍数を要求する。上限は 30 日（43200分）—
+      // 無制限だと totalPrice 計算が天文学的な値になりオーバーフロー/DoS の温床になる。
+      durationMinutes: Joi.number().integer().min(5).max(43200).multiple(5).required(),
+      description: Joi.string().max(1000).optional(),
+      paymentMethod: Joi.string().valid('lightning', 'onchain').optional(),
+      // gpuId 指定時はハンドラ側で maxPricePerHour との併用を拒否する（排他）
+      maxPricePerHour: Joi.number().min(0.00001).optional(),
       location: Joi.object({
         preferredCountry: Joi.string(),
         maxDistance: Joi.number().min(0),
         latitude: Joi.number().min(-90).max(90),
         longitude: Joi.number().min(-180).max(180)
-      }),
-      priority: Joi.string().valid('price', 'performance', 'availability', 'distance').default('price')
+      }).optional(),
+      priority: Joi.string().valid('price', 'performance', 'availability', 'distance').default('price'),
+      // 事前予約: 指定しない場合は即時（now）として扱う
+      scheduledStartAt: Joi.string().isoDate().optional()
     })
   },
   
@@ -181,6 +220,12 @@ const schemas = {
       email: Joi.string().email().required(),
       password: Joi.string()
         .min(8)
+        // bcrypt は入力を 72 バイトで切り詰める。上限を設けないと「73文字目以降は
+        // 無視される」ことにユーザーが気付けず、先頭72バイトが同じ別パスワードが
+        // 同一として認証される。OWASP/bcrypt 推奨に従い 8〜72 文字に制限する。
+        // （login 側は上限なし: 既存の長いパスワードも bcrypt.compare が同じく
+        //  72 バイト切り詰めで一致するため、後付けの上限で締め出さない）
+        .max(72)
         .pattern(/[a-z]/, 'lowercase')
         .pattern(/[A-Z]/, 'uppercase')
         .pattern(/[0-9]/, 'number')
@@ -188,9 +233,10 @@ const schemas = {
         .required()
         .messages({
           'string.pattern.name': 'Password must include at least one {#name} character',
-          'string.min': 'Password must be at least 8 characters long'
+          'string.min': 'Password must be at least 8 characters long',
+          'string.max': 'Password must be at most 72 characters long'
         }),
-      role: Joi.string().valid('user', 'provider', 'admin').optional()
+      role: Joi.string().valid('user', 'provider').optional()
     }),
     
     // ログイン用スキーマ
@@ -227,12 +273,17 @@ function validate(data, schema) {
 }
 
 // Express用バリデーションミドルウェア
-function validateMiddleware(schema) {
+// 既存バグ: 第2引数 source('params'/'query')が無視され常に req.body を検証していたため、
+// validateMiddleware(paramSchema, 'params') が body を param スキーマで検証し、PUT/DELETE /:id
+// などが「id is required」で 400 になっていた。source を尊重して該当部位を検証する。
+function validateMiddleware(schema, source = 'body') {
   return (req, res, next) => {
     try {
-      // リクエストボディをバリデーション
-      const validated = validate(req.body, schema);
-      req.validatedBody = validated;
+      const target = source === 'params' ? req.params : source === 'query' ? req.query : req.body;
+      const validated = validate(target, schema);
+      if (source === 'params') req.validatedParams = validated;
+      else if (source === 'query') req.validatedQuery = validated;
+      else req.validatedBody = validated;
       next();
     } catch (error) {
       next(error);

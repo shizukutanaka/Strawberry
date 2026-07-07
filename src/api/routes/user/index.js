@@ -9,88 +9,275 @@ const { validateMiddleware, schemas, Joi } = require('../../../utils/validator')
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { config } = require('../../../utils/config');
+// 署名鍵は検証側（jwt-auth/security）と同一の resolveSecret で解決する。
+// 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
+// リフレッシュトークンは resolveRefreshSecret を使い、JWT_REFRESH_SECRET が設定されている
+// 場合はアクセストークンとは別の鍵で署名・検証する（クロスタイプ代替攻撃を防ぐ）。
+const { resolveSecret, resolveRefreshSecret } = require('../../middleware/jwt-auth');
+const { withLock } = require('../../../utils/async-lock');
+
+const { sanitizeObject } = require('../../../utils/sanitize');
+// レスポンスから機密フィールド(password/apiKey 等)を除去する共通ヘルパー。
+const { sanitizeUser } = require('../../utils/sanitize-user');
+
+const { authLimiter } = require('../../middleware/rate-limit');
+const { invalidateUserCache } = require('../../middleware/cache');
+const { appendAuditLog } = require('../../../utils/audit-log');
 
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
+// ピアID管理サブルート
+const peeridRouter = require('./peerid');
+
+// Dummy bcrypt hash for constant-time comparison when the email doesn't exist.
+// Without this, an attacker can enumerate valid emails by measuring whether the
+// response takes ~1ms (no user) vs ~100ms (wrong password, bcrypt ran).
+// Generated once at startup so the cost is paid upfront, not on first login attempt.
+//
+// 重要: コストファクタは必ず本物のパスワードハッシュと同じ config.security.bcryptRounds を
+// 使う。ここを定数（例: 10）で固定すると、運用者が BCRYPT_ROUNDS を 12 等に引き上げた
+// 瞬間に「実在ユーザー = cost 12（遅い）」「不在ユーザー = ダミー cost 10（速い）」の
+// タイミング差が生じ、ダミーハッシュ本来の目的（アカウント列挙のタイミング遮断）が
+// 静かに破れる。両者のコストを常に一致させることでこの再発リスクを断つ。
+const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', config.security.bcryptRounds);
+
+// アカウント単位のブルートフォース抑制（IPを迂回した辞書攻撃対策）。
+// スライディングウィンドウ: 15分以内に10回失敗 → 429。成功でリセット。
+const _loginFailures = new Map(); // email → { count, windowStart }
+const _LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const _LOGIN_MAX_FAILURES = 10;
+function _recordLoginFailure(email) {
+  const now = Date.now();
+  const entry = _loginFailures.get(email) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > _LOGIN_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count += 1;
+  _loginFailures.set(email, entry);
+  return entry.count;
+}
+function _resetLoginFailures(email) { _loginFailures.delete(email); }
+function _isLoginLocked(email) {
+  const entry = _loginFailures.get(email);
+  if (!entry) return false;
+  if (Date.now() - entry.windowStart > _LOGIN_WINDOW_MS) { _loginFailures.delete(email); return false; }
+  return entry.count >= _LOGIN_MAX_FAILURES;
+}
 
 // ユーザー登録
-router.post('/register', 
+router.post('/register',
+  authLimiter,
   validateMiddleware(schemas.user.register),
   asyncHandler(async (req, res) => {
     // 入力値サニタイズ
     const sanitized = sanitizeObject(req.validatedBody, ['username', 'email']);
-    const { username, email, password, role } = sanitized;
+    // メールアドレスは大文字小文字を区別しない（RFC 5321 では local-part は区別されるが
+    // 実運用上ほぼ全プロバイダが等価扱い）。正規化しないと USER@X.COM と user@x.com が
+    // 別アカウントとして登録でき、同一受信箱へのなりすましや混乱が生じる。
+    const { username, password, role } = sanitized;
+    const email = typeof sanitized.email === 'string' ? sanitized.email.toLowerCase() : sanitized.email;
+    // 自己登録では 'user' または 'provider' のみ許可（admin への昇格は管理者が行う）
+    const assignedRole = (role === 'provider') ? 'provider' : 'user';
     logger.info(`Registering new user: ${username}`);
-    // メールアドレス・ユーザー名の重複チェック
-    if (UserRepository.getByEmail(email)) {
-      return res.status(409).json({ error: 'Email already registered' });
-    }
-    if (UserRepository.getByUsername(username)) {
-      return res.status(409).json({ error: 'Username already taken' });
-    }
-    // パスワードハッシュ化
+    // bcrypt はロック外で先に計算（重い演算をロック保持中に行わないため）。
+    // ロック内で重複チェック＋作成を不可分に実行し、同一メール同時登録 TOCTOU を閉じる。
     const salt = await bcrypt.genSalt(config.security.bcryptRounds);
     const hashedPassword = await bcrypt.hash(password, salt);
-    // 新規ユーザー作成
-    const newUser = UserRepository.create({
-      username,
-      email,
-      password: hashedPassword,
-      role: role || 'user',
-      lastLogin: null,
-      settings: {
-        notifications: true,
-        theme: 'light'
-      }
+    let newUser;
+    const registerConflict = await withLock(`register:${email}`, async () => {
+      if (UserRepository.getByEmail(email)) return 'email';
+      if (UserRepository.getByUsername(username)) return 'username';
+      newUser = UserRepository.create({
+        username,
+        email,
+        password: hashedPassword,
+        role: assignedRole,
+        lastLogin: null,
+        settings: { notifications: true, theme: 'light' }
+      });
+      return null;
     });
-    // レスポンス用にパスワードを削除
-    const userResponse = { ...newUser };
-    delete userResponse.password;
-    // ユーザー登録をログに記録
-    logger.info(`User registered: ${userId}`, {
-      userId,
+    if (registerConflict === 'email') return res.status(409).json({ error: 'Email already registered' });
+    if (registerConflict === 'username') return res.status(409).json({ error: 'Username already taken' });
+    // ユーザー登録をログに記録（既存バグ: 未定義の userId を参照し登録毎にクラッシュしていた）
+    logger.info(`User registered: ${newUser.id}`, {
+      userId: newUser.id,
       username,
       role: newUser.role
     });
+    // Use sanitizeUser() to strip password, apiKey, jti, and any other secret fields.
+    // The previous manual `delete password` left apiKey in the response body.
     res.status(201).json({
       message: 'User registered successfully',
-      user: userResponse
+      user: sanitizeUser(newUser)
     });
   })
 );
 
 // ログイン
-router.post('/login', 
+router.post('/login',
+  authLimiter,
   validateMiddleware(schemas.user.login),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.validatedBody;
+    const { password } = req.validatedBody;
+    const email = typeof req.validatedBody.email === 'string' ? req.validatedBody.email.toLowerCase() : req.validatedBody.email;
     logger.info(`Login attempt: ${email}`);
+    // アカウント単位ロックアウト（IPを迂回した辞書攻撃対策）
+    if (_isLoginLocked(email)) {
+      return res.status(429).json({ error: 'Too many failed login attempts. Please try again later.' });
+    }
     // ユーザーを検索（永続化対応）
     const user = UserRepository.getByEmail(email);
-    if (!user) {
-      logger.warn(`Login failed: user not found (${email})`);
+    // Always run bcrypt.compare even when user is not found to prevent
+    // account enumeration via timing: without this, non-existent emails
+    // return in ~1ms vs ~100ms for wrong passwords, leaking email validity.
+    const hashToCompare = (user && user.password) || _DUMMY_HASH;
+    const validPassword = await bcrypt.compare(password, hashToCompare);
+    if (!user || !validPassword) {
+      // ログメッセージを統一して「ユーザー不在」と「誤パスワード」を区別しない。
+      // ログ閲覧権限を持つオペレータによるメールアドレス列挙を防ぐ。
+      logger.warn(`Login failed (${email})`);
+      _recordLoginFailure(email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    // パスワード検証
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      logger.warn(`Login failed: wrong password (${email})`);
+    // 無効化済みアカウントはログイン不可（メール匿名化に加えた多層防御）
+    if (user.status === 'deactivated') {
+      logger.warn(`Login failed: account deactivated (${email})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    // JWTトークン生成
-    const token = jwt.sign({ id: user.id, role: user.role }, config.security.jwtSecret, { expiresIn: config.security.jwtExpiresIn });
-    user.lastLogin = new Date().toISOString();
+    // ログイン成功 → 失敗カウントをリセット
+    _resetLoginFailures(email);
+    // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。
+    // jti は logout 時の失効に使用。type で両者を厳密分離。
+    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
+    const accessJti = uuidv4();
+    const token = signAccessToken(user, accessJti);
+    const refreshToken = signRefreshToken(user, accessJti);
+    UserRepository.update(user.id, { lastLogin: new Date().toISOString() });
     logger.info(`Login success: ${email}`);
     // パスワードやAPIキーは絶対にレスポンス・ログに含めない
     res.json({
       message: 'Login successful',
-      token
+      token,
+      refreshToken
     });
   })
 );
 
+// アクセストークンの更新（リフレッシュトークンから新しいアクセストークンを発行）
+router.post('/refresh',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { refreshToken } = req.body || {};
+    if (!refreshToken || typeof refreshToken !== 'string') {
+      return res.status(400).json({ error: 'refreshToken is required' });
+    }
+    let payload;
+    try {
+      payload = jwt.verify(refreshToken, resolveRefreshSecret(), { algorithms: ['HS256'] });
+    } catch (_) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // リフレッシュトークン以外（アクセストークン等）では更新不可
+    if (payload.type !== 'refresh') {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // jti がないリフレッシュトークンは single-use 強制・再利用検知が機能しない（fix probe 35）。
+    // 正規発行トークンは必ず jti を持つ（signRefreshToken → uuidv4）。
+    // jti なしトークンは手動署名か旧バージョン発行の可能性が高く、永続的に再利用できてしまう。
+    if (!payload.jti) {
+      return res.status(401).json({ error: 'Invalid refresh token: missing token identifier' });
+    }
+    // ユーザーが削除/無効化されていないか確認（最新のロールも反映）
+    const user = UserRepository.getById(payload.id);
+    if (!user || user.status === 'deactivated') {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // jti ごとにロックし、check→revoke→reissue をアトミックにする。
+    // ロックがないと 2 つの並行リクエストが両方 isRevoked(jti)=false を見てから
+    // それぞれ revoke を呼び、どちらも新しいトークンペアを返す（single-use 破り）。
+    // reuse-detection は次のアクセスで機能するが、攻撃者が先行して rotate した
+    // 連鎖チェーンは生き残り得る。/register や /me/settings と同じパターン。
+    const { isRevoked, revoke } = require('../../middleware/token-denylist');
+    const { isSessionInvalidated } = require('../../utils/session-invalidation');
+    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
+    const lockKey = `refresh:${payload.jti}`; // jti is guaranteed non-null (checked above)
+    return withLock(lockKey, async () => {
+    // リフレッシュトークン再利用検知（盗難シグナル）:
+    // 既に失効済み(= logout または rotation で消費済み)の jti が再提示された場合、
+    // 単にこの 1 トークンを 401 で弾くだけでは不十分。rotation で「先に進んだ」攻撃者
+    // (または被害者)が保持する新しいリフレッシュトークンは生き残ってしまう。OWASP 推奨に
+    // 従い、再利用検知時は当該ユーザーの *全* セッションを失効させ(sessionsRevokedAt を更新)、
+    // 攻撃者の連鎖トークンも含めて全て無効化して再ログインを強制する。
+    if (payload.jti && isRevoked(payload.jti)) {
+      try {
+        UserRepository.update(user.id, { sessionsRevokedAt: new Date().toISOString() });
+        logger.warn(`Refresh token reuse detected for user ${user.id}; all sessions revoked`);
+      } catch (e) {
+        logger.error(`Failed to revoke sessions on refresh reuse (user=${user.id}): ${e.message}`);
+      }
+      return res.status(401).json({ error: 'Refresh token reuse detected; all sessions have been revoked. Please log in again.' });
+    }
+    // パスワード変更・全セッション失効より後に発行されたリフレッシュトークンのみ受け付ける
+    // （共有ヘルパーで REST/GraphQL と同一ポリシー）。盗まれたトークンはこれらで無効化できる。
+    if (isSessionInvalidated(user, payload.iat)) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+    // 使い切り（single-use）: 使用済みリフレッシュトークンの jti を失効させることで
+    // 同じトークンを再利用したリプレイアタックを防ぐ。
+    // jti は上で必須チェック済みのため条件分岐不要。
+    revoke(payload.jti, payload.exp ? payload.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
+    // ati: refresh token 発行時にペアだったアクセストークンの jti を失効させる。
+    // これにより、盗難されたアクセストークンが rotation 後も生き続けるのを防ぐ。
+    if (payload.ati) {
+      revoke(payload.ati, Date.now() + 60 * 60 * 1000);
+    }
+    const newAccessJti = uuidv4();
+    const token = signAccessToken(user, newAccessJti);
+    const newRefreshToken = signRefreshToken(user, newAccessJti);
+    logger.info(`Access token refreshed for user: ${user.id}`);
+    res.json({ message: 'Token refreshed', token, refreshToken: newRefreshToken });
+    }); // end withLock(refresh)
+  })
+);
+
+// ログアウト（トークン失効。認証必須）
+router.post('/logout',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const { revoke } = require('../../middleware/token-denylist');
+    const { refreshToken } = req.body || {};
+    if (refreshToken && typeof refreshToken === 'string') {
+      // リフレッシュトークンが提供されていれば jti を即時失効させる。
+      try {
+        const rp = jwt.verify(refreshToken, resolveRefreshSecret(), { algorithms: ['HS256'] });
+        if (rp.type === 'refresh' && rp.jti) {
+          revoke(rp.jti, rp.exp ? rp.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
+        }
+      } catch (_) { /* 無効なリフレッシュトークンは無視（logout は冪等に成功させる） */ }
+    } else {
+      // リフレッシュトークンが提供されなかった場合: クライアントが意図的に省略した場合や
+      // リフレッシュトークンを保持していない場合でも、sessionsRevokedAt を更新することで
+      // 既存の全リフレッシュトークンを無効化し、盗難トークンによるポストログアウト利用を防ぐ。
+      // トレードオフ: 他デバイスのセッションも同時に失効する（"log out everywhere" 動作）。
+      try {
+        UserRepository.update(req.user.id, { sessionsRevokedAt: new Date().toISOString() });
+      } catch (_) { /* 更新失敗はログアウト自体を妨げない */ }
+    }
+    if (req.user.jti) {
+      // exp（秒）をミリ秒に変換して保持期限とする。それ以降は自然失効するため保持不要。
+      revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
+      logger.info(`User logged out (token revoked): ${req.user.id}`);
+      return res.json({ message: 'Logged out successfully' });
+    }
+    // jti の無い旧トークンは失効リストに載せられない（exp までは有効なまま）
+    res.json({ message: 'Logged out (token issued before revocation support; it will expire naturally)' });
+  })
+);
+
 // 現在のユーザー情報取得 (認証必須)
-router.get('/me', 
+router.get('/me',
   authenticateJWT,
   asyncHandler(async (req, res) => {
     logger.info(`Fetching user profile: ${req.user.id}`);
@@ -100,53 +287,176 @@ router.get('/me',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // レスポンス用にパスワードを削除
-    const userResponse = { ...user };
-    delete userResponse.password;
-    res.json(userResponse);
+    // レスポンス用に機密フィールド(password/apiKey 等)を一括除去
+    res.json(sanitizeUser(user));
   })
 );
 
-// ユーザー情報更新 (認証必須)
-router.put('/me', 
+// アカウント自己退会（ソフト無効化。認証必須）
+// ハード削除はしない: 注文履歴・係争・監査証跡を保全しつつ、本人を確実にロックアウトする。
+// メール/ユーザー名を匿名化して再ログイン・再利用を防ぎ、現在のアクセストークンを失効させる。
+router.delete('/me',
   authenticateJWT,
   asyncHandler(async (req, res) => {
-    const updateData = req.body;
-    logger.info(`Updating user profile: ${req.user.id}`);
-    
-    // ユーザーを検索（永続化対応）
     const user = UserRepository.getById(req.user.id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // 更新不可のフィールドを削除
-    delete updateData.id;
-    delete updateData.email;
-    delete updateData.password;
-    delete updateData.role;
-    delete updateData.createdAt;
-    // ユーザー情報を更新
+    if (user.status === 'deactivated') {
+      return res.status(409).json({ error: 'Account is already deactivated' });
+    }
+    // 最後の管理者は自己退会できない（管理不能化の防止。ロール変更と同一ポリシー）
+    if (user.role === 'admin') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin' && u.status !== 'deactivated').length;
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: 'At least one active admin must remain; transfer admin before deactivating' });
+      }
+    }
+    // 進行中の注文を残したまま退会させない（GPU削除の "active orders first" と同一ポリシー）。
+    // 放置すると、レンターとしての注文はプロバイダのGPUを幽霊ユーザーで占有し続け、
+    // プロバイダとしての注文はレンターの進行中レンタルを宙吊りにする。本人が先に
+    // 解決（完了/キャンセル）する必要がある。終端状態 = completed / cancelled。
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const NON_TERMINAL = new Set(['pending', 'matched', 'active', 'disputed']);
+    const openOrders = OrderRepository.getAll().filter(o =>
+      NON_TERMINAL.has(o.status) && (o.userId === user.id || o.providerId === user.id)
+    );
+    if (openOrders.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot deactivate while you have in-flight orders. Complete or cancel them first.',
+        openOrderCount: openOrders.length,
+      });
+    }
+    const anonId = uuidv4();
+    const deactivatedAt = new Date().toISOString();
+    UserRepository.update(user.id, {
+      status: 'deactivated',
+      deactivatedAt,
+      // 全セッション無効化: 退会時に他デバイスで発行済みのアクセストークンを
+      // isSessionInvalidated() で拒否させる。これがないと、退会後も最大 TTL（1時間）
+      // 分だけ他デバイスのトークンが有効なままになる（盗取済みトークンを含む）。
+      sessionsRevokedAt: deactivatedAt,
+      // 個人情報の匿名化（履歴の userId 参照は維持されるため注文・監査は保全される）
+      email: `deactivated+${anonId}@invalid.local`,
+      username: `deactivated_${anonId.slice(0, 8)}`,
+      // パスワードを無効化（万一メールが復元されても認証不可）
+      password: `!deactivated-${anonId}`,
+      apiKey: null,
+    });
+    // 現在のアクセストークンを失効（exp まで保持）。本人の能動的ロックアウト。
+    try {
+      const { revoke } = require('../../middleware/token-denylist');
+      if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
+    } catch (e) {
+      logger.warn(`token revoke on self-deactivation failed (user=${user.id}): ${e.message}`);
+    }
+    // 価格ウォッチの後始末: 退会したユーザーのウォッチは二度と行動可能にならず
+    // （ログイン不可）、watches.json に永久に残るストレージリークになる。さらに
+    // notifyPriceWatchers が値下げ毎に死んだアカウントへの通知を試み続け無駄が生じる。
+    // GPU 削除時の孤児ウォッチ掃除（gpu/index.js DELETE /:id）と対称の後始末。
+    try {
+      const WatchRepository = require('../../../db/json/WatchRepository');
+      const userWatches = WatchRepository.getByUser(user.id) || [];
+      for (const w of userWatches) {
+        try { WatchRepository.delete(w.id); } catch (_) {}
+      }
+    } catch (_) { /* ウォッチ後始末の失敗で退会レスポンスを妨げない */ }
+
+    logger.info(`User self-deactivated account: ${user.id}`);
+    res.json({ message: 'Account deactivated', userId: user.id });
+  })
+);
+
+// ユーザー情報更新 (認証必須)
+// 許可するプロフィールフィールドの明示的な allowlist。
+// 削除ベース (delete updateData.sensitive) では新フィールド追加時に漏れが生じるため、
+// 許可リストベースに切り替え: 未知のフィールドは無視して inject を防止する。
+const ALLOWED_PROFILE_FIELDS = {
+  username:    v => typeof v === 'string' && v.length >= 3 && v.length <= 30 && /^[a-zA-Z0-9_-]+$/.test(v),
+  displayName: v => typeof v === 'string' && v.length <= 50,
+  bio:         v => typeof v === 'string' && v.length <= 500,
+  // website: http/https のみ許可。javascript: / data: URI はフロントエンドで <a href> 等に
+  // 展開されると Stored XSS になる。空文字（削除）は許可。
+  website:     v => v === '' || (typeof v === 'string' && v.length <= 200 && /^https?:\/\//i.test(v)),
+  location:    v => typeof v === 'string' && v.length <= 100,
+  // avatar: http/https または data:image/(raster) のみ許可。
+  // data:image/svg+xml は SVG 内に <script> を埋め込み可能なため拒否する。
+  // <object>/<embed> で表示されると Stored XSS になる（<img> はブラウザが制限するが完全ではない）。
+  // base64, を必須にして URL エンコードされた SVG インジェクションも防ぐ。
+  avatar:      v => v === '' || (typeof v === 'string' && v.length <= 500 &&
+                    (/^https?:\/\//i.test(v) ||
+                     /^data:image\/(png|jpeg|jpg|gif|webp|avif);base64,/i.test(v))),
+  // payoutAddress: プロバイダ（貸し手）が受取に使う Lightning / on-chain アドレス。
+  // 決済(btc-onchain)はこの登録済みアドレスを「正」として使い、リクエストボディで
+  // 送金先を差し替えられる詐称・妨害(借り手が貸し手への payout を別アドレスへ流す)を防ぐ。
+  // 形式はプロバイダ依存(bolt11/LNURL/オンチェーン)のため緩めに検証。空文字で削除可。
+  payoutAddress: v => v === '' || (typeof v === 'string' && v.length >= 10 && v.length <= 500 && !/\s/.test(v)),
+};
+
+router.put('/me',
+  authLimiter,
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    logger.info(`Updating user profile: ${req.user.id}`);
+    const user = UserRepository.getById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    // 退会済みアカウントがレガシートークン（jti なし）を使って payout address 等を
+    // 変更し資金を横取りする攻撃を防ぐ。
+    if (user.status === 'deactivated') {
+      return res.status(403).json({ error: 'Account is deactivated. Contact support to reactivate.' });
+    }
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Request body must be a JSON object' });
+    }
+    // 許可フィールドのみを抽出・検証（値の型も確認）
+    // displayName/bio/location はフリーテキストのため HTML タグを除去してから保存する。
+    // review comment と同じく sanitizeString を適用し、<script> 等の Stored XSS を防ぐ。
+    const { sanitizeString } = require('../../../utils/sanitize');
+    const HTML_TEXT_FIELDS = new Set(['displayName', 'bio', 'location']);
+    const updateData = {};
+    for (const [field, validate] of Object.entries(ALLOWED_PROFILE_FIELDS)) {
+      if (field in req.body) {
+        if (!validate(req.body[field])) {
+          return res.status(400).json({ error: `Invalid value for field: ${field}` });
+        }
+        updateData[field] = HTML_TEXT_FIELDS.has(field) ? sanitizeString(req.body[field]) : req.body[field];
+      }
+    }
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: `No updatable fields provided. Allowed: ${Object.keys(ALLOWED_PROFILE_FIELDS).join(', ')}` });
+    }
+    // ユーザー名の重複チェック
+    if (updateData.username) {
+      const existing = UserRepository.getAll().find(u => u.username === updateData.username && u.id !== req.user.id);
+      if (existing) return res.status(409).json({ error: 'Username already taken' });
+    }
     const updatedUser = UserRepository.update(req.user.id, {
       ...updateData,
       updatedAt: new Date().toISOString()
     });
-    // レスポンス用にパスワードを削除
-    const userResponse = { ...updatedUser };
-    delete userResponse.password;
+    // Audit log for security-sensitive field changes (payout address, username).
+    if (updateData.payoutAddress !== undefined) {
+      appendAuditLog('user_payout_address_changed', { userId: req.user.id }, req.user.id);
+    }
     res.json({
       message: 'User profile updated successfully',
-      user: userResponse
+      user: sanitizeUser(updatedUser)
     });
   })
 );
 
 // パスワード変更 (認証必須)
-router.put('/me/password', 
+router.put('/me/password',
+  authLimiter,
   authenticateJWT,
   validateMiddleware(Joi.object({
     currentPassword: Joi.string().required(),
     newPassword: Joi.string()
       .min(8)
+      // bcrypt の 72 バイト切り詰め対策（register と同一ポリシー）。
+      .max(72)
       .pattern(/[a-z]/, 'lowercase')
       .pattern(/[A-Z]/, 'uppercase')
       .pattern(/[0-9]/, 'number')
@@ -154,7 +464,8 @@ router.put('/me/password',
       .required()
       .messages({
         'string.pattern.name': 'Password must include at least one {#name} character',
-        'string.min': 'Password must be at least 8 characters long'
+        'string.min': 'Password must be at least 8 characters long',
+        'string.max': 'Password must be at most 72 characters long'
       })
   }), 'body'),
   asyncHandler(async (req, res) => {
@@ -173,69 +484,360 @@ router.put('/me/password',
     // 新しいパスワードをハッシュ化
     const salt = await bcrypt.genSalt(config.security.bcryptRounds);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
-    // パスワードを更新
+    // passwordChangedAt を記録し、iat がこれより古いトークンを全無効化する。
+    // jti 失効（denylist）はログアウトした1トークンのみを対象にするが、
+    // passwordChangedAt は他端末・盗難トークンを含むすべての既存セッションを無効化する。
+    const changedAt = new Date().toISOString();
     UserRepository.update(req.user.id, {
       password: hashedPassword,
-      updatedAt: new Date().toISOString()
+      updatedAt: changedAt,
+      passwordChangedAt: changedAt,
+      // sessionsRevokedAt も同時更新（多層防御）: passwordChangedAt だけでも
+      // isSessionInvalidated() が全既存トークンを弾くが、sessionsRevokedAt を
+      // 独立フィールドとして同時に立てることで、将来いずれかのフィールドが
+      // クリアされても無効化が維持される。
+      sessionsRevokedAt: changedAt,
     });
+    // 現在のアクセストークンも即時失効（他セッションは passwordChangedAt で弾かれるが、
+    // 本リクエストで使ったトークンは iat が同秒になる可能性があるため denylist でも対処）
+    try {
+      const { revoke } = require('../../middleware/token-denylist');
+      if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
+    } catch (_) { /* denylist 失敗は更新を妨げない */ }
     logger.info(`Password changed for user: ${req.user.id}`);
+    appendAuditLog('user_password_changed', { userId: req.user.id }, req.user.id);
     res.json({ message: 'Password changed successfully' });
   })
 );
 
+// 許可された設定キーと各値のバリデータ（key allowlist + value type/range）
+const SETTINGS_SCHEMA = {
+  notifications: v => typeof v === 'boolean',
+  theme:         v => ['light', 'dark', 'system'].includes(v),
+  language:      v => typeof v === 'string' && /^[a-z]{2,5}(-[A-Z]{2})?$/.test(v),
+  timezone:      v => typeof v === 'string' && v.length > 0 && v.length <= 64 && /^[A-Za-z0-9/_+-]+$/.test(v),
+  currency:      v => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
+};
+
 // ユーザー設定更新 (認証必須)
-router.put('/me/settings', 
+router.put('/me/settings',
+  authLimiter,
   authenticateJWT,
   asyncHandler(async (req, res) => {
-    const settings = req.body;
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Settings must be an object' });
+    }
+    const settings = {};
+    for (const [k, v] of Object.entries(req.body)) {
+      if (!Object.prototype.hasOwnProperty.call(SETTINGS_SCHEMA, k)) continue;
+      if (!SETTINGS_SCHEMA[k](v)) {
+        return res.status(400).json({ error: `Invalid value for setting: ${k}` });
+      }
+      settings[k] = v;
+    }
+    if (Object.keys(settings).length === 0) {
+      return res.status(400).json({ error: `No valid settings provided. Allowed: ${Object.keys(SETTINGS_SCHEMA).join(', ')}` });
+    }
     logger.info(`Updating settings for user: ${req.user.id}`);
     
-    // ユーザーを検索（永続化対応）
-    const user = UserRepository.getById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    // 設定を更新
-    const updatedUser = UserRepository.update(req.user.id, {
-      settings: {
-        ...user.settings,
-        ...settings
-      },
-      updatedAt: new Date().toISOString()
-    });
-    res.json({
-      message: 'Settings updated successfully',
-      settings: updatedUser.settings
+    // TOCTOU防止: settings はオブジェクトのマージ（stale-spread）で更新するため、
+    // 並行リクエストが互いの変更を上書き消去しないようにロックする。
+    return withLock(`user:${req.user.id}:settings`, async () => {
+      const user = UserRepository.getById(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.status === 'deactivated') {
+        return res.status(403).json({ error: 'Account is deactivated. Contact support to reactivate.' });
+      }
+      const updatedUser = UserRepository.update(req.user.id, {
+        settings: { ...user.settings, ...settings },
+        updatedAt: new Date().toISOString(),
+      });
+      return res.json({ message: 'Settings updated successfully', settings: updatedUser.settings });
     });
   })
 );
 
-const { apiKeyAuth } = require('../../middleware/security');
-const { sanitizeObject } = require('../../../utils/sanitize');
+// 自分のアクティビティフィード (認証必須)
+// 注文（借り手・提供者）、GPU登録、レビュー受領を単一タイムラインに統合して返す。
+// クエリ: ?limit=N (1-100, default 20) ?offset=N ?type=order_renter|order_provider|gpu_registered|review_received
+router.get('/me/activity',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const typeFilter = req.query.type || null;
+    const VALID_TYPES = new Set(['order_renter', 'order_provider', 'gpu_registered', 'review_received']);
+    if (typeFilter && !VALID_TYPES.has(typeFilter)) {
+      return res.status(400).json({ error: `Invalid type filter. Valid values: ${[...VALID_TYPES].join(', ')}` });
+    }
+
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const allOrders = OrderRepository.getAll();
+
+    const events = [];
+
+    if (!typeFilter || typeFilter === 'order_renter') {
+      for (const order of allOrders.filter(o => o.userId === userId)) {
+        events.push({
+          type: 'order_renter',
+          timestamp: order.createdAt,
+          orderId: order.id,
+          gpuId: order.gpuId || null,
+          status: order.status,
+          durationMinutes: order.durationMinutes,
+          totalPrice: order.totalPrice || null,
+        });
+      }
+    }
+
+    if (!typeFilter || typeFilter === 'order_provider') {
+      for (const order of allOrders.filter(o => o.providerId === userId)) {
+        events.push({
+          type: 'order_provider',
+          timestamp: order.createdAt,
+          orderId: order.id,
+          gpuId: order.gpuId || null,
+          status: order.status,
+          durationMinutes: order.durationMinutes,
+          totalPrice: order.totalPrice || null,
+        });
+      }
+    }
+
+    if (!typeFilter || typeFilter === 'gpu_registered') {
+      for (const gpu of GpuRepository.getAll().filter(g => g.providerId === userId)) {
+        events.push({
+          type: 'gpu_registered',
+          timestamp: gpu.createdAt,
+          gpuId: gpu.id,
+          name: gpu.name,
+          model: gpu.model,
+          vendor: gpu.vendor,
+        });
+      }
+    }
+
+    if (!typeFilter || typeFilter === 'review_received') {
+      for (const order of allOrders) {
+        // 借り手として受けたレビュー（提供者→借り手）
+        // reviewedBy は Probe 33 fix の bypassを防ぐため除去:
+        // order.providerId をここで返すとレビュー投稿者の UUID が露出し、
+        // /orders 一覧側で reviewerId を剥がした効果が失われる。
+        if (order.userId === userId && order.renterReview) {
+          events.push({
+            type: 'review_received',
+            timestamp: order.renterReview.reviewedAt || order.updatedAt || order.createdAt,
+            orderId: order.id,
+            rating: order.renterReview.rating,
+            comment: order.renterReview.comment || null,
+          });
+        }
+        // 提供者として受けたレビュー（借り手→提供者）
+        if (order.providerId === userId && order.review) {
+          events.push({
+            type: 'review_received',
+            timestamp: order.review.reviewedAt || order.updatedAt || order.createdAt,
+            orderId: order.id,
+            rating: order.review.rating,
+            comment: order.review.comment || null,
+          });
+        }
+      }
+    }
+
+    // 新しい順にソートしてページネーション
+    events.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+    const total = events.length;
+    const page = events.slice(offset, offset + limit);
+
+    res.json({ total, limit, offset, events: page });
+  })
+);
 
 // ユーザー一覧取得 (管理者のみ)
-router.get('/', 
-  apiKeyAuth,
+// ページネーション: ?limit=50&offset=0 — 上限200, 既定50
+router.get('/',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
     logger.info('Fetching all users');
-    // パスワード・APIキーを除外
-    const allUsers = UserRepository.getAll();
-    const usersNoSecrets = allUsers.map(u => {
-      const { password, apiKey, ...rest } = u;
-      return rest;
-    });
+    let users = UserRepository.getAll();
+    // 任意フィルタ（ロール・ステータス）
+    if (req.query.role) users = users.filter(u => u.role === req.query.role);
+    if (req.query.status) users = users.filter(u => u.status === req.query.status);
+    const total = users.length;
+    // ページネーション
+    const limitRaw = parseInt(req.query.limit, 10);
+    const offsetRaw = parseInt(req.query.offset, 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
+    const page = users.slice(offset, offset + limit);
+    // パスワード・APIキー等の機密フィールドを除外
+    const usersNoSecrets = page.map(sanitizeUser);
     res.json({
       message: 'Fetched all users',
-      total: usersNoSecrets.length,
+      total,
+      limit,
+      offset,
       users: usersNoSecrets
     });
   })
 );
 
+// プロバイダ公開レピュテーション (認証不要 — マーケットプレイスの信頼判断材料)。
+// reputation-scorer の score/tier（完了/失敗/監査/SLA/スラッシュ由来）に加え、
+// 当該プロバイダの全 GPU に対するレビュー集計（平均★・件数）と取引実績を返す。
+// レピュテーションスコアの簡易インメモリキャッシュ（TTL: 5分）
+// 同一プロバイダへの連続リクエストでの O(n) 集計を避ける。
+const _reputationCache = new Map(); // providerId → { data, expiresAt }
+const REPUTATION_CACHE_TTL_MS = 5 * 60 * 1000;
+
+router.get('/:id/reputation', asyncHandler(async (req, res) => {
+  const providerId = req.params.id;
+  const user = UserRepository.getById(providerId);
+  // renter-profile と同様: 無効化済みユーザーは 404 で返し PII を漏洩しない
+  if (!user || user.status === 'deactivated') return res.status(404).json({ error: 'User not found' });
+
+  // キャッシュヒット確認
+  const cached = _reputationCache.get(providerId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.json(cached.data);
+  }
+
+  const { createReputationService } = require('../../../reputation/reputation-service');
+  const repSvc = createReputationService();
+  const { score, tier, components } = repSvc.getScore(providerId);
+  const stats = repSvc.getStats(providerId);
+
+  // 当該プロバイダのオーダーからレビュー★と取引実績を集計
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+  const reviewed = orders.filter(o => o.review);
+
+  // 同一借り手が5分注文を量産して同一プロバイダに ★1 を撃ち込み続けて
+  // GPU の検索ランクから落とすブリゲーディング攻撃を防ぐため、reviewerId 単位で
+  // dedup（平均化）してから集計する。レビュー数は dedup 後のユニーク評価者数。
+  const ratingByReviewer = new Map();
+  for (const o of reviewed) {
+    const rid = (o.review && o.review.reviewerId) || o.userId;
+    const raw = Number(o.review.rating);
+    if (!Number.isFinite(raw)) continue;
+    const r = Math.min(5, Math.max(1, raw));
+    const cur = ratingByReviewer.get(rid) || { sum: 0, n: 0 };
+    cur.sum += r; cur.n += 1;
+    ratingByReviewer.set(rid, cur);
+  }
+  const perReviewerAverages = Array.from(ratingByReviewer.values()).map(v => v.sum / v.n);
+  const reviewCount = perReviewerAverages.length;
+  const ratingAverage = reviewCount > 0
+    ? Math.round((perReviewerAverages.reduce((s, x) => s + x, 0) / reviewCount) * 10) / 10
+    : null;
+  const completedOrders = orders.filter(o => o.status === 'completed').length;
+  const rejectedOrders = orders.filter(o => o.cancelReason === 'provider_rejected').length;
+
+  // 借り手としての受領評価（プロバイダ→借り手レビューの集計）。同様に reviewerId(providerId)
+  // 単位で dedup し、同一プロバイダが量産した低評価で借り手を不当に落とすのを防ぐ。
+  const asRenter = OrderRepository.getAll().filter(o => o.userId === providerId && o.renterReview);
+  const renterByReviewer = new Map();
+  for (const o of asRenter) {
+    const rid = (o.renterReview && o.renterReview.reviewerId) || o.providerId;
+    const raw = Number(o.renterReview.rating);
+    if (!Number.isFinite(raw)) continue;
+    const r = Math.min(5, Math.max(1, raw));
+    const cur = renterByReviewer.get(rid) || { sum: 0, n: 0 };
+    cur.sum += r; cur.n += 1;
+    renterByReviewer.set(rid, cur);
+  }
+  const renterPerReviewerAverages = Array.from(renterByReviewer.values()).map(v => v.sum / v.n);
+  const renterReviewCount = renterPerReviewerAverages.length;
+  const renterRatingAverage = renterReviewCount > 0
+    ? Math.round((renterPerReviewerAverages.reduce((s, x) => s + x, 0) / renterReviewCount) * 10) / 10
+    : null;
+
+  const data = {
+    providerId,
+    score,
+    tier,
+    components,
+    stats,
+    ratingAverage,
+    reviewCount,
+    completedOrders,
+    rejectedOrders,
+    renterRatingAverage,
+    renterReviewCount,
+    memberSince: user.createdAt || null,
+  };
+  // キャッシュに保存（テスト環境ではキャッシュしない — レピュテーション変化を即時反映したい）
+  if (process.env.NODE_ENV !== 'test') {
+    _reputationCache.set(providerId, { data, expiresAt: Date.now() + REPUTATION_CACHE_TTL_MS });
+  }
+  res.json(data);
+}));
+
+// 借り手公開プロフィールのキャッシュ（TTL: 5分 — レピュテーションキャッシュと同一設定）
+// 認証不要の O(n) スキャンを連続リクエストから保護する。
+const _renterProfileCache = new Map(); // userId → { data, expiresAt }
+const RENTER_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+// 借り手公開プロフィール（認証不要 — プロバイダが注文受付前に借り手を調査できる）。
+// 受領したプロバイダ→借り手レビューの集計（平均★・件数）と取引実績を返す。
+// 無効化済みユーザーは 404 で応答し PII を漏洩しない。
+router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
+  const userId = req.params.id;
+  const user = UserRepository.getById(userId);
+  if (!user || user.status === 'deactivated') {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  // キャッシュヒット確認（テスト時はキャッシュしない — 変化を即時反映するため）
+  const cachedProfile = _renterProfileCache.get(userId);
+  if (cachedProfile && cachedProfile.expiresAt > Date.now()) {
+    return res.json(cachedProfile.data);
+  }
+
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  const renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview);
+  // 不正な rating（null/非数値）は `|| 1` で 1 に丸めず件数から除外する。旧実装は
+  // 不正データを 1 点として合算に含めてしまい、レガシー破損レコードが平均を
+  // 不当に押し下げていた（reputation-service の同種計算と同じ Number.isFinite 方式に統一）。
+  const validRatings = renterOrders
+    .map(o => Number(o.renterReview.rating))
+    .filter(r => Number.isFinite(r))
+    .map(r => Math.min(5, Math.max(1, r)));
+  const reviewCount = validRatings.length;
+  const ratingAverage = reviewCount > 0
+    ? Math.round((validRatings.reduce((s, r) => s + r, 0) / reviewCount) * 10) / 10
+    : null;
+  // 直近5件のレビュー（最新順）
+  const recentReviews = renterOrders
+    .sort((a, b) => (b.renterReview.reviewedAt || '').localeCompare(a.renterReview.reviewedAt || ''))
+    .slice(0, 5)
+    // orderId is omitted: returning the order ID on an unauthenticated endpoint
+    // lets any caller enumerate a renter's full order history and correlate with
+    // GPU IDs, exposing rental patterns without any authentication.
+    .map(o => ({ rating: o.renterReview.rating, comment: o.renterReview.comment || null, reviewedAt: o.renterReview.reviewedAt }));
+
+  const completedOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.status === 'completed').length;
+
+  const profileData = {
+    userId,
+    ratingAverage,
+    reviewCount,
+    completedOrders,
+    recentReviews,
+    memberSince: user.createdAt || null,
+  };
+  if (process.env.NODE_ENV !== 'test') {
+    _renterProfileCache.set(userId, { data: profileData, expiresAt: Date.now() + RENTER_PROFILE_CACHE_TTL_MS });
+  }
+  res.json(profileData);
+}));
+
 // 特定ユーザーの情報取得 (管理者のみ)
-router.get('/:id', 
+router.get('/:id',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
@@ -247,15 +849,14 @@ router.get('/:id',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // パスワードを除外
-    const { password, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    // パスワード・APIキー等を除外（GET /users リストと同一ポリシー。
+    // 管理者でも他人の credential を平文で参照できてはならない）
+    res.json(sanitizeUser(user));
   })
 );
 
 // ユーザー削除 (管理者のみ)
 router.delete('/:id', 
-  apiKeyAuth,
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
@@ -265,29 +866,50 @@ router.delete('/:id',
     if (userId === req.user.id) {
       return res.status(403).json({ error: 'You cannot delete yourself' });
     }
+    // 対象ユーザーを取得（最低1人の管理者を維持するため）
+    const target = UserRepository.getById(userId);
+    if (!target) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    // 最低1人アクティブ管理者維持: アクティブな管理者を削除すると 0 になる場合だけブロック。
+    // 非アクティブ（deactivated）な管理者の削除はカウントに影響しないため許可する。
+    if (target.role === 'admin' && target.status !== 'deactivated') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin' && u.status !== 'deactivated').length;
+      if (adminCount <= 1) {
+        return res.status(400).json({ error: 'At least one active admin must remain' });
+      }
+    }
+    // 進行中の注文がある場合は削除不可（自己退会と同一ポリシー）。
+    // 注文に参加中のユーザーをハード削除すると userId/providerId 参照が孤児化し、
+    // 支払・係争・エスクロー処理が機能しなくなる。
+    const OrderRepository = require('../../../db/json/OrderRepository');
+    const NON_TERMINAL = new Set(['pending', 'matched', 'active', 'disputed']);
+    const openOrders = OrderRepository.getAll().filter(o =>
+      NON_TERMINAL.has(o.status) && (o.userId === userId || o.providerId === userId)
+    );
+    if (openOrders.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete user with in-flight orders. Resolve them first.',
+        openOrderCount: openOrders.length,
+      });
+    }
+    // GPU リストが残存するプロバイダは削除不可。
+    // GPU を削除せずにユーザーをハード削除すると、孤立した GPU がマーケットプレイスに
+    // 残って新規注文を受け付け続け、providerId が解決できない注文・エスクローが生まれる。
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const providerGpus = GpuRepository.getAll().filter(g => g.providerId === userId);
+    if (providerGpus.length > 0) {
+      return res.status(409).json({
+        error: 'Cannot delete user with registered GPU listings. Remove or transfer all GPU listings first.',
+        gpuCount: providerGpus.length,
+        gpuIds: providerGpus.map(g => g.id),
+      });
+    }
     // ユーザー削除（永続化対応）
     const deleted = UserRepository.delete(userId);
     if (!deleted) {
       return res.status(404).json({ error: 'User not found' });
     }
-    res.json({ message: 'User deleted successfully' });
-    if (userId === req.user.id) {
-      return res.status(400).json({ error: 'You cannot delete your own account as admin' });
-    }
-    // ユーザーを検索
-    const userIndex = users.findIndex(user => user.id === userId);
-    if (userIndex === -1) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    // 最低1人管理者維持
-    if (users[userIndex].role === 'admin') {
-      const adminCount = users.filter(u => u.role === 'admin').length;
-      if (adminCount <= 1) {
-        return res.status(400).json({ error: 'At least one admin must remain' });
-      }
-    }
-    // ユーザーを削除
-    users.splice(userIndex, 1);
     logger.info(`User deleted: ${userId}`, { deletedBy: req.user.id });
     res.json({ message: 'User deleted successfully' });
   })
@@ -304,39 +926,111 @@ router.put('/:id/role',
     if (!role || !['user', 'provider', 'admin'].includes(role)) {
       return res.status(400).json({ error: 'Valid role is required' });
     }
+    // 操作者のアクティブ状態を DB から再確認（停止済み管理者の古いトークンによる操作を防ぐ）
+    const actingAdmin = UserRepository.getById(req.user.id);
+    if (!actingAdmin || actingAdmin.status === 'deactivated' || actingAdmin.status === 'suspended') {
+      return res.status(403).json({ error: 'Your account is not active' });
+    }
     // 自分自身の降格禁止
     if (userId === req.user.id && role !== 'admin') {
       return res.status(400).json({ error: 'You cannot remove your own admin role' });
     }
-    // ユーザーを検索
-    const userIndex = users.findIndex(user => user.id === userId);
-    if (userIndex === -1) {
+    // ユーザーを検索（既存バグ: 存在しない in-memory `users` 配列を参照し常に 500 だった）
+    const target = UserRepository.getById(userId);
+    if (!target) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // 最低1人管理者維持
-    if (users[userIndex].role === 'admin' && role !== 'admin') {
-      const adminCount = users.filter(u => u.role === 'admin').length;
+    // 最低1人アクティブ管理者維持（非アクティブ管理者はカウント外）
+    if (target.role === 'admin' && role !== 'admin') {
+      const adminCount = UserRepository.getAll().filter(u => u.role === 'admin' && u.status !== 'deactivated').length;
       if (adminCount <= 1) {
-        return res.status(400).json({ error: 'At least one admin must remain' });
+        return res.status(400).json({ error: 'At least one active admin must remain' });
       }
     }
-    // ロールを更新
-    users[userIndex].role = role;
-    users[userIndex].updatedAt = new Date().toISOString();
+    // ロールを更新（永続化対応）
+    // 降格（特に admin→user/provider）の場合はセッションを即時失効させる。
+    // これにより旧トークンが admin 権限で使い続けられるウィンドウを閉じる。
+    const now = new Date().toISOString();
+    const roleDowngraded = target.role === 'admin' && role !== 'admin';
+    const updated = UserRepository.update(userId, {
+      role,
+      updatedAt: now,
+      ...(roleDowngraded ? { sessionsRevokedAt: now } : {}),
+    });
+    // 旧ロール時に書かれた per-user キャッシュ（GET /orders 等）を必ず無効化する。
+    // role はキャッシュキーの一部だが、再ログイン後の userId は同一なので
+    // role を変えてもキー衝突しないが、旧 role のエントリ自体が LRU に残ると不要にメモリを
+    // 食う/監査タイムラインを撹乱するため、当該 user の全エントリをここで一掃する。
+    try { invalidateUserCache(userId); } catch (_) {}
+    if (roleDowngraded) {
+      logger.warn(`Admin role revoked for user ${userId} by ${req.user.id} — sessions invalidated`);
+    }
     logger.info(`Role changed for user: ${userId}`, {
       userId,
       newRole: role,
       changedBy: req.user.id
     });
+    appendAuditLog('user_role_changed', {
+      targetUserId: userId,
+      previousRole: target.role,
+      newRole: role,
+      changedBy: req.user.id,
+    }, req.user.id);
     res.json({
       message: 'User role updated successfully',
       user: {
-        id: users[userIndex].id,
-        username: users[userIndex].username,
-        role: users[userIndex].role
+        id: updated.id,
+        username: updated.username,
+        role: updated.role
       }
     });
   })
 );
 
+// ピアID管理 /api/v1/users/peerid/*
+router.use('/peerid', peeridRouter);
+
+// 自分の GPU 価格ウォッチ一覧（GPU スナップショット付き）
+// GET /users/me/watches — 認証必須
+// N+1 問題の解消: クライアントが各 gpuId に対して GET /gpus/:id を個別に
+// 呼ぶ（N+1 往復）のではなく、サーバー側で GPU 情報をジョインして返す。
+// 削除済み GPU のウォッチは gpu:null として返す（クライアントが 404 を個別処理不要）。
+router.get('/me/watches',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const WatchRepository = require('../../../db/json/WatchRepository');
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const watches = WatchRepository.getByUser(req.user.id) || [];
+    const enriched = watches.map(w => {
+      const raw = GpuRepository.getById(w.gpuId);
+      // apiKey・providerId など機密/内部フィールドを除外し、表示に必要な公開フィールドのみ返す
+      const gpu = raw ? {
+        id: raw.id,
+        name: raw.name,
+        model: raw.model,
+        vendor: raw.vendor,
+        memoryGB: raw.memoryGB,
+        pricePerHour: raw.pricePerHour,
+        // マーケットプレイスの rentable 述語は available !== false（undefined は rentable 扱い）。
+        // API クライアントがこの内部規約を知らずに available === true で判定すると
+        // 未設定 GPU を全部「借りられない」と誤判定する。スナップショットでは
+        // 明示的な boolean に正規化して呼び出し側の誤判定リスクを排除する。
+        available: raw.available !== false,
+      } : null;
+      return { ...w, gpu };
+    });
+    return res.json({ watches: enriched });
+  })
+);
+
+// スラッシュ・係争解決・レビュー投稿後にレピュテーションキャッシュを即座に無効化する。
+// order/index.js から直接呼び出す（循環依存を避けるためルーターではなく関数のみエクスポート）。
+function invalidateReputationCache(userId) {
+  if (userId) {
+    _reputationCache.delete(userId);
+    _renterProfileCache.delete(userId);
+  }
+}
+
 module.exports = router;
+module.exports.invalidateReputationCache = invalidateReputationCache;

@@ -1,7 +1,12 @@
 // src/api/middleware/audit.js - 監査ログミドルウェア
 const fs = require('fs');
 const path = require('path');
-const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../../../logs/audit.log');
+const { sanitizeSensitiveFields } = require('../../utils/sanitize');
+// HTTP リクエスト監査の出力先。
+// 重要: 改ざん検知ハッシュチェーン(src/utils/audit-log.js)が管理する logs/audit.log とは
+// 別ファイルにする。同一ファイルへ追記すると、ハッシュチェーンに含まれない本ミドルウェアの
+// エントリが間に挟まり、verifyAuditLogIntegrity / audit-anchor の検証が常に失敗していた。
+const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../../../logs/access-audit.log');
 
 function auditLogger(req, res, next) {
   const start = Date.now();
@@ -14,9 +19,9 @@ function auditLogger(req, res, next) {
     userId: user.id || null,
     peerId,
     ip: req.ip,
-    // 機密情報はマスキング
-    body: req.method !== 'GET' ? require('../../utils/sanitize').sanitizeSensitiveFields(req.body) : undefined,
-    query: req.query,
+    // 機密情報はマスキング（query も token/apiKey 等が混入し得るためマスクする）
+    body: req.method !== 'GET' ? sanitizeSensitiveFields(req.body) : undefined,
+    query: sanitizeSensitiveFields(req.query),
     status: null,
     durationMs: null,
     error: null
@@ -27,7 +32,7 @@ function auditLogger(req, res, next) {
     logEntry.status = res.statusCode;
     logEntry.durationMs = Date.now() - start;
     // レスポンスもマスキング
-    logEntry.response = require('../../utils/sanitize').sanitizeSensitiveFields(data);
+    logEntry.response = sanitizeSensitiveFields(data);
     writeAuditLog(logEntry);
     return originalJson.apply(this, arguments);
   };

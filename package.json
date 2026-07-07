@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node src/api/server.js",
     "dev": "nodemon src/api/server.js",
-    "test": "jest",
-    "coverage": "jest --coverage",
+    "test": "jest --forceExit",
+    "coverage": "jest --coverage --forceExit",
     "lint": "eslint .",
     "openapi": "node src/api/openapi-generator.js",
     "openapi-gen": "node src/api/openapi-generator.js",
@@ -56,7 +56,6 @@
     "joi": "^17.13.3",
     "joi-to-swagger": "^6.2.0",
     "jsonwebtoken": "^9.0.2",
-    "knex": "^2.5.1",
     "lru-cache": "^10.2.1",
     "morgan": "^1.10.0",
     "nodemailer": "^6.9.14",
@@ -77,8 +76,7 @@
     "dockerode": "^4.0.2",
     "imagemin": "^8.0.1",
     "imagemin-mozjpeg": "^10.0.0",
-    "imagemin-pngquant": "^9.0.2",
-    "sqlite3": "^5.1.6"
+    "imagemin-pngquant": "^9.0.2"
   },
   "devDependencies": {
     "jest": "^29.7.0",

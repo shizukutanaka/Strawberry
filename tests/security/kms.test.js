@@ -1,4 +1,5 @@
-// KMS（Key Management Service）連携ユーティリティの自動テスト雛形（Jest）
+// KMS（Key Management Service）連携ユーティリティの自動テスト
+// probe 36b: KMS stub は実装なしで黙って返さず、明示的にエラーを投げる（fail-secure）。
 const { KMSProvider } = require('../../src/security/kms');
 
 describe('KMSProvider', () => {
@@ -7,19 +8,15 @@ describe('KMSProvider', () => {
     kms = new KMSProvider();
   });
 
-  it('getKeyで鍵を取得できる', async () => {
-    const key = await kms.getKey('test-key-id');
-    expect(typeof key).toBe('string');
+  it('getKey: 未実装時は例外を投げる（ダミー値でサイレントに成功しない）', async () => {
+    await expect(kms.getKey('test-key-id')).rejects.toThrow(/KMS not configured/);
   });
 
-  it('createKeyで新規鍵を作成できる', async () => {
-    const result = await kms.createKey({ usage: 'encrypt' });
-    expect(result.keyId).toBeDefined();
-    expect(result.usage).toBe('encrypt');
+  it('createKey: 未実装時は例外を投げる（ダミー keyId を返さない）', async () => {
+    await expect(kms.createKey({ usage: 'encrypt' })).rejects.toThrow(/KMS not configured/);
   });
 
-  it('rotateKeyで鍵ローテーションできる', async () => {
-    const result = await kms.rotateKey('test-key-id');
-    expect(result).toBe(true);
+  it('rotateKey: 未実装時は例外を投げる（true を偽装しない）', async () => {
+    await expect(kms.rotateKey('test-key-id')).rejects.toThrow(/KMS not configured/);
   });
 });

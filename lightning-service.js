@@ -5,7 +5,7 @@ const protoLoader = require('@grpc/proto-loader');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const { logger } = require('../utils/logger');
+const { logger } = require('./src/utils/logger');
 
 class LightningService extends EventEmitter {
     /**
@@ -87,7 +87,7 @@ class LightningService extends EventEmitter {
     }
 
     // gRPC自動再接続（指数バックオフ付）＋障害監査証跡・外部通知対応
-    async connectToLND(maxRetries = 5, notifyOnError = true) {
+    async connectToLND(maxRetries = process.env.NODE_ENV === 'test' ? 0 : 5, notifyOnError = true) {
         const { appendAuditLog } = require('./src/utils/audit-log');
         let attempt = 0;
         let lastError = null;
@@ -161,7 +161,7 @@ class LightningService extends EventEmitter {
             if (attempt < maxRetries) {
                 const wait = backoff(attempt);
                 logger.warn(`Retrying LND connection in ${wait / 1000}s... (attempt ${attempt + 1}/${maxRetries})`);
-                await new Promise(r => setTimeout(r, wait));
+                await new Promise(r => { const t = setTimeout(r, wait); if (t.unref) t.unref(); });
                 attempt++;
             } else {
                 logger.error('LND自動再接続失敗: モックモードへ', errorDetail);
@@ -171,12 +171,21 @@ class LightningService extends EventEmitter {
             }
             this.setupMockLND();
         }
+        }
     }
 
     setupMockLND() {
         // 開発/テスト用のモックLND
         this.lnd = {
-            getInfo: (callback) => {
+            // 実呼び出し側（getInfo()）は real gRPC の呼び出し規約に合わせ
+            // this.lnd.getInfo({}, callback) と2引数で呼ぶ。旧モックは (callback) の
+            // 1引数のみを受け取っていたため、呼び出し側が渡す第1引数({})が
+            // callback パラメータに束縛され、渡された本物のコールバック関数は
+            // 無視される。結果、モック内の callback(null, {...}) は「{} を関数として
+            // 呼ぶ」ことになり TypeError: callback is not a function で落ちていた
+            // （updateNodeInfo() 経由の起動時ノード情報取得・service-monitor の
+            // 自動復旧リトライが常に失敗する原因）。
+            getInfo: (_request, callback) => {
                 callback(null, {
                     identity_pubkey: 'mock_pubkey_' + crypto.randomBytes(16).toString('hex'),
                     alias: 'Strawberry Mock Node',
@@ -202,17 +211,54 @@ class LightningService extends EventEmitter {
             },
             
             sendPaymentSync: (request, callback) => {
+                const amt = (request && request.amt) || 0;
                 callback(null, {
                     payment_error: '',
                     payment_preimage: crypto.randomBytes(32),
                     payment_route: {
-                        total_fees: Math.floor(request.amt * 0.001),
-                        total_amt: request.amt
+                        total_fees: Math.floor(amt * 0.001),
+                        total_amt: amt
                     }
                 });
             },
-            
-            listChannels: (callback) => {
+
+            // sendPayment()/decodePaymentRequest() が呼ぶ。モックには存在しなかったため、
+            // POST /payments/pay（実ルート）はモックLND環境で常に
+            // "this.lnd.decodePayReq is not a function" で失敗していた
+            // （getNodeInfo/listChannels と同じ、モック側のメソッド欠落パターン）。
+            decodePayReq: (request, callback) => {
+                callback(null, {
+                    destination: 'mock_dest_' + crypto.randomBytes(16).toString('hex'),
+                    payment_hash: crypto.randomBytes(32).toString('hex'),
+                    num_satoshis: '1000',
+                });
+            },
+
+            // モック環境には実際の支払者が存在しないため、作成されたインボイスが
+            // 自然に決済されることはない。this.invoices（addInvoice が登録する
+            // 内部 Map）を参照して一貫した「未決済」を返す — 将来テスト用の
+            // 強制決済フックを追加する場合はここに反映される。
+            lookupInvoice: (request, callback) => {
+                const hashBuf = request && request.r_hash;
+                const paymentHash = Buffer.isBuffer(hashBuf) ? hashBuf.toString('hex') : String(hashBuf || '');
+                const tracked = this.invoices.get(paymentHash);
+                if (!tracked) {
+                    return callback(new Error(`invoice not found: ${paymentHash}`));
+                }
+                const settled = tracked.status === 'paid' || tracked.status === 'settled';
+                callback(null, {
+                    settled,
+                    amt_paid_sat: settled ? String(tracked.amountPaid || tracked.amountSats || 0) : '0',
+                    value: String(tracked.amountSats || 0),
+                    settle_date: settled ? String(Math.floor((tracked.settledAt || Date.now()) / 1000)) : '0',
+                });
+            },
+
+            // getInfo と同じ理由（実呼び出しは (request, callback) の2引数）でシグネチャを
+            // 揃える。total_satoshis_sent/received・unsettled_balance も updateChannels()
+            // が parseInt() する必須フィールドのため、欠落による NaN → Joi バリデーション
+            // 失敗（チャネルがサイレントに 0 件扱いされる）を防ぐため含める。
+            listChannels: (_request, callback) => {
                 callback(null, {
                     channels: [
                         {
@@ -222,7 +268,10 @@ class LightningService extends EventEmitter {
                             chan_id: '123456789',
                             capacity: '10000000',
                             local_balance: '5000000',
-                            remote_balance: '5000000'
+                            remote_balance: '5000000',
+                            total_satoshis_sent: '0',
+                            total_satoshis_received: '0',
+                            unsettled_balance: '0'
                         }
                     ]
                 });
@@ -293,56 +342,136 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async createInvoice(amount, memo) {
+    // src/api/routes/index.js と src/api/routes/payment/index.js の /node-info
+    // エンドポイントが呼ぶ公開 API。このメソッド自体が存在しなかったため、両ルートは
+    // 呼び出す度に必ず `lightning.getNodeInfo is not a function` の 500 を返していた
+    // （updateNodeInfo() という別名の内部メソッドはあるが、外部公開されておらず
+    // 戻り値も返さない）。毎回最新情報を取得してから返す。
+    async getNodeInfo() {
+        await this.updateNodeInfo();
+        return this.nodeInfo;
+    }
+
+    // src/api/routes/payment/index.js の GET /channels エンドポイントが呼ぶ公開 API。
+    // getNodeInfo() と同じ理由で存在しなかった（内部メソッドは updateChannels() という
+    // 別名で、Map に格納するのみで配列を返さない）。呼び出し側は channel.channelId を
+    // 期待するが、内部ストレージのフィールド名は chanId（Joi スキーマ側もこの名前で
+    // 検証しているため、内部命名は変更せずここでエイリアスを追加するに留める）。
+    async listChannels() {
+        await this.updateChannels();
+        return Array.from(this.channels.values()).map((c) => ({ ...c, channelId: c.chanId }));
+    }
+
+    // 実際の呼び出し元（src/api/routes/payment/index.js）は常に
+    // { value, memo, expiry } オブジェクトを渡し、value は satoshi 建てで確定済みの
+    // 注文総額（order-pricing.js が算出）である。旧実装は (amount, memo) の位置引数
+    // を期待し amount を「米ドル」とみなして convertUSDToSats() で再変換していたため、
+    // オブジェクトを渡すと amount がオブジェクトのまま演算され NaN が生成され、
+    // 結果の BOLT11 風文字列に "NaN" がそのまま埋め込まれる不正インボイスになっていた
+    // （実 LND 接続時も value:"NaN" を渡すことになり同様に失敗する）。
+    // LND の実 AddInvoice API は value を satoshi でそのまま受け取るため、USD 変換は
+    // 不要かつ誤り。sats をそのまま渡す。
+    async createInvoice({ value, memo, expiry } = {}) {
         try {
-            // 金額をsatoshiに変換（入力は米ドル）
-            const amountSats = await this.convertUSDToSats(amount);
-            
+            const amountSats = Math.round(Number(value));
+            if (!Number.isFinite(amountSats) || amountSats <= 0) {
+                throw new Error(`createInvoice: value must be a positive finite number of satoshis (got ${value})`);
+            }
+            const expirySeconds = Number.isFinite(Number(expiry)) && Number(expiry) > 0 ? Number(expiry) : 3600;
+
             const invoice = await new Promise((resolve, reject) => {
                 this.lnd.addInvoice({
                     value: amountSats.toString(),
                     memo: memo,
-                    expiry: 3600, // 1時間
+                    expiry: expirySeconds,
                     private: false
                 }, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
             });
-            
+
+            const paymentHash = invoice.r_hash.toString('hex');
             const invoiceData = {
-                paymentHash: invoice.r_hash.toString('hex'),
+                id: paymentHash,
+                paymentHash,
                 paymentRequest: invoice.payment_request,
-                amount: amount,
                 amountSats: amountSats,
                 memo: memo,
                 createdAt: Date.now(),
-                expiresAt: Date.now() + (3600 * 1000),
+                expiresAt: Date.now() + (expirySeconds * 1000),
                 status: 'pending',
                 addIndex: invoice.add_index
             };
-            
+
             this.invoices.set(invoiceData.paymentHash, invoiceData);
-            
-            logger.info(`Created invoice: ${invoiceData.paymentHash.substring(0, 16)}... for $${amount}`);
-            
+
+            logger.info(`Created invoice: ${invoiceData.paymentHash.substring(0, 16)}... for ${amountSats} sats`);
+
             this.emit('invoice:created', invoiceData);
-            
+
             return invoiceData;
-            
+
         } catch (error) {
             logger.error('Failed to create invoice:', error);
             throw error;
         }
     }
 
-    async sendPayment(paymentRequest, maxFee = null) {
+    // src/core/invoice-poller.js が 15 秒間隔で全 pending Lightning 決済を確認するために
+    // 呼び出す（この呼び出しが唯一 PaymentRepository の 'paid' 遷移をトリガーする経路）。
+    // 以前はこのメソッド自体が存在せず、ポーラーが毎回 TypeError を送出して
+    // try/catch に握りつぶされていた — つまり Lightning 決済は一度も自動確定せず、
+    // 全ての注文が支払い済みでも invoiceExpiresAt 経過で単に failed になっていた。
+    // LND の実 gRPC API lookupInvoice をラップし、ポーラーが期待する
+    // { settled, amountPaid, value, settleDate } 形式へ正規化する。
+    async checkInvoice(paymentHash) {
+        try {
+            // サーバー起動直後、invoice-poller が LND 接続完了より先に最初の pollOnce() を
+            // 実行できるレース（server.js が invoicePoller.start() を同期的に呼ぶ一方、
+            // lightning.initialize()/connectToLND() は非同期）。this.lnd が未設定のまま
+            // lookupInvoice を呼ぶと素の TypeError になり原因が分かりにくいため、
+            // 明示的なエラーメッセージにする（呼び出し元のポーラーは try/catch 済みで
+            // 次の 15 秒後のサイクルで自然に回復する）。
+            if (!this.lnd) {
+                throw new Error('Lightning client not yet connected; retry on next poll cycle');
+            }
+            const response = await new Promise((resolve, reject) => {
+                this.lnd.lookupInvoice({ r_hash: Buffer.from(paymentHash, 'hex') }, (error, resp) => {
+                    if (error) reject(error);
+                    else resolve(resp);
+                });
+            });
+            return {
+                settled: !!response.settled,
+                amountPaid: response.amt_paid_sat != null ? parseInt(response.amt_paid_sat, 10) : undefined,
+                value: response.value != null ? parseInt(response.value, 10) : undefined,
+                settleDate: response.settle_date != null ? parseInt(response.settle_date, 10) : undefined,
+            };
+        } catch (error) {
+            logger.error(`Failed to check invoice ${paymentHash}:`, error);
+            throw error;
+        }
+    }
+
+    // maxFeePercent はインボイス額に対する手数料上限の割合（例: 1 = 1%）。
+    // 呼び出し元（src/api/routes/payment/index.js）は schemas.payment.pay で
+    // 0-10 の範囲・デフォルト1に検証済みのパーセンテージを渡す。
+    // 旧実装は第2引数を「USD建て手数料上限額」として扱い convertUSDToSats() で
+    // sats へ再変換していたが、実際に渡されていたのは決済額そのもの(amount, sats建て)
+    // だったため、これを USD とみなして再度為替変換する二重誤変換になっていた
+    // （呼び出し側の maxFeePercent は payInvoice(paymentRequest, maxFee) の2引数
+    // シグネチャでは受け取れず黙って捨てられてもいた）。
+    async sendPayment(paymentRequest, maxFeePercent = null) {
         try {
             // 請求書デコード
             const decodedInvoice = await this.decodePaymentRequest(paymentRequest);
-            
-            // 最大手数料設定
-            const maxFeeSats = maxFee ? await this.convertUSDToSats(maxFee) : Math.floor(decodedInvoice.num_satoshis * 0.01);
+
+            // 最大手数料設定（インボイス額の割合。sats建てで完結し外部レート変換は不要）
+            const feePercent = typeof maxFeePercent === 'number' && Number.isFinite(maxFeePercent) && maxFeePercent >= 0
+                ? maxFeePercent
+                : 1;
+            const maxFeeSats = Math.ceil(decodedInvoice.num_satoshis * (feePercent / 100));
             
             const payment = await new Promise((resolve, reject) => {
                 this.lnd.sendPaymentSync({
@@ -583,89 +712,6 @@ class LightningService extends EventEmitter {
         });
         
         return pending;
-    }
-
-    async convertUSDToSats(usdAmount) {
-        try {
-            // ビットコイン価格取得（実際の実装では外部APIを使用）
-            const btcPrice = await this.getBTCPrice();
-            const btcAmount = usdAmount / btcPrice;
-            const satsAmount = Math.floor(btcAmount * 100000000);
-            
-            return satsAmount;
-            
-        } catch (error) {
-            logger.error('Failed to convert USD to sats:', error);
-            // フォールバック: 固定レート使用
-            const fallbackRate = 50000; // $50,000/BTC
-            return Math.floor((usdAmount / fallbackRate) * 100000000);
-        }
-    }
-
-    async getBTCPrice() {
-        try {
-            // 価格キャッシュチェック
-            if (this.priceCache && Date.now() - this.priceCache.timestamp < 60000) {
-                return this.priceCache.price;
-            }
-            
-            // 実際の実装では CoinGecko/CoinMarketCap API を使用
-            const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-            const data = await response.json();
-            const price = data.bitcoin.usd;
-            
-            // キャッシュ更新
-            this.priceCache = {
-                price: price,
-                timestamp: Date.now()
-            };
-            
-            return price;
-            
-        } catch (error) {
-            logger.error('Failed to get BTC price:', error);
-            return 50000; // フォールバック価格
-        }
-    }
-
-    async createHoldInvoice(amount, memo, preimageHash) {
-        // HODL請求書作成（条件付き支払い）
-        try {
-            const amountSats = await this.convertUSDToSats(amount);
-            
-            const invoice = await new Promise((resolve, reject) => {
-                this.lnd.addHoldInvoice({
-                    hash: preimageHash,
-                    value: amountSats.toString(),
-                    memo: memo,
-                    expiry: 3600
-                }, (error, response) => {
-                    if (error) reject(error);
-                    else resolve(response);
-                });
-            });
-            
-            const holdInvoiceData = {
-                paymentHash: preimageHash.toString('hex'),
-                paymentRequest: invoice.payment_request,
-                amount: amount,
-                amountSats: amountSats,
-                memo: memo,
-                createdAt: Date.now(),
-                expiresAt: Date.now() + (3600 * 1000),
-                status: 'hold',
-                type: 'hold'
-            };
-            
-            this.invoices.set(holdInvoiceData.paymentHash, holdInvoiceData);
-            
-            return holdInvoiceData;
-            
-        } catch (error) {
-            logger.error('Failed to create hold invoice:', error);
-            // フォールバック: 通常の請求書
-            return await this.createInvoice(amount, memo);
-        }
     }
 
     async settleHoldInvoice(preimage) {
@@ -922,14 +968,13 @@ class LightningService extends EventEmitter {
         return { active, inactive, pending, totalCapacity };
     }
 
-    async generateInvoice(amount, memo, expiry = 3600) {
-        // 請求書生成のラッパー関数
-        return await this.createInvoice(amount, memo);
-    }
-
-    async payInvoice(paymentRequest, maxFee) {
+    // amount 引数は現状未使用（インボイス自体に金額がエンコード済みで decodePaymentRequest
+    // が実額を取得するため）だが、呼び出し規約を維持するため受け取る。
+    // maxFeePercent は sendPayment へそのまま委譲する（sats建て手数料上限の算出は
+    // sendPayment 側で完結する）。
+    async payInvoice(paymentRequest, amount, maxFeePercent) {
         // 支払いのラッパー関数
-        return await this.sendPayment(paymentRequest, maxFee);
+        return await this.sendPayment(paymentRequest, maxFeePercent);
     }
 
     async shutdown() {

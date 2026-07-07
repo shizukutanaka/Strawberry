@@ -2,24 +2,25 @@
 const { createNode, signMessage, verifyMessage } = require('./p2p-node');
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('./db/json/atomicWrite');
 
 const ORDERS_FILE = path.join(__dirname, 'orders.json');
 const PAYMENTS_FILE = path.join(__dirname, 'payments.json');
 
 // ローカル保存
 function saveOrders(orders) {
-  fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
+  atomicWriteJSON(ORDERS_FILE, orders);
 }
 function loadOrders() {
   if (!fs.existsSync(ORDERS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(ORDERS_FILE));
+  try { return JSON.parse(fs.readFileSync(ORDERS_FILE)); } catch (_) { return []; }
 }
 function savePayments(payments) {
-  fs.writeFileSync(PAYMENTS_FILE, JSON.stringify(payments, null, 2));
+  atomicWriteJSON(PAYMENTS_FILE, payments);
 }
 function loadPayments() {
   if (!fs.existsSync(PAYMENTS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(PAYMENTS_FILE));
+  try { return JSON.parse(fs.readFileSync(PAYMENTS_FILE)); } catch (_) { return []; }
 }
 
 // P2Pイベントハンドラ

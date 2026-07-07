@@ -428,6 +428,35 @@ router.get('/history',
 // /btc 配下のサブルートとして取り込んだ。グローバルJWTゲートの保護下にある。
 router.use('/btc', require('./btc-onchain'));
 
+// 管理者向け：承認待ちの手動決済（銀行振込等）一覧。
+// GET /payments/history は req.user.id のみに絞られるため（本人の決済履歴専用）、
+// 管理者が全ユーザー横断で「今どの決済が承認待ちか」を確認する経路が存在しなかった
+// （手動承認 UI を作るにはこの一覧が前提として必須）。
+router.get('/admin/pending',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const UserRepository = require('../../../db/json/UserRepository');
+    const all = PaymentRepository.getAll() || [];
+    const pending = all.filter(p => p.status === 'pending' && p.method !== 'lightning');
+    const sorted = [...pending].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const enriched = sorted.map(p => {
+      const order = p.orderId ? OrderRepository.getById(p.orderId) : null;
+      const renter = p.userId ? UserRepository.getById(p.userId) : null;
+      return {
+        id: p.id,
+        orderId: p.orderId,
+        amount: p.amount,
+        method: p.method,
+        createdAt: p.createdAt || null,
+        orderStatus: order ? order.status : null,
+        renterUsername: renter ? renter.username : null,
+      };
+    });
+    res.json({ total: enriched.length, payments: enriched });
+  })
+);
+
 // 管理者による手動支払い承認API
 router.post('/manual/approve/:id',
   authenticateJWT,

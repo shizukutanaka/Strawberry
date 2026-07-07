@@ -10,6 +10,7 @@ import * as gpuNewPage from './pages/gpu-new.js';
 import * as myGpusPage from './pages/my-gpus.js';
 import * as ordersPage from './pages/orders.js';
 import * as orderDetailPage from './pages/order-detail.js';
+import * as adminPaymentsPage from './pages/admin-payments.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -81,6 +82,7 @@ route('#/gpus/new', { render: gpuNewPage.render, auth: true, roles: ['provider',
 route('#/my-gpus', { render: myGpusPage.render, auth: true, roles: ['provider', 'admin'] });
 route('#/orders', { render: ordersPage.render, auth: true });
 route('#/orders/:id', { render: orderDetailPage.render, auth: true });
+route('#/admin/payments', { render: adminPaymentsPage.render, auth: true, roles: ['admin'] });
 setNotFound(notFoundPage.render);
 
 start('#/market');

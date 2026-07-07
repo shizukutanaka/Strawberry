@@ -1,1 +1,31 @@
-<!-- 本番UI -->
+<!DOCTYPE html>
+<html lang="ja" data-theme="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strawberry — P2P GPUマーケット</title>
+  <meta name="description" content="Bitcoin Lightning決済によるP2P GPUレンタルマーケットプレイス">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <a href="#/market" class="brand"><span class="brand-mark">🍓</span> Strawberry</a>
+    <nav class="app-nav" id="nav"></nav>
+    <div class="app-header-actions">
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="テーマ切り替え">🌓</button>
+      <div id="auth-actions"></div>
+    </div>
+  </header>
+
+  <main id="app" aria-live="polite"></main>
+
+  <footer class="app-footer">
+    <p>Strawberry P2P GPU Marketplace</p>
+  </footer>
+
+  <div id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

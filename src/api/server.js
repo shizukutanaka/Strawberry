@@ -257,8 +257,13 @@ const graphqlReady = (async () => {
   }
 })();
 
-// フロントエンドルート（SPA対応）
-app.get('*', (req, res) => {
+// フロントエンドルート（SPA対応）。
+// 拡張子付きパス（/js/foo.js, /css/foo.css 等）はアセット欠落・タイポを意味する —
+// index.html (200, text/html) にフォールバックすると「JSファイルなのにHTMLが
+// 返る」という分かりにくい実行時エラーになりデバッグを妨げるため、素直に404にする。
+// 拡張子なしのパス（SPAのハッシュルート等）のみ index.html にフォールバックする。
+app.get('*', (req, res, next) => {
+  if (path.extname(req.path)) return next();
   res.sendFile(path.join(__dirname, '../../public/index.html'));
 });
 

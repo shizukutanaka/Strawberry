@@ -39,44 +39,12 @@ jobs:
           if [ -n "$LINE_TOKEN" ]; then
             curl -X POST https://notify-api.line.me/api/notify -H "Authorization: Bearer $LINE_TOKEN" -F "message=❌ Strawberry CI failed on $GITHUB_REPOSITORY ($GITHUB_SHA)"
           fi
-      - name: Build API Docker image
+      - name: Deploy (Netlify)
         if: success() && github.ref == 'refs/heads/main'
-        # Strawberry is a stateful Node.js/Express server (JWT auth, JSON-file
-        # persistence, long-lived polling) that serves both the API and the
-        # static frontend from one process — it cannot run on a static-site
-        # host. The previous step here ran `netlify deploy --dir=build`:
-        # there is no build step and no `build/` directory anywhere in this
-        # repo (the frontend under public/ is plain HTML/CSS/JS served
-        # as-is, by design — see public/js/app.js), so this always silently
-        # no-op'd when the Netlify secrets were unset, and would have
-        # deployed a frontend-only static site with every API call 404ing
-        # had the secrets ever been configured. The actual deployable
-        # artifact for this architecture is the Docker image already
-        # defined in docker/Dockerfile.api; build and smoke-test it here as
-        # a real CI gate.
-        run: docker build -f docker/Dockerfile.api -t strawberry-api:${{ github.sha }} .
-      - name: Smoke-test the built image
-        if: success() && github.ref == 'refs/heads/main'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
-          # src/utils/config.js's requireSecret() fails fast in NODE_ENV=production
-          # for any of these three that are unset/too short (JWT_SECRET needs 32+
-          # chars, the others 16+) — without all three the container would crash
-          # at boot before ever reaching the health endpoint below.
-          docker run -d --name strawberry-smoke -p 3000:3000 \
-            -e JWT_SECRET=ci-smoke-test-jwt-secret-not-for-prod-use \
-            -e SESSION_SECRET=ci-smoke-test-session-secret \
-            -e ENCRYPTION_KEY=ci-smoke-test-encryption-key \
-            -e NODE_ENV=production \
-            strawberry-api:${{ github.sha }}
-          for i in $(seq 1 15); do
-            if curl -sf http://localhost:3000/health > /dev/null; then
-              echo "Health check passed"; docker logs strawberry-smoke; docker rm -f strawberry-smoke; exit 0
-            fi
-            sleep 2
-          done
-          echo "Health check failed after 30s"; docker logs strawberry-smoke; docker rm -f strawberry-smoke; exit 1
-      # Publishing strawberry-api:${{ github.sha }} to a registry and rolling
-      # it out to a real host is an explicit follow-up: it needs a chosen
-      # registry/host and its secrets, neither of which exist yet. Building
-      # this image is a genuine, verifiable CI gate on its own — this repo
-      # had zero evidence the Docker image even builds before this change.
+          if [ -n "$NETLIFY_AUTH_TOKEN" ] && [ -n "$NETLIFY_SITE_ID" ]; then
+            npx netlify deploy --prod --dir=build --auth=$NETLIFY_AUTH_TOKEN --site=$NETLIFY_SITE_ID
+          fi

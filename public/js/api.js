@@ -76,6 +76,7 @@ export const api = {
 
   // --- orders ---
   listOrders: (query) => request('/api/v1/orders', { query }),
+  orderStats: () => request('/api/v1/orders/stats'),
   providerEarnings: (query) => request('/api/v1/orders/provider/earnings', { query }),
   getOrder: (id) => request(`/api/v1/orders/${id}`),
   getOrderPayment: (id) => request(`/api/v1/orders/${id}/payment`),

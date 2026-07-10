@@ -2,7 +2,7 @@
 // Reached by clicking a GPU name/rating in market.js's cards (previously
 // there was no way to see full specs or read individual reviews before
 // deciding to rent — market.js's cards only ever showed a summary).
-import { el, skeleton, emptyState, fmtDate } from '../ui.js';
+import { el, skeleton, emptyState, toast, fmtDate, fmtSats } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -22,6 +22,76 @@ function reviewItem(r) {
     ),
     r.comment ? el('p', { style: 'margin:8px 0 0' }, r.comment) : null,
   );
+}
+
+// 価格ウォッチ（値下げ通知）セクション。GET/POST/DELETE /gpus/:id/watch は既存だが
+// フロントエンドからの利用経路が皆無だった。ウォッチ一覧の集約エンドポイントは
+// 存在しない（"自分のウォッチ全部" は取得できない）ため、GPU単位のトグルのみ提供する
+// （専用の「ウォッチリスト」ページは今回のスコープ外）。
+function renderWatchSection(gpuId, gpu) {
+  const box = el('div', { class: 'card' }, el('p', { class: 'muted' }, '読み込み中…'));
+
+  async function load() {
+    if (!isAuthenticated()) {
+      box.replaceChildren(el('p', { class: 'muted' }, 'ログインすると値下げ通知を設定できます。'));
+      return;
+    }
+    try {
+      const { watch } = await api.getGpuWatch(gpuId);
+      renderActive(watch);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) renderInactive();
+      else box.replaceChildren(el('p', { class: 'muted' }, '通知設定の取得に失敗しました。'));
+    }
+  }
+
+  function renderInactive() {
+    const priceInput = el('input', { type: 'number', min: '0.00001', step: 'any', placeholder: `例: ${Math.max(1, Math.round(gpu.pricePerHour * 0.8))}` });
+    const setBtn = el('button', {
+      class: 'btn btn-primary btn-sm',
+      onClick: async () => {
+        const v = parseFloat(priceInput.value);
+        if (!Number.isFinite(v) || v <= 0) { toast('目標価格を入力してください', 'error'); return; }
+        setBtn.disabled = true;
+        try {
+          await api.setGpuWatch(gpuId, v);
+          toast('値下げ通知を設定しました', 'success');
+          await load();
+        } catch (err) {
+          toast(err instanceof ApiError ? err.message : '設定に失敗しました', 'error');
+          setBtn.disabled = false;
+        }
+      },
+    }, '通知を設定');
+    box.replaceChildren(el('div', { class: 'stack' },
+      el('p', {}, `このGPUの価格が指定額以下になったら通知します（現在: ${fmtSats(gpu.pricePerHour)}/時）`),
+      el('div', { class: 'row' }, priceInput, setBtn),
+    ));
+  }
+
+  function renderActive(watch) {
+    const removeBtn = el('button', {
+      class: 'btn btn-ghost btn-sm',
+      onClick: async () => {
+        removeBtn.disabled = true;
+        try {
+          await api.removeGpuWatch(gpuId);
+          toast('通知を解除しました', 'info');
+          await load();
+        } catch (err) {
+          toast(err instanceof ApiError ? err.message : '解除に失敗しました', 'error');
+          removeBtn.disabled = false;
+        }
+      },
+    }, '通知を解除');
+    box.replaceChildren(el('div', { class: 'row-between' },
+      el('p', { style: 'margin:0' }, `目標価格 ${fmtSats(watch.targetPrice)}/時 以下で通知します`),
+      removeBtn,
+    ));
+  }
+
+  load();
+  return box;
 }
 
 export async function render(container, params) {
@@ -91,6 +161,8 @@ export async function render(container, params) {
         price.jpy ? el('div', { class: 'muted' }, price.jpy) : null,
       ),
       rentBtn,
+      el('h3', {}, '価格通知'),
+      renderWatchSection(gpuId, gpu),
       el('h3', {}, 'スペック'),
       specCard,
       reviewsSection,

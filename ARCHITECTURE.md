@@ -13,13 +13,13 @@
 - **`public/` は実際に動くフロントエンド**（2026-07 追加）。ビルド不要の静的SPA
   （素の HTML + CSS + ネイティブ ES modules、依存追加ゼロ）。`http://localhost:3000`
   で登録/ログイン・GPUマーケット閲覧・注文（Lightning/銀行振込決済含む）・稼働中セッション
-  （ハートビート・停止）・レビュー・管理者の決済承認まで、実際に画面から一通り操作できる
-  （以前は `public/index.html` が1行の空スタブで、ブラウザで見える画面が存在しなかった）。
-  `#/`始まりのハッシュルーティング（`public/js/router.js`）。厳格CSP
-  （`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。`/swagger.html` も
-  同様の理由で CDN+インライン版から同一オリジンの自前ビューア（`public/js/docs.js`）に
-  置換済み。未実装: 係争(dispute)UI、GPU接続情報の実配信（`accessInfo.deliveryImplemented`
-  が false の間はその旨を正直に表示するのみ）。
+  （ハートビート・停止）・レビュー・係争の申請/管理者裁定・管理者の決済承認まで、実際に
+  画面から一通り操作できる（以前は `public/index.html` が1行の空スタブで、ブラウザで
+  見える画面が存在しなかった）。`#/`始まりのハッシュルーティング（`public/js/router.js`）。
+  厳格CSP（`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。`/swagger.html`
+  も同様の理由で CDN+インライン版から同一オリジンの自前ビューア（`public/js/docs.js`）に
+  置換済み。未実装: GPU接続情報の実配信（`accessInfo.deliveryImplemented` が false の間は
+  その旨を正直に表示するのみ）。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
   `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
   （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`

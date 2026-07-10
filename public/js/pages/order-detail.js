@@ -5,7 +5,7 @@
 // Cleanup contract: this page sets up polling intervals (payment status,
 // heartbeat) — render() returns a cleanup function that the router calls
 // before navigating away, or these intervals leak indefinitely.
-import { el, toast, statusBadge, timeline, fmtDate, fmtSats, fmtJpy } from '../ui.js';
+import { el, toast, statusBadge, timeline, fmtDate, fmtSats, fmtJpy, confirmDialog } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getUser } from '../auth.js';
 import { getRate, priceLine } from '../rate.js';
@@ -72,11 +72,116 @@ export async function render(container, params) {
     root.replaceChildren(card);
 
     if (order.status === 'pending') renderPending(body, order, isRenter, isProvider, isAdmin);
-    else if (order.status === 'matched') renderMatched(body, order, paymentInfo, isRenter, isProvider, rateInfo);
+    else if (order.status === 'matched') renderMatched(body, order, paymentInfo, isRenter, isProvider, isAdmin, rateInfo);
     else if (order.status === 'active') renderActive(body, order, isRenter, isProvider, isAdmin);
     else if (order.status === 'completed') renderCompleted(body, order, isRenter);
     else if (order.status === 'cancelled') body.appendChild(el('div', { class: 'banner banner-warning' }, 'この注文はキャンセルされました。'));
-    else if (order.status === 'disputed') body.appendChild(el('div', { class: 'banner banner-warning' }, 'この注文は係争中です。管理者の対応をお待ちください。'));
+    else if (order.status === 'disputed') renderDisputed(body, order, isRenter, isProvider, isAdmin);
+  }
+
+  // Only the renter, the GPU's provider, or an admin may raise a dispute — the
+  // server enforces this too (403 otherwise), but hiding it client-side avoids
+  // showing an action that would just fail for an unrelated viewer. Server
+  // also requires a paid payment for 'matched'-state disputes (unpaid orders
+  // can't be disputed to prevent a free-GPU DoS via griefing); callers of this
+  // helper for 'matched' only invoke it once a paid payment is confirmed, so
+  // that rule doesn't need duplicating here.
+  function renderDisputeAction(body, order, isRenter, isProvider, isAdmin) {
+    if (!isRenter && !isProvider && !isAdmin) return;
+    const openBtn = el('button', { class: 'btn btn-ghost btn-sm', style: 'margin-top:8px' }, '係争を申請する');
+    const formBox = el('div', { style: 'display:none;margin-top:8px' });
+    openBtn.addEventListener('click', () => {
+      openBtn.style.display = 'none';
+      formBox.style.display = '';
+    });
+    const reasonInput = el('textarea', { rows: '3', placeholder: '係争の理由（任意）' });
+    const submitBtn = el('button', {
+      class: 'btn btn-danger btn-sm',
+      onClick: async () => {
+        submitBtn.disabled = true;
+        try {
+          await api.raiseDispute(order.id, reasonInput.value.trim());
+          toast('係争を申請しました', 'info');
+          await load();
+        } catch (err) {
+          toast(err instanceof ApiError ? err.message : '係争の申請に失敗しました', 'error');
+          submitBtn.disabled = false;
+        }
+      },
+    }, '申請を送信');
+    const cancelBtn = el('button', {
+      class: 'btn btn-ghost btn-sm',
+      onClick: () => { formBox.style.display = 'none'; openBtn.style.display = ''; },
+    }, 'キャンセル');
+    formBox.append(
+      el('div', { class: 'field' }, el('label', {}, '係争の理由'), reasonInput),
+      el('div', { class: 'row' }, submitBtn, cancelBtn),
+    );
+    body.appendChild(el('div', {}, openBtn, formBox));
+  }
+
+  function disputantLabel(order, userId) {
+    if (!userId) return '不明';
+    if (userId === order.userId) return '借り手';
+    if (userId === order.providerId) return 'プロバイダー';
+    return '不明';
+  }
+
+  function renderDisputed(body, order, isRenter, isProvider, isAdmin) {
+    const dispute = order.dispute || {};
+    body.appendChild(el('div', { class: 'stack' },
+      el('div', { class: 'banner banner-warning' }, 'この注文は係争中です。管理者の対応をお待ちください。'),
+      el('div', { class: 'card', style: 'background:var(--color-surface-2)' },
+        el('div', { class: 'muted', style: 'font-size:0.8rem' }, `申請者: ${disputantLabel(order, dispute.raisedBy)}`),
+        el('div', { class: 'muted', style: 'font-size:0.8rem' }, `申請日時: ${fmtDate(dispute.raisedAt)}`),
+        dispute.reason ? el('p', {}, dispute.reason) : el('p', { class: 'muted' }, '（理由の記載なし）'),
+      ),
+    ));
+
+    if (!isAdmin) return;
+
+    let decision = null;
+    const refundBtn = el('button', {
+      class: 'btn btn-ghost',
+      onClick: (e) => {
+        decision = 'refund';
+        [refundBtn, upholdBtn].forEach((b) => b.classList.remove('btn-primary'));
+        e.target.classList.add('btn-primary');
+      },
+    }, '返金（借り手勝訴）');
+    const upholdBtn = el('button', {
+      class: 'btn btn-ghost',
+      onClick: (e) => {
+        decision = 'uphold';
+        [refundBtn, upholdBtn].forEach((b) => b.classList.remove('btn-primary'));
+        e.target.classList.add('btn-primary');
+      },
+    }, '棄却（プロバイダー勝訴）');
+    const noteInput = el('textarea', { rows: '3', placeholder: '裁定の備考（任意）' });
+    const submitBtn = el('button', {
+      class: 'btn btn-danger',
+      onClick: async () => {
+        if (!decision) { toast('裁定を選択してください', 'error'); return; }
+        const ok = await confirmDialog(`この注文を「${decision === 'refund' ? '返金' : '棄却'}」で裁定しますか？取り消せません。`);
+        if (!ok) return;
+        submitBtn.disabled = true;
+        try {
+          await api.resolveDispute(order.id, decision, noteInput.value.trim());
+          toast('係争を裁定しました', 'success');
+          await load();
+        } catch (err) {
+          toast(err instanceof ApiError ? err.message : '裁定に失敗しました', 'error');
+          submitBtn.disabled = false;
+        }
+      },
+    }, '裁定を確定');
+
+    body.appendChild(el('div', { class: 'stack' },
+      el('h3', {}, '管理者裁定'),
+      el('div', { class: 'row' }, refundBtn, upholdBtn),
+      noteInput,
+      submitBtn,
+    ));
   }
 
   function renderPending(body, order, isRenter, isProvider, isAdmin) {
@@ -115,12 +220,18 @@ export async function render(container, params) {
     }
   }
 
-  function renderMatched(body, order, paymentInfo, isRenter, isProvider, rateInfo) {
+  function renderMatched(body, order, paymentInfo, isRenter, isProvider, isAdmin, rateInfo) {
     const paidPayment = paymentInfo.payments.find((p) => p.status === 'paid');
     const pendingPayment = paymentInfo.payments.find((p) => p.status === 'pending');
 
     if (!isRenter) {
-      body.appendChild(el('div', { class: 'banner banner-info' }, '借り手の支払いをお待ちください。'));
+      // The backend allows disputing a paid 'matched' order from either side
+      // (e.g. the renter paid but never starts the session) — surface that
+      // to the provider too instead of only ever showing a generic waiting
+      // banner regardless of payment state.
+      body.appendChild(el('div', { class: 'banner banner-info' },
+        paidPayment ? '支払いが完了しました。借り手の利用開始をお待ちください。' : '借り手の支払いをお待ちください。'));
+      if (paidPayment) renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
       return;
     }
 
@@ -147,6 +258,7 @@ export async function render(container, params) {
         },
       }, '利用を開始する');
       body.appendChild(startBtn);
+      renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
       return;
     }
 
@@ -302,6 +414,7 @@ export async function render(container, params) {
     } else if (isProvider) {
       body.appendChild(el('p', { class: 'muted' }, 'プロバイダーは利用を停止できません。問題がある場合は管理者にお問い合わせください。'));
     }
+    renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
   }
 
   function renderCompleted(body, order, isRenter) {

@@ -75,6 +75,7 @@ export const api = {
 
   // --- orders ---
   listOrders: (query) => request('/api/v1/orders', { query }),
+  providerEarnings: (query) => request('/api/v1/orders/provider/earnings', { query }),
   getOrder: (id) => request(`/api/v1/orders/${id}`),
   getOrderPayment: (id) => request(`/api/v1/orders/${id}/payment`),
   createOrder: (gpuId, durationMinutes) => request('/api/v1/orders', { method: 'POST', body: { gpuId, durationMinutes } }),

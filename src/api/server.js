@@ -205,6 +205,22 @@ app.get('/openapi.json', apiLimiter, (req, res) => {
 // リクエストID生成（ロギング用）
 app.use(requestId);
 
+// 動的APIレスポンスへの Cache-Control: no-store 付与。
+// Express は既定で ETag を自動生成するが、Cache-Control を明示しない限り
+// 認証必須の動的レスポンス（例: GET /orders/:id の status）がブラウザの
+// HTTP キャッシュから再利用されうる。実際に発見された事象: 注文が pending の
+// 時点で一度 GET /orders/:id を叩いた後、accept→pay→approve→start を経て
+// active になっても、同一URLへの再フェッチが（サーバに到達せず）キャッシュ
+// された pending 時点のレスポンスをそのまま返し、UI が古い状態を表示し続けた。
+// public/ 配下の静的アセット（JS/CSS）は意図的なキャッシュ対象のため対象外にする。
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/js/') && !req.path.startsWith('/css/') && !req.path.startsWith('/vendor/')
+    && req.path !== '/' && !req.path.endsWith('.html') && !req.path.endsWith('.ico')) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  next();
+});
+
 // セキュリティミドルウェア
 app.use(securityHeaders);
 app.use(permissionsPolicy);

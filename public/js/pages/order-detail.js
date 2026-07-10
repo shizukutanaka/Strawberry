@@ -29,7 +29,7 @@ export async function render(container, params) {
     try {
       order = (await api.getOrder(orderId)).order;
       [gpu, paymentInfo, rateInfo] = await Promise.all([
-        api.getGpu(order.gpuId).catch(() => null),
+        api.getGpu(order.gpuId).then((r) => r.gpu).catch(() => null),
         api.getOrderPayment(orderId).catch(() => ({ payments: [], escrows: [] })),
         getRate(),
       ]);

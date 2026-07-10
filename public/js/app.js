@@ -12,6 +12,7 @@ import * as ordersPage from './pages/orders.js';
 import * as orderDetailPage from './pages/order-detail.js';
 import * as adminPaymentsPage from './pages/admin-payments.js';
 import * as earningsPage from './pages/earnings.js';
+import * as gpuDetailPage from './pages/gpu-detail.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -81,6 +82,7 @@ route('#/login', { render: loginPage.render });
 route('#/register', { render: registerPage.render });
 route('#/market', { render: marketPage.render });
 route('#/gpus/new', { render: gpuNewPage.render, auth: true, roles: ['provider', 'admin'] });
+route('#/gpus/:id', { render: gpuDetailPage.render });
 route('#/my-gpus', { render: myGpusPage.render, auth: true, roles: ['provider', 'admin'] });
 route('#/orders', { render: ordersPage.render, auth: true });
 route('#/orders/:id', { render: orderDetailPage.render, auth: true });

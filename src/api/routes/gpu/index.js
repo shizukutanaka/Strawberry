@@ -16,6 +16,8 @@ const { createMockAttestationVerifier } = require('../../../security/gpu-attesta
 const _attestationVerifier = createMockAttestationVerifier();
 // プロバイダ・レピュテーション記録（アテステーション結果の反映）
 const { createReputationService } = require('../../../reputation/reputation-service');
+// プロバイダー稼働実績（客観的な信頼性スコア）
+const providerUptime = require('../../../reputation/provider-uptime');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -213,10 +215,18 @@ router.get('/', asyncHandler(async (req, res) => {
       return (r.sum / r.count) >= _minRating;
     });
   }
-  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|availability(空き優先)
-  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; rating は常に高→低）
+  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)|availability(空き優先)
+  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; rating/reliability は常に高→低）
   const sort = req.query.sort || 'price';
   const sortDir = req.query.sortDir === 'desc' ? -1 : 1;
+  // 信頼性は providerId 単位でファイル読み取りを伴うため、リクエスト内でメモ化する
+  // （ソート比較で同一 provider を何度も引くのと、レスポンス整形での再取得を防ぐ）。
+  const _relCache = new Map();
+  const relFor = (pid) => {
+    if (!pid) return { score: null, tier: 'unrated', sessions: 0, beats: 0, gapEvents: 0, measuring: false };
+    if (!_relCache.has(pid)) _relCache.set(pid, providerUptime.getReliability(pid));
+    return _relCache.get(pid);
+  };
   if (sort === 'rating') {
     gpus.sort((a, b) => {
       const ra = reviewMap.get(a.id);
@@ -227,6 +237,13 @@ router.get('/', asyncHandler(async (req, res) => {
     });
   } else if (sort === 'memory') {
     gpus.sort((a, b) => sortDir * (b.memoryGB - a.memoryGB));
+  } else if (sort === 'reliability') {
+    // 信頼性スコアの高い順（未計測=null は 0 扱いで末尾に寄せる）。常に降順。
+    gpus.sort((a, b) => {
+      const sa = relFor(a.providerId).score || 0;
+      const sb = relFor(b.providerId).score || 0;
+      return sb - sa;
+    });
   } else if (sort === 'availability') {
     // 空き GPU を先に表示
     gpus.sort((a, b) => {
@@ -262,11 +279,14 @@ router.get('/', asyncHandler(async (req, res) => {
     summary: { totalRegistered, totalAvailable, totalOccupied },
     gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, ...gpu }) => {
       const r = reviewMap.get(gpu.id);
+      const rel = relFor(_pid);
       return {
         ...gpu,
         rating: r && r.count > 0
           ? { average: Math.round((r.sum / r.count) * 10) / 10, count: r.count }
           : { average: null, count: 0 },
+        // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
+        reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
       };
     }),
     timestamp: new Date().toISOString()
@@ -318,13 +338,16 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // manualBlocks: 予約空き状況の内部スケジュールデータ — 公開しない（リスト側と同じ扱い）。
   // apiKey: 常に除外。
   const { apiKey, providerId, manualBlocks, ...gpuSafe } = gpu;
+  const rel = providerUptime.getReliability(providerId);
   const response = {
     message: 'Fetched GPU detail',
     gpu: {
       ...gpuSafe,
       ...(viewerIsOwnerOrAdmin ? { providerId, manualBlocks } : {}),
       details, usageStats, availability,
-      rating: { average: ratingAverage, count: ratingCount }
+      rating: { average: ratingAverage, count: ratingCount },
+      // 客観的な信頼性シグナル（集計値のみ — プロバイダー身元は露出しない）
+      reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions, beats: rel.beats, gapEvents: rel.gapEvents, measuring: rel.measuring },
     }
   };
   res.json(response);

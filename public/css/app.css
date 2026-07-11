@@ -126,6 +126,14 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
   border: 1px solid var(--color-border);
 }
 
+/* プロバイダー信頼性チップ（稼働安定度）。tier で色分けし、未計測は控えめに。 */
+.chip-reliability { font-weight: 600; }
+.chip-reliability-excellent { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
+.chip-reliability-good { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
+.chip-reliability-fair { background: var(--color-warning-bg); color: var(--color-warning); border-color: transparent; }
+.chip-reliability-poor { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
+.chip-reliability-unrated { background: var(--color-surface-2); color: var(--color-text-muted); }
+
 .filter-bar {
   display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;
   background: var(--color-surface); border: 1px solid var(--color-border);

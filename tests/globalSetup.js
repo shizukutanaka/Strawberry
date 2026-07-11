@@ -7,7 +7,7 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '../data');
 
 module.exports = async function globalSetup() {
-  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications'];
+  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'uptime'];
   const objectFiles = ['revoked-tokens', 'notification-settings'];
 
   for (const name of arrayFiles) {

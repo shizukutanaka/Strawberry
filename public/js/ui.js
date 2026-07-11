@@ -78,6 +78,27 @@ export function statusBadge(status) {
   return el('span', { class: `badge badge-${status}` }, statusLabel(status));
 }
 
+// プロバイダー信頼性バッジ。reliability = { score, tier, sessions, measuring } を受け取り、
+// 未計測（score=null）は控えめな「計測中」チップ、計測済みは色分けした % 表示を返す。
+// 正直なUI原則: サンプル不足のスコアを断定的に見せない。
+const RELIABILITY_TIER_LABELS = {
+  excellent: '非常に安定', good: '安定', fair: 'やや不安定', poor: '不安定',
+  measuring: '計測中', unrated: '実績なし', unknown: '',
+};
+export function reliabilityBadge(reliability) {
+  if (!reliability) return null;
+  const { score, tier, sessions } = reliability;
+  if (score == null) {
+    // measuring / unrated / 実績なし
+    const label = tier === 'measuring' ? '稼働計測中' : '稼働実績なし';
+    return el('span', { class: 'chip chip-reliability chip-reliability-unrated', title: '安定稼働の実績が十分に蓄積されていません' }, label);
+  }
+  const pct = Math.round(score * 100);
+  const tierLabel = RELIABILITY_TIER_LABELS[tier] || '';
+  const title = `稼働安定度 ${pct}%${sessions ? `（${sessions}セッションの実績）` : ''}`;
+  return el('span', { class: `chip chip-reliability chip-reliability-${tier}`, title }, `稼働 ${pct}%${tierLabel ? ` ・ ${tierLabel}` : ''}`);
+}
+
 export function timeline(order) {
   const current = order.status;
   const list = el('ul', { class: 'timeline' });

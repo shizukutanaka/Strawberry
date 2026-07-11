@@ -104,6 +104,7 @@ const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
 const GpuRepository = require('../../../db/json/GpuRepository');
+const providerUptime = require('../../../reputation/provider-uptime');
 // 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 // 注文イベント通知（メール/LINE/Discord/Slack/Webhook/Telegram）
@@ -436,6 +437,11 @@ router.post('/:id/heartbeat',
       usageSessions.set(orderId, session);
     }
     session.onHeartbeat(req.user.id, role);
+    // プロバイダー（lender）ハートビートは稼働実績として永続化し、信頼性スコアの母数にする。
+    // best-effort（失敗してもハートビート応答は返す）。
+    if (role === 'lender') {
+      providerUptime.recordProviderHeartbeat(order.providerId, orderId, nowMs);
+    }
     res.json({ usageSeconds: session.getUsageSeconds() });
   })
 );

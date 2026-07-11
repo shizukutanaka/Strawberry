@@ -87,8 +87,114 @@ function reapUsageSessions() {
     }
   }
 }
+
+// --- SLA 違反スイープ（プロバイダーのハートビート途絶＝実質ダウンの自動処理）---
+// なぜ必要か: レンタル中に「箱が落ちた」場合、これまでは最大レンタル時間の
+// タイムアウト（数時間後）まで何も起きず、借り手は死んだ GPU に対して満額を
+// 支払い続けかねなかった。DePIN 市場で企業導入の最大障壁は「強制力のある SLA の
+// 不在」（Messari State of DePIN 2025）。ここではプロバイダーのハートビートが
+// SLA 猶予を超えて途絶した active 注文を検知し、実提供分だけ按分課金して残りを
+// 借り手へ返金し、プロバイダーの信頼性を減点する（TensorDock 型の稼働ペナルティ）。
+//
+// 安全側の設計:
+//  - 「プロバイダーのハートビートが一度届いた後に途絶した」場合のみ発火する
+//    （lastLenderHeartbeat が truthy）。一度も届いていない注文は、箱が落ちたのか
+//    エージェント未導入なのか判別できないため触らず、既存の最大時間タイムアウトに委ねる。
+//  - 按分は実利用秒（session.getUsageSeconds()）ベース。プロバイダー起因の障害では
+//    セットアップ最低料金（minChargeRatio）を 0 に上書きし、借り手に不当な床料金を課さない。
+//  - 金銭移動（エスクロー精算）は best-effort。失敗しても注文の終端遷移は行う。
+const SLA_PROVIDER_TIMEOUT_MS = Math.max(
+  30000,
+  Number(process.env.SLA_PROVIDER_HEARTBEAT_TIMEOUT_MS) || 5 * 60 * 1000,
+);
+function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
+  const OrderRepo = require('../../../db/json/OrderRepository');
+  const breached = [];
+  for (const [orderId, session] of usageSessions) {
+    // 証拠主義: プロバイダーのハートビートが一度も無いセッションは対象外。
+    if (!session.lastLenderHeartbeat) continue;
+    if (nowMs - session.lastLenderHeartbeat <= SLA_PROVIDER_TIMEOUT_MS) continue;
+
+    let order = null;
+    try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
+    if (!order || order.status !== 'active') continue;
+
+    const usageSeconds = typeof session.getUsageSeconds === 'function' ? session.getUsageSeconds() : 0;
+    const totalSeconds = (Number(order.durationMinutes) || 0) * 60;
+    const deliveredRatio = totalSeconds > 0
+      ? Math.max(0, Math.min(1, usageSeconds / totalSeconds))
+      : 0;
+
+    // active → completed（SLA 違反フラグ付き）。CAS で二重処理を防ぐ。
+    const nowIso = new Date(nowMs).toISOString();
+    const result = OrderRepo.updateIf(orderId, (o) => o.status === 'active', {
+      status: 'completed',
+      completedAt: nowIso,
+      stoppedAt: nowIso,
+      slaBreach: true,
+      slaBreachReason: 'provider_heartbeat_lost',
+      deliveredRatio,
+      updatedAt: nowIso,
+    });
+    if (!result.ok) continue;
+
+    // GPU 解放（best-effort・非同期）。releaseGPU は Promise を返し reject し得るため、
+    // 同期 try/catch では捕捉できない（unhandledRejection でプロセスが落ちる）。
+    // fire-and-forget で reject を握り潰す。
+    if (vgpuManager) {
+      try { Promise.resolve(vgpuManager.releaseGPU(order.gpuId, orderId)).catch(() => {}); } catch (_) {}
+    }
+
+    // エスクロー按分精算（プロバイダー起因 → 最低料金床なし）。best-effort。
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const { createEscrowService } = require('../../../payments/escrow-service');
+      const escrowSvc = createEscrowService();
+      const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
+      for (const escrow of escrows) {
+        escrowSvc.settle(escrow.id, { deliveredRatio, slaUptimePct: Math.round(deliveredRatio * 100) }, { minChargeRatio: 0 });
+        escrowSvc.apply(escrow.id, 'DELIVER_OK');
+      }
+    } catch (e) {
+      logger.warn(`[sla-sweep] escrow settle failed for order ${orderId}: ${e.message}`);
+    }
+
+    // プロバイダー信頼性の減点: 稼働スコアへ SLA 違反、ジョブ成否へ失敗を記録。
+    if (order.providerId) {
+      try { providerUptime.recordSlaBreach(order.providerId, nowMs); } catch (_) {}
+      try {
+        const { createReputationService } = require('../../../reputation/reputation-service');
+        createReputationService().recordJobResult(order.providerId, false);
+      } catch (_) {}
+    }
+
+    // 両者へ通知（best-effort）。
+    try {
+      const { notifyUser } = require('../../../utils/user-notify');
+      const pct = Math.round(deliveredRatio * 100);
+      if (order.userId) {
+        notifyUser(order.userId, 'order_sla_breach',
+          `【Strawberry】提供元GPUの応答が途絶したため注文を自動終了しました\n注文: #${orderId}\n実提供 ${pct}% 分のみ課金し、残りは返金対象です。`, {});
+      }
+      if (order.providerId) {
+        notifyUser(order.providerId, 'order_sla_breach',
+          `【Strawberry】ハートビート途絶により注文 #${orderId} が自動終了しました。稼働信頼性スコアに影響します。`, {});
+      }
+    } catch (_) {}
+
+    usageSessions.delete(orderId);
+    _deleteHeartbeatsForOrder(orderId);
+    breached.push({ id: orderId, deliveredRatio });
+    logger.info(`[sla-sweep] order ${orderId} auto-terminated (provider heartbeat lost), deliveredRatio=${deliveredRatio.toFixed(3)}`);
+  }
+  return breached;
+}
+
 // unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
-const sessionTimeoutInterval = setInterval(reapUsageSessions, 30000);
+const sessionTimeoutInterval = setInterval(() => {
+  sweepHeartbeatSlaBreaches();
+  reapUsageSessions();
+}, 30000);
 if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
@@ -1868,5 +1974,6 @@ router.post('/:id/stop',
 module.exports = router;
 module.exports._usageSessions = usageSessions;
 module.exports._reapUsageSessions = reapUsageSessions;
+module.exports._sweepHeartbeatSlaBreaches = sweepHeartbeatSlaBreaches;
 module.exports._OrderUsageSession = OrderUsageSession;
 module.exports._checkOrderCreateRateLimit = _checkOrderCreateRateLimit;

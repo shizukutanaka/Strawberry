@@ -418,6 +418,15 @@ export async function render(container, params) {
   }
 
   function renderCompleted(body, order, isRenter) {
+    // SLA 違反による自動終了は、通常完了と区別して理由と返金を明示する（正直なUI原則）。
+    if (order.slaBreach) {
+      const pct = typeof order.deliveredRatio === 'number' ? Math.round(order.deliveredRatio * 100) : null;
+      body.appendChild(el('div', { class: 'banner banner-warning' },
+        isRenter
+          ? `提供元GPUの応答が途絶したため自動終了しました。${pct != null ? `実提供 ${pct}% 分のみ課金され、残りは返金対象です。` : '未提供分は返金対象です。'}`
+          : `ハートビート途絶により自動終了しました。稼働信頼性スコアに影響します。${pct != null ? `（実提供 ${pct}%）` : ''}`,
+      ));
+    }
     if (order.review) {
       body.appendChild(el('div', { class: 'stack' },
         el('p', {}, el('span', { class: 'stars' }, '★'.repeat(order.review.rating) + '☆'.repeat(5 - order.review.rating))),

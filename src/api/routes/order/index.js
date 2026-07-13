@@ -192,8 +192,10 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
 
 // unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
 const sessionTimeoutInterval = setInterval(() => {
-  sweepHeartbeatSlaBreaches();
-  reapUsageSessions();
+  try {
+    sweepHeartbeatSlaBreaches();
+    reapUsageSessions();
+  } catch (_) { /* jest teardown 後の発火等: 無視 */ }
 }, 30000);
 if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 

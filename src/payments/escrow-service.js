@@ -3,12 +3,57 @@
 // 永続化(EscrowRepository)を束ね、注文ごとのエスクローを生成・遷移・記録する。
 // 検証結果(work-verifier)による解放判断もここで適用する。
 // repository は DI 可能（既定は JSON リポジトリ、テストはインメモリ fake を注入）。
+//
+// lnAdapter（任意 DI）: 状態機械が返す actions（reveal_preimage/payout_provider/
+// cancel_invoice 等）を action-executor 経由で実 LN 操作へ実行する。これまで actions は
+// 計算されるだけで呼び出し側が使わず（このファイル自身のコメントが「action-executor が
+// 実行する」と述べていたにも関わらず）実際には誰も呼んでいなかった —
+// 計算した資金移動の意図を実行しない、というエスクローとして致命的なギャップだった。
+// lnAdapter を渡さない既存呼び出し側は一切動作を変えない（後方互換・ゼロリスク）。
 const { initial, transition, applyDecision } = require('./escrow-state-machine');
 const { computeSettlement } = require('./settlement-calculator');
+const { executeActions } = require('./action-executor');
 
-function createEscrowService({ repository } = {}) {
+function createEscrowService({ repository, lnAdapter } = {}) {
   // 遅延 require: テスト時は repository を注入し、JSON 層を読み込まない
   const repo = repository || require('../db/json/EscrowRepository');
+
+  // actions を lnAdapter 経由で実行し、結果を履歴へ追記する。lnAdapter 未指定時は
+  // 何もしない（呼び出し元が LN 結線をまだ持たない場合の後方互換）。
+  // ベストエフォート: LN 実行の失敗で状態遷移そのものは取り消さない
+  // （他の best-effort 箇所 — order/index.js の escrow 精算等 — と同じ方針）。
+  async function runActions(escrow, actions, extra = {}) {
+    if (!lnAdapter || !Array.isArray(actions) || actions.length === 0) return null;
+    const ctx = {
+      preimage: escrow.preimage,
+      preimageHash: escrow.preimageHash,
+      providerInvoice: escrow.providerInvoice,
+      payoutSats: (escrow.settlement && escrow.settlement.providerPayoutSats) ?? escrow.amountSats,
+      ...extra,
+    };
+    try {
+      const results = await executeActions(actions, ctx, lnAdapter);
+      const now = new Date().toISOString();
+      repo.update(escrow.id, {
+        updatedAt: now,
+        history: [
+          ...(escrow.history || []),
+          { event: 'LN_ACTIONS_EXECUTED', results, at: now },
+        ],
+      });
+      return results;
+    } catch (e) {
+      const now = new Date().toISOString();
+      repo.update(escrow.id, {
+        updatedAt: now,
+        history: [
+          ...(escrow.history || []),
+          { event: 'LN_ACTIONS_FAILED', error: e.message, actions, at: now },
+        ],
+      });
+      return null;
+    }
+  }
 
   function persist(escrow, result, event) {
     const now = new Date().toISOString();
@@ -46,11 +91,16 @@ function createEscrowService({ repository } = {}) {
     return escrow;
   }
 
-  // 単一イベントを適用して永続化（無効遷移は state machine が throw）
+  // 単一イベントを適用して永続化（無効遷移は state machine が throw）。
+  // 同期関数のまま維持する（全既存呼び出し側が同期戻り値 {escrow,actions,event} を
+  // 前提にしているため、async 化は呼び出し側全体を破壊する）。LN 実行は
+  // fire-and-forget のベストエフォート（vgpuManager.releaseGPU と同じ既存パターン）。
   function apply(escrowId, event) {
     const escrow = getOrThrow(escrowId);
     const result = transition(escrow.state, event);
-    return { escrow: persist(escrow, result, event), actions: result.actions, event };
+    const saved = persist(escrow, result, event);
+    runActions(saved, result.actions).catch(() => {});
+    return { escrow: saved, actions: result.actions, event };
   }
 
   return {
@@ -111,6 +161,7 @@ function createEscrowService({ repository } = {}) {
         return { escrow, actions: [], event: 'WAIT' };
       }
       const saved = persist(escrow, { state: decision.state, actions: decision.actions }, decision.event);
+      runActions(saved, decision.actions).catch(() => {});
       return { escrow: saved, actions: decision.actions, event: decision.event };
     },
 

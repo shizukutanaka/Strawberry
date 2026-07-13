@@ -99,6 +99,21 @@ export function reliabilityBadge(reliability) {
   return el('span', { class: `chip chip-reliability chip-reliability-${tier}`, title }, `稼働 ${pct}%${tierLabel ? ` ・ ${tierLabel}` : ''}`);
 }
 
+// GPUスペック検証ティアバッジ。attestation = { passed, score, findings, verifiedAt } を受け取る。
+// 正直なUI原則: プロバイダー申告スペックは詐称され得る（vBIOS書き換え等）ため、
+// 「自己申告」「実測検証済み」「検証失敗」を常に区別して表示し、未検証を検証済みと
+// 混同させない。findings は検証失敗時のみツールチップで開示する。
+export function attestationBadge(attestation) {
+  if (!attestation || !attestation.verifiedAt) {
+    return el('span', { class: 'chip chip-attestation chip-attestation-self', title: 'プロバイダーの自己申告スペックです。実機検証は行われていません。' }, 'スペック: 自己申告');
+  }
+  if (attestation.passed) {
+    return el('span', { class: 'chip chip-attestation chip-attestation-verified', title: `実機ベンチマークで申告スペックと一致を確認済み（スコア ${Math.round((attestation.score || 0) * 100)}%）` }, 'スペック: 実測検証済み');
+  }
+  const findings = Array.isArray(attestation.findings) ? attestation.findings.join('; ') : '';
+  return el('span', { class: 'chip chip-attestation chip-attestation-failed', title: `実機検証で申告スペックとの不一致が検出されました: ${findings}` }, 'スペック: 検証失敗');
+}
+
 export function timeline(order) {
   const current = order.status;
   const list = el('ul', { class: 'timeline' });

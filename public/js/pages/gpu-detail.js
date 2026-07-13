@@ -2,7 +2,7 @@
 // Reached by clicking a GPU name/rating in market.js's cards (previously
 // there was no way to see full specs or read individual reviews before
 // deciding to rent — market.js's cards only ever showed a summary).
-import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge } from '../ui.js';
+import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge, attestationBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -126,6 +126,7 @@ export async function render(container, params) {
   }, gpu.available === false ? '貸出中' : 'このGPUを借りる');
 
   const specCard = el('div', { class: 'card stack' },
+    attestationBadge(gpu.attestation),
     specRow('ベンダー', gpu.vendor),
     specRow('モデル', gpu.model),
     specRow('APIタイプ', gpu.apiType),

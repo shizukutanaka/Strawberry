@@ -134,6 +134,12 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
 .chip-reliability-poor { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
 .chip-reliability-unrated { background: var(--color-surface-2); color: var(--color-text-muted); }
 
+/* GPUスペック検証ティアチップ（自己申告 / 実測検証済み / 検証失敗）。 */
+.chip-attestation { font-weight: 600; }
+.chip-attestation-self { background: var(--color-surface-2); color: var(--color-text-muted); }
+.chip-attestation-verified { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
+.chip-attestation-failed { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
+
 .filter-bar {
   display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;
   background: var(--color-surface); border: 1px solid var(--color-border);

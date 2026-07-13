@@ -45,6 +45,30 @@ test.describe('GPU detail page', () => {
     await expect(page.locator('.stars').first()).toContainText('★★★★☆');
   });
 
+  test('shows a self-reported badge with no attestation, and a verified badge with a matching one', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'attprov', role: 'provider' });
+    const selfReported = await apiCreateGpu(request, baseURL, provider.token, { name: `Unverified GPU ${uniqueId()}` });
+    const verified = await apiCreateGpu(request, baseURL, provider.token, {
+      name: `Verified GPU ${uniqueId()}`,
+      attestationReport: {
+        model: 'RTX 4090',
+        vendor: 'NVIDIA',
+        memoryGB: 24,
+        firmwareIntegrity: true,
+        certChain: ['dGVzdC1jZXJ0'],
+        timestamp: new Date().toISOString(),
+        signature: 'e2e-test-signature-1234',
+        measurements: { tempC: 65, powerW: 400, utilizationPct: 50 },
+      },
+    });
+
+    await page.goto(`/#/gpus/${selfReported.id}`);
+    await expect(page.locator('.card.stack')).toContainText('スペック: 自己申告');
+
+    await page.goto(`/#/gpus/${verified.id}`);
+    await expect(page.locator('.card.stack')).toContainText('スペック: 実測検証済み');
+  });
+
   test('price-watch: set, confirm server-side, remove, confirm removed', async ({ page, request, baseURL }) => {
     const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'watchprov', role: 'provider' });
     const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Watch GPU ${uniqueId()}`, pricePerHour: 1000 });

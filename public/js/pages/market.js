@@ -1,5 +1,5 @@
 // public/js/pages/market.js — GPU browse with filters and cards.
-import { el, skeleton, emptyState, reliabilityBadge } from '../ui.js';
+import { el, skeleton, emptyState, reliabilityBadge, attestationBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -24,6 +24,7 @@ function gpuCard(gpu, rateInfo, onRent) {
     el('p', { class: 'muted', style: 'font-size:0.85rem;margin:0' }, gpu.model),
     el('p', { class: 'muted', style: 'font-size:0.8rem;margin:0;cursor:pointer', onClick: () => navigate(`#/gpus/${gpu.id}`) }, ratingText),
     reliabilityBadge(gpu.reliability),
+    attestationBadge(gpu.attestation),
     el('div', { class: 'price' },
       el('div', { class: 'sats' }, price.sats),
       price.jpy ? el('div', { class: 'jpy' }, price.jpy) : null,

@@ -1,4 +1,8 @@
 // src/api/server.js - Express APIサーバー
+// OpenTelemetry: 他の全 require より先に読み込む必要がある（auto-instrumentation は
+// http/express 等を最初に require する前にパッチしないと効かない）。
+// OTEL_EXPORTER_OTLP_ENDPOINT 未設定時は完全な no-op（詳細は同ファイル参照）。
+require('../telemetry/instrumentation');
 const express = require('express');
 const path = require('path');
 const routes = require('./routes');

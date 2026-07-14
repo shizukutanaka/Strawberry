@@ -1,7 +1,17 @@
 /* Strawberry SPA — layout & components. No preprocessor, no build step. */
 
 *, *::before, *::after { box-sizing: border-box; }
-html { color-scheme: light dark; }
+html {
+  color-scheme: light dark;
+  /* WCAG 2.2 SC 2.4.11 (Focus Not Obscured): the app-header below is sticky
+     at top:0. Without this, tabbing to a field further down the page can
+     scroll it to sit exactly at the viewport top, hidden behind the header.
+     scroll-padding-top keeps focus-driven scrolling (and #anchor jumps)
+     clear of it. Value is a generous estimate of the header's height
+     (padding + one row of nav content); a little extra clearance is
+     harmless, too little defeats the fix. */
+  scroll-padding-top: 80px;
+}
 body {
   margin: 0;
   font-family: var(--font-sans);

@@ -387,6 +387,36 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   res.json({ gpuId, total, limit, offset, ratingAverage, reviews: page });
 }));
 
+// 同機種の相場（中央値・最小・最大 sats/時）取得（認証不要 — マーケット閲覧と同等）。
+// 借り手が「この価格は妥当か」を他機種横断ではなく同一 model 内で判断できるようにする。
+// price-watch (値下げ通知) の自然な発展形 — 既存の listings データのみで算出し、
+// 新しい永続化は不要。
+router.get('/:id/market-rate', asyncHandler(async (req, res) => {
+  const gpu = GpuRepository.getById(req.params.id);
+  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
+
+  const peers = GpuRepository.getAll()
+    .filter(g => g.model === gpu.model && typeof g.pricePerHour === 'number' && g.pricePerHour > 0)
+    .map(g => g.pricePerHour)
+    .sort((a, b) => a - b);
+  const sampleCount = peers.length;
+  const mid = Math.floor(sampleCount / 2);
+  const medianPricePerHour = sampleCount === 0
+    ? null
+    : sampleCount % 2 === 1
+      ? peers[mid]
+      : Math.round((peers[mid - 1] + peers[mid]) / 2);
+
+  res.json({
+    gpuId: gpu.id,
+    model: gpu.model,
+    sampleCount,
+    medianPricePerHour,
+    minPricePerHour: sampleCount > 0 ? peers[0] : null,
+    maxPricePerHour: sampleCount > 0 ? peers[sampleCount - 1] : null,
+  });
+}));
+
 // GPU注文履歴取得（認証必須 — 所有者または管理者のみ）
 // プロバイダが自分のGPUの使用状況を把握するためのエンドポイント。
 // ?limit=N ?offset=N ?status=completed|cancelled|etc. でフィルタリング可能。

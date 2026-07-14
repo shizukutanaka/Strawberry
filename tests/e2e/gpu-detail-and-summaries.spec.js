@@ -69,6 +69,21 @@ test.describe('GPU detail page', () => {
     await expect(page.locator('.card.stack')).toContainText('スペック: 実測検証済み');
   });
 
+  test('shows a market-rate line only when 2+ listings share the same model', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'ratesprov', role: 'provider' });
+    const uniqueModel = `RTX-RATE-${uniqueId()}`;
+    const soloGpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Solo GPU ${uniqueId()}`, model: `${uniqueModel}-SOLO`, pricePerHour: 900 });
+    const peerA = await apiCreateGpu(request, baseURL, provider.token, { name: `Peer A ${uniqueId()}`, model: uniqueModel, pricePerHour: 1000 });
+    const peerB = await apiCreateGpu(request, baseURL, provider.token, { name: `Peer B ${uniqueId()}`, model: uniqueModel, pricePerHour: 2000 });
+
+    await page.goto(`/#/gpus/${soloGpu.id}`);
+    await expect(page.locator('text=相場（同機種')).toHaveCount(0);
+
+    await page.goto(`/#/gpus/${peerA.id}`);
+    await expect(page.locator('text=相場（同機種 2件）')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=中央値 1,500 sats/時')).toBeVisible();
+  });
+
   test('price-watch: set, confirm server-side, remove, confirm removed', async ({ page, request, baseURL }) => {
     const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'watchprov', role: 'provider' });
     const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Watch GPU ${uniqueId()}`, pricePerHour: 1000 });

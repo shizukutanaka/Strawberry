@@ -110,6 +110,8 @@ export async function render(container, params) {
     root.replaceChildren(emptyState('⚠️', 'GPUが見つかりません', err instanceof ApiError ? err.message : ''));
     return;
   }
+  // 相場統計は補助情報のため、取得に失敗しても詳細ページ全体は表示する。
+  const marketRate = await api.getGpuMarketRate(gpuId).catch(() => null);
 
   const price = priceLine(gpu.pricePerHour, rateInfo, '/時');
   const ratingText = reviewsRes.ratingAverage != null
@@ -162,6 +164,12 @@ export async function render(container, params) {
         el('div', { style: 'font-size:1.4rem;font-weight:700' }, price.sats),
         price.jpy ? el('div', { class: 'muted' }, price.jpy) : null,
       ),
+      // 相場統計は同機種のリスティングが2件以上ある時のみ表示する。1件（自分自身）
+      // だけでは「相場」として意味を持たず、誤解を招く。
+      marketRate && marketRate.sampleCount > 1
+        ? el('p', { class: 'muted', style: 'font-size:0.85rem' },
+            `相場（同機種 ${marketRate.sampleCount}件）: 中央値 ${fmtSats(marketRate.medianPricePerHour)}/時（${fmtSats(marketRate.minPricePerHour)}〜${fmtSats(marketRate.maxPricePerHour)}）`)
+        : null,
       rentBtn,
       el('h3', {}, '価格通知'),
       renderWatchSection(gpuId, gpu),

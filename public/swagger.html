@@ -2,24 +2,20 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>Strawberry API Swagger UI</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css">
-  <style>body { margin: 0; }</style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strawberry API ドキュメント</title>
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/docs.css">
 </head>
 <body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
-  <script>
-    window.onload = function() {
-      window.ui = SwaggerUIBundle({
-        url: '/openapi.json',
-        dom_id: '#swagger-ui',
-        presets: [SwaggerUIBundle.presets.apis],
-        layout: 'BaseLayout',
-        docExpansion: 'none',
-        defaultModelsExpandDepth: -1
-      });
-    };
-  </script>
+  <header class="app-header">
+    <a href="/" class="brand"><span class="brand-mark">🍓</span> Strawberry</a>
+    <span class="muted">API ドキュメント</span>
+  </header>
+  <main id="docs-app" class="docs-main">
+    <p class="muted">読み込み中…</p>
+  </main>
+  <script type="module" src="/js/docs.js"></script>
 </body>
 </html>

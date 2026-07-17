@@ -1,10 +1,13 @@
-// サンドボックスAPIキー発行・検証API（開発/検証用）
+// サンドボックスAPIキー発行・検証API（開発/テスト環境専用）
+// 本番環境では NODE_ENV=production の場合このルートは全て 404 を返す
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const Joi = require('joi');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { authenticateJWT, checkRole } = require('./middleware/security');
+const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
 
 const SANDBOX_KEY_PATH = path.join(__dirname, '../../data/sandbox-apikeys.json');
 
@@ -15,40 +18,49 @@ function generateApiKey() {
 
 // サンドボックスAPIキー保存・検証
 function loadApiKeys() {
-  if (!fs.existsSync(SANDBOX_KEY_PATH)) return [];
-  return JSON.parse(fs.readFileSync(SANDBOX_KEY_PATH, 'utf-8'));
-}
-function saveApiKeys(keys) {
-  fs.writeFileSync(SANDBOX_KEY_PATH, JSON.stringify(keys, null, 2));
+  try {
+    return require('fs').existsSync(SANDBOX_KEY_PATH)
+      ? JSON.parse(require('fs').readFileSync(SANDBOX_KEY_PATH, 'utf-8'))
+      : [];
+  } catch (_) {
+    return [];
+  }
 }
 function addApiKey(userId) {
   const keys = loadApiKeys();
   const key = generateApiKey();
   keys.push({ userId, key, created: new Date().toISOString() });
-  saveApiKeys(keys);
+  atomicWriteJSON(SANDBOX_KEY_PATH, keys);
   return key;
 }
 function isValidApiKey(key) {
-  const keys = loadApiKeys();
-  return keys.some(k => k.key === key);
+  return loadApiKeys().some(k => k.key === key);
 }
 
-// APIキー発行エンドポイント
-router.post('/sandbox/apikey', (req, res) => {
+// 本番環境では無効化
+router.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  next();
+});
+
+// APIキー発行エンドポイント（管理者のみ）
+router.post('/sandbox/apikey', authenticateJWT, checkRole(['admin']), asyncHandler(async (req, res) => {
   const schema = Joi.object({ userId: Joi.string().required() });
   const { error, value } = schema.validate(req.body);
   if (error) return res.status(400).json({ error: error.message });
   const key = addApiKey(value.userId);
   res.json({ apiKey: key });
-});
+}));
 
-// APIキー検証エンドポイント
-router.post('/sandbox/apikey/verify', (req, res) => {
+// APIキー検証エンドポイント（管理者のみ）
+router.post('/sandbox/apikey/verify', authenticateJWT, checkRole(['admin']), asyncHandler(async (req, res) => {
   const schema = Joi.object({ apiKey: Joi.string().required() });
   const { error, value } = schema.validate(req.body);
   if (error) return res.status(400).json({ error: error.message });
   const valid = isValidApiKey(value.apiKey);
   res.json({ valid });
-});
+}));
 
 module.exports = { router, generateApiKey, isValidApiKey };

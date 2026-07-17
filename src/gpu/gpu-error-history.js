@@ -1,6 +1,7 @@
 // GPUごとの障害・エラー履歴記録＋障害発生時の多段通知
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { sendNotification, NotifyType } = require('../utils/notifier');
 const { logger } = require('../utils/logger');
 
@@ -18,8 +19,7 @@ function loadHistory() {
 
 function saveHistory(history) {
   try {
-    fs.mkdirSync(path.dirname(HISTORY_PATH), { recursive: true });
-    fs.writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2));
+    atomicWriteJSON(HISTORY_PATH, history);
   } catch (e) {
     logger.error('Failed to save GPU error history:', e);
   }

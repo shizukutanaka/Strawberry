@@ -4,6 +4,8 @@ const router = express.Router();
 
 // --- 利用時間セッション管理クラス ---
 const usageSessions = new Map(); // orderId -> OrderUsageSession
+// ハートビート頻度制限用の最終受信タイムスタンプ（"orderId:userId" → ms）
+const heartbeatTimestamps = new Map();
 class OrderUsageSession {
   constructor(orderId, lenderId, renterId) {
     this.orderId = orderId;
@@ -59,42 +61,265 @@ class OrderUsageSession {
   }
 }
 
-// 全セッションのタイムアウト監視（30秒ごと）
-setInterval(() => {
-  for (const session of usageSessions.values()) {
-    session.checkTimeouts();
+// 全セッションのタイムアウト監視 + 終了済みセッションの回収。
+// メモリリーク防止: /stop 以外の終端経路（delete/reject/dispute-resolve）や、
+// オーダーが削除済みの孤児セッションをここで一括回収する。これがないと、
+// 明示的 /stop を経ずに終了したオーダーのセッションが永久に Map に残る。
+const TERMINAL_SESSION_STATUSES = new Set(['completed', 'cancelled']);
+function _deleteHeartbeatsForOrder(orderId) {
+  // heartbeatTimestamps のキーは `${orderId}:${userId}` 形式。
+  // 該当オーダーの全ハートビートエントリを除去（メモリリーク防止）。
+  const prefix = `${orderId}:`;
+  for (const key of heartbeatTimestamps.keys()) {
+    if (key.startsWith(prefix)) heartbeatTimestamps.delete(key);
   }
-}, 30000);
+}
+function reapUsageSessions() {
+  // 遅延 require: モジュール末尾で定義される OrderRepository をクロージャ経由で参照する。
+  const OrderRepo = require('../../../db/json/OrderRepository');
+  for (const [orderId, session] of usageSessions) {
+    session.checkTimeouts();
+    let order = null;
+    try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
+    if (!order || TERMINAL_SESSION_STATUSES.has(order.status)) {
+      usageSessions.delete(orderId);
+      _deleteHeartbeatsForOrder(orderId);
+    }
+  }
+}
 
-const { asyncHandler } = require('../../../utils/error-handler');
+// --- SLA 違反スイープ（プロバイダーのハートビート途絶＝実質ダウンの自動処理）---
+// なぜ必要か: レンタル中に「箱が落ちた」場合、これまでは最大レンタル時間の
+// タイムアウト（数時間後）まで何も起きず、借り手は死んだ GPU に対して満額を
+// 支払い続けかねなかった。DePIN 市場で企業導入の最大障壁は「強制力のある SLA の
+// 不在」（Messari State of DePIN 2025）。ここではプロバイダーのハートビートが
+// SLA 猶予を超えて途絶した active 注文を検知し、実提供分だけ按分課金して残りを
+// 借り手へ返金し、プロバイダーの信頼性を減点する（TensorDock 型の稼働ペナルティ）。
+//
+// 安全側の設計:
+//  - 「プロバイダーのハートビートが一度届いた後に途絶した」場合のみ発火する
+//    （lastLenderHeartbeat が truthy）。一度も届いていない注文は、箱が落ちたのか
+//    エージェント未導入なのか判別できないため触らず、既存の最大時間タイムアウトに委ねる。
+//  - 按分は実利用秒（session.getUsageSeconds()）ベース。プロバイダー起因の障害では
+//    セットアップ最低料金（minChargeRatio）を 0 に上書きし、借り手に不当な床料金を課さない。
+//  - 金銭移動（エスクロー精算）は best-effort。失敗しても注文の終端遷移は行う。
+const SLA_PROVIDER_TIMEOUT_MS = Math.max(
+  30000,
+  Number(process.env.SLA_PROVIDER_HEARTBEAT_TIMEOUT_MS) || 5 * 60 * 1000,
+);
+function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
+  const OrderRepo = require('../../../db/json/OrderRepository');
+  const breached = [];
+  for (const [orderId, session] of usageSessions) {
+    // 証拠主義: プロバイダーのハートビートが一度も無いセッションは対象外。
+    if (!session.lastLenderHeartbeat) continue;
+    if (nowMs - session.lastLenderHeartbeat <= SLA_PROVIDER_TIMEOUT_MS) continue;
+
+    let order = null;
+    try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
+    if (!order || order.status !== 'active') continue;
+
+    const usageSeconds = typeof session.getUsageSeconds === 'function' ? session.getUsageSeconds() : 0;
+    const totalSeconds = (Number(order.durationMinutes) || 0) * 60;
+    const deliveredRatio = totalSeconds > 0
+      ? Math.max(0, Math.min(1, usageSeconds / totalSeconds))
+      : 0;
+
+    // active → completed（SLA 違反フラグ付き）。CAS で二重処理を防ぐ。
+    const nowIso = new Date(nowMs).toISOString();
+    const result = OrderRepo.updateIf(orderId, (o) => o.status === 'active', {
+      status: 'completed',
+      completedAt: nowIso,
+      stoppedAt: nowIso,
+      slaBreach: true,
+      slaBreachReason: 'provider_heartbeat_lost',
+      deliveredRatio,
+      updatedAt: nowIso,
+    });
+    if (!result.ok) continue;
+
+    // GPU 解放（best-effort・非同期）。releaseGPU は Promise を返し reject し得るため、
+    // 同期 try/catch では捕捉できない（unhandledRejection でプロセスが落ちる）。
+    // fire-and-forget で reject を握り潰す。
+    if (vgpuManager) {
+      try { Promise.resolve(vgpuManager.releaseGPU(order.gpuId, orderId)).catch(() => {}); } catch (_) {}
+    }
+
+    // エスクロー按分精算（プロバイダー起因 → 最低料金床なし）。best-effort。
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const { createEscrowService } = require('../../../payments/escrow-service');
+      const escrowSvc = createEscrowService();
+      const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
+      for (const escrow of escrows) {
+        escrowSvc.settle(escrow.id, { deliveredRatio, slaUptimePct: Math.round(deliveredRatio * 100) }, { minChargeRatio: 0 });
+        escrowSvc.apply(escrow.id, 'DELIVER_OK');
+      }
+    } catch (e) {
+      logger.warn(`[sla-sweep] escrow settle failed for order ${orderId}: ${e.message}`);
+    }
+
+    // プロバイダー信頼性の減点: 稼働スコアへ SLA 違反、ジョブ成否へ失敗を記録。
+    if (order.providerId) {
+      try { providerUptime.recordSlaBreach(order.providerId, nowMs); } catch (_) {}
+      try {
+        const { createReputationService } = require('../../../reputation/reputation-service');
+        createReputationService().recordJobResult(order.providerId, false);
+      } catch (_) {}
+    }
+
+    // 両者へ通知（best-effort）。
+    try {
+      const { notifyUser } = require('../../../utils/user-notify');
+      const pct = Math.round(deliveredRatio * 100);
+      if (order.userId) {
+        notifyUser(order.userId, 'order_sla_breach',
+          `【Strawberry】提供元GPUの応答が途絶したため注文を自動終了しました\n注文: #${orderId}\n実提供 ${pct}% 分のみ課金し、残りは返金対象です。`, {});
+      }
+      if (order.providerId) {
+        notifyUser(order.providerId, 'order_sla_breach',
+          `【Strawberry】ハートビート途絶により注文 #${orderId} が自動終了しました。稼働信頼性スコアに影響します。`, {});
+      }
+    } catch (_) {}
+
+    usageSessions.delete(orderId);
+    _deleteHeartbeatsForOrder(orderId);
+    breached.push({ id: orderId, deliveredRatio });
+    logger.info(`[sla-sweep] order ${orderId} auto-terminated (provider heartbeat lost), deliveredRatio=${deliveredRatio.toFixed(3)}`);
+  }
+  return breached;
+}
+
+// unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
+const sessionTimeoutInterval = setInterval(() => {
+  try {
+    sweepHeartbeatSlaBreaches();
+    reapUsageSessions();
+  } catch (_) { /* jest teardown 後の発火等: 無視 */ }
+}, 30000);
+if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
+
+const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
+const { appendAuditLog } = require('../../../utils/audit-log');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
+const { withLock } = require('../../../utils/async-lock');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
 const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
+const GpuRepository = require('../../../db/json/GpuRepository');
+const providerUptime = require('../../../reputation/provider-uptime');
+// 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
+const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+// 注文イベント通知（メール/LINE/Discord/Slack/Webhook/Telegram）
+const { sendNotification, NotifyType } = require('../../../utils/notifier');
+// 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
+const { isValidOrderTransition } = require('../../../utils/state-checker');
+// 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
+const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../../utils/order-expiry');
+// GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
+const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
-const { apiKeyAuth } = require('../../middleware/security');
-const { sanitizeObject } = require('../../../utils/sanitize');
+// 事前予約の先行上限（既定 90 日）。durationMinutes の上限は Joi スキーマ
+// (validator.js: max 43200 = 30日) が担保するが、scheduledStartAt は isoDate
+// 形式のみ検証され「どれだけ先か」は無制限だった。pending 注文の絶対 TTL(90日)を
+// 超える先の枠を予約できると、その注文は後で必ず自動キャンセルされるのに在庫だけを
+// ブロックする（在庫ブロッキング / 不可解な UX）。作成時点で先行上限を課して塞ぐ。env 上書き可。
+function resolvePositiveIntEnv(name, def) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return def;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : def;
+}
+const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_AHEAD_DAYS', 90); // pending TTL と整合
+
+const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
+const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
+// スラッシュ/係争解決/レビュー後にレピュテーションキャッシュを無効化する
+let _invalidateRepCache = null;
+function invalidateRepCache(userId) {
+  if (!_invalidateRepCache) {
+    try { _invalidateRepCache = require('../user/index').invalidateReputationCache; } catch (_) { _invalidateRepCache = () => {}; }
+  }
+  if (userId && typeof _invalidateRepCache === 'function') _invalidateRepCache(userId);
+}
+
+// 注文作成のユーザー別レートリミット（IP ベースのグローバル制限を補完）。
+// 認証済みユーザーが在庫チェック・価格計算の重いパスを連打して DB を圧迫するのを防ぐ。
+// グローバル IP リミットだけでは：同一ユーザーが異なる IP (Tor/VPN) から来た場合に効果がなく、
+// また共有 IP (NAT) では無関係ユーザーを巻き込んでしまう。
+// ここでは id ベースの滑動ウィンドウで「ユーザー単位」の短時間爆発を抑制する。
+const _orderCreateRateState = new Map(); // userId → { count, windowStart }
+const ORDER_CREATE_RATE_LIMIT = Number(process.env.ORDER_CREATE_RATE_LIMIT) || 10;  // per window
+const ORDER_CREATE_RATE_WINDOW_MS = 60_000; // 1 minute sliding window
+function _checkOrderCreateRateLimit(userId) {
+  const now = Date.now();
+  let s = _orderCreateRateState.get(userId);
+  if (!s || now - s.windowStart >= ORDER_CREATE_RATE_WINDOW_MS) {
+    _orderCreateRateState.set(userId, { count: 1, windowStart: now });
+    return true;
+  }
+  if (s.count >= ORDER_CREATE_RATE_LIMIT) return false;
+  s.count++;
+  return true;
+}
+// 単体テストが Map を直接リセットできるよう公開（プロセス再起動が不要）
+_checkOrderCreateRateLimit._state = _orderCreateRateState;
 
 // オーダー一覧取得 (認証必須)
-const { cacheMiddleware } = require('../../middleware/cache');
+// キャッシュは perUser 必須: URL のみをキーにすると先行ユーザーの注文一覧が
+// 他ユーザーに返る（認可バイパス）ため、ユーザーIDをキーに含める。
 
-router.get('/', 
-  cacheMiddleware(),
-  apiKeyAuth,
+// Stale-order sweeps are O(N orders) reads + writes per call. Triggering them on
+// every GET /orders amplified into a 4-sweep DoS — a fresh role:'user' token could
+// hammer ?offset=$i (bypassing the perUser cache via varying querystring) and force
+// 4×N IO per request. Throttle to once per SWEEP_THROTTLE_MS process-wide.
+const SWEEP_THROTTLE_MS = process.env.NODE_ENV === 'test' ? 0 : 30_000;
+let _lastOrderSweepAt = 0;
+router.get('/',
   authenticateJWT,
+  cacheMiddleware({ perUser: true }),
   asyncHandler(async (req, res, next) => {
     try {
       logger.info('Fetching orders');
+      // 期限切れ pending/matched 注文を失効させてから一覧を返す（遅延スイープ）。
+      // 30 秒に 1 回だけ実行し、リクエストごとの 4×N スキャン増幅を遮断する。
+      if (Date.now() - _lastOrderSweepAt > SWEEP_THROTTLE_MS) {
+        _lastOrderSweepAt = Date.now();
+        expireStaleOrders();
+        expireStaleMatchedOrders();
+        expireStaleDisputedOrders();
+        // active タイムアウト: 返された各注文の GPU を解放する（vgpuManager 利用可能時のみ）
+        const timedOutActive = expireStaleActiveOrders();
+        if (vgpuManager && timedOutActive.length > 0) {
+          for (const { id: oid, gpuId } of timedOutActive) {
+            try { await vgpuManager.releaseGPU(gpuId, oid); } catch (_) {}
+          }
+        }
+      }
       let orders;
       if (req.user.role === 'admin') {
         orders = OrderRepository.getAll();
+        // 管理者はユーザーIDやプロバイダIDで絞り込み可能（サポートワークフロー）
+        if (req.query.userId) orders = orders.filter(o => o.userId === req.query.userId);
+        if (req.query.providerId) orders = orders.filter(o => o.providerId === req.query.providerId);
       } else if (req.user.role === 'provider') {
-        orders = OrderRepository.getAll().filter(o => o.providerId === req.user.id);
+        // プロバイダは自分が提供側の注文に加え、自分が借り手側の注文も閲覧できる。
+        // ?role=provider でプロバイダ側のみ、?role=renter で借り手側のみ絞り込み可能。
+        const allOrders = OrderRepository.getAll();
+        if (req.query.role === 'provider') {
+          orders = allOrders.filter(o => o.providerId === req.user.id);
+        } else if (req.query.role === 'renter') {
+          orders = allOrders.filter(o => o.userId === req.user.id);
+        } else {
+          const providerSet = new Set(allOrders.filter(o => o.providerId === req.user.id).map(o => o.id));
+          const renterOrders = allOrders.filter(o => o.userId === req.user.id && !providerSet.has(o.id));
+          orders = [...allOrders.filter(o => providerSet.has(o.id)), ...renterOrders];
+        }
       } else {
         orders = OrderRepository.getByUserId(req.user.id);
       }
@@ -102,48 +327,177 @@ router.get('/',
       if (status) {
         orders = orders.filter(order => order.status === status);
       }
-      const sortBy = req.query.sortBy || 'createdAt';
+      // gpuId で絞り込み（全ロール対応 — プロバイダが特定 GPU の注文を確認する際に便利）
+      if (req.query.gpuId) {
+        orders = orders.filter(order => order.gpuId === req.query.gpuId);
+      }
+      // 日付範囲フィルタ（from=ISO&to=ISO — createdAt ベース）
+      if (req.query.from) {
+        const fromMs = Date.parse(req.query.from);
+        if (!Number.isFinite(fromMs)) return res.status(400).json({ error: 'Invalid "from" date' });
+        orders = orders.filter(o => Date.parse(o.createdAt) >= fromMs);
+      }
+      if (req.query.to) {
+        const toMs = Date.parse(req.query.to);
+        if (!Number.isFinite(toMs)) return res.status(400).json({ error: 'Invalid "to" date' });
+        orders = orders.filter(o => Date.parse(o.createdAt) <= toMs);
+      }
+      const SORTABLE_FIELDS = new Set(['createdAt', 'updatedAt', 'status', 'totalPrice', 'durationMinutes']);
+      const sortBy = SORTABLE_FIELDS.has(req.query.sortBy) ? req.query.sortBy : 'createdAt';
       const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
       orders.sort((a, b) => {
         if (a[sortBy] < b[sortBy]) return -1 * sortDir;
         if (a[sortBy] > b[sortBy]) return 1 * sortDir;
         return 0;
       });
-      // リアルタイムBTC/JPY換算
-      const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-      const { rate: satoshiToJPY, timestamp: exchangeRateTimestamp } = await getBTCtoJPYRate(false, true);
+      // ページネーション（limit: 1..200 既定50 / offset: 0..）
+      const total = orders.length;
+      const limitRaw = parseInt(req.query.limit, 10);
+      const offsetRaw = parseInt(req.query.offset, 10);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+      const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
+      orders = orders.slice(offset, offset + limit);
+      // リアルタイムBTC/JPY換算（レートは一覧全体で1回だけ取得して使い回す）
+      const rateInfo = await fetchRateInfo();
       const ordersWithPricing = orders.map(order => {
-        let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-        if (!pricePerHour && order.gpuId) {
-          try {
-            const GpuRepository = require('../../../db/json/GpuRepository');
-            const gpu = GpuRepository.getById(order.gpuId);
-            if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-          } catch {}
-        }
-        const durationMinutes = order.durationMinutes || 0;
-        const pricePer5Min = pricePerHour / 12;
-        const totalPrice = pricePer5Min * (durationMinutes / 5);
-        // 冗長化為替APIで換算（キャッシュ活用）
-        const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
-        return {
-          ...order,
-          pricePerHour,
-          pricePer5Min,
-          totalPrice,
-          totalPriceJPY,
-          exchangeRateTimestamp
-        };
+        const o = { ...order, ...computeOrderPricing(order, rateInfo) };
+        // Strip reviewerId from review sub-objects: it is the reviewer's internal UUID.
+        // Exposing it to the counterparty breaks reviewer anonymity — they can cross-reference
+        // with GET /users/:id/renter-profile to identify who left a specific review.
+        if (o.review) o.review = { ...o.review, reviewerId: undefined };
+        if (o.renterReview) o.renterReview = { ...o.renterReview, reviewerId: undefined };
+        return o;
       });
       res.json({
         message: 'Fetched orders',
-        total: ordersWithPricing.length,
+        total,
+        limit,
+        offset,
         orders: ordersWithPricing,
-        exchangeRateTimestamp
+        exchangeRateTimestamp: rateInfo.timestamp
       });
     } catch (error) {
       next(error);
     }
+  })
+);
+
+// ユーザー自身の注文統計 (認証必須 — 全ロール)
+// 借り手として: 総支出・完了件数・キャンセル件数・係争件数
+// 提供者として: 収益サマリは /provider/earnings を参照（こちらはより軽量）
+router.get('/stats',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const allOrders = OrderRepository.getAll();
+
+    const asRenter = allOrders.filter(o => o.userId === userId);
+    const asProvider = req.user.role === 'provider' || req.user.role === 'admin'
+      ? allOrders.filter(o => o.providerId === userId)
+      : [];
+
+    const countByStatus = (orders) => {
+      const counts = {};
+      for (const o of orders) {
+        counts[o.status] = (counts[o.status] || 0) + 1;
+      }
+      return counts;
+    };
+
+    const totalSpentSats = asRenter
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPrice === 'number' ? o.totalPrice : 0), 0);
+    const totalSpentJPY = asRenter
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0), 0);
+
+    const totalEarnedSats = asProvider
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPrice === 'number' ? o.totalPrice : 0), 0);
+    const totalEarnedJPY = asProvider
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + (typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0), 0);
+
+    res.json({
+      userId,
+      asRenter: {
+        total: asRenter.length,
+        byStatus: countByStatus(asRenter),
+        totalSpentSats,
+        totalSpentJPY,
+      },
+      // 提供者・管理者は asProvider を常に返す（件数 0 でも null にしない）
+      asProvider: (req.user.role === 'provider' || req.user.role === 'admin') ? {
+        total: asProvider.length,
+        byStatus: countByStatus(asProvider),
+        totalEarnedSats,
+        totalEarnedJPY,
+      } : null,
+    });
+  })
+);
+
+// プロバイダ収益サマリ (認証必須, provider/admin)
+// 自身が providerId の注文を集計し、完了済み収益と進行中の見込み額を返す。
+router.get('/provider/earnings',
+  authenticateJWT,
+  checkRole(['provider', 'admin']),
+  asyncHandler(async (req, res) => {
+    const providerId = req.user.id;
+    // 任意の日付範囲フィルタ（from=ISO&to=ISO）
+    const fromMs = req.query.from ? Date.parse(req.query.from) : null;
+    const toMs = req.query.to ? Date.parse(req.query.to) : null;
+    if (req.query.from && isNaN(fromMs)) {
+      return res.status(400).json({ error: 'Invalid from date' });
+    }
+    if (req.query.to && isNaN(toMs)) {
+      return res.status(400).json({ error: 'Invalid to date' });
+    }
+    let orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+    if (fromMs) orders = orders.filter(o => Date.parse(o.createdAt) >= fromMs);
+    if (toMs) orders = orders.filter(o => Date.parse(o.createdAt) <= toMs);
+    const summary = {
+      providerId,
+      from: req.query.from || null,
+      to: req.query.to || null,
+      completedCount: 0,
+      completedSats: 0,
+      completedJPY: 0,
+      activeCount: 0,
+      activeSats: 0,
+      cancelledCount: 0,
+    };
+    for (const o of orders) {
+      const sats = typeof o.totalPrice === 'number' ? o.totalPrice : 0;
+      if (o.status === 'completed') {
+        summary.completedCount++;
+        summary.completedSats += sats;
+        summary.completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
+      } else if (o.status === 'active') {
+        summary.activeCount++;
+        summary.activeSats += sats;
+      } else if (o.status === 'cancelled') {
+        summary.cancelledCount++;
+      }
+    }
+    // GPU別収益内訳
+    const GpuRepository = require('../../../db/json/GpuRepository');
+    const byGpu = {};
+    for (const o of orders) {
+      if (o.status !== 'completed') continue;
+      const gid = o.gpuId;
+      if (!byGpu[gid]) byGpu[gid] = { gpuId: gid, gpuName: null, completedCount: 0, completedSats: 0, completedJPY: 0 };
+      byGpu[gid].completedCount++;
+      byGpu[gid].completedSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
+      byGpu[gid].completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
+    }
+    for (const entry of Object.values(byGpu)) {
+      const gpu = GpuRepository.getById(entry.gpuId);
+      entry.gpuName = gpu ? gpu.name : null;
+    }
+    summary.byGpu = Object.values(byGpu).sort((a, b) => b.completedSats - a.completedSats);
+
+    res.json({ message: 'Provider earnings summary', earnings: summary });
   })
 );
 
@@ -154,7 +508,6 @@ router.post('/:id/heartbeat',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     const { role } = req.body;
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!['lender', 'renter'].includes(role)) {
       throw new APIError(ErrorTypes.VALIDATION, 'role must be lender or renter', 400);
     }
@@ -168,6 +521,23 @@ router.post('/:id/heartbeat',
         (role === 'renter' && req.user.id !== order.userId)) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'No permission for this order as this role', 403);
     }
+    // ハートビートは active 状態のオーダーのみ受け付ける。
+    // pending/matched では GPU はまだ割り当てられておらず、
+    // 偽のハートビートで usageSeconds を積み上げることを防ぐ。
+    // completed/cancelled はメモリリーク防止を兼ねる。
+    if (order.status !== 'active') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Heartbeats are only accepted for active orders', 409);
+    }
+    // ハートビート頻度制限: 同一 (orderId, userId) で MIN_INTERVAL_MS 未満は 429 を返す。
+    // 制限なしだと毎秒数千リクエストで Node.js イベントループが枯渇する（認証済みユーザーによる DoS）。
+    const HB_MIN_MS = Math.max(1000, Number(process.env.HEARTBEAT_MIN_INTERVAL_MS) || 10000);
+    const hbKey = `${orderId}:${req.user.id}`;
+    const lastHb = heartbeatTimestamps.get(hbKey) || 0;
+    const nowMs = Date.now();
+    if (nowMs - lastHb < HB_MIN_MS) {
+      return res.status(429).json({ error: `Heartbeat too frequent. Minimum interval: ${HB_MIN_MS / 1000}s` });
+    }
+    heartbeatTimestamps.set(hbKey, nowMs);
     // セッション取得または作成
     let session = usageSessions.get(orderId);
     if (!session) {
@@ -175,13 +545,17 @@ router.post('/:id/heartbeat',
       usageSessions.set(orderId, session);
     }
     session.onHeartbeat(req.user.id, role);
+    // プロバイダー（lender）ハートビートは稼働実績として永続化し、信頼性スコアの母数にする。
+    // best-effort（失敗してもハートビート応答は返す）。
+    if (role === 'lender') {
+      providerUptime.recordProviderHeartbeat(order.providerId, orderId, nowMs);
+    }
     res.json({ usageSeconds: session.getUsageSeconds() });
   })
 );
 
 // オーダー詳細取得 (認証必須)
 router.get('/:id',
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
@@ -189,32 +563,31 @@ router.get('/:id',
     try {
       logger.info(`Fetching order detail: ${req.params.id}`);
       const order = req.resource;
-      let pricePerHour = order.pricePerHour || order.maxPricePerHour || 0;
-      if (!pricePerHour && order.gpuId) {
-        try {
-          const GpuRepository = require('../../../db/json/GpuRepository');
-          const gpu = GpuRepository.getById(order.gpuId);
-          if (gpu && gpu.pricePerHour) pricePerHour = gpu.pricePerHour;
-        } catch {}
-      }
-      const durationMinutes = order.durationMinutes || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * (durationMinutes / 5);
-      // 冗長化為替APIで換算（キャッシュ活用）
-      const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-      const { rate: satoshiToJPY, timestamp: exchangeRateTimestamp } = await getBTCtoJPYRate(false, true);
-      const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+      const rateInfo = await fetchRateInfo();
+      // 借り手プロフィール（プロバイダが承認/拒否判断に使えるよう注文詳細に同梱）
+      const renterOrders = OrderRepository.getAll().filter(o => o.userId === order.userId && o.renterReview);
+      const renterReviewCount = renterOrders.length;
+      const renterRatingAverage = renterReviewCount > 0
+        ? Math.round((renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount) * 10) / 10
+        : null;
+      // ステータス変遷タイムライン（既存タイムスタンプを時系列に整列）
+      const timeline = [
+        { status: 'pending',   at: order.createdAt || null },
+        { status: 'matched',   at: order.matchedAt || null },
+        { status: 'active',    at: order.startedAt || null },
+        { status: 'completed', at: order.completedAt || null },
+        { status: 'cancelled', at: order.cancelledAt || null },
+        { status: 'disputed',  at: order.dispute ? order.dispute.raisedAt : null },
+      ].filter(e => e.at).sort((a, b) => a.at.localeCompare(b.at));
       res.json({
         message: 'Fetched order detail',
         order: {
           ...order,
-          pricePerHour,
-          pricePer5Min,
-          totalPrice,
-          totalPriceJPY,
-          exchangeRateTimestamp
+          ...computeOrderPricing(order, rateInfo),
+          renterProfile: { ratingAverage: renterRatingAverage, reviewCount: renterReviewCount },
+          timeline,
         },
-        exchangeRateTimestamp
+        exchangeRateTimestamp: rateInfo.timestamp
       });
     } catch (error) {
       next(error);
@@ -222,26 +595,163 @@ router.get('/:id',
   })
 );
 
-// オーダー更新 (認証必須)
-router.put('/:id',
-  apiKeyAuth,
+// オーダーの課金・エスクロー状況（注文当事者＝借り手/プロバイダ/管理者のみ）
+// これまで支払状況は別の paymentId 経由（支払者しか知らない）、エスクローは管理者限定でしか
+// 見えず、注文当事者が自分の注文の決済状態を確認できなかった。orderId 起点で一括照会する。
+router.get('/:id/payment',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
+    const PaymentRepository = require('../../../db/json/PaymentRepository');
+    const EscrowRepository = require('../../../db/json/EscrowRepository');
+
+    const payments = (PaymentRepository.getByOrderId(order.id) || []).map(p => ({
+      id: p.id,
+      status: p.status,
+      amount: p.amount,
+      method: p.method,
+      paidAt: p.paidAt || null,
+      invoiceExpiresAt: p.invoiceExpiresAt || null,
+    }));
+    const escrows = (EscrowRepository.getByOrderId(order.id) || []).map(e => ({
+      id: e.id,
+      state: e.state,
+      amountSats: e.amountSats,
+      feeRate: e.feeRate,
+      createdAt: e.createdAt || null,
+    }));
+
+    res.json({
+      orderId: order.id,
+      orderStatus: order.status,
+      totalPrice: typeof order.totalPrice === 'number' ? order.totalPrice : null,
+      totalPriceJPY: typeof order.totalPriceJPY === 'number' ? order.totalPriceJPY : null,
+      payments,
+      escrows,
+    });
+  })
+);
+
+// オーダー更新 (認証必須)
+router.put('/:id',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
+  asyncHandler(async (req, res) => {
+    const order = req.resource;
+    // PUT is the renter's (order creator's) edit path. allowOwnerOrAdmin also grants
+    // access when req.user.id === order.providerId, but providers must use the
+    // dedicated /accept and /reject endpoints — not PUT — to avoid unauthorized
+    // mutation of the renter's record (e.g., evidence tampering before a dispute).
+    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can edit order fields. Providers must use /accept or /reject.', 403);
+    }
     logger.info(`Updating order: ${order.id}`);
     // 入力値サニタイズ
-    const sanitized = sanitizeObject(req.body, ['description']);
-    // 状態遷移チェック
+    const sanitized = sanitizeObject(req.body, ['description', 'notes']);
+    // ステータス変更は管理者専用（専用エンドポイント /accept /reject /start /stop /dispute を使う）。
+    // 一般ユーザー（借り手・提供者）が PUT で status を直接操作できると正規フローを迂回できる:
+    //   - 借り手が pending→matched や matched→active にすることで提供者確認をスキップ
+    //   - 提供者が active→completed にすることで /stop のエスクロー決済をスキップ
     if (sanitized.status && sanitized.status !== order.status) {
-      if (!isValidOrderTransition(order.status, req.body.status)) {
-        return res.status(400).json({ error: `Invalid status transition from ${order.status} to ${req.body.status}` });
+      if (req.user.role !== 'admin') {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Only admins can change order status via this endpoint. Use the dedicated endpoints (/accept, /reject, /start, /stop, /dispute)', 403);
+      }
+      if (!isValidOrderTransition(order.status, sanitized.status)) {
+        return res.status(400).json({ error: `Invalid status transition from ${order.status} to ${sanitized.status}` });
+      }
+      // 'disputed' への直接遷移は POST /:id/dispute のみが正規ルート。
+      // admin PUT で transition させると order.dispute オブジェクトが存在しない状態になり、
+      // /dispute/resolve の raisedBy 参照や係争グリーフィングゲートが正しく機能しなくなる。
+      if (sanitized.status === 'disputed') {
+        throw new APIError(ErrorTypes.VALIDATION,
+          "Use POST /:id/dispute to raise a dispute. Setting status to 'disputed' directly is not allowed.",
+          400);
+      }
+      // 'completed' への直接遷移は POST /:id/stop のみが正規ルート。
+      // admin PUT で active→completed させると escrow 精算・GPU 解放・評価記録が実行されず、
+      // 資金が HELD のまま永久にロックされる（エスクロー不整合）。
+      // admin は /stop を使うか、係争解決経由で completed に誘導すること。
+      if (sanitized.status === 'completed') {
+        throw new APIError(ErrorTypes.VALIDATION,
+          "Use POST /:id/stop to complete an order. Setting status to 'completed' directly is not allowed.",
+          400);
       }
     }
-    // オーダーを更新
-    const updatedOrder = OrderRepository.update(order.id, { ...order, ...sanitized });
+    // フィールドフィルタ: 明示的な許可リストのみ更新可能。
+    // sanitizeObject は req.body の全キーをコピーする（文字列値のみサニタイズ）ため、
+    // 許可リストなしで admin が sanitized をそのまま update() に渡すと
+    // { totalPrice: 1, providerId: 'other', userId: 'victim' } 等の任意フィールドを
+    // DB に書き込む mass-assignment 脆弱性になる。
+    // 一般ユーザー: description/notes のみ。
+    // 管理者: description/notes + status（status は上の isValidOrderTransition ゲート済み）。
+    // 金融フィールド(totalPrice, pricePerHour)・所有権フィールド(userId, providerId, gpuId)は
+    // いずれも変更不可（専用エンドポイントが担う）。
+    const MUTABLE_BY_OWNER = new Set(['description', 'notes']);
+    const MUTABLE_BY_ADMIN = new Set(['description', 'notes', 'status']);
+    const updateData = req.user.role === 'admin'
+      ? Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_ADMIN.has(k)))
+      : Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_OWNER.has(k)));
+    // admin が PUT で status を 'cancelled' にする場合、エスクローを先にキャンセルする。
+    // これが無いと HELD 資金が永久にロックされ借り手は返金を受けられない（escrow 不整合）。
+    // HELD エスクローのキャンセル失敗は致命的: 注文更新を中断してエラーを返す。
+    if (updateData.status === 'cancelled') {
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const escrows = EscrowRepository.getByOrderId(order.id) || [];
+        if (escrows.length > 0) {
+          const { createEscrowService } = require('../../../payments/escrow-service');
+          const escrowSvc = createEscrowService();
+          for (const escrow of escrows) {
+            if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
+            // HELD escrow cancel failure must not be silently swallowed — propagate it.
+            escrowSvc.cancel(escrow.id);
+          }
+        }
+      } catch (e) {
+        throw new APIError(ErrorTypes.INTERNAL,
+          `Cannot cancel order: escrow cancellation failed (${e.message}). Retry or resolve escrow manually.`,
+          502);
+      }
+    }
+    // オーダーを更新（update() は内部で merge するため delta のみ渡す。
+    // 旧コードの { ...order, ...sanitized } は getById〜update 間の並行書き込みを上書きする
+    // stale-spread anti-pattern だった）
+    const prevStatus = order.status;
+    const updatedOrder = OrderRepository.update(order.id, updateData);
     logger.info(`Order updated: ${order.id}`);
+    invalidateUserCache(req.user.id);
+    if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
+    // Admin status overrides must be audit-logged with the acting admin's ID.
+    // Without this, a malicious or compromised admin can silently alter order states
+    // (e.g., cancel a disputed order to deny a renter's refund) with no tamper-evident record.
+    if (updateData.status && updateData.status !== prevStatus && req.user.role === 'admin') {
+      appendAuditLog('admin_order_status_override', {
+        orderId: order.id,
+        previousStatus: prevStatus,
+        newStatus: updateData.status,
+        adminId: req.user.id,
+        orderUserId: order.userId,
+        orderProviderId: order.providerId,
+      }, req.user.id);
+    }
+    // ステータスが matched または active に変わった場合は借り手へ通知
+    if (updateData.status && updateData.status !== prevStatus) {
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        if (updateData.status === 'matched') {
+          notifyUser(order.userId, 'order_matched',
+            `【Strawberry】注文がマッチしました\n注文: #${order.id}\nまもなく利用を開始できます`,
+            { subject: `【Strawberry】注文 #${order.id} マッチング完了` });
+        } else if (updateData.status === 'active') {
+          notifyUser(order.userId, 'order_started',
+            `【Strawberry】GPU の利用が開始されました\n注文: #${order.id}`,
+            { subject: `【Strawberry】注文 #${order.id} 利用開始` });
+        }
+      } catch (_) { /* 通知失敗は更新を妨げない */ }
+    }
     res.json({
       message: 'Order updated successfully',
       order: updatedOrder
@@ -256,36 +766,110 @@ router.delete('/:id',
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
+    // DELETE (soft-cancel) is the renter's self-cancel path. allowOwnerOrAdmin also
+    // admits providers via order.providerId, but providers must use POST /:id/reject.
+    // Allowing providers here lets them forge a 'user_cancelled' reason, forfeiting
+    // the renter's escrow deposit and breaking dispute resolution.
+    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can cancel an order via DELETE. Providers must use POST /:id/reject.', 403);
+    }
     logger.info(`Deleting order: ${order.id}`);
-    // 状態チェック
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
-    if (!['pending', 'matched'].includes(order.status)) {
+    // 注文単位の mutex: 並行するキャンセルリクエストが escrowSvc.cancel() を
+    // 二重呼出しする前に updateIf CAS が実行されるよう直列化する。
+    return withLock(`order:${order.id}:cancel`, async () => {
+    // 状態チェック（ロック内で再読み込みして最新状態を確認）
+    const freshOrder = OrderRepository.getById(order.id);
+    if (!freshOrder || !['pending', 'matched'].includes(freshOrder.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
     }
-    const deleted = OrderRepository.delete(order.id);
-    if (!deleted) {
-      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    // エスクローが存在する場合は返金キャンセルを試みる。
+    // HELD エスクロー（入金済）のキャンセル失敗は致命的: 注文をキャンセル状態にすると
+    // 資金が HELD のまま永久にロックされるため、失敗時は注文キャンセルを中断してエラーを返す。
+    // PENDING エスクローは未入金なので失敗しても資金喪失はなく、ベストエフォートで扱う。
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const escrows = EscrowRepository.getByOrderId(order.id);
+      if (Array.isArray(escrows) && escrows.length > 0) {
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        for (const escrow of escrows) {
+          if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
+          if (escrow.state === 'HELD') {
+            // HELD escrow cancel failure must block the delete — do NOT swallow.
+            escrowSvc.cancel(escrow.id);
+          } else {
+            // PENDING/DISPUTED: best-effort cancel; failure is logged but non-blocking.
+            try { escrowSvc.cancel(escrow.id); } catch (e) {
+              logger.warn(`Non-critical escrow cancel failed for ${escrow.id} (${escrow.state}): ${e.message}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name === 'APIError') throw e;
+      // Escrow lookup failure or HELD cancel failure — block the order cancellation.
+      throw new APIError(ErrorTypes.INTERNAL,
+        `Cannot cancel order: escrow operation failed (${e.message}). Retry or contact support.`,
+        502);
     }
-    logger.info(`Order deleted: ${order.id}`);
-    res.json({ message: 'Order deleted', orderId: order.id });
+    // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。
+    // updateIf で CAS を使う: 並行する /accept が pending→matched へ遷移させた後に
+    // DELETE の status=pending 確認（req.resource は snapshot）が通過し、
+    // 盲目的な update() が matched を上書きキャンセルするのを防ぐ。
+    const cancelResult = OrderRepository.updateIf(
+      order.id,
+      (o) => ['pending', 'matched'].includes(o.status),
+      {
+        status: 'cancelled',
+        cancelReason: 'user_cancelled',
+        cancelledAt: new Date().toISOString(),
+      }
+    );
+    if (!cancelResult.ok) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `Order status changed concurrently (now '${cancelResult.current?.status}'). Only pending or matched orders can be cancelled.`,
+        409
+      );
+    }
+    // プロバイダへキャンセル通知（予約した GPU が開放されたことを即時連絡）
+    if (order.providerId) {
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        const cancelledGpu = GpuRepository.getById(order.gpuId);
+        const gpuLabel = cancelledGpu ? cancelledGpu.name : order.gpuId;
+        notifyUser(order.providerId, 'order_cancelled',
+          `【Strawberry】注文がキャンセルされました\n注文: #${order.id}\nGPU: ${gpuLabel}`,
+          { subject: `【Strawberry】注文 #${order.id} キャンセル通知` });
+      } catch (_) { /* 通知失敗はキャンセル処理を妨げない */ }
+    }
+    logger.info(`Order cancelled (soft-delete): ${order.id}`);
+    invalidateUserCache(req.user.id);
+    if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
+    res.json({ message: 'Order cancelled', orderId: order.id });
+    }); // end withLock(cancel)
   })
 );
 
 // オーダー作成 (認証必須)
 router.post('/', 
-  apiKeyAuth,
   authenticateJWT,
   validateMiddleware(schemas.order.create),
   asyncHandler(async (req, res) => {
+    // ユーザー別レートリミット（IP ベースグローバル制限の補完）
+    if (!_checkOrderCreateRateLimit(req.user.id)) {
+      throw new APIError(ErrorTypes.CONFLICT,
+        `Too many order creation requests. Limit: ${ORDER_CREATE_RATE_LIMIT} per minute per user.`, 429);
+    }
     // 入力値サニタイズ
     const orderData = sanitizeObject(req.validatedBody, ['description']);
     logger.info('Creating new order');
     // durationMinutes必須・5の倍数・整数のみ許可
     const durationMinutes = Number(orderData.durationMinutes);
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0 || durationMinutes % 5 !== 0) {
       throw new APIError(ErrorTypes.VALIDATION, 'durationMinutes must be a positive integer and a multiple of 5 (minutes)', 400);
     }
+    // 注: durationMinutes の上限(30日 = 43200分)は schemas.order.create(Joi) が担保する。
     orderData.durationMinutes = durationMinutes;
 
     // gpuId必須化（maxPricePerHourとの排他チェック）
@@ -297,10 +881,59 @@ router.post('/',
     }
 
     // GPUの存在チェック
-    const GpuRepository = require('../../../db/json/GpuRepository');
     const gpu = GpuRepository.getById(orderData.gpuId);
     if (!gpu) {
       throw new APIError(ErrorTypes.NOT_FOUND, 'Specified GPU not found', 404);
+    }
+    // 自己取引（ウォッシュトレード）防止: プロバイダは自分の GPU を注文できない。
+    // これを許すと、注文→完了で recordJobResult(true) により自分の評判を、
+    // 自己レビューで自分の GPU 評価を、いずれも無から捏造できてしまう（信頼層の偽造）。
+    if (gpu.providerId && gpu.providerId === req.user.id) {
+      throw new APIError(ErrorTypes.VALIDATION, 'You cannot order your own GPU', 400);
+    }
+    // GPU 利用可能性チェック: プロバイダが明示的に無効化した GPU は予約不可。
+    // GET /gpus リストはフロントエンド向けの表示フィルタだが、gpuId を知っていれば
+    // リストに出なくても直接 POST /orders で予約できてしまう(バイパス)のでここで防ぐ。
+    if (gpu.available === false) {
+      throw new APIError(ErrorTypes.CONFLICT, 'GPU is not available for booking', 409);
+    }
+    // 手動ブロック期間との重複チェック（プロバイダが整備/メンテのため予約を止めた時間帯）。
+    // double-booking チェックはオーダーステータス基準なのでこちらも必要。
+    const reqStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
+    const reqEnd = reqStart + durationMinutes * 60 * 1000;
+    if (Array.isArray(gpu.manualBlocks)) {
+      const blocked = gpu.manualBlocks.find(b => {
+        const bs = new Date(b.from).getTime();
+        const be = new Date(b.to).getTime();
+        return Number.isFinite(bs) && Number.isFinite(be) && reqStart < be && reqEnd > bs;
+      });
+      if (blocked) {
+        throw new APIError(ErrorTypes.CONFLICT,
+          `GPU is manually blocked during the requested period (blocked until ${blocked.to})`, 409);
+      }
+    }
+    // 借り手レーティング資格チェック: ルールは renter-eligibility に集約（注文作成と
+    // GET /gpus/:id/eligibility 事前チェックで同一ロジックを共有し、ドリフトを防ぐ）。
+    //
+    // 新規（レビュー実績ゼロ）の借り手の扱いには設計上のトレードオフがある:
+    //   - 厳格: 新規=評価0 とみなし floor>0 の GPU を一律拒否 → Sybil（捨てアカウントで
+    //     低評価を回避）に強いが、正当な新規借り手の参入を全プロバイダが阻害でき、
+    //     二面市場のオンボーディングを殺す。
+    //   - 寛容（既定）: 新規は「未評価」として通し、プロバイダの accept ゲートで判断させる。
+    //     注文作成は pending を生むだけでプロバイダの明示承認が必要なため、Sybil の実害は
+    //     accept 時点で抑止できる。
+    // 既定は寛容とし、Sybil 耐性を必須としたいプロバイダは gpu.rejectUnratedRenters:true で
+    // 明示的にオプトインできる（未評価の借り手も floor 扱いで拒否）。
+    // minRenterRating を設定しない GPU（undefined/0/null）は全借り手を受け付ける。
+    const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
+    const _allOrdersForRating = OrderRepository.getAll();
+    const renterRating = computeRenterRating(_allOrdersForRating, req.user.id);
+    const renterRatingAverage = renterRating.average; // 通知メッセージで使用
+    const renterReviewCount = renterRating.count;
+    // self_trade は上で専用メッセージ済みなので、ここではレーティング系の判定のみ強制する。
+    const _elig = evaluateRenterEligibility(gpu, req.user.id, renterRating);
+    if (!_elig.eligible && (_elig.reason === 'no_rating_history' || _elig.reason === 'below_rating_floor')) {
+      throw new APIError(ErrorTypes.VALIDATION, _elig.message, 422);
     }
     // 料金計算: GPUのpricePerHour必須
     let pricePerHour = gpu.pricePerHour;
@@ -308,24 +941,126 @@ router.post('/',
       throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
     }
 
+    // 為替レートを先にフェッチ（キャッシュ活用）。以下の全チェックと create() は
+    // 同期的に実行される（await なし）ため、この await の後に事前予約/二重予約の
+    // TOCTOU レースウィンドウが生じない。
+    // 旧実装: fetchRateInfo を洪水チェックと二重予約チェックの「間」に置いていた。
+    // これにより Node.js イベントループが yield し、並行リクエストが洪水チェックを通過した
+    // 後・二重予約チェック前に create() を実行できた（GPU 二重予約）。
+    // 修正: fetchRateInfo を全チェックより前に移動。洪水上限超過時は若干余分なキャッシュ
+    // 参照が発生するが、fetchRateInfo はほぼ常にキャッシュヒットするため許容範囲。
+    // fetchRateInfo().rate は「1 BTC あたりの JPY」（getBTCtoJPYRate の単位）。
+    // 変数名 satoshiToJPY は誤解を招く（実体は BTC あたりのレート）— sat→JPY 換算は
+    // totalPrice(sat) を 1e8 で割って BTC に変換してから乗じる必要がある（下記参照）。
+    const { rate: btcToJPY } = await fetchRateInfo();
+
+    // 洪水防止: 2 段階チェック（単一 getAll() で両チェックを完結させ余分な I/O を避ける）。
+    const MAX_GLOBAL_PENDING_PER_USER = Number(process.env.MAX_PENDING_ORDERS_PER_USER) || 50;
+    const MAX_PENDING_ORDERS_PER_USER_GPU = 5;
+    const userBlockingOrders = OrderRepository.getAll().filter(
+      (o) => o.userId === req.user.id && BLOCKING_ORDER_STATUSES.has(o.status)
+    );
+    if (userBlockingOrders.length >= MAX_GLOBAL_PENDING_PER_USER) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `You have reached the global limit of ${MAX_GLOBAL_PENDING_PER_USER} active/pending orders. Complete or cancel existing orders before creating more.`,
+        409
+      );
+    }
+    const userPendingForGpu = userBlockingOrders.filter((o) => o.gpuId === orderData.gpuId).length;
+    if (userPendingForGpu >= MAX_PENDING_ORDERS_PER_USER_GPU) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `You already have ${MAX_PENDING_ORDERS_PER_USER_GPU} active orders for this GPU. Complete or cancel existing orders before creating more.`,
+        409
+      );
+    }
+
+    // 二重予約チェック: 期限切れ pending を先に失効させ、時間帯の重複を確認する。
+    // scheduledStartAt が指定された場合はカレンダー予約として時間帯重複を検査し、
+    // 指定がない場合は即時予約として全 BLOCKING 注文と重複とみなす。
+    // このブロックは同期的（await なし）— fetchRateInfo() が上で済んでいるため
+    // ここから OrderRepository.create() までイベントループの yield は発生しない。
+    expireStaleOrders();
+    expireStaleMatchedOrders();
+    // Reject scheduledStartAt more than 5 minutes in the past (allows clock-drift
+    // but prevents creating orders for historical dates that bypass booking checks).
+    if (orderData.scheduledStartAt) {
+      const schedMs = new Date(orderData.scheduledStartAt).getTime();
+      if (!Number.isFinite(schedMs)) {
+        throw new APIError(ErrorTypes.VALIDATION, 'scheduledStartAt is not a valid date', 400);
+      }
+      if (schedMs < Date.now() - 5 * 60 * 1000) {
+        throw new APIError(ErrorTypes.VALIDATION,
+          'scheduledStartAt must not be more than 5 minutes in the past', 400);
+      }
+      // 先行予約の上限: pending 注文の絶対 TTL(90日)を超える枠は、後で必ず自動
+      // キャンセルされる（在庫を無駄にブロックするだけ）ため作成時点で拒否する。
+      const maxAheadMs = MAX_ORDER_SCHEDULE_AHEAD_DAYS * 24 * 60 * 60 * 1000;
+      if (schedMs > Date.now() + maxAheadMs) {
+        throw new APIError(ErrorTypes.VALIDATION,
+          `scheduledStartAt must not be more than ${MAX_ORDER_SCHEDULE_AHEAD_DAYS} days in the future`, 400);
+      }
+    }
+    const newStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
+    const newEnd = newStart + durationMinutes * 60 * 1000;
+    const blocking = OrderRepository.getAll().find(o => {
+      if (o.gpuId !== orderData.gpuId) return false;
+      if (!BLOCKING_ORDER_STATUSES.has(o.status)) return false;
+      const existingStart = new Date(o.scheduledStartAt || o.createdAt).getTime();
+      const existingEnd = existingStart + (o.durationMinutes || 0) * 60 * 1000;
+      return newStart < existingEnd && newEnd > existingStart;
+    });
+    if (blocking) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        `GPU is not available: an order in '${blocking.status}' state already exists for this GPU at the requested time`,
+        409
+      );
+    }
+
     // ユーザーIDを設定
     orderData.userId = req.user.id;
+    // GPU プロバイダ ID を注文に記録（allowOwnerOrAdmin でプロバイダが自分の GPU 上の注文を管理できるようにする）
+    orderData.providerId = gpu.providerId || null;
     // オーダーステータスを設定
     orderData.status = 'pending';
+    // 予約時間帯を確定（scheduledStartAt 未指定 = 即時）
+    orderData.scheduledStartAt = orderData.scheduledStartAt || new Date().toISOString();
+    orderData.scheduledEndAt = new Date(new Date(orderData.scheduledStartAt).getTime() + durationMinutes * 60 * 1000).toISOString();
     // 5分単価
     const pricePer5Min = pricePerHour / 12;
-    const totalPrice = pricePer5Min * (durationMinutes / 5);
-    // 冗長化為替APIで換算（キャッシュ活用）
-    const { getBTCtoJPYRate } = require('../../../utils/exchange-rate');
-    const satoshiToJPY = await getBTCtoJPYRate();
-    const totalPriceJPY = Math.round(totalPrice * satoshiToJPY);
+    // totalPrice は整数 sats へ丸める（computeOrderPricing と同一規則）。丸めないと
+    // 注文作成時に保存・表示する totalPrice が、支払い時に再計算される額と食い違う。
+    // 1 satoshi はビットコインの最小不可分単位。pricePerHour > 0（上で検証済み）の有償注文が
+    // 丸めで 0 sat になると「無料レンタル」かつ「支払い不能(btc-onchain は 0 を拒否)」になるため、
+    // 正の生額は最小 1 sat に切り上げる（端数 0.25 sat の注文も実際には 1 sat 課金される）。
+    const rawTotal = pricePer5Min * (durationMinutes / 5);
+    const totalPrice = rawTotal > 0 ? Math.max(1, Math.round(rawTotal)) : 0;
+    // totalPrice は satoshi、btcToJPY は BTC あたりのレートなので、1e8 で割って
+    // BTC に変換してから乗じる（そのまま掛けると 1e8 倍に水増しされる単位不一致バグ）。
+    const rawJPY = Math.round((totalPrice / 1e8) * btcToJPY);
+    const totalPriceJPY = Number.isFinite(rawJPY) ? rawJPY : null;
     // ファイル永続化リポジトリで作成
+    // 価格ロック: 合意時の時間単価を注文に固定する。これが無いと支払い時の
+    // computeOrderPricing が GPU の「現在価格」へフォールバックし、プロバイダが注文後に
+    // 値上げするとレンターが合意額より高く課金される（見積りの拘束力が失われる）バグになる。
+    orderData.pricePerHour = pricePerHour;
     orderData.totalPrice = totalPrice;
     orderData.totalPriceJPY = totalPriceJPY;
     const createdOrder = OrderRepository.create(orderData);
     // 通知サービス呼び出し
-    const { sendNotification, NotifyType } = require('../../../utils/notifier');
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;
+    // GPU 提供者（プロバイダ）へ通知（notification-settings で登録したチャネルへ）
+    if (gpu.providerId) {
+      const { notifyUser } = require('../../../utils/user-notify');
+      const renterRatingStr = renterRatingAverage !== null
+        ? `借り手評価: ★${Math.round(renterRatingAverage * 10) / 10}（${renterReviewCount}件）\n`
+        : '借り手評価: 未評価（新規）\n';
+      notifyUser(gpu.providerId, 'order_created',
+        `【Strawberry】あなたの GPU に注文が入りました\n注文: #${createdOrder.id}\nGPU: ${gpu.name}\n${renterRatingStr}時間: ${durationMinutes}分\n報酬: ${totalPrice} sat (${totalPriceJPY}円)`,
+        { subject: `【Strawberry】新規注文 #${createdOrder.id}（${gpu.name}）` });
+    }
     // メール通知（ユーザーのメールアドレスが取得できる場合のみ）
     if (req.user.email) {
       sendNotification(NotifyType.EMAIL, notifyMsg, {
@@ -353,7 +1088,7 @@ router.post('/',
         chatId: process.env.TELEGRAM_CHAT_ID
       }).catch(() => {});
     }
-    // Googleカレンダー連携（非同期で実行、失敗はログのみ）
+    // Googleカレンダー連携（非同期で実行、失敗はログのみ。googleapis は optional）
     try {
       const { addEventToCalendar } = require('../../../utils/google-calendar');
       const startDate = new Date();
@@ -377,6 +1112,8 @@ router.post('/',
       totalPrice,
       totalPriceJPY
     });
+    // 注文作成後に借り手のキャッシュを即時無効化（60秒 TTL を待たず最新一覧が見える）
+    invalidateUserCache(req.user.id);
     res.status(201).json({
       message: 'Order created successfully',
       orderId: createdOrder.id,
@@ -391,66 +1128,613 @@ router.post('/',
   })
 );
 
+// プロバイダによる注文拒否（GPU 所有者専用 — pending のみ許可）
+// POST /orders/:id/reject { reason?: string }
+router.post('/:id/reject',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    // プロバイダまたは admin のみ許可
+    // order.providerId は注文作成時に確定させる（GPU 再代入後の乗っ取りを防ぐ）
+    const isProvider = order.providerId && order.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can reject an order', 403);
+    }
+    const gpu = GpuRepository.getById(order.gpuId);
+    if (order.status !== 'pending') {
+      throw new APIError(ErrorTypes.VALIDATION, `Cannot reject order in '${order.status}' state (only pending orders can be rejected)`, 400);
+    }
+    const cancelNote = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 500) : '';
+    // TOCTOU防止: reject と DELETE/accept が同時実行された場合どちらか一方のみ通過させる。
+    const rejectResult = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
+      status: 'cancelled',
+      cancelReason: 'provider_rejected',
+      cancelNote,
+      cancelledAt: new Date().toISOString(),
+    });
+    if (!rejectResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before reject could complete; please retry', 409);
+    }
+    // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const escrows = EscrowRepository.getByOrderId(order.id);
+      if (Array.isArray(escrows) && escrows.length > 0) {
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        for (const escrow of escrows) {
+          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
+            try { escrowSvc.cancel(escrow.id); } catch (e) {
+              logger.warn(`Escrow cancel failed on reject (id=${escrow.id}): ${e.message}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Escrow lookup on order reject failed (order=${order.id}): ${e.message}`);
+    }
+    // 借り手（レンター）へ通知
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpuName = gpu ? gpu.name : order.gpuId;
+    notifyUser(order.userId, 'order_rejected',
+      `【Strawberry】プロバイダがあなたの注文を拒否しました\n注文: #${order.id}\nGPU: ${gpuName}${cancelNote ? `\n理由: ${cancelNote}` : ''}`,
+      { subject: `【Strawberry】注文 #${order.id} が拒否されました` });
+    logger.info(`Order rejected by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id, cancelNote });
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
+    res.json({ message: 'Order rejected', orderId: order.id });
+  })
+);
+
+// プロバイダによる注文の明示的承認 (pending → matched)
+// POST /:id/accept — GPU オーナーまたは admin のみ
+// 自動マッチングを使わず、プロバイダが手動で注文を確認・承認するフロー。
+router.post('/:id/accept',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    // order.providerId は注文作成時に確定させる（注文作成後の GPU 乗っ取り防止）。
+    const isProvider = order.providerId && order.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can accept an order', 403);
+    }
+    if (order.status !== 'pending') {
+      throw new APIError(ErrorTypes.VALIDATION, `Cannot accept order in '${order.status}' state (only pending orders can be accepted)`, 400);
+    }
+    const gpu = GpuRepository.getById(order.gpuId);
+    // GPU ownership re-check: if an admin reassigned this GPU after the order was
+    // created, the ex-provider's order.providerId still matches but they no longer
+    // own the GPU. Block accept until an admin resolves the ownership conflict.
+    if (req.user.role !== 'admin' && gpu && gpu.providerId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'GPU ownership has changed since this order was created; contact an admin to resolve', 403);
+    }
+    const now = new Date().toISOString();
+    // TOCTOU防止: accept と reject/DELETE が同時実行、または accept-ownership-check と
+    // GPU 所有権移転が競合した場合にどちらか一方のみ通過させる。
+    // GPU 所有権を updateIf 述語の中で再確認し、チェック→書込みの間に admin が
+    // GPU を他プロバイダへ移管した場合でも旧プロバイダの accept が通らないようにする。
+    const acceptingUserId = req.user.id;
+    const acceptResult = OrderRepository.updateIf(order.id,
+      (o) => o.status === 'pending' &&
+        (req.user.role === 'admin' || (() => {
+          const freshGpu = GpuRepository.getById(o.gpuId);
+          return freshGpu && freshGpu.providerId === acceptingUserId;
+        })()),
+      { status: 'matched', matchedAt: now, updatedAt: now }
+    );
+    // updateIf は常にオブジェクト({ok, row} or {ok:false, reason, current})を返す。
+    // !acceptResult は決して true にならないため CAS 失敗時に renter に "accepted" 通知が
+    // 飛び、reject 側で cancelled になっているのに matched と返してしまう不整合が出ていた。
+    if (!acceptResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before accept could complete; please retry', 409);
+    }
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpuName = gpu ? gpu.name : order.gpuId;
+    notifyUser(order.userId, 'order_accepted',
+      `【Strawberry】プロバイダがあなたの注文を承認しました\nGPU: ${gpuName}\n注文: #${order.id}`,
+      { subject: `【Strawberry】注文 #${order.id} が承認されました` });
+    logger.info(`Order accepted by provider: ${order.id}`, { orderId: order.id, providerId: req.user.id });
+    invalidateUserCache(order.userId);
+    invalidateUserCache(req.user.id);
+    res.json({ message: 'Order accepted', orderId: order.id, status: 'matched' });
+  })
+);
+
+// 係争申請（active/matched 注文の当事者〈借り手 or プロバイダ〉が管理者介入を要求）
+// POST /orders/:id/dispute { reason: string }
+// 管理者は別途 POST /api/v1/marketplace/escrow/:id/resolve で決済する。
+router.post('/:id/dispute',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    const isOwner = order.userId === req.user.id;
+    const isProvider = order.providerId && order.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isOwner && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order owner, GPU provider, or admin can raise a dispute', 403);
+    }
+    if (order.dispute) {
+      throw new APIError(ErrorTypes.CONFLICT, 'A dispute has already been raised for this order', 409);
+    }
+    if (!['active', 'matched'].includes(order.status)) {
+      throw new APIError(ErrorTypes.VALIDATION, `Cannot dispute an order in '${order.status}' state (only active or matched orders can be disputed)`, 400);
+    }
+    // matched状態の係争は支払い済みの場合のみ許可（無支払いでプロバイダGPUをDoSする攻撃を防止）
+    if (order.status === 'matched' && req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const payments = PaymentRepository.getByOrderId(order.id) || [];
+      const hasPaidPayment = payments.some(p => p.status === 'paid');
+      if (!hasPaidPayment) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot dispute a matched order without confirmed payment. Complete payment first or wait for the provider to start the session.', 402);
+      }
+    }
+    // 連続グリーフィング防止 — ただし「率」で判定する（#23 の絶対カウント永久バンを是正）。
+    // プロバイダ評判が成功「率」(Bayesian)で測られるのと対称に、申請者も棄却「率」で測る。
+    // 正当な係争(vindicated)を起こせば率が下がり回復できる＝単調な永久ペナルティにしない。
+    // ゲート発火条件: 解決済み係争が最小サンプル以上 かつ 棄却率が閾値以上（管理者は対象外）。
+    // 注文単位の mutex: renter と provider が同時に同じ注文へ係争を申請した場合に
+    // 相互排除する（per-user key では異なるユーザー間で serialization されない）。
+    // per-user open-disputes カウントは内側でチェックするため保護される。
+    return withLock(`order:${order.id}:dispute`, async () => {
+      if (req.user.role !== 'admin') {
+        const MIN_RESOLVED = Number(process.env.MIN_RESOLVED_DISPUTES) || 3;
+        const MAX_DENIED_RATE = Number(process.env.MAX_DENIED_DISPUTE_RATE) || 0.67;
+        const UserRepository = require('../../../db/json/UserRepository');
+        const me = UserRepository.getById(req.user.id);
+        const denied = (me && me.deniedDisputeCount) || 0;
+        const vindicated = (me && me.vindicatedDisputeCount) || 0;
+        const resolved = denied + vindicated;
+        if (resolved >= MIN_RESOLVED && denied / resolved >= MAX_DENIED_RATE) {
+          throw new APIError(ErrorTypes.FORBIDDEN,
+            `Too high a share of your disputes have been denied (${denied}/${resolved}); raise legitimate disputes or contact support`, 403);
+        }
+        // 未解決係争の絶対数上限: 解決歴がないアカウントでも複数の未解決係争でプロバイダを
+        // DoS できるため（1件/注文の制限はあるが多数の注文で迂回可能）。
+        const MAX_OPEN_DISPUTES = Number(process.env.MAX_OPEN_DISPUTES_PER_USER) || 3;
+        const openDisputes = OrderRepository.getAll().filter(
+          (o) => o.dispute && o.dispute.raisedBy === req.user.id && o.status === 'disputed'
+        ).length;
+        if (openDisputes >= MAX_OPEN_DISPUTES) {
+          throw new APIError(ErrorTypes.CONFLICT,
+            `You already have ${MAX_OPEN_DISPUTES} open disputes. Wait for existing disputes to be resolved before raising new ones.`,
+            409
+          );
+        }
+      }
+      const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 1000) : '';
+      const dispute = { raisedBy: req.user.id, reason, raisedAt: new Date().toISOString() };
+      // TOCTOU防止: 並行 dispute リクエストや stop との競合を防ぐ。
+      const disputeResult = OrderRepository.updateIf(
+        order.id,
+        (o) => ['active', 'matched'].includes(o.status) && !o.dispute,
+        { status: 'disputed', dispute }
+      );
+      if (!disputeResult.ok) {
+        throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before dispute could be raised; please retry', 409);
+      }
+
+      // 管理者・運営側へ通知（ユーザー通知設定経由）
+      const { notifyUser } = require('../../../utils/user-notify');
+      const gpu = GpuRepository.getById(order.gpuId);
+      const gpuName = gpu ? gpu.name : order.gpuId;
+      notifyUser(order.userId, 'order_dispute_raised',
+        `【Strawberry】注文 #${order.id} に係争が申請されました。\nGPU: ${gpuName}${reason ? `\n理由: ${reason}` : ''}`,
+        { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
+      if (order.providerId && order.providerId !== req.user.id) {
+        notifyUser(order.providerId, 'order_dispute_raised',
+          `【Strawberry】あなたの GPU 注文に係争が申請されました。\n注文: #${order.id}\nGPU: ${gpuName}`,
+          { subject: `【Strawberry】係争申請: 注文 #${order.id}` });
+      }
+      logger.info(`Dispute raised for order: ${order.id}`, { orderId: order.id, raisedBy: req.user.id });
+      invalidateUserCache(order.userId);
+      if (order.providerId) invalidateUserCache(order.providerId);
+      res.status(201).json({ message: 'Dispute raised', orderId: order.id, dispute });
+    });
+  })
+);
+
+// 係争の裁定（管理者のみ）— 宙ぶらりんの disputed 注文を終端状態へ遷移させ、
+// かつ「実フロー」のレピュテーションへ失敗を反映する（これまで失敗系は抽象 auction 経路でしか
+// 記録されず、実際の注文ライフサイクルでは reputation が単調増加しかしなかった欠陥を是正）。
+// POST /orders/:id/dispute/resolve { decision: 'refund'|'uphold', note?: string }
+//  - refund: 借り手勝訴（プロバイダ過失）→ 注文を cancelled、エスクロー返金、
+//            provider に recordJobResult(false) + slash（評判を減点）。
+//  - uphold: 係争棄却（プロバイダ正当）→ 注文を completed、provider に recordJobResult(true)。
+router.post('/:id/dispute/resolve',
+  authenticateJWT,
+  checkRole(['admin']),
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const orderId = req.params.id;
+    // 二重裁定の副作用（reputation slash + credit が両方走る、raiser counter の二重加算など）
+    // を防ぐため、order 単位の mutex で全フローを直列化する。CAS だけだと CAS 前の副作用
+    // （raiser の getById+update、reputation の getById+update）が並行に走り得る。
+    // ロックキーを `order:${orderId}` に統一: /start・/stop と同一 mutex を共有することで、
+    // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が escrow 精算を
+    // 並行実行し GPU が二重解放・二重精算されるリスクを排除する（旧: dispute-resolve
+    // キーが /start・/stop と別 namespace で完全な排他になっていなかった）。
+    return withLock(`order:${orderId}`, async () => {
+    const order = OrderRepository.getById(orderId);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (order.status !== 'disputed') {
+      throw new APIError(ErrorTypes.VALIDATION, `Only disputed orders can be resolved (current: '${order.status}')`, 400);
+    }
+    const decision = req.body.decision;
+    if (!['refund', 'uphold'].includes(decision)) {
+      throw new APIError(ErrorTypes.VALIDATION, "decision must be 'refund' or 'uphold'", 400);
+    }
+    const note = req.body.note ? sanitizeString(String(req.body.note)).slice(0, 1000) : '';
+    const resolvedAt = new Date().toISOString();
+    const resolution = { decision, note, resolvedBy: req.user.id, resolvedAt };
+
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpu = GpuRepository.getById(order.gpuId);
+    const gpuName = gpu ? gpu.name : order.gpuId;
+
+    // TOCTOU防止: 二重裁定による reputation/escrow 副作用の二重実行を防ぐ。
+    // updateIf が null を返した場合は別の管理者リクエストが先に状態遷移済みなので 409 を返す。
+    if (decision === 'refund') {
+      // 注文を終端へ（cancelled）。dispute オブジェクトに裁定結果を併記。
+      const resolveRefundResult = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', {
+        status: 'cancelled',
+        cancelReason: 'dispute_resolved_refund',
+        cancelledAt: resolvedAt,
+        dispute: { ...order.dispute, resolution },
+      });
+      if (!resolveRefundResult.ok) {
+        throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
+      }
+      // エスクロー返金（存在すれば、ベストエフォート）
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const escrows = EscrowRepository.getByOrderId(order.id);
+        if (Array.isArray(escrows) && escrows.length > 0) {
+          const { createEscrowService } = require('../../../payments/escrow-service');
+          const escrowSvc = createEscrowService();
+          for (const e of escrows) {
+            if (!['CANCELED', 'SETTLED'].includes(e.state)) {
+              try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn(`Escrow refund on dispute resolve failed (order=${order.id}): ${e.message}`);
+      }
+      // レピュテーション減点（実フローでの失敗反映）— ベストエフォート
+      if (order.providerId) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          const rep = createReputationService();
+          rep.recordJobResult(order.providerId, false);
+          rep.slash(order.providerId);
+        } catch (e) {
+          logger.warn(`reputation penalty on dispute refund failed (order=${order.id}): ${e.message}`);
+        }
+      }
+      // 係争認容 = 申請者の主張は正当。申請者に「認容された係争」を加算する。
+      // これにより申請者の「棄却率」が下がり、ゲート(#23の monotonic な永久バンを是正)から
+      // 回復できる。正当な係争を多く起こす利用者を、数件の棄却で永久に締め出さない。
+      const vRaiser = order.dispute && order.dispute.raisedBy;
+      if (vRaiser) {
+        try {
+          const UserRepository = require('../../../db/json/UserRepository');
+          const u = UserRepository.getById(vRaiser);
+          if (u) {
+            UserRepository.update(vRaiser, { vindicatedDisputeCount: (u.vindicatedDisputeCount || 0) + 1 });
+          }
+        } catch (e) {
+          logger.warn(`vindicated-dispute accounting failed (raiser=${vRaiser}): ${e.message}`);
+        }
+      }
+    } else {
+      // uphold: 係争棄却。仕事は有効として completed へ。プロバイダに成功を記録。
+      const resolveUpholdResult = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', {
+        status: 'completed',
+        stoppedAt: resolvedAt,
+        completedAt: resolvedAt,
+        dispute: { ...order.dispute, resolution },
+      });
+      if (!resolveUpholdResult.ok) {
+        throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
+      }
+      // エスクロー精算（uphold = 仕事は有効 → HELD 資金をプロバイダへ解放）。
+      // refund 側が escrowSvc.cancel で返金するのと対称に、uphold 側でも明示的に
+      // SETTLED へ遷移させないと HELD のまま資金が永久ロックされ、プロバイダは
+      // 正当に裁定勝ちしても入金されない（resolveUphold が status だけ completed に
+      // して escrow を放置していた漏れの修正）。escrow の現状態に応じて正しい
+      // イベント（HELD→DELIVER_OK / DISPUTED→RESOLVE_SETTLE）を選ぶ。
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const escrows = EscrowRepository.getByOrderId(order.id);
+        if (Array.isArray(escrows) && escrows.length > 0) {
+          const { createEscrowService } = require('../../../payments/escrow-service');
+          const escrowSvc = createEscrowService();
+          for (const e of escrows) {
+            if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
+            const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'
+              : e.state === 'HELD' ? 'DELIVER_OK'
+              : null;
+            if (!event) continue; // PENDING 等、まだ入金されていないものは精算対象外
+            try {
+              // 全量納品・SLA 満たしたものとして精算内訳を記録してから SETTLED へ遷移。
+              escrowSvc.settle(e.id, { deliveredRatio: 1, slaUptimePct: 100 });
+              escrowSvc.apply(e.id, event);
+              logger.info(`Escrow ${e.id} settled (dispute uphold) for order ${order.id}`);
+            } catch (err) {
+              logger.warn(`Escrow settle on dispute uphold failed for ${e.id}: ${err.message}`);
+            }
+          }
+        }
+      } catch (e) {
+        logger.warn(`Escrow settlement on dispute uphold failed (order=${order.id}): ${e.message}`);
+      }
+      if (order.providerId) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          createReputationService().recordJobResult(order.providerId, true);
+        } catch (e) {
+          logger.warn(`reputation credit on dispute uphold failed (order=${order.id}): ${e.message}`);
+        }
+      }
+      // 係争棄却 = 申請者の主張は不当。申請者(raisedBy)に「棄却された係争」を加算する。
+      // 係争は active 注文を凍結しプロバイダの完了・支払・評判加点をブロックするため、
+      // 無償の連続係争はグリーフィング(DoS)になる。申請者にコストを課して対称性を回復する。
+      const raiser = order.dispute && order.dispute.raisedBy;
+      if (raiser) {
+        try {
+          const UserRepository = require('../../../db/json/UserRepository');
+          const u = UserRepository.getById(raiser);
+          if (u) {
+            UserRepository.update(raiser, { deniedDisputeCount: (u.deniedDisputeCount || 0) + 1 });
+          }
+        } catch (e) {
+          logger.warn(`denied-dispute accounting failed (raiser=${raiser}): ${e.message}`);
+        }
+      }
+    }
+
+    // 両当事者へ裁定結果を通知
+    const verdictText = decision === 'refund' ? '借り手への返金（プロバイダ過失）' : '係争棄却（注文は有効）';
+    for (const uid of [order.userId, order.providerId]) {
+      if (uid) {
+        notifyUser(uid, 'order_dispute_resolved',
+          `【Strawberry】注文 #${order.id} の係争が裁定されました。\n結果: ${verdictText}\nGPU: ${gpuName}${note ? `\n備考: ${note}` : ''}`,
+          { subject: `【Strawberry】係争裁定: 注文 #${order.id}` });
+      }
+    }
+    logger.info(`Dispute resolved for order: ${order.id}`, { orderId: order.id, decision, resolvedBy: req.user.id });
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
+    // 係争解決後はスラッシュ/成功が記録されるためレピュテーションキャッシュを即時無効化する
+    invalidateRepCache(order.userId);
+    if (order.providerId) invalidateRepCache(order.providerId);
+    res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
+    }); // end withLock
+  })
+);
+
+// 注文レビュー投稿（完了済み注文の借り手のみ、1 注文 1 回のみ）
+// POST /orders/:id/review { rating: 1-5, comment?: string }
+router.post('/:id/review',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (order.userId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order owner can submit a review', 403);
+    }
+    // 自己レビュー防止（多層防御）: 注文作成側で自己取引は弾くが、レガシー/管理者生成の
+    // 自己注文が混入しても自分の GPU を自分で評価できないようにする。
+    if (order.providerId && order.providerId === req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You cannot review your own GPU', 403);
+    }
+    if (order.status !== 'completed') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
+    }
+    // レビュー期限: 完了から 30 日以内のみ受け付ける（完了後の嫌がらせ・サクラ投稿を抑止）
+    // completedAt がない旧レコード（stoppedAt のみ）にも対応する多層防御フォールバック
+    const reviewWindowAnchor = order.completedAt || order.stoppedAt;
+    if (reviewWindowAnchor) {
+      const daysSinceCompletion = (Date.now() - new Date(reviewWindowAnchor).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceCompletion > 30) {
+        throw new APIError(ErrorTypes.VALIDATION, 'Reviews must be submitted within 30 days of order completion', 400);
+      }
+    }
+    // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
+    if (req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const payments = PaymentRepository.getByOrderId(order.id) || [];
+      const hasPaidPayment = payments.some(p => p.status === 'paid');
+      if (!hasPaidPayment) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot review an order without confirmed payment', 402);
+      }
+    }
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
+    }
+    const comment = req.body.comment ? sanitizeString(String(req.body.comment)).slice(0, 500) : '';
+    const review = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
+    // Atomic check-and-write: re-reads the order inside the same synchronous section
+    // to prevent a concurrent request that also passed the review=null check above
+    // from overwriting the first writer's review.
+    const reviewResult = OrderRepository.updateIf(order.id,
+      o => o.status === 'completed' && !o.review,
+      { review }
+    );
+    if (!reviewResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a review', 409);
+    }
+    // プロバイダへレビュー通知
+    if (order.providerId) {
+      const { notifyUser } = require('../../../utils/user-notify');
+      const gpu = GpuRepository.getById(order.gpuId);
+      const gpuName = gpu ? gpu.name : order.gpuId;
+      notifyUser(order.providerId, 'order_reviewed',
+        `【Strawberry】あなたの GPU にレビューが投稿されました ★${rating}/5\nGPU: ${gpuName}\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
+        { subject: `【Strawberry】GPU「${gpuName}」にレビュー ★${rating}/5` });
+    }
+    // Invalidate GPU rating cache so the next GET /gpus/:id reflects the new review
+    try {
+      const GpuRoutes = require('../gpu/index');
+      if (typeof GpuRoutes._invalidateGpuRatingCache === 'function') {
+        GpuRoutes._invalidateGpuRatingCache(order.gpuId);
+      }
+    } catch (_) { /* best-effort */ }
+    logger.info(`Review submitted for order: ${order.id}`, { orderId: order.id, rating });
+    // レビュー投稿でプロバイダの平均評価が変わる → キャッシュ無効化
+    if (order.providerId) invalidateRepCache(order.providerId);
+    res.status(201).json({ message: 'Review submitted', review });
+  })
+);
+
+// プロバイダ→借り手レビュー（完了済み注文の GPU プロバイダのみ、1 注文 1 回のみ）。
+// 借り手→プロバイダ評価(#17)の対称: 難あり借り手（不払い・濫用・不当係争）を記録できる手段。
+// POST /orders/:id/renter-review { rating: 1-5, comment?: string }
+router.post('/:id/renter-review',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (!order.providerId) {
+      throw new APIError(ErrorTypes.VALIDATION, 'Order has no provider recorded — renter review unavailable', 400);
+    }
+    if (order.providerId !== req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider can review the renter', 403);
+    }
+    // 自己レビュー防止（多層防御）: 自己注文では借り手＝プロバイダのため評価不可
+    if (order.userId === req.user.id) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'You cannot review yourself', 403);
+    }
+    if (order.status !== 'completed') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Can only review completed orders', 400);
+    }
+    // レビュー期限: 完了から 30 日以内のみ受け付ける（完了後の嫌がらせ・サクラ投稿を抑止）
+    // completedAt がない旧レコード（stoppedAt のみ）にも対応する多層防御フォールバック
+    const renterReviewWindowAnchor = order.completedAt || order.stoppedAt;
+    if (renterReviewWindowAnchor) {
+      const daysSinceCompletion = (Date.now() - new Date(renterReviewWindowAnchor).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceCompletion > 30) {
+        throw new APIError(ErrorTypes.VALIDATION, 'Renter reviews must be submitted within 30 days of order completion', 400);
+      }
+    }
+    // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
+    if (req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const payments = PaymentRepository.getByOrderId(order.id) || [];
+      const hasPaidPayment = payments.some(p => p.status === 'paid');
+      if (!hasPaidPayment) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot submit renter review for an order without confirmed payment', 402);
+      }
+    }
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
+    }
+    const comment = req.body.comment ? sanitizeString(String(req.body.comment)).slice(0, 500) : '';
+    const renterReview = { rating, comment, reviewerId: req.user.id, reviewedAt: new Date().toISOString() };
+    const renterReviewResult = OrderRepository.updateIf(order.id,
+      o => o.status === 'completed' && !o.renterReview,
+      { renterReview }
+    );
+    if (!renterReviewResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'This order already has a renter review', 409);
+    }
+    // 借り手へ通知
+    const { notifyUser } = require('../../../utils/user-notify');
+    notifyUser(order.userId, 'renter_reviewed',
+      `【Strawberry】取引相手（プロバイダ）からあなたへの評価が投稿されました ★${rating}/5\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
+      { subject: `【Strawberry】あなたへの評価 ★${rating}/5（注文 #${order.id}）` });
+    logger.info(`Renter review submitted for order: ${order.id}`, { orderId: order.id, rating, renterId: order.userId });
+    // 借り手レビューが追加されると借り手の renterRatingAverage が変わる → キャッシュ無効化
+    invalidateRepCache(order.userId);
+    res.status(201).json({ message: 'Renter review submitted', review: renterReview });
+  })
+);
+
 // マッチング要求 (認証必須)
-router.post('/:id/match', 
+router.post('/:id/match',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Requesting matching for order: ${orderId}`);
-    
-    // オーダー情報を取得
-    const order = await p2pNetwork.getOrderById(orderId);
-    
+
+    // ローカルリポジトリから取得（ソースオブトゥルース）
+    const order = OrderRepository.getById(orderId);
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
-    
-    // オーダーの所有者確認
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
       return res.status(403).json({ error: 'You do not have permission to match this order' });
     }
-    
-    // オーダーがpending状態であることを確認
     if (order.status !== 'pending') {
-      return res.status(400).json({ 
-        error: 'Order cannot be matched',
-        details: `Current status: ${order.status}`
-      });
+      return res.status(400).json({ error: 'Order cannot be matched', details: `Current status: ${order.status}` });
     }
-    
-    // P2Pネットワークでマッチング実行
+
+    // P2Pマッチングはネットワークサービスが必要
+    if (!requireService(p2pNetwork, res)) return;
     const matchResult = await p2pNetwork.matchOrder(orderId);
-    
+
     if (!matchResult || !matchResult.matched) {
-      return res.json({ 
-        matched: false,
-        message: 'No suitable GPU found for this order'
-      });
+      return res.json({ matched: false, message: 'No suitable GPU found for this order' });
     }
-    
-    // マッチング成功
-    // オーダーステータスを更新
-    await p2pNetwork.updateOrder(orderId, { 
+
+    // P2P ピアは信頼境界の外にいる。matchResult.gpu.providerId をそのまま採用すると、
+    // 悪意あるピアが「実 GPU の ID + 被害者プロバイダの ID」を返して注文の providerId を
+    // 被害者にすり替えられ、レピュテーション操作・払い出し先誤誘導につながる。
+    // 必ずローカル GpuRepository の providerId を真とし、不一致なら 409 で拒否する。
+    const matchedGpuId = matchResult.gpu && matchResult.gpu.id;
+    const localGpu = matchedGpuId ? GpuRepository.getById(matchedGpuId) : null;
+    if (!localGpu) {
+      return res.status(409).json({ error: 'P2P match returned a GPU not present in the local registry' });
+    }
+    if (matchResult.gpu.providerId && localGpu.providerId !== matchResult.gpu.providerId) {
+      logger.warn(`P2P providerId mismatch for GPU ${matchedGpuId}: local=${localGpu.providerId} peer=${matchResult.gpu.providerId}`);
+      return res.status(409).json({ error: 'P2P match providerId conflicts with local GPU registry' });
+    }
+
+    const updateData = {
       status: 'matched',
-      gpuId: matchResult.gpu.id,
-      providerId: matchResult.gpu.providerId,
+      gpuId: matchedGpuId,
+      providerId: localGpu.providerId,
       matchedAt: new Date().toISOString()
+    };
+    // Atomic write: guards against /accept or a second /match completing while
+    // p2pNetwork.matchOrder() was awaiting above. Also double-booking check:
+    // serialize all booking writes for this GPU under a per-GPU lock so that
+    // two concurrent /match calls can't both observe "GPU is free" and both commit.
+    const matchWriteResult = await withLock(`gpu:${matchedGpuId}:book`, async () => {
+      const existingForGpu = OrderRepository.getAll().filter(
+        o => o.gpuId === matchedGpuId && o.id !== orderId && BLOCKING_ORDER_STATUSES.has(o.status)
+      );
+      if (existingForGpu.length > 0) {
+        return { ok: false, reason: 'gpu_double_booked' };
+      }
+      return OrderRepository.updateIf(orderId, o => o.status === 'pending', updateData);
     });
-    
-    // マッチングイベントをログに記録
-    logger.info(`Order matched: ${orderId}`, {
-      orderId,
-      userId: req.user.id,
-      gpuId: matchResult.gpu.id,
-      providerId: matchResult.gpu.providerId
-    });
-    
-    res.json({
-      matched: true,
-      message: 'Order successfully matched with GPU',
-      matchResult
-    });
+    if (!matchWriteResult.ok) {
+      if (matchWriteResult.reason === 'gpu_double_booked') {
+        return res.status(409).json({ error: 'GPU is already booked by another order; match aborted' });
+      }
+      return res.status(409).json({ error: 'Order status changed while matching; match aborted', details: `Current status: ${(matchWriteResult.current || {}).status}` });
+    }
+    if (typeof p2pNetwork.updateOrder === 'function') {
+      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+    }
+
+    logger.info(`Order matched: ${orderId}`, { orderId, userId: req.user.id, gpuId: matchResult.gpu.id });
+    res.json({ matched: true, message: 'Order successfully matched with GPU', matchResult });
   })
 );
 
@@ -463,98 +1747,235 @@ router.post('/:id/start',
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Starting order execution: ${orderId}`);
-    
-    // オーダー情報を取得
-    const order = await p2pNetwork.getOrderById(orderId);
-    
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
-    if (!order) {
-      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
-    }
-    
-    // オーダーの所有者確認
-    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to start this order', 403);
-    }
-    
-    // オーダーがmatched状態であることを確認
-    if (order.status !== 'matched') {
-      return res.status(400).json({ 
-        error: 'Order cannot be started',
-        details: `Current status: ${order.status}`
-      });
-    }
-    
-    // GPUを割り当て
-    const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId);
-    
-    if (!allocation.success) {
-      throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation.message });
-    }
-    
-    // オーダーステータスを更新
-    await p2pNetwork.updateOrder(orderId, { 
-      status: 'active',
-      startedAt: new Date().toISOString(),
-      allocationDetails: allocation
-    });
-    
-    res.json({
-      message: 'Order execution started successfully',
-      allocationDetails: allocation
+
+    // Per-order mutex: prevents concurrent /start calls from both passing the
+    // status check, double-allocating the GPU, and writing duplicate 'active' states.
+    return withLock(`order:${orderId}`, async () => {
+      const order = OrderRepository.getById(orderId);
+      if (!order) {
+        throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+      }
+      if (req.user.role !== 'admin' && order.userId !== req.user.id) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to start this order', 403);
+      }
+      if (order.status !== 'matched') {
+        return res.status(400).json({ error: 'Order cannot be started', details: `Current status: ${order.status}` });
+      }
+
+      // スケジュール開始時刻の検証: 5分の時計ズレ許容を設け、それより前の開始を拒否する。
+      // これがないと、来週予定の注文を今すぐ起動でき、GPU プロバイダの合意時間枠を
+      // 守らずに GPU を早期占有するスロット契約違反が起きる。
+      if (req.user.role !== 'admin' && order.scheduledStartAt) {
+        const schedMs = new Date(order.scheduledStartAt).getTime();
+        const CLOCK_DRIFT_TOLERANCE_MS = 5 * 60 * 1000; // 5分
+        if (!isNaN(schedMs) && Date.now() < schedMs - CLOCK_DRIFT_TOLERANCE_MS) {
+          return res.status(400).json({
+            error: `Order cannot be started before scheduled time`,
+            scheduledStartAt: order.scheduledStartAt,
+          });
+        }
+      }
+
+      // 支払い確認: 無償で GPU を起動されないよう、確定済み支払いレコードを要求する。
+      // 管理者は手動割り当て・テスト環境のために免除。
+      if (req.user.role !== 'admin') {
+        const PaymentRepository = require('../../../db/json/PaymentRepository');
+        const payments = PaymentRepository.getByOrderId(order.id) || [];
+        const hasPaidPayment = payments.some(p => p.status === 'paid');
+        if (!hasPaidPayment) {
+          throw new APIError(
+            ErrorTypes.FORBIDDEN,
+            'Cannot start order: no confirmed payment found. Complete the payment first.',
+            402
+          );
+        }
+      }
+
+      // GPU割り当てには vgpuManager が必要
+      if (!requireService(vgpuManager, res)) return;
+      // vgpuManager.virtualGPUs は物理検出（nvidia-smi 等）を経た GPU のみを保持する。
+      // marketplace 経由で登録された GPU（他プロバイダのマシン上に実在する GPU を含む）は
+      // このノードのローカル検出には現れないため、allocateGPU は常に
+      // "Virtual GPU not found" で失敗していた。GPU レコードを渡し、未登録なら
+      // marketplace のスペックから最小限のエントリを遅延登録させる。
+      const gpu = GpuRepository.getById(order.gpuId);
+      const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId, gpu);
+      if (!allocation || !allocation.success) {
+        throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation && allocation.message });
+      }
+
+      // Atomic compare-and-swap: only write if the order is still in 'matched' state.
+      // Guards against a second concurrent request that passed the check above but
+      // whose GPU allocation completed after ours.
+      const updateData = { status: 'active', startedAt: new Date().toISOString(), allocationDetails: allocation };
+      const result = OrderRepository.updateIf(orderId, o => o.status === 'matched', updateData);
+      if (!result.ok) {
+        // Another concurrent request already transitioned this order — release the GPU we just allocated.
+        try { await vgpuManager.releaseGPU(order.gpuId, orderId); } catch (_) {}
+        return res.status(409).json({ error: 'Order was already started by a concurrent request' });
+      }
+      if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
+        try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+      }
+      // 借り手へ利用開始通知
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        notifyUser(order.userId, 'order_started',
+          `【Strawberry】GPU の利用が開始されました\n注文: #${orderId}`,
+          { subject: `【Strawberry】注文 #${orderId} 利用開始` });
+      } catch (_) { /* 通知失敗は起動を妨げない */ }
+
+      res.json({ message: 'Order execution started successfully', allocationDetails: allocation });
     });
   })
 );
 
 // オーダー実行終了 (認証必須)
-router.post('/:id/stop', 
+router.post('/:id/stop',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
-    
-    // オーダー情報を取得
-    const order = await p2pNetwork.getOrderById(orderId);
-    
-    const { APIError, ErrorTypes } = require('../../../utils/error-handler');
-    if (!order) {
-      throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
-    }
-    
-    // オーダーの所有者確認
-    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
-    }
-    
-    // オーダーがactive状態であることを確認
-    if (order.status !== 'active') {
-      throw new APIError(
-        ErrorTypes.VALIDATION,
-        'Order cannot be stopped',
-        400,
-        { details: `Current status: ${order.status}` }
-      );
-    }
-    
-    // GPUを解放
-    const release = await vgpuManager.releaseGPU(order.gpuId, orderId);
-    
-    // 使用統計を取得
-    const usageStats = await vgpuManager.getGPUUsageStats(order.gpuId, orderId);
-    
-    // オーダーステータスを更新
-    await p2pNetwork.updateOrder(orderId, { 
-      status: 'completed',
-      stoppedAt: new Date().toISOString(),
-      usageStats
-    });
-    
-    res.json({
-      message: 'Order execution stopped successfully',
-      usageStats
+
+    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU,
+    // double-recording reputation, and double-settling escrow for the same order.
+    return withLock(`order:${orderId}`, async () => {
+      const order = OrderRepository.getById(orderId);
+      if (!order) {
+        throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+      }
+      // /stop は通常完了経路（status='completed', deliveredRatio→100%payout）。
+      // プロバイダがこれを呼べると「accept→renter pay→renter start→provider 即 stop」で
+      // 借り手の支払いを 0 秒の労働で全額受け取れる zero-work theft が成立する。
+      // プロバイダが終了させたい場合は /dispute を使い admin 介在で settle/refund を決める。
+      const canStop = req.user.role === 'admin'
+        || order.userId === req.user.id;
+      if (!canStop) {
+        if (order.providerId && order.providerId === req.user.id) {
+          throw new APIError(
+            ErrorTypes.FORBIDDEN,
+            'Provider cannot stop an active order; raise a dispute (POST /:id/dispute) for admin resolution.',
+            403,
+          );
+        }
+        throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
+      }
+      if (order.status !== 'active') {
+        throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
+      }
+
+      // 支払い確認: active な注文は Lightning インボイス支払い済み、または管理者手動承認済みの
+      // 決済レコードが存在するはずである。未払いのまま /stop を呼んで completed にされると
+      // GPU 利用を無償で受け取り、レピュテーションも加点される。
+      // 管理者は決済記録なしでも停止できる（手動割り当て・テスト環境等の例外処理に対応）。
+      if (req.user.role !== 'admin') {
+        const PaymentRepository = require('../../../db/json/PaymentRepository');
+        const payments = PaymentRepository.getByOrderId(order.id) || [];
+        const hasPaidPayment = payments.some(p => p.status === 'paid');
+        if (!hasPaidPayment) {
+          throw new APIError(
+            ErrorTypes.FORBIDDEN,
+            'Cannot stop order: no confirmed payment found. Complete the payment before stopping the order.',
+            402
+          );
+        }
+      }
+
+      // GPU解放（vgpuManager が利用可能な場合のみ）
+      let usageStats = null;
+      if (vgpuManager) {
+        try {
+          await vgpuManager.releaseGPU(order.gpuId, orderId);
+          usageStats = await vgpuManager.getGPUUsageStats(order.gpuId, orderId).catch(() => null);
+        } catch (e) {
+          logger.warn(`GPU release failed for order ${orderId}: ${e.message}`);
+        }
+      }
+
+      // ハートビートセッションを削除（メモリリーク防止）。
+      // heartbeatTimestamps の対応エントリも同時に除去（旧実装は usageSessions だけ
+      // 削除し timestamps Map が無限増加していた）。
+      usageSessions.delete(orderId);
+      _deleteHeartbeatsForOrder(orderId);
+
+      // Atomic compare-and-swap: only write completed if still active.
+      // Reputation and escrow settlement only run when this write succeeds,
+      // preventing double-increment if a second concurrent stop somehow slipped through.
+      const now43g = new Date().toISOString();
+      const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
+      const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);
+      if (!result.ok) {
+        return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });
+      }
+      if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
+        try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
+      }
+
+      // プロバイダ・レピュテーションへ完了を記録（updateIf 成功時のみ: 二重記録を防ぐ）。
+      if (order.providerId) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          createReputationService().recordJobResult(order.providerId, true);
+        } catch (e) {
+          logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
+        }
+      }
+
+      // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
+      // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
+      try {
+        const EscrowRepository = require('../../../db/json/EscrowRepository');
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
+        // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
+        // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。
+        // settlement-calculator 側の minChargeRatio が下限を担うため、ここでは
+        // measured 値が無いときは 0 を渡し、計算器のポリシーで最低料金が適用される。
+        // Fallback delivered ratio: when vgpuManager is absent (no usageStats),
+        // use wall-clock elapsed time rather than 0. Without this a renter could
+        // call /start then /stop immediately, receive measured=0, and pay near
+        // nothing if the minChargeRatio floor is below 1.0.
+        const elapsedSeconds = order.startedAt
+          ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
+          : 0;
+        for (const escrow of escrows) {
+          const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
+            ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
+            : order.durationMinutes
+              ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
+              : 0;
+          escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
+          escrowSvc.apply(escrow.id, 'DELIVER_OK');
+          logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
+        }
+      } catch (e) {
+        logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
+      }
+
+      // 借り手へ完了通知（支払い確認と利用時間サマリを含む）
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        const duration = usageStats && usageStats.usageSeconds
+          ? `${Math.round(usageStats.usageSeconds / 60)} 分` : `${order.durationMinutes} 分`;
+        notifyUser(order.userId, 'order_completed',
+          `【Strawberry】GPU 利用が完了しました\n注文: #${orderId}\n利用時間: ${duration}\nレビューを投稿して次回の GPU 選択に役立ててください。`,
+          { subject: `【Strawberry】注文 #${orderId} 完了` });
+      } catch (_) { /* 通知失敗は完了処理を妨げない */ }
+
+      invalidateUserCache(order.userId);
+      if (order.providerId) invalidateUserCache(order.providerId);
+      res.json({ message: 'Order execution stopped successfully', usageStats });
     });
   })
 );
 
+// テスト用フック: セッション回収ロジックとセッションマップを公開する。
+// （本番では 30 秒間隔の setInterval が reapUsageSessions を駆動する）
 module.exports = router;
+module.exports._usageSessions = usageSessions;
+module.exports._reapUsageSessions = reapUsageSessions;
+module.exports._sweepHeartbeatSlaBreaches = sweepHeartbeatSlaBreaches;
+module.exports._OrderUsageSession = OrderUsageSession;
+module.exports._checkOrderCreateRateLimit = _checkOrderCreateRateLimit;

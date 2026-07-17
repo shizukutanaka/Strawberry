@@ -3,11 +3,12 @@ const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
 const Docker = require('dockerode');
 const k8s = require('@kubernetes/client-node');
-const { logger } = require('../utils/logger');
+const { logger } = require('./src/utils/logger');
 // child_process には .promises が存在しないため、util.promisify で exec を生成する
 // (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
 const exec = require('util').promisify(require('child_process').exec);
 const fs = require('fs').promises;
+const fsSync = require('fs'); // existsSync 等の同期APIは fs.promises に無いため別途参照
 const path = require('path');
 
 // シェルコマンドへ埋め込む識別子の検証（コマンドインジェクション防止）。
@@ -64,7 +65,7 @@ class VirtualGPUManager extends EventEmitter {
         // 実行環境検出
         if (process.env.KUBERNETES_SERVICE_HOST) {
             return 'kubernetes';
-        } else if (process.env.DOCKER_HOST || fs.existsSync('/var/run/docker.sock')) {
+        } else if (process.env.DOCKER_HOST || fsSync.existsSync('/var/run/docker.sock')) {
             return 'docker';
         } else {
             return 'native';
@@ -479,7 +480,7 @@ class VirtualGPUManager extends EventEmitter {
     async createMPSInstance(physicalGPU, config, vgpuId) {
         // CUDA MPS (Multi-Process Service) 設定
         try {
-            const mpsDir = `/var/lib/strawberry/mps/${vgpuId}`;
+            const mpsDir = `/var/lib/strawberry/mps/${sanitizeId(vgpuId)}`;
             await fs.mkdir(mpsDir, { recursive: true });
             
             // MPSサーバー起動スクリプト作成
@@ -517,41 +518,150 @@ nvidia-cuda-mps-control -d
         if (!vgpu) {
             throw new Error('Virtual GPU not found');
         }
-        
+
         if (vgpu.status !== 'available') {
             throw new Error(`Virtual GPU is ${vgpu.status}`);
         }
-        
-        // 割り当て作成
-        const allocation = {
-            id: `alloc-${uuidv4()}`,
-            vgpuId: vgpuId,
-            rentalId: rentalId,
-            startTime: Date.now(),
-            status: 'active',
-            accessInfo: await this.generateAccessInfo(vgpu)
-        };
-        
-        // プラットフォーム別のアクセス設定
-        switch (this.platform) {
-            case 'kubernetes':
-                allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
-                break;
-            case 'docker':
-                allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
-                break;
-            case 'native':
+
+        // TOCTOU 対策: 最初の await の前に同期的に 'allocating' へ遷移させ、
+        // 並行リクエストが同一 GPU を二重確保するのを防ぐ。失敗時は available に戻す。
+        vgpu.status = 'allocating';
+        try {
+            // 割り当て作成
+            const allocation = {
+                id: `alloc-${uuidv4()}`,
+                vgpuId: vgpuId,
+                rentalId: rentalId,
+                startTime: Date.now(),
+                status: 'active',
+                accessInfo: await this.generateAccessInfo(vgpu)
+            };
+
+            // プラットフォーム別のアクセス設定。
+            // marketplace GPU（allocateGPU の遅延登録で作られる。他プロバイダのマシン上に
+            // 実在し、このノードにはコンテナ/Pod の実体を持たない）は、このノードが
+            // docker/k8s を検出していても setupDockerAccess/setupK8sAccess を適用できない
+            // （this.containers に実体が無く 'Container not found' で throw する）。CI ランナー
+            // には /var/run/docker.sock が存在し platform='docker' と誤検出されるため、
+            // これを分岐しないと marketplace GPU の start が常に 500 になる。実体が無い以上
+            // 正直な native アクセス（endpoint:null, deliveryImplemented:false）を用いる。
+            if (vgpu.type === 'marketplace') {
                 allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
-                break;
+            } else {
+                switch (this.platform) {
+                    case 'kubernetes':
+                        allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
+                        break;
+                    case 'docker':
+                        allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
+                        break;
+                    case 'native':
+                        allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
+                        break;
+                }
+            }
+
+            this.allocations.set(allocation.id, allocation);
+            vgpu.status = 'allocated';
+            vgpu.allocationId = allocation.id;
+
+            this.emit('vgpu:allocated', { vgpuId, allocationId: allocation.id });
+
+            return allocation;
+        } catch (e) {
+            // 確保処理途中で失敗したら利用可能状態へロールバック
+            vgpu.status = 'available';
+            throw e;
         }
-        
-        this.allocations.set(allocation.id, allocation);
-        vgpu.status = 'allocated';
-        vgpu.allocationId = allocation.id;
-        
-        this.emit('vgpu:allocated', { vgpuId, allocationId: allocation.id });
-        
-        return allocation;
+    }
+
+    // ── ルート互換 API（呼び出し規約アダプタ）─────────────────────────────
+    // src/api/routes/{gpu,order} は allocateGPU/releaseGPU/getGPU* を呼ぶが、
+    // クラス本来の API は allocateVirtualGPU/releaseVirtualGPU/getVirtualGPUStats。
+    // 名前・シグネチャの差異により vgpu 有効時は必ず TypeError になっていた。
+    // ここで薄いアダプタを提供し、呼び出し側の規約（{success} 返却・gpuId 起点の解放）を吸収する。
+    // gpuRecord は呼び出し元（order/index.js の /start）が既に持っている marketplace
+    // GPU レコード。省略時（既存呼び出し規約テスト・未知IDの検証等）は遅延登録を行わず、
+    // 従来通り未登録 GPU への割り当ては {success:false} で失敗する。
+    async allocateGPU(gpuId, rentalId, gpuRecord = null) {
+        try {
+            if (gpuRecord) {
+                this.ensureVirtualGPU(gpuId, gpuRecord);
+            }
+            const allocation = await this.allocateVirtualGPU(gpuId, rentalId);
+            return { success: true, allocationId: allocation.id, ...allocation };
+        } catch (e) {
+            return { success: false, message: e.message };
+        }
+    }
+
+    // marketplace GPU（このノードの物理検出を経ていない GPU — 他プロバイダのマシン上に
+    // 実在する可能性がある）用の最小限の仮想GPUエントリを遅延登録する。
+    // createVirtualGPU()/createNativeVirtualGPU() は nvidia-smi 等の実ハードウェア操作を
+    // 伴うため使えない（そのGPUは本ノード上に物理的に存在しない）。
+    // ルート互換アダプタ（allocateGPU/releaseGPU 等）は gpuId をそのまま vgpuId として
+    // this.virtualGPUs を検索するため、必ず gpuId をキーとして登録する。
+    ensureVirtualGPU(gpuId, gpuRecord) {
+        if (this.virtualGPUs.has(gpuId)) return this.virtualGPUs.get(gpuId);
+        const virtualGPU = {
+            id: gpuId,
+            physicalGPUId: gpuId,
+            name: gpuRecord.name || 'Marketplace GPU',
+            type: 'marketplace',
+            config: {},
+            resources: {
+                vram: typeof gpuRecord.memoryGB === 'number' ? gpuRecord.memoryGB : null,
+                compute: null,
+                bandwidth: null,
+            },
+            status: 'available',
+            createdAt: Date.now(),
+            platform: this.platform,
+            platformData: null,
+        };
+        this.virtualGPUs.set(gpuId, virtualGPU);
+        logger.info(`Lazily registered marketplace GPU as virtual GPU: ${gpuId}`);
+        return virtualGPU;
+    }
+
+    async releaseGPU(gpuId, rentalId) {
+        const vgpu = this.virtualGPUs.get(gpuId);
+        let allocationId = vgpu && vgpu.allocationId;
+        if (!allocationId) {
+            // gpuId から特定できなければ rentalId でアクティブな割り当てを逆引き
+            for (const [id, a] of this.allocations) {
+                if (a.rentalId === rentalId && a.status === 'active') { allocationId = id; break; }
+            }
+        }
+        if (!allocationId) {
+            throw new Error('Active allocation not found for GPU');
+        }
+        return this.releaseVirtualGPU(allocationId);
+    }
+
+    async getGPUUsageStats(gpuId) {
+        if (!this.virtualGPUs.has(gpuId)) return null;
+        return this.getVirtualGPUStats(gpuId);
+    }
+
+    async getGPUDetails(gpuId) {
+        return this.virtualGPUs.get(gpuId) || null;
+    }
+
+    async getGPUAvailability(gpuId) {
+        const vgpu = this.virtualGPUs.get(gpuId);
+        if (!vgpu) return null;
+        return { status: vgpu.status, available: vgpu.status === 'available' };
+    }
+
+    async getGPUBenchmarkResults(gpuId) {
+        // ベンチマーク結果の永続化は未実装。結果なしを正直に返す（ルートは null→404）。
+        return null;
+    }
+
+    async runGPUBenchmark(gpuId, type) {
+        // ベンチマーク実行は未実装。捏造ジョブを返さず明示的に失敗させる。
+        throw new Error('GPU benchmarking is not implemented');
     }
 
     async releaseVirtualGPU(allocationId) {
@@ -565,17 +675,23 @@ nvidia-cuda-mps-control -d
             throw new Error('Virtual GPU not found');
         }
         
-        // プラットフォーム別のリリース処理
-        switch (this.platform) {
-            case 'kubernetes':
-                await this.releaseK8sAccess(vgpu, allocation);
-                break;
-            case 'docker':
-                await this.releaseDockerAccess(vgpu, allocation);
-                break;
-            case 'native':
-                await this.releaseNativeAccess(vgpu, allocation);
-                break;
+        // プラットフォーム別のリリース処理。
+        // 割り当て時（allocateVirtualGPU）と対称に、marketplace GPU は native 解放を用いる
+        // （コンテナ/Pod の実体を持たないため docker/k8s 解放は無意味）。
+        if (vgpu.type === 'marketplace') {
+            await this.releaseNativeAccess(vgpu, allocation);
+        } else {
+            switch (this.platform) {
+                case 'kubernetes':
+                    await this.releaseK8sAccess(vgpu, allocation);
+                    break;
+                case 'docker':
+                    await this.releaseDockerAccess(vgpu, allocation);
+                    break;
+                case 'native':
+                    await this.releaseNativeAccess(vgpu, allocation);
+                    break;
+            }
         }
         
         // 状態更新
@@ -687,36 +803,23 @@ nvidia-cuda-mps-control -d
     }
 
     async setupNativeAccess(vgpu, allocation) {
-        // ネイティブアクセス設定
-        const accessPort = 8080 + Math.floor(Math.random() * 1000);
-        
-        // アクセスプロキシ起動
-        const proxyScript = `#!/bin/bash
-export CUDA_VISIBLE_DEVICES=${this.getGPUIndex(vgpu.physicalGPUId)}
-export VGPU_ID=${vgpu.id}
-export ACCESS_TOKEN=${this.generateAccessToken()}
+        // ネイティブアクセス設定。
+        // 旧実装は実在しない `strawberry-gpu-proxy` バイナリを spawn し、誰も listen して
+        // いない endpoint URL を「成功」として返していた（renter は支払い後に接続できない
+        // 空約束を受け取っていた）。実プロキシ配線は別途のフォローアップ課題とし、ここでは
+        // 割り当て自体（課金・スケジューリング・状態遷移）を正しく完了させることを優先する。
+        // トークンは実際に発行して記録するが、endpoint は null にし
+        // deliveryImplemented:false で「まだ配信未実装」であることを明示する。
+        const accessToken = this.generateAccessToken();
 
-strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
-`;
-        
-        const proxyPath = `/var/lib/strawberry/proxy/${allocation.id}`;
-        await fs.mkdir(proxyPath, { recursive: true });
-        await fs.writeFile(`${proxyPath}/start-proxy.sh`, proxyScript, { mode: 0o755 });
-        
-        // プロキシ起動
-        const { spawn } = require('child_process');
-        const proxy = spawn(`${proxyPath}/start-proxy.sh`, [], {
-            detached: true,
-            stdio: 'ignore'
-        });
-        proxy.unref();
-        
         return {
             type: 'native',
-            endpoint: `http://localhost:${accessPort}`,
+            endpoint: null,
             credentials: {
-                token: process.env.ACCESS_TOKEN
-            }
+                token: accessToken
+            },
+            deliveryImplemented: false,
+            message: 'GPU access delivery is not yet implemented for native allocations. Billing, scheduling, and rental state are fully active.',
         };
     }
 
@@ -737,7 +840,20 @@ strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
     }
 
     async releaseNativeAccess(vgpu, allocation) {
-        // プロキシプロセス終了
+        // プロキシプロセス終了。setupNativeAccess で記録した allocation.proxyPid を
+        // 第一手段とする。pkill -f パターンは「同一 vgpuId の別割当を巻き込む / 再 exec で
+        // cmdline が変わり取り逃す」リスクがあり、孤児プロキシとバインドポートをリークさせる。
+        const pid = allocation && allocation.proxyPid;
+        if (pid) {
+            try {
+                process.kill(pid, 'SIGTERM');
+                return;
+            } catch (error) {
+                // 既に終了済み(ESRCH)なら成功扱い。それ以外は pkill にフォールバック。
+                if (error && error.code === 'ESRCH') return;
+                logger.debug(`process.kill(${pid}) failed, falling back to pkill:`, error);
+            }
+        }
         try {
             await exec(`pkill -f "strawberry-gpu-proxy.*${sanitizeId(vgpu.id)}"`);
         } catch (error) {
@@ -1019,16 +1135,18 @@ strawberry-gpu-proxy --port ${accessPort} --vgpu ${vgpu.id}
             const { stdout } = await exec(
                 `nvidia-smi --id=${this.getGPUIndex(vgpu.physicalGPUId)} --query-gpu=utilization.gpu,utilization.memory,temperature.gpu --format=csv,noheader,nounits`
             );
-            
-            const [utilization, memoryUtil, temperature] = stdout.trim().split(', ');
-            
-            return {
-                gpu: {
-                    utilization: parseFloat(utilization),
-                    memory: parseFloat(memoryUtil),
-                    temperature: parseFloat(temperature)
-                }
-            };
+
+            // 出力形式が想定外（区切り・欠損）だと undefined→NaN が統計へ混入するため検証する。
+            const parts = stdout.trim().split(',').map(p => p.trim());
+            if (parts.length < 3) {
+                throw new Error(`Unexpected nvidia-smi output: "${stdout.trim()}"`);
+            }
+            const [utilization, memory, temperature] = parts.map(p => parseFloat(p));
+            if ([utilization, memory, temperature].some(v => Number.isNaN(v))) {
+                throw new Error(`Failed to parse GPU metrics: "${stdout.trim()}"`);
+            }
+
+            return { gpu: { utilization, memory, temperature } };
         } catch (error) {
             logger.error('Failed to get native vGPU stats:', error);
             return null;

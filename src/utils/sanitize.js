@@ -11,8 +11,10 @@ function sanitizeSensitiveFields(obj, fields = [
 ]) {
   if (!obj || typeof obj !== 'object') return obj;
   const out = { ...obj };
-  for (const key of fields) {
-    if (key in out) out[key] = '[MASKED]';
+  // 大文字小文字を問わずマスキング（'Password', 'TOKEN' 等の非標準ケーシングを取り漏らさないため）
+  const fieldsLower = fields.map(f => f.toLowerCase());
+  for (const k of Object.keys(out)) {
+    if (fieldsLower.includes(k.toLowerCase())) out[k] = '[MASKED]';
   }
   // ネストも再帰的にマスキング
   for (const k in out) {
@@ -27,10 +29,12 @@ module.exports = {
   sanitizeSensitiveFields,
   sanitizeString(str) {
     if (typeof str !== 'string') return '';
-    // 前後空白除去・制御文字・HTMLタグ除去
+    // 制御文字・HTMLタグ除去。タグ除去後に残る `<`/`>` (例: `<<script>` の外側の `<`) を
+    // 不活性化して <<tag> バイパスを閉じる。
     return str
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // 制御文字除去
-      .replace(/<[^>]*>/g, '') // HTMLタグ除去
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, '') // 制御文字除去
+      .replace(/<[^>]*>/g, '') // HTMLタグ除去（1パス）
+      .replace(/[<>]/g, '') // 残留角括弧を除去（<<tag> バイパス対策）
       .trim();
   },
   sanitizeObject(obj, keys) {

@@ -34,25 +34,25 @@ class MetricsCollector {
             gpuUtilization: new promClient.Gauge({
                 name: 'strawberry_gpu_utilization_percent',
                 help: 'GPU utilization percentage',
-                labelNames: ['gpu_id', 'gpu_model']
+                labelNames: ['gpu_model']
             }),
-            
+
             gpuTemperature: new promClient.Gauge({
                 name: 'strawberry_gpu_temperature_celsius',
                 help: 'GPU temperature in Celsius',
-                labelNames: ['gpu_id', 'gpu_model']
+                labelNames: ['gpu_model']
             }),
-            
+
             gpuMemoryUsed: new promClient.Gauge({
                 name: 'strawberry_gpu_memory_used_bytes',
                 help: 'GPU memory used in bytes',
-                labelNames: ['gpu_id', 'gpu_model']
+                labelNames: ['gpu_model']
             }),
-            
+
             gpuPowerDraw: new promClient.Gauge({
                 name: 'strawberry_gpu_power_draw_watts',
                 help: 'GPU power draw in watts',
-                labelNames: ['gpu_id', 'gpu_model']
+                labelNames: ['gpu_model']
             }),
             
             // ヒストグラム: 分布
@@ -333,22 +333,22 @@ class MetricsCollector {
             const { gpu_id, model, utilization, temperature, memory_used, power_draw } = gpuData;
 
             this.gpuMetrics.gpuUtilization.set(
-                { gpu_id, gpu_model: model },
+                { gpu_model: model },
                 utilization
             );
 
             this.gpuMetrics.gpuTemperature.set(
-                { gpu_id, gpu_model: model },
+                { gpu_model: model },
                 temperature
             );
 
             this.gpuMetrics.gpuMemoryUsed.set(
-                { gpu_id, gpu_model: model },
+                { gpu_model: model },
                 memory_used
             );
 
             this.gpuMetrics.gpuPowerDraw.set(
-                { gpu_id, gpu_model: model },
+                { gpu_model: model },
                 power_draw
             );
 

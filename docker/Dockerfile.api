@@ -4,14 +4,26 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
-RUN npm run build || true
+# 本アプリにビルド工程は無い（public/ 配下は素の HTML/CSS/JS をそのまま配信する
+# no-build SPA。src/ はトランスパイル不要な CommonJS）。存在しない "build" script
+# を `|| true` で握りつぶす行が残っていたため削除（かつては雛形だった名残り）。
 
 FROM node:20-slim AS runtime
 WORKDIR /app
 COPY --from=build /app /app
-# 開発用不要ファイル除外
+# 開発用不要ファイル除外（.dockerignore で大半は既にビルドコンテキストから除外済みだが、
+# 万一 .dockerignore なしでビルドされた場合のフォールバックとして残す）
 RUN rm -rf tests/ .github/ .vscode/ docs/ improvement_checklist* md/
 ENV NODE_ENV=production
+# src/utils/config.js defaults server.host to 'localhost' — correct for local
+# `npm start` (a dev server should not be reachable from the LAN by default),
+# but inside a container that means the app only accepts connections from
+# within its own network namespace: Docker's `-p 3000:3000` port mapping
+# delivers external traffic via the bridge interface, not loopback, so it
+# would be silently unreachable (connection refused) despite the container
+# and process both looking healthy. HOST=0.0.0.0 is read by config.js as an
+# explicit override, scoped to this container image only.
+ENV HOST=0.0.0.0
 EXPOSE 3000
 CMD ["node", "src/api/server.js"]
 

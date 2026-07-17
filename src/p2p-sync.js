@@ -7,6 +7,7 @@ const path = require('path');
 const DB_NAMES = ['orders', 'payments', 'gpus', 'health'];
 const LOCAL_DIR = path.join(__dirname);
 
+const { atomicWriteJSON } = require('./db/json/atomicWrite');
 const { restoreFromLatestBackup } = require('./utils/backup');
 const { logger } = require('./utils/logger');
 
@@ -37,7 +38,7 @@ async function main() {
     // 2. 分散DB→ローカル（常に最新を優先）
     db.events.on('replicated', () => {
       const all = db.all ? db.all : db._index;
-      fs.writeFileSync(localFile, JSON.stringify(all, null, 2));
+      atomicWriteJSON(localFile, all);
       logger.info(`[SYNC] ${name} replicated from OrbitDB`);
     });
     // 3. ローカル→分散DB（初回のみ/変更時）

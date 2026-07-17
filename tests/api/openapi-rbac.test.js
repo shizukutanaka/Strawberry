@@ -1,12 +1,15 @@
-// OpenAPI仕様のRBAC要件自動テスト雛形（Jest）
-const fs = require('fs');
-const path = require('path');
+// OpenAPI仕様のRBAC要件自動テスト（Jest）
+// ジェネレータの戻り値を直接検証する（成果物ファイル非依存）。
+// 以前はテスト内で generateOpenAPISpec() を呼んだ後 openapi.json をディスクから
+// 読んでいたが、ジェネレータが persist:false 既定（disk write を廃し spec を返す
+// 方式）へ変わって以降、クリーンなチェックアウトでは openapi.json が存在せず
+// 必ず ENOENT で赤になっていた。戻り値を使えば副作用ファイルに依存しない。
+const { generateOpenAPISpec } = require('../../src/api/openapi-generator');
 
 describe('OpenAPI RBAC要件', () => {
   let openapi;
   beforeAll(() => {
-    const specPath = path.join(__dirname, '../../openapi.json');
-    openapi = JSON.parse(fs.readFileSync(specPath, 'utf8'));
+    openapi = generateOpenAPISpec();
   });
 
   it('/system/infoはadminロールのみ許可', () => {
@@ -17,8 +20,8 @@ describe('OpenAPI RBAC要件', () => {
   });
 
   it('全APIにBearer認証が付与されている', () => {
-    for (const [path, methods] of Object.entries(openapi.paths)) {
-      for (const [method, def] of Object.entries(methods)) {
+    for (const [, methods] of Object.entries(openapi.paths)) {
+      for (const [, def] of Object.entries(methods)) {
         expect(def.security).toBeDefined();
         expect(def.security[0]).toHaveProperty('BearerAuth');
       }

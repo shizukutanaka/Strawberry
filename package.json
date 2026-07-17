@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node src/api/server.js",
     "dev": "nodemon src/api/server.js",
-    "test": "jest",
-    "coverage": "jest --coverage",
+    "test": "jest --forceExit",
+    "test:e2e": "playwright test",
+    "coverage": "jest --coverage --forceExit",
     "lint": "eslint .",
     "openapi": "node src/api/openapi-generator.js",
     "openapi-gen": "node src/api/openapi-generator.js",
@@ -43,6 +44,11 @@
     "setup": "npm ci && npm run prisma-migrate && npm run openapi-gen && npm test"
   },
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.78.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "apollo-server-express": "^3.13.0",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",
@@ -56,7 +62,6 @@
     "joi": "^17.13.3",
     "joi-to-swagger": "^6.2.0",
     "jsonwebtoken": "^9.0.2",
-    "knex": "^2.5.1",
     "lru-cache": "^10.2.1",
     "morgan": "^1.10.0",
     "nodemailer": "^6.9.14",
@@ -77,10 +82,10 @@
     "dockerode": "^4.0.2",
     "imagemin": "^8.0.1",
     "imagemin-mozjpeg": "^10.0.0",
-    "imagemin-pngquant": "^9.0.2",
-    "sqlite3": "^5.1.6"
+    "imagemin-pngquant": "^9.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "jest": "^29.7.0",
     "supertest": "^6.3.3"
   }

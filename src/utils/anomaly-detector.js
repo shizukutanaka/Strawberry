@@ -1,6 +1,8 @@
 // 不正利用・異常検知自動化ユーティリティ
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { withLock } = require('./async-lock');
 const { logger } = require('./logger');
 const { resilientNotify } = require('./resilient-notify');
 const { appendAuditLog } = require('./audit-log');
@@ -15,14 +17,24 @@ const ANOMALY_HISTORY_PATH = path.join(__dirname, '../../logs/anomaly-history.js
  */
 function reportAnomaly(type, detail = {}) {
   const entry = { time: new Date().toISOString(), type, detail };
+  // appendFileSync は O_APPEND でアトミック（Linux カーネル保証）なので lock 不要。
   fs.appendFileSync(ANOMALY_LOG_PATH, JSON.stringify(entry) + '\n');
-  let history = [];
-  if (fs.existsSync(ANOMALY_HISTORY_PATH)) {
-    history = JSON.parse(fs.readFileSync(ANOMALY_HISTORY_PATH, 'utf-8'));
-  }
-  history.push(entry);
-  if (history.length > 1000) history.shift();
-  fs.writeFileSync(ANOMALY_HISTORY_PATH, JSON.stringify(history, null, 2));
+  // 履歴 JSON は読み込み→追加→書き込みのシーケンスが非アトミックなため、
+  // 並行呼び出しで「後勝ち」上書きが発生して異常イベントが消えるリスクがある。
+  // per-key withLock でシリアライズして履歴の完全性を保証する。
+  withLock('anomaly-history', async () => {
+    let history = [];
+    if (fs.existsSync(ANOMALY_HISTORY_PATH)) {
+      try {
+        history = JSON.parse(fs.readFileSync(ANOMALY_HISTORY_PATH, 'utf-8'));
+      } catch (_) {
+        history = [];
+      }
+    }
+    history.push(entry);
+    if (history.length > 1000) history.shift();
+    atomicWriteJSON(ANOMALY_HISTORY_PATH, history);
+  }).catch((e) => logger.warn(`[Anomaly] failed to persist anomaly-history: ${e.message}`));
   logger.warn('[Anomaly] 異常検知', entry);
   resilientNotify(`[Strawberry] 異常検知: ${type}\n${JSON.stringify(detail)}`).catch(()=>{});
   appendAuditLog('anomaly_detected', { type, detail });

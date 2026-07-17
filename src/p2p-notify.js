@@ -6,7 +6,9 @@ const path = require('path');
 const axios = require('axios');
 
 const HEALTH_FILE = path.join(__dirname, 'health.json');
-const LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../logs/audit.log');
+// 死活監視アラートの記録先。改ざん検知ハッシュチェーンが管理する logs/audit.log とは
+// 分離する（混在させると verifyAuditLogIntegrity / audit-anchor が常に失敗する）。
+const LOG_PATH = process.env.MONITOR_LOG_PATH || path.join(__dirname, '../logs/monitor-audit.log');
 
 // 通知先（環境変数で柔軟に切替）
 const CHANNELS = [
@@ -29,7 +31,12 @@ function logAudit(event) {
 
 async function checkHealthFile() {
   if (!fs.existsSync(HEALTH_FILE)) return;
-  const health = JSON.parse(fs.readFileSync(HEALTH_FILE));
+  let health;
+  try {
+    health = JSON.parse(fs.readFileSync(HEALTH_FILE));
+  } catch (_) {
+    return;
+  }
   if (health.peerCount === 0) {
     const msg = `【P2Pノード障害検知】\nピア接続がありません（${health.peerId}）\n${new Date(health.timestamp).toLocaleString()}`;
     await notifyAll(msg, 'NODE_DOWN');

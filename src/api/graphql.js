@@ -1,11 +1,15 @@
 // GraphQL APIエンドポイント自動生成（Express+apollo-server-express）
-const express = require('express');
-const { ApolloServer, gql } = require('apollo-server-express');
-const { schemas } = require('../utils/validator');
+const { ApolloServer, gql, AuthenticationError, ForbiddenError } = require('apollo-server-express');
 const { getBTCtoJPYRate } = require('../utils/exchange-rate');
 const OrderRepository = require('../db/json/OrderRepository');
 const UserRepository = require('../db/json/UserRepository');
 const GPURepository = require('../db/json/GpuRepository');
+const jwt = require('jsonwebtoken');
+const { resolveSecret } = require('./middleware/jwt-auth');
+const { isRevoked } = require('./middleware/token-denylist');
+const { sanitizeUser } = require('./utils/sanitize-user');
+// 価格計算は REST と同一の共通ユーティリティを使う（整数 sats へ丸め・単位統一）。
+const { computeOrderPricing } = require('../utils/order-pricing');
 
 // GraphQLスキーマ定義（簡易例）
 const typeDefs = gql`
@@ -52,37 +56,62 @@ const typeDefs = gql`
 
 const resolvers = {
   Query: {
-    orders: () => OrderRepository.getAll(),
-    order: (_, { id }) => OrderRepository.getById(id),
-    users: () => UserRepository.getAll(),
-    user: (_, { id }) => UserRepository.getById(id),
-    gpus: () => GPURepository.getAll(),
-    gpu: (_, { id }) => GPURepository.getById(id),
-    btcToJpy: async () => await getBTCtoJPYRate(),
-    exchangeRate: async (_, { fresh }) => {
-      const { rate, timestamp, isCache } = await getBTCtoJPYRate(!!fresh, true);
+    // 認証必須クエリ
+    orders: (_, __, { user }) => {
+      if (!user) throw new AuthenticationError('Authentication required');
+      const all = OrderRepository.getAll();
+      // admin は全件、一般ユーザーは自分の注文のみ
+      return user.role === 'admin' ? all : all.filter(o => o.userId === user.id);
+    },
+    order: (_, { id }, { user }) => {
+      if (!user) throw new AuthenticationError('Authentication required');
+      const order = OrderRepository.getById(id);
+      if (!order) return null;
+      if (user.role !== 'admin' && order.userId !== user.id && order.providerId !== user.id) {
+        throw new ForbiddenError('Access denied');
+      }
+      return order;
+    },
+    users: (_, __, { user }) => {
+      if (!user) throw new AuthenticationError('Authentication required');
+      if (user.role !== 'admin') throw new ForbiddenError('Admin only');
+      return UserRepository.getAll().map(sanitizeUser);
+    },
+    user: (_, { id }, { user }) => {
+      if (!user) throw new AuthenticationError('Authentication required');
+      if (user.role !== 'admin' && user.id !== id) throw new ForbiddenError('Access denied');
+      const found = UserRepository.getById(id);
+      if (!found) return null;
+      return sanitizeUser(found);
+    },
+    gpus: () => GPURepository.getAll().map(({ apiKey, ...g }) => g),
+    gpu: (_, { id }) => {
+      const g = GPURepository.getById(id);
+      if (!g) return null;
+      const { apiKey, ...safe } = g;
+      return safe;
+    },
+    btcToJpy: async () => {
+      const rate = await getBTCtoJPYRate();
+      return typeof rate === 'number' ? rate : (rate && rate.rate) || 0;
+    },
+    exchangeRate: async (_, { fresh }, { user }) => {
+      // fresh=true は外部 HTTPS を最大 4 本叩く。alias 増幅で上流レートを潰せるため
+      // 管理者限定とし、それ以外はキャッシュ値を返す（誤入力でも DoS にしない）。
+      const allowFresh = !!fresh && user && user.role === 'admin';
+      const { rate, timestamp, isCache } = await getBTCtoJPYRate(allowFresh, true);
       return { rate, timestamp, isCache };
     },
   },
   Order: {
-    pricePer5Min: (order) => {
-      const pricePerHour = order.pricePerHour || 0;
-      return pricePerHour / 12;
-    },
-    totalPrice: (order) => {
-      const pricePerHour = order.pricePerHour || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * ((order.durationMinutes || 0) / 5);
-      return totalPrice;
-    },
+    pricePer5Min: (order) => computeOrderPricing(order).pricePer5Min,
+    totalPrice: (order) => computeOrderPricing(order).totalPrice,
     totalPriceJPY: async (order) => {
-      const pricePerHour = order.pricePerHour || 0;
-      const pricePer5Min = pricePerHour / 12;
-      const totalPrice = pricePer5Min * ((order.durationMinutes || 0) / 5);
-      const { rate, timestamp } = await getBTCtoJPYRate(false, true);
+      const rateInfo = await getBTCtoJPYRate(false, true);
+      const { totalPriceJPY, exchangeRateTimestamp } = computeOrderPricing(order, rateInfo);
       // exchangeRateTimestampも返すため、resolverで値をorderに注入
-      order._exchangeRateTimestamp = timestamp;
-      return Math.round(totalPrice * rate);
+      order._exchangeRateTimestamp = exchangeRateTimestamp;
+      return totalPriceJPY;
     },
     exchangeRateTimestamp: (order) => {
       // totalPriceJPY解決時に注入されていればそれを返す
@@ -93,8 +122,85 @@ const resolvers = {
   }
 };
 
+// --- 多重・深いクエリ攻撃の遮断 ---
+// 旧実装は深さ・別名上限なし。1 リクエストで `gpus` を 500 alias 並べて
+// gpus.json を 500 回走査する CPU/IO DoS、および exchangeRate(fresh:true) を
+// alias 連打して外部 HTTPS を増幅させる SSRF 増幅が可能だった。
+const MAX_QUERY_DEPTH = 8;
+const MAX_TOTAL_SELECTIONS = 200;
+function depthAndSelectionLimitRule(context) {
+  let totalSelections = 0;
+  return {
+    Field(node, _key, _parent, _path, ancestors) {
+      totalSelections += 1;
+      if (totalSelections > MAX_TOTAL_SELECTIONS) {
+        context.reportError(new (require('graphql').GraphQLError)(
+          `Query exceeds total selection limit (${MAX_TOTAL_SELECTIONS}); reduce aliases/fields and retry.`,
+        ));
+      }
+      let depth = 0;
+      for (const a of ancestors) {
+        if (a && a.kind === 'Field') depth += 1;
+      }
+      if (depth > MAX_QUERY_DEPTH) {
+        context.reportError(new (require('graphql').GraphQLError)(
+          `Query depth ${depth} exceeds limit ${MAX_QUERY_DEPTH}.`,
+        ));
+      }
+    },
+  };
+}
+
 async function setupGraphQL(app) {
-  const server = new ApolloServer({ typeDefs, resolvers });
+  // Apply rate limiting to the GraphQL endpoint.
+  // The /graphql app is a separate Express sub-app mounted before the REST routes,
+  // so the global apiLimiter in server.js does NOT cover it automatically.
+  // Without this, unauthenticated callers can hammer alias-batched queries at full speed.
+  const { apiLimiter } = require('./middleware/security');
+  app.use(apiLimiter);
+
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+    validationRules: [depthAndSelectionLimitRule],
+    // 明示的なオプトインのみでイントロスペクションを有効化。
+    // NODE_ENV !== 'production' という条件は NODE_ENV 未設定（undefined）の場合も
+    // true となり、設定漏れの本番環境でスキーマが露出するリスクがあった。
+    // GRAPHQL_INTROSPECTION=true を設定した環境のみで有効化することで
+    // オプトアウト方式（デフォルト公開）をオプトイン方式（デフォルト非公開）に変更する。
+    introspection: process.env.GRAPHQL_INTROSPECTION === 'true',
+    context: ({ req }) => {
+      const auth = req.headers.authorization || '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+      if (!token) return { user: null };
+      try {
+        const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+        // REST(jwt-auth.js) と同一ポリシー: リフレッシュトークンをアクセスとして使わせない、
+        // かつ logout で失効済み(jti)のトークンは拒否する。これを欠くと GraphQL 経由で
+        // ログアウト済み/リフレッシュ用トークンが認証を通ってしまう。
+        if (payload.type === 'refresh') return { user: null };
+        if (payload.jti && isRevoked(payload.jti)) return { user: null };
+        // passwordChangedAt check (same as REST middleware): reject tokens issued at or
+        // before the password change so that GraphQL is covered by session invalidation.
+        const tokenUser = UserRepository.getById(payload.id);
+        if (!tokenUser || tokenUser.status === 'deactivated') return { user: null };
+        const { isSessionInvalidated } = require('./utils/session-invalidation');
+        if (isSessionInvalidated(tokenUser, payload.iat)) {
+          return { user: null };
+        }
+        return { user: payload };
+      } catch (_) {
+        return { user: null };
+      }
+    },
+    // 本番では詳細なエラースタックを非表示
+    formatError: (err) => {
+      if (process.env.NODE_ENV === 'production' && err.extensions?.code === 'INTERNAL_SERVER_ERROR') {
+        return { message: 'Internal server error', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
+      }
+      return err;
+    }
+  });
   await server.start();
   server.applyMiddleware({ app, path: '/graphql' });
 }

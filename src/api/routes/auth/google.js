@@ -1,35 +1,68 @@
 // src/api/routes/auth/google.js - Google OAuth2認証エンドポイント
 const express = require('express');
 const router = express.Router();
-const { OAuth2Client } = require('google-auth-library');
-const jwt = require('jsonwebtoken');
 const UserRepository = require('../../../db/json/UserRepository');
 const { APIError, ErrorTypes, asyncHandler } = require('../../../utils/error-handler');
+const { signAccessToken } = require('../../utils/tokens');
+const { authLimiter } = require('../../middleware/rate-limit');
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const JWT_SECRET = process.env.JWT_SECRET;
-const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-// POST /api/auth/google { idToken }
-router.post('/', asyncHandler(async (req, res) => {
+// POST /api/v1/auth/google { idToken }
+router.post('/', authLimiter, asyncHandler(async (req, res) => {
+  if (!GOOGLE_CLIENT_ID) {
+    throw new APIError(ErrorTypes.EXTERNAL_SERVICE, 'Google OAuth is not configured', 503);
+  }
   const { idToken } = req.body;
   if (!idToken) throw new APIError(ErrorTypes.VALIDATION, 'idToken is required', 400);
+
+  // google-auth-library は optional（googleapis と同様に未インストールの場合がある）
   let ticket;
   try {
+    const { OAuth2Client } = require('google-auth-library');
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
     ticket = await client.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
   } catch (e) {
-    throw new APIError(ErrorTypes.AUTH, 'Invalid Google ID token', 401);
+    if (e.code === 'MODULE_NOT_FOUND') {
+      throw new APIError(ErrorTypes.EXTERNAL_SERVICE, 'google-auth-library is not installed', 503);
+    }
+    throw new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid Google ID token', 401);
   }
+
   const payload = ticket.getPayload();
   const { sub: googleId, email, name, picture } = payload;
-  if (!email) throw new APIError(ErrorTypes.AUTH, 'Googleアカウントにメールがありません', 400);
-  // ユーザーDBに登録/更新
+  if (!email) throw new APIError(ErrorTypes.VALIDATION, 'Googleアカウントにメールがありません', 400);
+  // email_verified が true でない Google アカウントを拒否する。
+  // verifyIdToken はシグネチャ/audience/issuer を検証するが email_verified は確認しない。
+  // Workspace 等では email_verified:false のまま有効な ID トークンが発行されるため、
+  // 攻撃者が未確認メールアドレスで victim@corp.com の Strawberry アカウントを先取りできる。
+  if (payload.email_verified !== true) {
+    throw new APIError(ErrorTypes.UNAUTHORIZED, 'Google account email is not verified', 401);
+  }
+
+  // ユーザーDBに登録/取得
   let user = UserRepository.getByGoogleId(googleId);
   if (!user) {
-    user = UserRepository.create({ googleId, email, name, picture, role: 'user' });
+    // メール重複チェック: 同じメールでパスワード登録済みの口座が既にあるなら、
+    // Google 紐付けは別フローで明示的に行わせる。これがないと攻撃者が同名 Google
+    // アカウントで新規 user 口座を作り、被害者のメール表示の裏で別 JWT を発行できる
+    // （並行口座なりすまし）。
+    const lowered = (email || '').toLowerCase();
+    const conflict = UserRepository.getByEmail(lowered);
+    if (conflict) {
+      throw new APIError(
+        ErrorTypes.CONFLICT,
+        'Account with this email already exists; sign in with your password and link Google from settings',
+        409,
+      );
+    }
+    user = UserRepository.create({ googleId, email: lowered, name, picture, role: 'user' });
   }
-  // JWT発行
-  const token = jwt.sign({ id: user.id, email: user.email, role: user.role, googleId }, JWT_SECRET, { expiresIn: '7d' });
+
+  // JWT発行: 共通の signAccessToken を使い jti（logout 失効可能）・type:'access'・
+  // 一貫した TTL を付与する。以前は jti 無し・7日固定のアクセストークンを直接署名しており、
+  // Google ログインユーザーは logout でトークンを失効できなかった。
+  const token = signAccessToken(user);
   res.json({ token, user: { id: user.id, email: user.email, name: user.name, picture: user.picture, role: user.role } });
 }));
 

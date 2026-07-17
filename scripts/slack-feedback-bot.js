@@ -5,8 +5,8 @@ const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL; // .envに設定
 
 function sendSlackMessage(text) {
   if (!SLACK_WEBHOOK_URL) {
-    console.error('SLACK_WEBHOOK_URLが未設定です');
-    process.exit(1);
+    console.warn('[slack-feedback-bot] SLACK_WEBHOOK_URL未設定のため通知をスキップします');
+    return;
   }
   const data = JSON.stringify({ text });
   const url = new URL(SLACK_WEBHOOK_URL);

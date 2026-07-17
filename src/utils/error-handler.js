@@ -3,10 +3,12 @@ const { logger } = require('./logger');
 
 // エラータイプの定義
 const ErrorTypes = {
+  INTERNAL: 'INTERNAL_ERROR',
   VALIDATION: 'VALIDATION_ERROR',
   NOT_FOUND: 'NOT_FOUND_ERROR',
   UNAUTHORIZED: 'UNAUTHORIZED_ERROR',
   FORBIDDEN: 'FORBIDDEN_ERROR',
+  CONFLICT: 'CONFLICT_ERROR',
   EXTERNAL_SERVICE: 'EXTERNAL_SERVICE_ERROR',
   GPU_ERROR: 'GPU_ERROR',
   P2P_ERROR: 'P2P_ERROR',
@@ -29,14 +31,16 @@ class APIError extends Error {
   }
   
   // エラーレスポンス用のJSONオブジェクトを生成
-  toJSON() {
+  // maskInternal=true（本番）では 5xx の詳細をクライアントに漏らさない
+  toJSON(maskInternal = false) {
+    const masked = maskInternal && this.statusCode >= 500;
     return {
       error: {
         type: this.type,
-        message: this.message,
+        message: masked ? 'Internal server error' : this.message,
         statusCode: this.statusCode,
         timestamp: this.timestamp,
-        details: this.details
+        details: masked ? null : this.details
       }
     };
   }
@@ -48,46 +52,56 @@ function convertToAPIError(err) {
   if (err instanceof APIError) {
     return err;
   }
-  
-  // エラータイプを判定
+
   let type = ErrorTypes.INTERNAL;
   let statusCode = 500;
   let message = err.message || 'An unexpected error occurred';
-  
-  // エラーメッセージからタイプを推測
+
+  // エラーオブジェクト自体に statusCode が付いていればそれを尊重する（axios, http-errors 等）。
+  // これにより外部ライブラリのエラーがメッセージ文言の偶発的キーワードマッチで
+  // 誤分類（例: "invalid cursor" → 400、"invoice timeout" → 400）されるのを防ぐ。
+  if (typeof err.statusCode === 'number' && err.statusCode >= 400) {
+    statusCode = err.statusCode;
+    type = statusCode < 500 ? ErrorTypes.VALIDATION : ErrorTypes.INTERNAL;
+    return new APIError(type, message, statusCode, { originalError: err.name, code: err.code });
+  }
+
+  // statusCode を持たない未知の Error はデフォルト 500/INTERNAL のまま返す。
+  // アプリケーションコードが意図した 4xx エラーは必ず new APIError(...) で明示的に投げること。
+  // 以下のキーワードマッチはレガシー互換のためのフォールバックにすぎず、
+  // 正確性より「何もしないより多少まし」を優先するベストエフォートである点に注意。
   if (err.message) {
     const msg = err.message.toLowerCase();
-    
+
+    // キーワードマッチで 4xx に再分類する場合は、raw な内部エラーメッセージ
+    // （ファイルパス・DBスキーマ名等）をクライアントに渡さずジェネリックな文言に
+    // 差し替える。元メッセージは errorMiddleware がログに記録済み。
+    // toJSON の maskInternal は statusCode >= 500 にしか効かないため、
+    // 再分類後の 4xx はここで明示的に無害化しなければ本番で情報漏洩する。
     if (msg.includes('not found') || msg.includes('does not exist')) {
       type = ErrorTypes.NOT_FOUND;
       statusCode = 404;
-    } else if (msg.includes('validation') || msg.includes('invalid')) {
-      type = ErrorTypes.VALIDATION;
-      statusCode = 400;
+      message = 'Resource not found';
     } else if (msg.includes('unauthorized') || msg.includes('authentication')) {
       type = ErrorTypes.UNAUTHORIZED;
       statusCode = 401;
+      message = 'Authentication required';
     } else if (msg.includes('permission') || msg.includes('forbidden')) {
       type = ErrorTypes.FORBIDDEN;
       statusCode = 403;
+      message = 'Access denied';
     } else if (msg.includes('conflict') || msg.includes('duplicate')) {
       type = ErrorTypes.CONFLICT;
       statusCode = 409;
-    } else if (msg.includes('gpu')) {
-      type = ErrorTypes.GPU_ERROR;
-      statusCode = 500;
-    } else if (msg.includes('p2p') || msg.includes('peer')) {
-      type = ErrorTypes.P2P_ERROR;
-      statusCode = 500;
-    } else if (msg.includes('lightning') || msg.includes('lnd')) {
-      type = ErrorTypes.LIGHTNING_ERROR;
-      statusCode = 500;
-    } else if (msg.includes('payment') || msg.includes('invoice')) {
-      type = ErrorTypes.PAYMENT_ERROR;
-      statusCode = 400;
+      message = 'Resource conflict';
     }
+    // 旧: msg.includes('validation') || msg.includes('invalid') → 400
+    // 削除理由: 内部エラー（UV_EINVAL, "invalid cursor state"等）を誤って 400 へ格下げし
+    // 本番アラートを抑圧していたため。アプリ側で明示的に APIError を投げること。
+    // 旧: msg.includes('gpu'/'p2p'/'lightning'/'lnd'/'payment'/'invoice') → 500 or 400
+    // 削除理由: 'invoice timeout' → 400 のように正常な 5xx を 400 に格下げしていた。
   }
-  
+
   return new APIError(type, message, statusCode, {
     originalError: err.name,
     code: err.code
@@ -99,9 +113,11 @@ function errorMiddleware(err, req, res, next) {
   // APIエラーに変換
   const apiError = convertToAPIError(err);
   
-  // エラーをログに記録
+  // エラーをログに記録。requestId を含めることでアクセスログ（morgan :id）と
+  // エラーログを同一リクエストとして相関できる（障害調査の起点）。
   if (apiError.statusCode >= 500) {
     logger.error(`${apiError.type}: ${apiError.message}`, {
+      requestId: req.id,
       path: req.path,
       method: req.method,
       statusCode: apiError.statusCode,
@@ -109,14 +125,16 @@ function errorMiddleware(err, req, res, next) {
     });
   } else {
     logger.warn(`${apiError.type}: ${apiError.message}`, {
+      requestId: req.id,
       path: req.path,
       method: req.method,
       statusCode: apiError.statusCode
     });
   }
   
-  // クライアントにレスポンスを返す
-  res.status(apiError.statusCode).json(apiError.toJSON());
+  // クライアントにレスポンスを返す（本番では 5xx 詳細をマスク）
+  const maskInternal = process.env.NODE_ENV === 'production';
+  res.status(apiError.statusCode).json(apiError.toJSON(maskInternal));
 }
 
 // 非同期ルートハンドラのラッパー
@@ -133,9 +151,14 @@ function createError(type, message, statusCode, details = null) {
 
 // 404エラー用のミドルウェア
 function notFoundMiddleware(req, res, next) {
+  // req.originalUrl をそのまま埋めると XSS / パス情報漏洩になる。
+  // メソッドはホワイトリスト一致のみ通し、パスは英数字・/ . - _ のみ残す。
+  const SAFE_METHODS = new Set(['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS']);
+  const method = SAFE_METHODS.has(req.method) ? req.method : 'UNKNOWN';
+  const safePath = (req.path || '').replace(/[^a-zA-Z0-9/.\-_]/g, '').slice(0, 100);
   const err = new APIError(
     ErrorTypes.NOT_FOUND,
-    `Route not found: ${req.method} ${req.originalUrl}`,
+    `Route not found: ${method} ${safePath}`,
     404
   );
   next(err);

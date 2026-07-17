@@ -1,0 +1,31 @@
+/* public/css/docs.css — API docs viewer, layered on tokens.css/app.css */
+.docs-main { max-width: 900px; margin: 0 auto; padding: var(--space-5); }
+.docs-endpoint {
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); margin-bottom: var(--space-3); overflow: hidden;
+}
+.docs-endpoint summary {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); cursor: pointer; list-style: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem;
+}
+.docs-endpoint summary::-webkit-details-marker { display: none; }
+.docs-endpoint[open] summary { border-bottom: 1px solid var(--color-border); }
+.docs-method {
+  display: inline-block; min-width: 60px; text-align: center; padding: 2px var(--space-2);
+  border-radius: var(--radius-sm); font-weight: 700; font-size: 0.75rem; color: #fff;
+}
+.docs-method-get { background: #2563a8; }
+.docs-method-post { background: #1f9d55; }
+.docs-method-put { background: #b7791f; }
+.docs-method-delete { background: #d63447; }
+.docs-summary-text { font-family: var(--font-sans); color: var(--color-text-muted); }
+.docs-body { padding: var(--space-4); }
+.docs-body h4 { font-size: 0.85rem; text-transform: uppercase; color: var(--color-text-muted); margin: var(--space-3) 0 var(--space-1); }
+.docs-body h4:first-child { margin-top: 0; }
+.docs-schema {
+  background: var(--color-surface-2); border-radius: var(--radius-sm);
+  padding: var(--space-3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem; white-space: pre-wrap; word-break: break-word;
+}
+.docs-tag-group h2 { margin-top: var(--space-6); font-size: 1.1rem; }

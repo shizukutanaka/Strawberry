@@ -18,3 +18,5 @@ build/
 .swp
 *.bak
 *.tmp
+test-results/
+playwright-report/

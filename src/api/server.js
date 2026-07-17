@@ -1,25 +1,29 @@
 // src/api/server.js - Express APIサーバー
+// OpenTelemetry: 他の全 require より先に読み込む必要がある（auto-instrumentation は
+// http/express 等を最初に require する前にパッチしないと効かない）。
+// OTEL_EXPORTER_OTLP_ENDPOINT 未設定時は完全な no-op（詳細は同ファイル参照）。
+require('../telemetry/instrumentation');
 const express = require('express');
 const path = require('path');
 const routes = require('./routes');
 const masterAuthRouter = require('./routes/master-auth');
-const paymentRouter = require('./routes/payment');
 const profitAddressesRouter = require('./routes/profit-addresses');
 const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
-const { 
-  securityHeaders, 
-  corsMiddleware, 
-  apiLimiter 
+const {
+  securityHeaders,
+  permissionsPolicy,
+  corsMiddleware,
+  apiLimiter
 } = require('./middleware/security');
-const { 
-  requestId, 
-  requestLogger, 
-  devRequestLogger, 
-  responseTime, 
-  errorLogger 
+const {
+  requestId,
+  requestLogger,
+  devRequestLogger,
+  responseTime,
+  errorLogger
 } = require('./middleware/logger');
 
 // Prometheusメトリクス
@@ -71,30 +75,159 @@ app.use('/api/exchange-rate', exchangeRateRouter);
 
 // コアサービス参照のセットと監視起動
 try {
-  // 既存のコアサービス参照を取得
-  const routes = require('./routes');
-  const lightning = routes.lightning || (routes.default && routes.default.lightning);
-  const p2pNetwork = routes.p2pNetwork || (routes.default && routes.default.p2pNetwork);
-  const vgpuManager = routes.vgpuManager || (routes.default && routes.default.vgpuManager);
-  setServices({ LightningService: lightning, P2PNetwork: p2pNetwork, VirtualGPUManager: vgpuManager });
-  startMonitor();
+  const { lightning, p2pNetwork, vgpuManager } = require('../core/services');
+  const svcRefs = {};
+  if (lightning) svcRefs.LightningService = lightning;
+  if (p2pNetwork) svcRefs.P2PNetwork = p2pNetwork;
+  if (vgpuManager) svcRefs.VirtualGPUManager = vgpuManager;
+  if (Object.keys(svcRefs).length > 0) {
+    setServices(svcRefs);
+    startMonitor();
+  }
 } catch (e) {
   logger.warn('Service monitor could not be started:', e);
 }
 
-// /metricsエンドポイント
-app.get('/metrics', async (req, res) => {
+// Lightningインボイス入金確認ループ（15秒間隔でポーリング、Lightning未導入時は無効）
+try {
+  const invoicePoller = require('../core/invoice-poller');
+  const { lightning: lightningForPoller } = require('../core/services');
+  invoicePoller.start(lightningForPoller);
+} catch (e) {
+  logger.warn(`invoice-poller: failed to start: ${e.message}`);
+}
+
+// /metricsエンドポイント（Prometheus スクレイプ用）。
+// Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
+// METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
+// 未設定かつ本番環境では 503 を返す（fail-closed）。テスト環境では素通り。
+app.get('/metrics', apiLimiter, (req, res, next) => {
+  const metricsToken = process.env.METRICS_AUTH_TOKEN;
+  if (!metricsToken) {
+    // コメントに「本番では必ず設定すること」と書いても見落とされる。
+    // 設定なしで本番稼働したら即座に運用KPIが公開されるため fail-closed にする。
+    if (process.env.NODE_ENV !== 'test') {
+      return res.status(503).end('Metrics endpoint requires METRICS_AUTH_TOKEN');
+    }
+    return next();
+  }
+  const authHeader = req.headers.authorization || '';
+  const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!provided || provided !== metricsToken) {
+    return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
+  }
+  next();
+}, async (req, res) => {
   await updateLightningMetrics();
   // cacheHitCounter, cacheMissCounter, cachePurgeCounterはprom-clientに自動登録されている
   res.set('Content-Type', client.register.contentType);
   res.end(await client.register.metrics());
 });
 
+// /health — 死活監視エンドポイント（LB/k8s probe・sla-tracker が参照）。
+// レート制限より前に定義し、高頻度ポーリングでも 429 にならないようにする。
+const serverStartedAt = Date.now();
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// /ready — レディネスプローブ（/health の静的 ok と異なり、データ層が実際に使えるかを検証する）。
+// JSON データ層が本プロダクトの唯一必須の依存。data ディレクトリへ実際に temp ファイルを書き
+// 削除し、リポジトリ読込が例外を投げないことを確認する。失敗時は 503 を返し、LB/k8s が
+// トラフィックを流さないようにする。オプショナルサービス（Lightning/P2P）は情報として
+// 併記するが readiness のゲートには含めない（未導入でも API 本体は機能するため）。
+// 同期 I/O を含むため専用レート制限を設ける（グローバル apiLimiter より前にマウントされるが
+// このエンドポイント単体には 30 req/min のガードを掛ける）。
+const { rateLimit: readyRateLimit } = require('express-rate-limit');
+const readyLimiter = readyRateLimit({
+  windowMs: 60 * 1000,
+  max: () => process.env.NODE_ENV === 'test' ? 10000 : 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.get('/ready', readyLimiter, (req, res) => {
+  const fs = require('fs');
+  const checks = {};
+  let ready = true;
+
+  // 1) data ディレクトリの書き込み可否（atomicWriteJSON と同じ依存）
+  try {
+    const dataDir = path.join(__dirname, '../../data');
+    const probe = path.join(dataDir, `.ready-probe-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    checks.dataDirWritable = 'ok';
+  } catch (e) {
+    ready = false;
+    checks.dataDirWritable = `failed: ${e.message}`;
+  }
+
+  // 2) リポジトリ読込が例外を投げないこと（破損 JSON 等の早期検知）
+  try {
+    require('../db/json/GpuRepository').getAll();
+    require('../db/json/OrderRepository').getAll();
+    checks.repositoriesReadable = 'ok';
+  } catch (e) {
+    ready = false;
+    checks.repositoriesReadable = `failed: ${e.message}`;
+  }
+
+  // オプショナルサービス（情報のみ。readiness をブロックしない）
+  let optional = {};
+  try {
+    const { lightning, p2pNetwork } = require('../core/services');
+    optional = { lightning: lightning ? 'available' : 'disabled', p2pNetwork: p2pNetwork ? 'available' : 'disabled' };
+  } catch (_) { /* services 未解決時は省略 */ }
+
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    checks,
+    optionalServices: optional,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// /openapi.json — API 仕様の HTTP 公開（初回アクセス時に生成しキャッシュ）
+let openapiSpecCache = null;
+app.get('/openapi.json', apiLimiter, (req, res) => {
+  if (!openapiSpecCache) {
+    try {
+      const { generateOpenAPISpec } = require('./openapi-generator');
+      openapiSpecCache = generateOpenAPISpec();
+    } catch (e) {
+      logger.error('OpenAPI spec generation failed:', e);
+      return res.status(500).json({ error: 'Failed to generate OpenAPI spec' });
+    }
+  }
+  res.json(openapiSpecCache);
+});
+
 // リクエストID生成（ロギング用）
 app.use(requestId);
 
+// 動的APIレスポンスへの Cache-Control: no-store 付与。
+// Express は既定で ETag を自動生成するが、Cache-Control を明示しない限り
+// 認証必須の動的レスポンス（例: GET /orders/:id の status）がブラウザの
+// HTTP キャッシュから再利用されうる。実際に発見された事象: 注文が pending の
+// 時点で一度 GET /orders/:id を叩いた後、accept→pay→approve→start を経て
+// active になっても、同一URLへの再フェッチが（サーバに到達せず）キャッシュ
+// された pending 時点のレスポンスをそのまま返し、UI が古い状態を表示し続けた。
+// public/ 配下の静的アセット（JS/CSS）は意図的なキャッシュ対象のため対象外にする。
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/js/') && !req.path.startsWith('/css/') && !req.path.startsWith('/vendor/')
+    && req.path !== '/' && !req.path.endsWith('.html') && !req.path.endsWith('.ico')) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  next();
+});
+
 // セキュリティミドルウェア
 app.use(securityHeaders);
+app.use(permissionsPolicy);
 app.use(corsMiddleware);
 
 // レート制限（DoS対策）
@@ -127,8 +260,30 @@ if (process.env.NODE_ENV === 'development') {
 // APIルート
 app.use(config.server.apiPrefix || '/api/v1', routes);
 
-// フロントエンドルート（SPA対応）
-app.get('*', (req, res) => {
+// GraphQL エンドポイント（/graphql）。Apollo の start() は非同期だが、SPA キャッチオール
+// より前に必ず配置する必要があるため、サブアプリを同期的にここへ mount してスロットを予約し、
+// Apollo は非同期でそのサブアプリへ後付けする。失敗してもサーバ本体は起動を継続（guard）。
+const graphqlApp = express();
+app.use(graphqlApp);
+const graphqlReady = (async () => {
+  try {
+    const { setupGraphQL } = require('./graphql');
+    await setupGraphQL(graphqlApp);
+    logger.info('GraphQL endpoint mounted at /graphql');
+    return true;
+  } catch (e) {
+    logger.warn(`GraphQL endpoint disabled: ${e.message}`);
+    return false;
+  }
+})();
+
+// フロントエンドルート（SPA対応）。
+// 拡張子付きパス（/js/foo.js, /css/foo.css 等）はアセット欠落・タイポを意味する —
+// index.html (200, text/html) にフォールバックすると「JSファイルなのにHTMLが
+// 返る」という分かりにくい実行時エラーになりデバッグを妨げるため、素直に404にする。
+// 拡張子なしのパス（SPAのハッシュルート等）のみ index.html にフォールバックする。
+app.get('*', (req, res, next) => {
+  if (path.extname(req.path)) return next();
   res.sendFile(path.join(__dirname, '../../public/index.html'));
 });
 
@@ -152,14 +307,32 @@ if (require.main === module) {
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
-  // グレースフルシャットダウン
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM signal received: closing HTTP server');
+  // グレースフルシャットダウン（30秒でタイムアウト — ハングしたハンドラで無限待機しない）。
+  // SIGTERM(オーケストレータ)と SIGINT(Ctrl-C/開発・一部環境) の両方を扱う。未処理シグナルでの
+  // ハード終了は進行中レスポンス・ファイル書込みを切断するため。二重受信に備え冪等化する。
+  let shuttingDown = false;
+  const gracefulShutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`${signal} signal received: closing HTTP server`);
+    const forceExit = setTimeout(() => {
+      logger.error('Graceful shutdown timed out after 30s; forcing exit');
+      process.exit(1);
+    }, 30000);
+    if (forceExit.unref) forceExit.unref();
     server.close(() => {
+      clearTimeout(forceExit);
       logger.info('HTTP server closed');
       process.exit(0);
     });
-  });
+  };
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // プロセスレベルの最終防衛ライン（未処理例外/リジェクションのログ記録＋安全終了）。
+  // main 実行時のみ登録し、テスト（require 経由）では登録しない（テストランナーを落とさない）。
+  const { registerProcessGuards } = require('../utils/process-guards');
+  registerProcessGuards({ logger, getServer: () => server });
 }
 
-module.exports = { app, server };
+module.exports = { app, server, graphqlReady };

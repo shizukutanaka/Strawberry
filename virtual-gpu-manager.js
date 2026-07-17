@@ -537,17 +537,28 @@ nvidia-cuda-mps-control -d
                 accessInfo: await this.generateAccessInfo(vgpu)
             };
 
-            // プラットフォーム別のアクセス設定
-            switch (this.platform) {
-                case 'kubernetes':
-                    allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
-                    break;
-                case 'docker':
-                    allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
-                    break;
-                case 'native':
-                    allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
-                    break;
+            // プラットフォーム別のアクセス設定。
+            // marketplace GPU（allocateGPU の遅延登録で作られる。他プロバイダのマシン上に
+            // 実在し、このノードにはコンテナ/Pod の実体を持たない）は、このノードが
+            // docker/k8s を検出していても setupDockerAccess/setupK8sAccess を適用できない
+            // （this.containers に実体が無く 'Container not found' で throw する）。CI ランナー
+            // には /var/run/docker.sock が存在し platform='docker' と誤検出されるため、
+            // これを分岐しないと marketplace GPU の start が常に 500 になる。実体が無い以上
+            // 正直な native アクセス（endpoint:null, deliveryImplemented:false）を用いる。
+            if (vgpu.type === 'marketplace') {
+                allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
+            } else {
+                switch (this.platform) {
+                    case 'kubernetes':
+                        allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
+                        break;
+                    case 'docker':
+                        allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
+                        break;
+                    case 'native':
+                        allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
+                        break;
+                }
             }
 
             this.allocations.set(allocation.id, allocation);
@@ -664,17 +675,23 @@ nvidia-cuda-mps-control -d
             throw new Error('Virtual GPU not found');
         }
         
-        // プラットフォーム別のリリース処理
-        switch (this.platform) {
-            case 'kubernetes':
-                await this.releaseK8sAccess(vgpu, allocation);
-                break;
-            case 'docker':
-                await this.releaseDockerAccess(vgpu, allocation);
-                break;
-            case 'native':
-                await this.releaseNativeAccess(vgpu, allocation);
-                break;
+        // プラットフォーム別のリリース処理。
+        // 割り当て時（allocateVirtualGPU）と対称に、marketplace GPU は native 解放を用いる
+        // （コンテナ/Pod の実体を持たないため docker/k8s 解放は無意味）。
+        if (vgpu.type === 'marketplace') {
+            await this.releaseNativeAccess(vgpu, allocation);
+        } else {
+            switch (this.platform) {
+                case 'kubernetes':
+                    await this.releaseK8sAccess(vgpu, allocation);
+                    break;
+                case 'docker':
+                    await this.releaseDockerAccess(vgpu, allocation);
+                    break;
+                case 'native':
+                    await this.releaseNativeAccess(vgpu, allocation);
+                    break;
+            }
         }
         
         // 状態更新

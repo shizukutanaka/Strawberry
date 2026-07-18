@@ -21,4 +21,18 @@ module.exports = {
   // directory here — otherwise a full `npm test` run reports its spec files as
   // failed suites even though they pass under Playwright.
   testPathIgnorePatterns: ['/node_modules/', '/tests/e2e/'],
+  // forceExit as a config default (not just the --forceExit CLI flag on some
+  // npm scripts). The app keeps several long-lived timers alive after tests
+  // finish (LND mock reconnect, service-monitor, invoice-poller, the SLA sweep),
+  // so a bare `jest` invocation never exits on its own. The Test & Coverage
+  // workflow runs `npx jest --coverage --json` WITHOUT --forceExit and would
+  // otherwise hang until the job timeout; setting it here makes every jest
+  // invocation terminate cleanly.
+  forceExit: true,
+  // json-summary is required by the coverage-threshold step in
+  // .github/workflows/test-coverage-check.yml, which reads
+  // coverage/coverage-summary.json. Jest's default coverageReporters
+  // (clover/json/lcov/text) don't produce it, so that step used to crash with
+  // MODULE_NOT_FOUND even once the run stopped hanging.
+  coverageReporters: ['json', 'json-summary', 'lcov', 'text', 'text-summary'],
 };

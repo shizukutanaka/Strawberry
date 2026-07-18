@@ -100,6 +100,12 @@ describe('sendNotification type dispatch', () => {
   it('an unknown type rejects', async () => {
     await expect(sendNotification('carrier-pigeon', 'm', {})).rejects.toThrow('Unknown notification type');
   });
+
+  it('Telegram with a valid token but malformed chatId rejects', async () => {
+    const goodToken = `${'3'.repeat(8)}:${'C'.repeat(35)}`;
+    await expect(sendNotification(NotifyType.TELEGRAM, 'm', { botToken: goodToken, chatId: 'not a chat id!' }))
+      .rejects.toThrow('chatId format invalid');
+  });
 });
 
 describe('sendNotification multi-channel (user_ prefixed)', () => {

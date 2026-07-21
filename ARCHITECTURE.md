@@ -4,6 +4,9 @@
 `improvement_checklist2.md` の一部記述は実装より先行（aspirational）しているため、
 本ファイルを一次情報として扱うこと。
 
+> AI エージェント（Claude Opus/Sonnet 等）で作業する場合は、長所・短所・優先度つき
+> 改善案・作業規約・環境の罠をまとめた **`docs/AGENT_HANDBOOK.md`** を先に読むこと。
+
 ## 実体は何か
 
 - **本体は Node.js / Express の Web API サーバ**（`src/api/server.js`、`npm start`）。

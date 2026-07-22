@@ -71,6 +71,7 @@ export const api = {
   getGpu: (id) => request(`/api/v1/gpus/${id}`, { auth: false }),
   getGpuReviews: (id, query) => request(`/api/v1/gpus/${id}/reviews`, { auth: false, query }),
   getGpuMarketRate: (id) => request(`/api/v1/gpus/${id}/market-rate`, { auth: false }),
+  myWatches: () => request('/api/v1/users/me/watches'),
   getGpuWatch: (id) => request(`/api/v1/gpus/${id}/watch`),
   setGpuWatch: (id, targetPrice) => request(`/api/v1/gpus/${id}/watch`, { method: 'POST', body: { targetPrice } }),
   removeGpuWatch: (id) => request(`/api/v1/gpus/${id}/watch`, { method: 'DELETE' }),

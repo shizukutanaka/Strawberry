@@ -91,7 +91,10 @@ test.describe('GPU detail page', () => {
 
     await loginUI(page, renter.email, renter.password);
     await page.goto(`/#/gpus/${gpu.id}`);
-    await page.waitForSelector('button:has-text("通知を設定")', { timeout: 5000 });
+    // 10s (not 5s): the detail page fans out GPU + reviews + rate + market-rate
+    // fetches before the watch form renders; under a full-file run's shared-server
+    // load the tighter timeout flaked intermittently (passes in isolation).
+    await page.waitForSelector('button:has-text("通知を設定")', { timeout: 10000 });
     await page.fill('input[type="number"][step]', '700');
     await page.click('button:has-text("通知を設定")');
     await expect(page.locator('text=700 sats')).toBeVisible({ timeout: 5000 });
@@ -115,6 +118,46 @@ test.describe('GPU detail page', () => {
     await page.goto(`/#/gpus/${gpu.id}`);
     await expect(page.locator('text=ログインすると値下げ通知')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('button:has-text("通知を設定")')).toHaveCount(0);
+  });
+
+  test('the watches list page shows a set watch and removes it', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'wlprov', role: 'provider' });
+    const gpuName = `Watchlist GPU ${uniqueId()}`;
+    const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: gpuName, pricePerHour: 2000 });
+    const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'wlrent' });
+    // Seed a watch via the API, then confirm the new list page renders it.
+    await request.post(`${baseURL}/api/v1/gpus/${gpu.id}/watch`, {
+      headers: { Authorization: `Bearer ${renter.token}` },
+      data: { targetPrice: 1500 },
+    });
+
+    await loginUI(page, renter.email, renter.password);
+    await page.goto('/#/watches');
+    await expect(page.locator('table.data-table')).toContainText(gpuName, { timeout: 5000 });
+    await expect(page.locator('table.data-table')).toContainText('1,500 sats');
+    // current price (2000) > target (1500) -> still monitoring
+    await expect(page.locator('text=監視中')).toBeVisible();
+
+    await page.click('button:has-text("解除")');
+    await expect(page.locator('text=ウォッチはまだありません')).toBeVisible({ timeout: 5000 });
+    // server-side confirmation
+    const check = await request.get(`${baseURL}/api/v1/gpus/${gpu.id}/watch`, {
+      headers: { Authorization: `Bearer ${renter.token}` },
+    });
+    expect(check.status()).toBe(404);
+  });
+
+  test('drop-achieved is shown when the current price is at or below target', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'wlprov2', role: 'provider' });
+    const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Cheap GPU ${uniqueId()}`, pricePerHour: 800 });
+    const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'wlrent2' });
+    await request.post(`${baseURL}/api/v1/gpus/${gpu.id}/watch`, {
+      headers: { Authorization: `Bearer ${renter.token}` },
+      data: { targetPrice: 1000 }, // target above current 800 -> achieved
+    });
+    await loginUI(page, renter.email, renter.password);
+    await page.goto('/#/watches');
+    await expect(page.locator('text=値下げ達成')).toBeVisible({ timeout: 5000 });
   });
 });
 

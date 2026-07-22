@@ -13,6 +13,7 @@ import * as orderDetailPage from './pages/order-detail.js';
 import * as adminPaymentsPage from './pages/admin-payments.js';
 import * as earningsPage from './pages/earnings.js';
 import * as gpuDetailPage from './pages/gpu-detail.js';
+import * as watchesPage from './pages/watches.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -52,6 +53,7 @@ function renderNav() {
   nav.appendChild(link('#/market', 'マーケット'));
   if (isAuthenticated()) {
     nav.appendChild(link('#/orders', '注文'));
+    nav.appendChild(link('#/watches', 'ウォッチ'));
     if (user && user.role === 'provider') {
       nav.appendChild(link('#/my-gpus', 'マイGPU'));
       nav.appendChild(link('#/gpus/new', 'GPU登録'));
@@ -88,6 +90,7 @@ route('#/orders', { render: ordersPage.render, auth: true });
 route('#/orders/:id', { render: orderDetailPage.render, auth: true });
 route('#/admin/payments', { render: adminPaymentsPage.render, auth: true, roles: ['admin'] });
 route('#/earnings', { render: earningsPage.render, auth: true, roles: ['provider', 'admin'] });
+route('#/watches', { render: watchesPage.render, auth: true });
 setNotFound(notFoundPage.render);
 
 start('#/market');

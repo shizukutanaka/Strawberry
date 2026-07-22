@@ -68,4 +68,47 @@ test.describe('auth', () => {
     await page.goto('/#/orders');
     await page.waitForFunction(() => location.hash.startsWith('#/login'), { timeout: 5000 });
   });
+
+  test('account: changing the password logs out all sessions and requires the new one', async ({ page }) => {
+    const user = await registerAndLoginUI(page, { prefix: 'pwchg' });
+    const newPassword = 'NewSecret123!';
+
+    await page.goto('/#/account');
+    await page.waitForSelector('#acc-current');
+    await page.fill('#acc-current', user.password);
+    await page.fill('#acc-new', newPassword);
+    await page.fill('#acc-confirm', newPassword);
+    await page.click('button:has-text("パスワードを変更")');
+
+    // Success revokes every session -> app clears local session and returns to login.
+    await page.waitForFunction(() => location.hash === '#/login', { timeout: 5000 });
+    expect(await page.evaluate(() => localStorage.getItem('strawberry.token'))).toBeNull();
+
+    // The OLD password no longer works.
+    await page.fill('#login-email', user.email);
+    await page.fill('#login-password', user.password);
+    await page.click('button[type="submit"]');
+    await expect(page.locator('.error-msg')).toBeVisible({ timeout: 5000 });
+
+    // The NEW password logs in successfully.
+    await page.fill('#login-email', user.email);
+    await page.fill('#login-password', newPassword);
+    await page.click('button[type="submit"]');
+    await page.waitForFunction(() => location.hash === '#/market', { timeout: 8000 });
+  });
+
+  test('account: a wrong current password surfaces an error and keeps the session', async ({ page }) => {
+    await registerAndLoginUI(page, { prefix: 'pwbad' });
+    await page.goto('/#/account');
+    await page.waitForSelector('#acc-current');
+    await page.fill('#acc-current', 'TotallyWrong1!');
+    await page.fill('#acc-new', 'AnotherSecret123!');
+    await page.fill('#acc-confirm', 'AnotherSecret123!');
+    await page.click('button:has-text("パスワードを変更")');
+
+    await expect(page.locator('.error-msg')).toBeVisible({ timeout: 5000 });
+    // Still authenticated, still on the account page — no session loss on failure.
+    expect(await page.evaluate(() => localStorage.getItem('strawberry.token'))).not.toBeNull();
+    expect(page.url()).toContain('#/account');
+  });
 });

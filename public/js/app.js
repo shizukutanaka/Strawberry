@@ -14,6 +14,7 @@ import * as adminPaymentsPage from './pages/admin-payments.js';
 import * as earningsPage from './pages/earnings.js';
 import * as gpuDetailPage from './pages/gpu-detail.js';
 import * as watchesPage from './pages/watches.js';
+import * as accountPage from './pages/account.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -65,7 +66,9 @@ function renderNav() {
   }
 
   if (isAuthenticated()) {
-    authActions.appendChild(el('span', { class: 'muted', style: 'margin-right:8px' }, user ? user.username : ''));
+    authActions.appendChild(el('a', {
+      href: '#/account', class: 'muted', style: 'margin-right:8px', title: 'アカウント設定',
+    }, user ? user.username : 'アカウント'));
     authActions.appendChild(el('button', {
       class: 'btn btn-ghost btn-sm',
       onClick: () => { clearSession(); navigate('#/login'); },
@@ -91,6 +94,7 @@ route('#/orders/:id', { render: orderDetailPage.render, auth: true });
 route('#/admin/payments', { render: adminPaymentsPage.render, auth: true, roles: ['admin'] });
 route('#/earnings', { render: earningsPage.render, auth: true, roles: ['provider', 'admin'] });
 route('#/watches', { render: watchesPage.render, auth: true });
+route('#/account', { render: accountPage.render, auth: true });
 setNotFound(notFoundPage.render);
 
 start('#/market');

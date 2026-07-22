@@ -10,7 +10,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, auth = true, query } = {}) {
+async function request(path, { method = 'GET', body, auth = true, query, noAuthRedirect = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (auth) {
     const token = getToken();
@@ -40,7 +40,10 @@ async function request(path, { method = 'GET', body, auth = true, query } = {}) 
     try { data = JSON.parse(text); } catch (_) { data = null; }
   }
 
-  if (res.status === 401 && auth) {
+  // 401 = セッション無効とみなしグローバルにログアウト＋ログインへ誘導する。
+  // ただし noAuthRedirect の呼び出し（例: パスワード変更の「現在のパスワードが誤り」）は
+  // セッション失効ではなくフォームエラーなので、握り潰さず ApiError として投げさせる。
+  if (res.status === 401 && auth && !noAuthRedirect) {
     clearSession();
     const next = encodeURIComponent(location.hash.slice(1) || '/market');
     if (!location.hash.startsWith('#/login')) {
@@ -65,6 +68,10 @@ export const api = {
   login: (email, password) =>
     request('/api/v1/users/login', { method: 'POST', auth: false, body: { email, password } }),
   me: () => request('/api/v1/users/me'),
+  changePassword: (currentPassword, newPassword) =>
+    // noAuthRedirect: a 401 here means "current password wrong" (a form error),
+    // not an expired session — don't let the global handler log the user out.
+    request('/api/v1/users/me/password', { method: 'PUT', body: { currentPassword, newPassword }, noAuthRedirect: true }),
 
   // --- gpus ---
   listGpus: (filters) => request('/api/v1/gpus', { query: filters, auth: false }),

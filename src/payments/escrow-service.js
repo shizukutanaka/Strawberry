@@ -104,8 +104,18 @@ function createEscrowService({ repository, lnAdapter } = {}) {
   }
 
   return {
-    /** 注文に対するエスクローを生成（PENDING）。hold invoice 情報は invoice に格納。 */
-    create({ orderId, amountSats, feeRate = 0, deadlineAt = null, invoice = null }) {
+    /**
+     * 注文に対するエスクローを生成（PENDING）。hold invoice 情報は invoice に格納。
+     * preimage/preimageHash/providerInvoice は LN 決済（runActions）に必須の文脈:
+     *   - reveal_preimage → settleHoldInvoice(preimage)（確定）
+     *   - cancel_invoice  → cancelHoldInvoice(preimageHash)（取消/返金）
+     *   - payout_provider → payInvoice(providerInvoice, payoutSats)（貸し手へ送金）
+     * これらは runActions が escrow.<field> として読むが、以前は create が保存して
+     * いなかったため常に undefined になり、payout 先が失われて送金が成立しなかった。
+     * 後方互換: 未指定なら従来通り undefined（LN 結線を持たない BTC オンチェーン
+     * エスクロー等は影響なし）。
+     */
+    create({ orderId, amountSats, feeRate = 0, deadlineAt = null, invoice = null, preimage = null, preimageHash = null, providerInvoice = null }) {
       if (!orderId) throw new Error('orderId required');
       if (typeof amountSats !== 'number' || !Number.isFinite(amountSats) || amountSats <= 0) {
         throw new Error('amountSats must be a positive finite number');
@@ -128,6 +138,9 @@ function createEscrowService({ repository, lnAdapter } = {}) {
         feeRate: clampedFeeRate,
         deadlineAt,
         invoice,
+        preimage,
+        preimageHash,
+        providerInvoice,
         state: initial(),
         history: [],
       });

@@ -6,6 +6,7 @@
 // 各サブサービスは DI（テストはインメモリ repo を注入）。
 const featurePricer = require('../pricing/feature-pricer');
 const { runAuction } = require('./auction-engine');
+const { toPricingFeatures } = require('../gpu/perf-score');
 
 function createMarketplaceService({
   escrowService,
@@ -18,9 +19,15 @@ function createMarketplaceService({
     throw new Error('escrowService, verificationService, reputationService are required');
   }
 
-  /** GPU 特徴量＋需給から時給を見積もる。 */
+  /**
+   * GPU 特徴量＋需給から時給を見積もる。
+   * 入力は出品レコード（memoryGB / performance.teraflops）でも feature-pricer 語彙
+   * （vramGB / memBandwidthGBs / benchmarkScore）でも良い。前者は toPricingFeatures で
+   * 変換する — 変換前は実レコードの特徴量が全て 0 と評価され、見積が価格フロアに
+   * 張り付いていた（openOrderEscrow から実 GPU レコードが渡る経路）。
+   */
   function quoteGpu(gpu, market = {}) {
-    return pricer.computePrice(gpu, market, pricingOpts);
+    return pricer.computePrice(toPricingFeatures(gpu), market, pricingOpts);
   }
 
   /** 候補プロバイダをレピュテーション順に並べる（マッチング）。 */

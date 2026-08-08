@@ -18,6 +18,8 @@ const _attestationVerifier = createMockAttestationVerifier();
 const { createReputationService } = require('../../../reputation/reputation-service');
 // プロバイダー稼働実績（客観的な信頼性スコア）
 const providerUptime = require('../../../reputation/provider-uptime');
+// 機種横断で比較可能な正規化性能スコア（DLPerf 風）と価格対性能
+const perfScore = require('../../../gpu/perf-score');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -215,10 +217,18 @@ router.get('/', asyncHandler(async (req, res) => {
       return (r.sum / r.count) >= _minRating;
     });
   }
-  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)|availability(空き優先)
-  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; rating/reliability は常に高→低）
+  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)
+  //          |perf(性能スコア高→低)|value(価格対性能 高→低)|availability(空き優先)
+  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; その他は常に高→低）
   const sort = req.query.sort || 'price';
   const sortDir = req.query.sortDir === 'desc' ? -1 : 1;
+  // 性能スコアは純関数だが型番の正規表現照合を伴うため、ソートとレスポンス整形で
+  // 二重計算しないよう GPU ごとにメモ化する。
+  const _perfCache = new Map();
+  const perfFor = (gpu) => {
+    if (!_perfCache.has(gpu.id)) _perfCache.set(gpu.id, perfScore.summarize(gpu));
+    return _perfCache.get(gpu.id);
+  };
   // 信頼性は providerId 単位でファイル読み取りを伴うため、リクエスト内でメモ化する
   // （ソート比較で同一 provider を何度も引くのと、レスポンス整形での再取得を防ぐ）。
   const _relCache = new Map();
@@ -244,6 +254,12 @@ router.get('/', asyncHandler(async (req, res) => {
       const sb = relFor(b.providerId).score || 0;
       return sb - sa;
     });
+  } else if (sort === 'perf') {
+    // 正規化性能スコアの高い順。算出不能（未知型番・根拠不足）は 0 扱いで末尾へ。常に降順。
+    gpus.sort((a, b) => (perfFor(b).score || 0) - (perfFor(a).score || 0));
+  } else if (sort === 'value') {
+    // 価格対性能（DLPerf/$ 相当）の高い順。算出不能は末尾へ。常に降順。
+    gpus.sort((a, b) => (perfFor(b).perfPerHourSat || 0) - (perfFor(a).perfPerHourSat || 0));
   } else if (sort === 'availability') {
     // 空き GPU を先に表示
     gpus.sort((a, b) => {
@@ -280,6 +296,9 @@ router.get('/', asyncHandler(async (req, res) => {
     gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, ...gpu }) => {
       const r = reviewMap.get(gpu.id);
       const rel = relFor(_pid);
+      // perfFor はページング前の全 GPU ではなくページ内のみ計算される（sort=perf/value 時は
+      // ソートで既に全件分がメモ化済み）。gpu は分割代入後で id を保持しているので流用できる。
+      const perf = perfFor(gpu);
       return {
         ...gpu,
         rating: r && r.count > 0
@@ -287,6 +306,11 @@ router.get('/', asyncHandler(async (req, res) => {
           : { average: null, count: 0 },
         // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
         reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
+        // 機種横断で比較可能な正規化性能スコアと価格対性能（一覧は findings/basis を省く）
+        performanceScore: {
+          score: perf.score, confidence: perf.confidence,
+          matchedModel: perf.matchedModel, perfPerHourSat: perf.perfPerHourSat,
+        },
       };
     }),
     timestamp: new Date().toISOString()
@@ -348,6 +372,11 @@ router.get('/:id', asyncHandler(async (req, res) => {
       rating: { average: ratingAverage, count: ratingCount },
       // 客観的な信頼性シグナル（集計値のみ — プロバイダー身元は露出しない）
       reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions, beats: rel.beats, gapEvents: rel.gapEvents, measuring: rel.measuring },
+      // 正規化性能スコア。詳細ページでは根拠(basis)と申告矛盾(findings)まで開示する
+      // — 借り手が「なぜこのスコアなのか」「申告に矛盾は無いか」を自分で検証できるようにする。
+      // basis/findings は公開済みフィールド（型番・VRAM・電力・申告TFLOPS）からの導出値のみで、
+      // 非公開情報は含まない。
+      performanceScore: perfScore.summarize(gpu),
     }
   };
   res.json(response);

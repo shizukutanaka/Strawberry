@@ -114,6 +114,41 @@ export function attestationBadge(attestation) {
   return el('span', { class: 'chip chip-attestation chip-attestation-failed', title: `実機検証で申告スペックとの不一致が検出されました: ${findings}` }, 'スペック: 検証失敗');
 }
 
+// 正規化性能スコアのバッジ。performanceScore = { score, confidence, matchedModel, perfPerHourSat }。
+// 正直なUI原則:
+//   - スコアは「順位付けの指数（参照GPU=RTX 4090 級を 100）」であって実測スループットでは
+//     ないことをツールチップで明示する。
+//   - 根拠の強さ（実機検証済み / 型番既知 / 自己申告）を必ず区別し、算出できない場合は
+//     推測値を出さず「未算出」と表示する（reliability の「計測中」と同じ扱い）。
+const PERF_CONFIDENCE = {
+  attested: { label: '実測検証済み', cls: 'verified', hint: 'アテステーションで申告スペックが実機と一致することを確認済み' },
+  reference: { label: '型番既知', cls: 'reference', hint: '型番が既知GPUの公開スペックと一致（実機検証は未実施）' },
+  declared: { label: '自己申告', cls: 'declared', hint: 'プロバイダーの自己申告スペックのみに基づく推定値' },
+};
+export function perfBadge(performanceScore) {
+  if (!performanceScore) return null;
+  const { score, confidence } = performanceScore;
+  if (score == null) {
+    return el('span', {
+      class: 'chip chip-perf chip-perf-unknown',
+      title: '型番が参照表に無く、性能の根拠となる申告値も無いためスコアを算出していません',
+    }, '性能: 未算出');
+  }
+  const meta = PERF_CONFIDENCE[confidence] || PERF_CONFIDENCE.declared;
+  const title = `性能スコア ${score}（RTX 4090 級 = 100 の相対指数。実測スループットではありません）／根拠: ${meta.hint}`;
+  return el('span', { class: `chip chip-perf chip-perf-${meta.cls}`, title }, `性能 ${score} ・ ${meta.label}`);
+}
+
+// 価格対性能（1 sats/時 あたりの性能スコア）。数値が大きいほど割安。
+export function valueBadge(performanceScore) {
+  if (!performanceScore || performanceScore.perfPerHourSat == null) return null;
+  const v = performanceScore.perfPerHourSat;
+  return el('span', {
+    class: 'chip chip-perf chip-perf-value',
+    title: '価格対性能 = 性能スコア ÷ 時間単価(sats)。同じ予算でより多くの計算が回せるほど大きくなります',
+  }, `コスパ ${v >= 0.01 ? v.toFixed(3) : v.toExponential(1)}/sat`);
+}
+
 export function timeline(order) {
   const current = order.status;
   const list = el('ul', { class: 'timeline' });

@@ -53,11 +53,13 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … ✅ だが **真正性検証なし** ❌（カテゴリ3）
-2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は未配線**（`feature-pricer` 実装済・未配線）
-3. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
-4. 決済: 直接二段送金 `btc-payment.sendBTC` … ❌ **エスクロー無し**（本書で実装）
-5. 稼働: `virtual-gpu-manager` でコンテナ割当 … 🟡（要 Docker/k8s 実機）
-6. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
+2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は `POST /marketplace/quote`・`openOrderEscrow` に配線済**（`feature-pricer`）。注文の実課金経路（`order/index.js`）はまだフラットのまま。
+   なお feature-pricer は `vramGB/memBandwidthGBs/benchmarkScore` 語彙、出品レコードは `memoryGB/performance.teraflops` 語彙で噛み合っておらず、実レコードを渡すと全特徴量 0 で見積が価格フロアに張り付いていた。`perf-score.toPricingFeatures()` で橋渡し済（2026-08）。
+3. 性能比較: ✅ **正規化性能スコア実装済**（`src/gpu/perf-score.js`、Vast.ai DLPerf 相当）。演算・帯域・VRAM の加重幾何平均で参照GPU(RTX 4090 級)=100 の機種横断指数を算出し、`GET /gpus`・`/gpus/:id` の `performanceScore` と `?sort=perf|value`（価格対性能 = DLPerf/$ 相当）で公開。自己申告での順位買いを防ぐため、参照表と矛盾する申告は表を採用せず（`vram_mismatch`）、申告 TFLOPS は消費電力由来の物理上限でクランプし、未検証の未知型番は参照GPU 超えを認めない。根拠が無い場合はスコアを推測せず null（未算出）。
+4. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
+5. 決済: 直接二段送金 `btc-payment.sendBTC` … ❌ **エスクロー無し**（本書で実装）
+6. 稼働: `virtual-gpu-manager` でコンテナ割当 … 🟡（要 Docker/k8s 実機）
+7. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
 
 ### F2. 信頼基盤（最優先トリオ）
 - **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。**ルート配線・実ジョブ収集は未**。
@@ -114,3 +116,4 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）
+- `src/gpu/perf-score.js` — 機種横断の正規化性能スコア／価格対性能（DLPerf 風。参照表照合・電力由来の TFLOPS 上限クランプ・未検証型番の上限・算出不能は null、feature-pricer への特徴量変換つき, 27テスト）

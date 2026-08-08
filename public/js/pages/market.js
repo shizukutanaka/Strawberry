@@ -1,5 +1,5 @@
 // public/js/pages/market.js — GPU browse with filters and cards.
-import { el, skeleton, emptyState, reliabilityBadge, attestationBadge } from '../ui.js';
+import { el, skeleton, emptyState, reliabilityBadge, attestationBadge, perfBadge, valueBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -25,6 +25,10 @@ function gpuCard(gpu, rateInfo, onRent) {
     el('p', { class: 'muted', style: 'font-size:0.8rem;margin:0;cursor:pointer', onClick: () => navigate(`#/gpus/${gpu.id}`) }, ratingText),
     reliabilityBadge(gpu.reliability),
     attestationBadge(gpu.attestation),
+    el('div', { class: 'chips' },
+      perfBadge(gpu.performanceScore),
+      valueBadge(gpu.performanceScore),
+    ),
     el('div', { class: 'price' },
       el('div', { class: 'sats' }, price.sats),
       price.jpy ? el('div', { class: 'jpy' }, price.jpy) : null,
@@ -46,6 +50,8 @@ export async function render(container) {
   );
   const sortSelect = el('select', { onChange: (e) => { state.sort = e.target.value; load(); } },
     el('option', { value: '' }, '価格が安い順'),
+    el('option', { value: 'value' }, 'コスパが良い順（価格対性能）'),
+    el('option', { value: 'perf' }, '性能が高い順'),
     el('option', { value: 'rating' }, '評価が高い順'),
     el('option', { value: 'reliability' }, '稼働が安定している順'),
     el('option', { value: 'memory' }, 'メモリが大きい順'),

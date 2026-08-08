@@ -2,7 +2,7 @@
 // Reached by clicking a GPU name/rating in market.js's cards (previously
 // there was no way to see full specs or read individual reviews before
 // deciding to rent — market.js's cards only ever showed a summary).
-import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge, attestationBadge } from '../ui.js';
+import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge, attestationBadge, perfBadge, valueBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -127,7 +127,7 @@ export async function render(container, params) {
     },
   }, gpu.available === false ? '貸出中' : 'このGPUを借りる');
 
-  const specCard = el('div', { class: 'card stack' },
+  const specCard = el('div', { class: 'card stack spec-card' },
     attestationBadge(gpu.attestation),
     specRow('ベンダー', gpu.vendor),
     specRow('モデル', gpu.model),
@@ -139,6 +139,26 @@ export async function render(container, params) {
     specRow('クロック', `${gpu.clockMHz} MHz`),
     specRow('消費電力', `${gpu.powerWatt} W`),
   );
+
+  // 性能スコアの内訳。一覧のバッジだけでは「なぜこのスコアなのか」が分からないため、
+  // 詳細ページでは算出根拠（basis）と申告矛盾（findings）まで開示する。
+  const perf = gpu.performanceScore;
+  const perfCard = perf ? el('div', { class: 'card stack perf-card' },
+    el('div', { class: 'chips' }, perfBadge(perf), valueBadge(perf)),
+    el('p', { class: 'muted', style: 'font-size:0.85rem;margin:0' },
+      'RTX 4090 級を 100 とした機種横断の相対指数です。演算性能・メモリ帯域・VRAM 容量の加重幾何平均で、実測スループットの予測値ではありません。'),
+    perf.matchedModel ? specRow('照合された型番', perf.matchedModel) : null,
+    perf.basis && perf.basis.fp16Tflops != null ? specRow('演算性能(FP16)', `約 ${perf.basis.fp16Tflops} TFLOPS`) : null,
+    perf.basis && perf.basis.memBandwidthGBs != null ? specRow('メモリ帯域', `約 ${perf.basis.memBandwidthGBs} GB/s`) : null,
+    perf.basis ? specRow('根拠', perf.basis.source) : null,
+    // 申告矛盾は借り手が知るべき警告 — 目立つ形で開示し、黙って握り潰さない。
+    perf.findings && perf.findings.length
+      ? el('div', { class: 'stack', style: 'gap:4px' },
+          el('strong', { style: 'color:var(--color-danger)' }, '申告スペックに関する注意'),
+          el('ul', { style: 'margin:0;padding-left:1.2em' },
+            ...perf.findings.map((f) => el('li', { class: 'muted', style: 'font-size:0.85rem' }, f))))
+      : null,
+  ) : null;
 
   const reviewsSection = el('div', { class: 'stack' },
     el('h3', {}, `レビュー（${reviewsRes.total}件）`),
@@ -173,6 +193,8 @@ export async function render(container, params) {
       rentBtn,
       el('h3', {}, '価格通知'),
       renderWatchSection(gpuId, gpu),
+      perfCard ? el('h3', {}, '性能スコア') : null,
+      perfCard,
       el('h3', {}, 'スペック'),
       specCard,
       reviewsSection,

@@ -38,9 +38,10 @@ test.describe('GPU detail page', () => {
 
     await page.goto(`/#/gpus/${gpu.id}`);
     await expect(page.locator('h1')).toContainText(gpu.name);
-    // The page has three `.card` elements (specs, watch section, review) --
-    // `.card.stack` (compound class selector) is unique to the specs card.
-    await expect(page.locator('.card.stack')).toContainText('48 GB');
+    // The page has several `.card` elements (specs, performance score, watch
+    // section, review). `.spec-card` is the specs card's own hook -- `.card.stack`
+    // is not unique any more now that the performance-score card uses it too.
+    await expect(page.locator('.spec-card')).toContainText('48 GB');
     await expect(page.locator('text=Solid performance')).toBeVisible();
     await expect(page.locator('.stars').first()).toContainText('★★★★☆');
   });
@@ -63,10 +64,10 @@ test.describe('GPU detail page', () => {
     });
 
     await page.goto(`/#/gpus/${selfReported.id}`);
-    await expect(page.locator('.card.stack')).toContainText('スペック: 自己申告');
+    await expect(page.locator('.spec-card')).toContainText('スペック: 自己申告');
 
     await page.goto(`/#/gpus/${verified.id}`);
-    await expect(page.locator('.card.stack')).toContainText('スペック: 実測検証済み');
+    await expect(page.locator('.spec-card')).toContainText('スペック: 実測検証済み');
   });
 
   test('shows a market-rate line only when 2+ listings share the same model', async ({ page, request, baseURL }) => {
@@ -115,6 +116,54 @@ test.describe('GPU detail page', () => {
     await page.goto(`/#/gpus/${gpu.id}`);
     await expect(page.locator('text=ログインすると値下げ通知')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('button:has-text("通知を設定")')).toHaveCount(0);
+  });
+});
+
+test.describe('normalized performance score', () => {
+  test('shows the score, its basis, and the price-performance chip for a known GPU', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'perfprov', role: 'provider' });
+    // helper の既定は RTX 4090 24GB = 参照GPU そのもの → スコアはちょうど 100
+    const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Perf GPU ${uniqueId()}`, pricePerHour: 1000 });
+
+    await page.goto(`/#/gpus/${gpu.id}`);
+    const perfCard = page.locator('.perf-card');
+    await expect(perfCard).toContainText('性能 100');
+    // 裏付けの強さを必ず区別して見せる（実機検証はしていないので「型番既知」）
+    await expect(perfCard).toContainText('型番既知');
+    await expect(perfCard).toContainText('照合された型番');
+    // 価格対性能 100/1000 = 0.1
+    await expect(perfCard).toContainText('コスパ 0.100/sat');
+  });
+
+  test('withholds the score and warns when the declared model contradicts the VRAM', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'perffraud', role: 'provider' });
+    // 「H100」を名乗る 24GB の出品 — H100 のスコアが付いてはならない
+    const gpu = await apiCreateGpu(request, baseURL, provider.token, {
+      name: `Fraud GPU ${uniqueId()}`, model: 'H100', memoryGB: 24, pricePerHour: 9000,
+    });
+
+    await page.goto(`/#/gpus/${gpu.id}`);
+    const perfCard = page.locator('.perf-card');
+    await expect(perfCard).toContainText('性能: 未算出');
+    await expect(perfCard).toContainText('申告スペックに関する注意');
+    await expect(perfCard).toContainText('vram_mismatch');
+  });
+
+  test('market list carries the perf badge and offers the price-performance sort', async ({ page, request, baseURL }) => {
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'perfmkt', role: 'provider' });
+    const name = `MktPerf GPU ${uniqueId()}`;
+    await apiCreateGpu(request, baseURL, provider.token, { name, pricePerHour: 1000 });
+
+    await page.goto('/#/market');
+    await page.locator('input[type="search"]').fill(name);
+    await page.locator('button:has-text("絞り込み")').click();
+    const card = page.locator('.gpu-card').filter({ hasText: name });
+    await expect(card).toContainText('性能 100');
+    await expect(card).toContainText('コスパ');
+
+    // 並び順に「コスパが良い順」が出ていて、選んでも一覧が壊れない
+    await page.locator('select').nth(1).selectOption('value');
+    await expect(page.locator('.gpu-card').first()).toBeVisible();
   });
 });
 

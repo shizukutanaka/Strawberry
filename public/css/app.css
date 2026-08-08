@@ -150,6 +150,15 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
 .chip-attestation-verified { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
 .chip-attestation-failed { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
 
+/* 正規化性能スコア／価格対性能チップ。根拠の強さ（実測検証済み / 型番既知 / 自己申告 /
+   未算出）で色を変え、裏付けの弱いスコアが検証済みと同じ重みに見えないようにする。 */
+.chip-perf { font-weight: 600; }
+.chip-perf-verified { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
+.chip-perf-reference { background: var(--color-info-bg); color: var(--color-info); border-color: transparent; }
+.chip-perf-declared { background: var(--color-warning-bg); color: var(--color-warning); border-color: transparent; }
+.chip-perf-unknown { background: var(--color-surface-2); color: var(--color-text-muted); }
+.chip-perf-value { background: var(--color-surface-2); color: var(--color-text); }
+
 .filter-bar {
   display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;
   background: var(--color-surface); border: 1px solid var(--color-border);

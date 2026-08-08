@@ -34,23 +34,50 @@ describe('POST /payment/btc: lenderWallet cannot be client-controlled', () => {
   });
 });
 
-describe('POST /payment/btc: PaymentRecord written on successful settlement', () => {
-  it('source code: PaymentRepository.create is called with status paid', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../../src/api/routes/payment/btc-onchain.js'),
-      'utf-8'
-    );
-    expect(src).toMatch(/PaymentRepository\.create/);
-    expect(src).toMatch(/status.*paid/);
-    expect(src).toMatch(/method.*btc_onchain/);
+// This block previously asserted the opposite — that the route writes a paid
+// PaymentRecord "on successful settlement". That invariant is gone because the
+// settlement itself was removed: the route's premise (tx1 "borrower→operator")
+// is impossible. sendBTC ignores its fromWallet and calls sendLightningPayment,
+// which is send-only (OpenNode /v2/withdrawals, LNbits {out:true}), so tx1 paid
+// the platform's own wallet out of platform funds and tx2 then paid the
+// provider: two payments out, nothing collected, triggerable by any renter on
+// their own order. The route is fail-closed now, and these are the inverted
+// guards that keep it that way.
+describe('POST /payment/btc: fail-closed — must never move funds', () => {
+  const readSrc = () => fs.readFileSync(
+    path.resolve(__dirname, '../../src/api/routes/payment/btc-onchain.js'),
+    'utf-8'
+  );
+  // "Is it called?" assertions must look at executable code only: the file
+  // deliberately *documents* the removed leak in its comments, and a whole-file
+  // grep would match that prose and fail.
+  const readCode = () => readSrc()
+    .replace(/\/\*[\s\S]*?\*\//g, '')    // block comments
+    .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments (without eating "https://")
+
+  it('source code: no fund-transfer helper is imported or called', () => {
+    const code = readCode();
+    // sendBTC must not be imported — keeping it out of scope makes an accidental
+    // re-wiring of the payout a syntax error rather than a silent money leak.
+    expect(code).not.toMatch(/\bsendBTC\b[^}]*\}\s*=\s*require/);
+    expect(code).not.toMatch(/\bsendBTC\s*\(/);
   });
 
-  it('PaymentRepository is required at module level (not inline)', () => {
-    const src = fs.readFileSync(
-      path.resolve(__dirname, '../../src/api/routes/payment/btc-onchain.js'),
-      'utf-8'
-    );
-    // Top-level require should be at beginning of file, before route handler.
+  it('source code: no paid PaymentRecord is written (nothing was actually paid)', () => {
+    expect(readCode()).not.toMatch(/PaymentRepository\.create/);
+  });
+
+  it('source code: the handler fails closed with 501 and points at the Lightning flow', () => {
+    const code = readCode();
+    expect(code).toMatch(/status\(501\)/);
+    expect(code).toMatch(/BTC_ONCHAIN_NOT_IMPLEMENTED/);
+    expect(code).toMatch(/payments\/order/);
+  });
+
+  it('PaymentRepository is still required at module level for the cross-method paid check', () => {
+    // Reading existing payments (to reject an order already paid via Lightning)
+    // is still needed; only the *writing* of a paid record was removed.
+    const src = readSrc();
     const paymentRepoReqIdx = src.indexOf("require('../../../db/json/PaymentRepository')");
     const routeHandlerIdx = src.indexOf('router.post(');
     expect(paymentRepoReqIdx).toBeGreaterThan(-1);

@@ -1,8 +1,10 @@
 // 支払い・受取API（BTC差益自動控除）
 const express = require('express');
 const router = express.Router();
-const { FEE_RATE, calcTotalWithFee, calcFee, calcPayout, sendBTC, getOperatorWallet } = require('../../utils/btc-payment');
-const { appendAuditLog } = require('../../../utils/audit-log');
+// 意図的に btc-payment の送金関数（sendBTC / getOperatorWallet 等）を import しない。
+// 本ルートは fail-closed 化されており資金を一切動かさない。スコープに入れないことで
+// 「うっかり再配線して資金流出を復活させる」事故を構文レベルで防ぐ
+// （理由の詳細はハンドラ内の FAIL-CLOSED コメントを参照）。
 const { logger } = require('../../../utils/logger');
 const { withLock } = require('../../../utils/async-lock');
 const { authenticateJWT } = require('../../middleware/security');
@@ -96,19 +98,13 @@ router.post('/', authenticateJWT, async (req, res) => {
     if (!order.totalPrice || order.totalPrice <= 0) {
       return res.status(422).json({ message: 'Order has no valid total price; cannot process payment' });
     }
-    const priceBTC = order.totalPrice / 1e8;
-    const total = calcTotalWithFee(priceBTC);
-    const fee = calcFee(priceBTC);
-    const payout = calcPayout(priceBTC);
-    const operatorWallet = getOperatorWallet();
-
     // ── エスクロー冪等性チェック ───────────────────────────────────────────────
-    // tx1/tx2 の進捗を EscrowRepository に記録し、再送時に既済ステップを飛ばす。
-    // PENDING: tx1 未送信  HELD: tx1 済み tx2 未送信  SETTLED: 完了
+    // fail-closed 化以前に SETTLED まで到達したエスクロー（レガシーデータ）は、
+    // 資金を動かさずにキャッシュ済み結果を返すため引き続き参照する。
     const EscrowRepository = require('../../../db/json/EscrowRepository');
     const existingEscrows = EscrowRepository.getByOrderId(orderId);
-    // 完了・進行中の最新エスクロー（CANCELED は無視して再開可能にする）
-    let escrow = existingEscrows.find(e => e.state !== 'CANCELED') || null;
+    // 完了・進行中の最新エスクロー（CANCELED は無視）
+    const escrow = existingEscrows.find(e => e.state !== 'CANCELED') || null;
 
     if (escrow && escrow.state === 'SETTLED') {
       // 既に決済完了 — tx を一切実行せずキャッシュ結果を返す
@@ -125,114 +121,38 @@ router.post('/', authenticateJWT, async (req, res) => {
       });
     }
 
-    if (!escrow) {
-      escrow = EscrowRepository.create({
-        orderId,
-        amountSats: Math.round(total * 1e8),
-        feeRate: FEE_RATE,
-        state: 'PENDING',
-        total,
-        payout,
-        fee,
-        lenderWallet,
-        operatorWallet,
-      });
-    }
-
-    // ── TX1: 借り手 → 運営 ────────────────────────────────────────────────────
-    const isProd = process.env.NODE_ENV === 'production';
-    let tx1Txid;
-
-    if (escrow.state === 'PENDING') {
-      let tx1;
-      try {
-        tx1 = await sendBTC(borrowerWallet, operatorWallet, total);
-      } catch (err) {
-        return res.status(502).json({
-          message: 'Payment failed before any funds were moved',
-          stage: 'borrower_to_operator',
-          escrowId: escrow.id,
-          error: isProd ? 'Lightning payment failed' : err.message,
-        });
-      }
-      tx1Txid = tx1.txid;
-      // PENDING → HELD: tx1 txid を永続化してからリトライ安全状態へ
-      EscrowRepository.updateIf(
-        escrow.id,
-        (e) => e.state === 'PENDING',
-        { state: 'HELD', txBorrowerToOperator: tx1Txid, updatedAt: new Date().toISOString() }
-      );
-    } else {
-      // HELD: tx1 は既に完了している（部分決済から再開）
-      tx1Txid = escrow.txBorrowerToOperator;
-      logger.info('[btc-onchain] Resuming partial settlement from tx2', { orderId, escrowId: escrow.id, tx1Txid });
-    }
-
-    // ── TX2: 運営 → 貸し手 ───────────────────────────────────────────────────
-    let tx2Txid;
-    try {
-      const tx2 = await sendBTC(operatorWallet, lenderWallet, payout);
-      tx2Txid = tx2.txid;
-    } catch (err) {
-      // 重大: tx1 は成立済み。同一リクエストを再送すれば tx2 のみリトライされ自動回復する。
-      appendAuditLog('payment_partial_settlement', {
-        orderId, operatorWallet, lenderWallet, total, payout,
-        txBorrowerToOperator: tx1Txid, escrowId: escrow.id, error: err.message,
-      });
-      logger.error('[CRITICAL] Partial settlement: operator received funds but lender payout failed. Retry the same request to resume from tx2.', {
-        orderId, escrowId: escrow.id, tx1Txid,
-      });
-      return res.status(500).json({
-        message: 'Partial settlement: operator received funds but payout to lender failed. Retry this request (same orderId) to resume from tx2 without double-charging.',
-        stage: 'operator_to_lender',
-        orderId,
-        escrowId: escrow.id,
-        txBorrowerToOperator: { txid: tx1Txid },
-        error: isProd ? 'Payout failed — see audit log for details' : err.message,
-        retryable: true,
-      });
-    }
-
-    // HELD → SETTLED: tx2 txid を原子的に記録
-    EscrowRepository.updateIf(
-      escrow.id,
-      (e) => e.state === 'HELD',
-      { state: 'SETTLED', txOperatorToLender: tx2Txid, updatedAt: new Date().toISOString() }
-    );
-
-    // PaymentRepository に paid レコードを書く。/orders/:id/start・/stop・/dispute の
-    // hasPaidPayment ゲートは PaymentRepository を参照するため、このレコードがないと
-    // btc-onchain で実際に資金を動かした後もサービス開始・終了・係争が一切できない
-    // （資金喪失のまま注文が宙ぶらりになる）。btc-onchain は idempotent 設計のため
-    // SETTLED 分の重複レコード作成を避けるため既存 paid レコードがある場合はスキップ。
-    try {
-      const existingPaid = (PaymentRepository.getByOrderId(orderId) || []).find(p => p.status === 'paid');
-      if (!existingPaid) {
-        PaymentRepository.create({
-          orderId,
-          userId: req.user.id,
-          amount: Math.round(total * 1e8),
-          status: 'paid',
-          method: 'btc_onchain',
-          txid: tx2Txid,
-          paidAt: new Date().toISOString(),
-        });
-      }
-    } catch (e) {
-      // 送金は完了しているため、PaymentRecord 書き込み失敗は致命的ではない（監査証跡は
-      // EscrowRepository に残る）が警告する。管理者が手動で reconcile できるよう記録する。
-      logger.warn(`[btc-onchain] PaymentRecord write failed for order ${orderId}: ${e.message}`);
-    }
-
-    return res.json({
-      message: 'Payment processed with operator fee',
-      orderId,
-      totalPaid: total,
-      payout,
-      operatorFee: fee,
-      txBorrowerToOperator: { txid: tx1Txid },
-      txOperatorToLender: { txid: tx2Txid },
-      escrowId: escrow.id,
+    // ── FAIL-CLOSED: この経路は資金を動かしてはならない ──────────────────────
+    // このルートの前提「TX1: 借り手 → 運営」は原理的に成立しない。
+    //
+    // Lightning には「相手の同意なく一方的に資金を引き出す」真の pull payment が存在
+    // しない。LNURL-withdraw は *資金源が事前に発行した引き出し許可* に対して受取側の
+    // ウォレットが能動的に要求する仕組みであり、BOLT12 の invoice_request も同様に
+    // 開始側の操作を必要とする。つまりサーバーが API 呼び出しだけで借り手の財布から
+    // 徴収する手段は存在しない。
+    //
+    // 実装も実際そうなっていた: sendBTC(from, to, amount) は from を無視して
+    // sendLightningPayment(to, ...) を呼ぶだけで（utils/btc-payment.js）、その実体は
+    // OpenNode の POST /v2/withdrawals ／ LNbits の {out:true} ＝ 送金専用 API
+    // （utils/lightning-api.js）。したがって TX1 は「借り手から徴収」ではなく
+    // 「運営が自己資金を運営アドレスへ払い出す」動作になり、続く TX2 でさらに貸し手へ
+    // 払い出していた。結果として借り手が 1sat も支払わないままプロバイダーへ送金される
+    // （実損）。しかも本ルートは管理者限定ではなく注文の借り手自身が実行できた。
+    //
+    // 徴収は「借り手がインボイスを支払う」形でしか実現できず、それは既に正しく動作して
+    // いる Lightning 経路（POST /payments/order/:id ＋ invoice-poller）が担っている。
+    // よってここは修正して徴収させるのではなく、資金を一切動かさず明示的に失敗させる
+    // （本プロジェクトの「正直なUI原則」＝偽の成功を返さない）。
+    //
+    // 配置意図: 既存の検証ガード（所有権・注文状態・二重支払い・payoutAddress 必須・
+    // 自己取引禁止）と、レガシー SETTLED エスクローの冪等キャッシュ返却（資金を動かさない）
+    // はすべて通過させたうえで、新規エスクロー作成と送金の直前で止める。これにより
+    // PENDING エスクローでデータを汚さず、既存の防御も温存される。
+    return res.status(501).json({
+      message: 'BTC on-chain payment is not available: this route cannot collect funds from the renter '
+        + '(Lightning payments require the payer to initiate; a server API call cannot debit a renter wallet). '
+        + 'No funds were moved. Use the Lightning invoice flow instead: POST /api/v1/payments/order/:id',
+      code: 'BTC_ONCHAIN_NOT_IMPLEMENTED',
+      useInstead: 'POST /api/v1/payments/order/:id',
     });
     }); // end withLock
   } catch (err) {

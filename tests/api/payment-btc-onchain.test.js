@@ -73,19 +73,27 @@ describe('btc-onchain payout recipient resolution (#anti-spoof)', () => {
     expect(sent.length).toBe(0); // no funds moved
   });
 
-  it("uses the provider's registered payoutAddress and ignores a spoofed lenderWallet in the body", async () => {
+  it('is fail-closed once the guards pass: 501 and not a single satoshi moves', async () => {
+    // This used to "settle" here with two sendBTC calls. Both were outbound
+    // platform withdrawals — sendBTC ignores its fromWallet argument and calls
+    // sendLightningPayment(to, amount), whose backends (OpenNode /v2/withdrawals,
+    // LNbits {out:true}) only send. So the renter was never debited: the platform
+    // paid its own operator wallet, then paid the provider. Two payments out,
+    // nothing collected, triggerable by any renter on their own order.
+    // Collecting from a payer without their signature is impossible on Lightning,
+    // so the transfers were removed; the invoice flow does the collecting.
     UserRepository.update(provider.id, { payoutAddress: PROVIDER_WALLET });
     const orderId = makeOrder();
     const attackerWallet = 'bc1qattacker0000000000000000000000000';
     const res = await request(app).post('/api/v1/payments/btc')
       .set('Authorization', `Bearer ${renter.token}`)
       .send({ orderId, lenderWallet: attackerWallet, borrowerWallet: BORROWER_WALLET });
-    expect(res.statusCode).toBe(200);
-    // Two sends: borrower→operator, operator→lender. The lender payout must go to
-    // the registered provider address, never the attacker-supplied one.
-    const payoutDest = sent[sent.length - 1].dest;
-    expect(payoutDest).toBe(PROVIDER_WALLET);
-    expect(sent.some(s => s.dest === attackerWallet)).toBe(false);
+    expect(res.statusCode).toBe(501);
+    expect(res.body.code).toBe('BTC_ONCHAIN_NOT_IMPLEMENTED');
+    expect(res.body.useInstead).toBe('POST /api/v1/payments/order/:id');
+    // The load-bearing assertion: the Lightning wrapper was never called, so no
+    // funds moved — not to the provider, not to the attacker, not to anyone.
+    expect(sent).toHaveLength(0);
   });
 
   it('returns 400 when neither a registered payout address nor a body lenderWallet is available', async () => {

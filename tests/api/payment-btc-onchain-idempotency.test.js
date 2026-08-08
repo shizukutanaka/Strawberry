@@ -1,10 +1,28 @@
-// Idempotency and partial-settlement recovery tests for POST /payments/btc.
+// POST /payments/btc is fail-closed: it must never move funds.
 //
-// Invariants under test:
-//   1. A SETTLED payment is returned from cache — no Lightning calls on re-POST.
-//   2. When tx2 (operator→lender) fails, escrow stays in HELD state.
-//      Re-posting the same orderId skips tx1 and retries only tx2.
-//   3. A retry storm after SETTLED never fires additional Lightning calls.
+// History: this route used to run two transfers — "tx1: borrower→operator" then
+// "tx2: operator→lender" — with idempotent resume between them, and this file
+// tested that resume logic. But sendBTC(from, to, amount) ignores `from` and
+// calls sendLightningPayment(to, amount), whose backends are send-only (OpenNode
+// POST /v2/withdrawals, LNbits {out:true}). So tx1 never debited the renter: it
+// paid the platform's own operator wallet out of platform funds, and tx2 then
+// paid the provider. The platform paid twice and collected nothing — and any
+// renter could trigger it on their own order.
+//
+// On Lightning there is no true "pull" payment: LNURL-withdraw acts on a
+// withdraw permission the funding side issued in advance, and BOLT12's
+// invoice_request likewise needs the initiating side to act. A server cannot
+// debit a renter's wallet from an API call. Collection is therefore only
+// possible as "the renter pays an invoice", which the Lightning flow
+// (POST /payments/order/:id + invoice-poller) already does correctly. The
+// transfers here were removed rather than "fixed".
+//
+// Invariants now under test:
+//   1. Once the guards pass, the route returns 501, fires zero Lightning calls,
+//      and leaves no escrow record behind.
+//   2. Repeated posts accrue no state.
+//   3. A SETTLED escrow written before this change still returns its cached
+//      result without any Lightning call.
 
 jest.mock('../../src/api/utils/lightning-api', () => ({
   sendLightningPayment: jest.fn(),
@@ -33,7 +51,7 @@ async function registerAndLogin(prefix) {
   return { token: login.body.token, id };
 }
 
-describe('btc-onchain payment idempotency and partial-settlement recovery', () => {
+describe('btc-onchain payment is fail-closed (moves no funds)', () => {
   let renter, provider, gpuId;
 
   beforeAll(async () => {
@@ -49,109 +67,72 @@ describe('btc-onchain payment idempotency and partial-settlement recovery', () =
 
   beforeEach(() => {
     sendLightningPayment.mockReset();
+    // Any call at all is a regression, so make one fail loudly if it happens.
+    sendLightningPayment.mockImplementation(async () => {
+      throw new Error('sendLightningPayment must never be called by this route');
+    });
   });
 
   const makeOrder = () => OrderRepository.create({
     gpuId, userId: renter.id, providerId: provider.id, durationMinutes: 60,
-    // btc-onchain は pending/matched/active のみ許可（completed への二次支払いは
-    // 不正資金移動になるためゲートされる — see #1 in audit batch 13）。
     status: 'pending', pricePerHour: 100, totalPrice: 100,
     createdAt: new Date().toISOString(),
   }).id;
 
-  it('returns cached SETTLED response and makes zero Lightning calls on re-POST', async () => {
-    let callCount = 0;
-    sendLightningPayment.mockImplementation(async () => {
-      callCount++;
-      return { id: `txid-${callCount}`, payment_hash: `hash-${callCount}` };
-    });
-
+  it('returns 501, moves no funds, and creates no escrow', async () => {
     const orderId = makeOrder();
-    const body = { orderId, borrowerWallet: BORROWER_WALLET };
-    const auth = { Authorization: `Bearer ${renter.token}` };
+    const res = await request(app).post('/api/v1/payments/btc')
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ orderId, borrowerWallet: BORROWER_WALLET });
 
-    // First POST: performs tx1 and tx2
-    const r1 = await request(app).post('/api/v1/payments/btc').set(auth).send(body);
-    expect(r1.statusCode).toBe(200);
-    expect(callCount).toBe(2);
-    const savedCount = callCount;
-
-    // Second POST: must return cached result with zero additional Lightning calls
-    const r2 = await request(app).post('/api/v1/payments/btc').set(auth).send(body);
-    expect(r2.statusCode).toBe(200);
-    expect(r2.body.idempotent).toBe(true);
-    expect(callCount).toBe(savedCount);
-    expect(r2.body.txBorrowerToOperator.txid).toBe(r1.body.txBorrowerToOperator.txid);
-    expect(r2.body.txOperatorToLender.txid).toBe(r1.body.txOperatorToLender.txid);
+    expect(res.statusCode).toBe(501);
+    expect(res.body.code).toBe('BTC_ONCHAIN_NOT_IMPLEMENTED');
+    expect(res.body.useInstead).toBe('POST /api/v1/payments/order/:id');
+    expect(sendLightningPayment).not.toHaveBeenCalled();
+    // No PENDING escrow may be left behind polluting the data layer.
+    expect(EscrowRepository.getByOrderId(orderId)).toHaveLength(0);
   });
 
-  it('recovers partial settlement by retrying only tx2 on re-POST', async () => {
-    let callCount = 0;
-    let failTx2Once = true;
-    sendLightningPayment.mockImplementation(async (dest) => {
-      callCount++;
-      if (failTx2Once && dest === PROVIDER_WALLET) {
-        failTx2Once = false;
-        throw new Error('Network timeout on provider payout');
-      }
-      return { id: `txid-${callCount}`, payment_hash: `hash-${callCount}` };
-    });
-
+  it('stays fail-closed across concurrent reposts, accruing no state', async () => {
     const orderId = makeOrder();
     const body = { orderId, borrowerWallet: BORROWER_WALLET };
     const auth = { Authorization: `Bearer ${renter.token}` };
 
-    // First attempt: tx1 OK, tx2 fails → 500 with retryable flag
-    const r1 = await request(app).post('/api/v1/payments/btc').set(auth).send(body);
-    expect(r1.statusCode).toBe(500);
-    expect(r1.body.retryable).toBe(true);
-    expect(r1.body.escrowId).toBeTruthy();
-    expect(callCount).toBe(2); // tx1 + failed tx2 attempt
-
-    // Escrow must be in HELD state with tx1 persisted
-    const escrow = EscrowRepository.getById(r1.body.escrowId);
-    expect(escrow.state).toBe('HELD');
-    expect(escrow.txBorrowerToOperator).toBeTruthy();
-    expect(escrow.txOperatorToLender).toBeUndefined();
-
-    const callsBefore = callCount;
-
-    // Retry with same orderId: must skip tx1 and fire only tx2
-    const r2 = await request(app).post('/api/v1/payments/btc').set(auth).send(body);
-    expect(r2.statusCode).toBe(200);
-    expect(callCount - callsBefore).toBe(1); // only tx2 was retried
-
-    // Escrow transitions to SETTLED
-    const settled = EscrowRepository.getById(r1.body.escrowId);
-    expect(settled.state).toBe('SETTLED');
-    expect(settled.txOperatorToLender).toBeTruthy();
-
-    // tx1 txid from the original attempt is preserved in the response
-    expect(r2.body.txBorrowerToOperator.txid).toBe(escrow.txBorrowerToOperator);
-  });
-
-  it('does not fire tx1 again when concurrent re-POSTs hit a SETTLED escrow', async () => {
-    let callCount = 0;
-    sendLightningPayment.mockImplementation(async () => {
-      callCount++;
-      return { id: `txid-${callCount}`, payment_hash: `hash-${callCount}` };
-    });
-
-    const orderId = makeOrder();
-    const body = { orderId, borrowerWallet: BORROWER_WALLET };
-    const auth = { Authorization: `Bearer ${renter.token}` };
-
-    // Settle normally
-    await request(app).post('/api/v1/payments/btc').set(auth).send(body);
-    expect(callCount).toBe(2);
-
-    // Simulate retry storm
-    const [ra, rb] = await Promise.all([
+    const [r1, r2, r3] = await Promise.all([
+      request(app).post('/api/v1/payments/btc').set(auth).send(body),
       request(app).post('/api/v1/payments/btc').set(auth).send(body),
       request(app).post('/api/v1/payments/btc').set(auth).send(body),
     ]);
-    expect(ra.statusCode).toBe(200);
-    expect(rb.statusCode).toBe(200);
-    expect(callCount).toBe(2); // no additional Lightning calls
+    expect([r1.statusCode, r2.statusCode, r3.statusCode]).toEqual([501, 501, 501]);
+    expect(sendLightningPayment).not.toHaveBeenCalled();
+    expect(EscrowRepository.getByOrderId(orderId)).toHaveLength(0);
+  });
+
+  it('still returns a legacy SETTLED escrow from cache without any Lightning call', async () => {
+    // Data written before the fail-closed change: the cached-result path is kept
+    // because it moves no funds and preserves the old idempotency contract.
+    const orderId = makeOrder();
+    EscrowRepository.create({
+      orderId,
+      amountSats: 101,
+      state: 'SETTLED',
+      total: 0.00000101,
+      payout: 0.000001,
+      fee: 0.00000001,
+      txBorrowerToOperator: 'legacy-tx1',
+      txOperatorToLender: 'legacy-tx2',
+      lenderWallet: PROVIDER_WALLET,
+      operatorWallet: OPERATOR_WALLET,
+    });
+
+    const res = await request(app).post('/api/v1/payments/btc')
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ orderId, borrowerWallet: BORROWER_WALLET });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.idempotent).toBe(true);
+    expect(res.body.txBorrowerToOperator.txid).toBe('legacy-tx1');
+    expect(res.body.txOperatorToLender.txid).toBe('legacy-tx2');
+    expect(sendLightningPayment).not.toHaveBeenCalled();
   });
 });

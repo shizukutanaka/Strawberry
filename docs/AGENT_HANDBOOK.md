@@ -57,6 +57,9 @@ Strawberry は **P2P GPU レンタルマーケットプレイス**。プロバ�
 
 ### 重大（プロダクトの本質に関わる）
 1. **資金移動が未完**。エスクロー状態機械（`src/payments/escrow-state-machine.js`）・LNアクション実行（`action-executor.js`）・LNアダプタは実装・テスト済みだが、**現行の決済フロー本体（`src/api/routes/payment/index.js`）はエスクローを作らない**。インボイス直接支払い＋手動承認のみで、プロバイダーへの実送金は記録上のみ。→ 改善案 P1-1。
+   - **プロバイダー払い出しはどの経路でも実行されない**: `payout_provider` は `escrow-service.runActions` 経由でしか呼ばれず、本番の `createEscrowService()` は全箇所が `lnAdapter` 未注入のため即 return する（`escrow-service.js:26`）。`/orders/:id/stop` も Lightning・銀行振込の注文にはエスクローが無いためループが 0 回。
+   - **返金も 1sat も動かない**: キャンセル・係争 refund は `state:'CANCELED'` と履歴を書くだけで `cancel_invoice`/`refund_renter` は未実行。借り手の Payment レコードは `paid` のまま（`'refunded'` 状態も返金エンドポイントも存在しない）。
+   - 【解決済み】`POST /payments/btc` は**借り手から徴収せずプラットフォーム資金を二重に払い出していた**（`sendBTC` が `fromWallet` を無視し、OpenNode `/v2/withdrawals` ／ LNbits `{out:true}` という送金専用 API を呼ぶため）。しかも管理者限定でなく借り手自身が実行可能だった。Lightning には真の pull payment が存在せず（LNURL-withdraw も BOLT12 `invoice_request` も開始側の能動的操作を要する）、「サーバーが API 呼び出しで借り手の財布から引き落とす」という前提自体が成立しないため、**修正ではなく fail-closed 化**（501・`sendBTC` の import ごと削除）した。徴収は Lightning インボイス経路が担う。
 2. **実ワークロード配信なし**。`/start` は課金・状態遷移のみ正しく行い、`accessInfo.deliveryImplemented:false` を正直に返す（偽エンドポイントは廃止済み）。借り手は実際にはGPUに接続できない。→ 改善案 P2-3。
 
 ### 中程度

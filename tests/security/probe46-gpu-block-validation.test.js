@@ -26,8 +26,8 @@ describe('POST /gpus/:id/block: requires valid UUID for GPU id', () => {
       require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
     );
     // The block creation route must have validateMiddleware with 'params' source
-    const postBlockIdx = src.indexOf("'/:id/block',\n  authenticateJWT,\n  validateMiddleware");
-    expect(postBlockIdx).toBeGreaterThan(-1);
+    // Newline-agnostic (source files may use CRLF on Windows)
+    expect(src).toMatch(/'\/:id\/block',\s*authenticateJWT,\s*validateMiddleware/);
   });
 
   it('gpu/index.js: DELETE /block/:blockId validates GPU id as UUID, blockId as bounded string', () => {

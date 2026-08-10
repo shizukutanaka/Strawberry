@@ -23,8 +23,10 @@ describe('payment creation: userId stored from order owner, not creator', () => 
       require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
     );
     // Find non-Lightning payment record creation block
-    const manualIdx = src.indexOf("method: paymentMethod\n");
-    expect(manualIdx).toBeGreaterThan(-1);
+    // Newline-agnostic (source files may use CRLF on Windows)
+    const manualMatch = src.match(/method:\s*paymentMethod\s*\n/);
+    expect(manualMatch).not.toBeNull();
+    const manualIdx = manualMatch.index;
     // The userId field near this block must be order.userId, not req.user.id
     const manualBlock = src.slice(Math.max(0, manualIdx - 400), manualIdx + 50);
     expect(manualBlock).toMatch(/userId:\s*order\.userId/);

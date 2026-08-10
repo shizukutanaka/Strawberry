@@ -37,8 +37,10 @@ describe('password change: both invalidation fields written', () => {
   });
 
   it('user/index.js: both fields use the same changedAt timestamp (consistency)', () => {
-    const idx = src.indexOf('password: hashedPassword,\n      updatedAt: changedAt');
-    expect(idx).toBeGreaterThan(-1);
+    // Newline-agnostic (source files may use CRLF on Windows)
+    const m = src.match(/password:\s*hashedPassword,\s*updatedAt:\s*changedAt/);
+    expect(m).not.toBeNull();
+    const idx = m.index;
     const block = src.slice(idx, idx + 600);
     // Both must reference the single changedAt variable, not separate new Date() calls
     const pwMatch = block.match(/passwordChangedAt:\s*(\w+)/);

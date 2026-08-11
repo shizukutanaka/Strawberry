@@ -137,50 +137,108 @@ class ExtendedGPUDetector {
     }
 
     async detectAMDGPUsWindows() {
-        const gpus = [];
-        
-        try {
-            // WMI クエリ
-            const { stdout } = await exec(
-                'wmic path Win32_VideoController where "AdapterCompatibility like \'%AMD%\' or AdapterCompatibility like \'%ATI%\'" get * /format:csv'
-            );
-            
-            const lines = stdout.split('\n').filter(line => line.trim());
-            if (lines.length > 2) {
-                const headers = lines[1].split(',');
-                
-                for (let i = 2; i < lines.length; i++) {
-                    const values = lines[i].split(',');
-                    const gpu = {};
-                    
-                    headers.forEach((header, index) => {
-                        gpu[header] = values[index];
-                    });
-                    
-                    if (gpu.Name) {
-                        gpus.push({
-                            uuid: `AMD-Win-${gpu.DeviceID}`,
-                            vendor: 'AMD',
-                            name: gpu.Name,
-                            model: this.parseAMDModelAdvanced(gpu.Name),
-                            vram: parseInt(gpu.AdapterRAM || 0) / (1024 * 1024),
-                            driver: {
-                                version: gpu.DriverVersion,
-                                date: gpu.DriverDate
-                            },
-                            capabilities: {
-                                opencl: true,
-                                vulkan: true,
-                                directx: true
-                            }
-                        });
-                    }
+        return this.detectWindowsGPUsByVendor({
+            match: (compat, name) => /AMD|ATI|Radeon/i.test(`${compat} ${name}`),
+            build: (gpu) => ({
+                uuid: `AMD-Win-${gpu.DeviceID}`,
+                vendor: 'AMD',
+                name: gpu.Name,
+                model: this.parseAMDModelAdvanced(gpu.Name),
+                vram: parseInt(gpu.AdapterRAM || 0) / (1024 * 1024),
+                driver: {
+                    version: gpu.DriverVersion,
+                    date: gpu.DriverDate
+                },
+                capabilities: {
+                    opencl: true,
+                    vulkan: true,
+                    directx: true
                 }
+            }),
+            label: 'AMD'
+        });
+    }
+
+    /**
+     * Windows のビデオコントローラ一覧を取得する。
+     *
+     * 元の実装は `wmic path Win32_VideoController ... /format:csv` を直接叩いていたが、
+     * wmic は Windows 11 / Windows Server 2025 で既定では取り除かれた非推奨コンポーネント
+     * であり、実機（Windows 11）では
+     *   Command failed: wmic path Win32_VideoController where "..." get * /format:csv
+     * となって AMD / Intel の GPU 検出が常に 0 件で返っていた（catch に落ちるだけなので
+     * 例外にはならず、「GPU が無い」と静かに誤検出される）。
+     *
+     * PowerShell の Get-CimInstance を第一手段とし、CSV パースをやめて JSON を使う
+     * （元の CSV パースは値にカンマを含むフィールドで列がずれるという別の潜在バグも
+     * 抱えていた）。PowerShell が使えない環境向けに wmic への後方互換フォールバックを残す。
+     *
+     * @returns {Promise<Array<object>>} Win32_VideoController のプロパティ配列
+     */
+    async queryWindowsVideoControllers() {
+        // 1st: PowerShell + CIM (Windows 8 以降で常用可能、wmic 廃止後も動作)
+        try {
+            const { stdout } = await exec(
+                'powershell -NoProfile -NonInteractive -Command ' +
+                '"Get-CimInstance Win32_VideoController | ' +
+                'Select-Object Name,DeviceID,PNPDeviceID,AdapterRAM,DriverVersion,DriverDate,AdapterCompatibility | ' +
+                'ConvertTo-Json -Compress"',
+                { windowsHide: true }
+            );
+            const text = (stdout || '').trim();
+            if (text) {
+                const parsed = JSON.parse(text);
+                // 1件のときオブジェクト、複数件のとき配列で返る
+                const list = Array.isArray(parsed) ? parsed : [parsed];
+                return list.filter(Boolean).map((g) => ({
+                    ...g,
+                    // 一部環境で DeviceID が空。PNPDeviceID を uuid の材料に使えるよう補完する。
+                    DeviceID: g.DeviceID || g.PNPDeviceID || g.Name
+                }));
             }
         } catch (error) {
-            logger.error('Windows AMD GPU detection error:', error);
+            logger.debug('PowerShell CIM video controller query failed, falling back to wmic:', error.message);
         }
-        
+
+        // 2nd: 旧 wmic（存在する古い Windows 向けの後方互換）
+        try {
+            const { stdout } = await exec(
+                'wmic path Win32_VideoController get Name,DeviceID,PNPDeviceID,AdapterRAM,DriverVersion,DriverDate,AdapterCompatibility /format:csv',
+                { windowsHide: true }
+            );
+            const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+            if (lines.length < 2) return [];
+            const headers = lines[0].split(',');
+            return lines.slice(1).map((line) => {
+                const values = line.split(',');
+                const gpu = {};
+                headers.forEach((h, i) => { gpu[h.trim()] = values[i]; });
+                gpu.DeviceID = gpu.DeviceID || gpu.PNPDeviceID || gpu.Name;
+                return gpu;
+            }).filter((g) => g.Name);
+        } catch (error) {
+            logger.debug('wmic video controller query failed:', error.message);
+        }
+
+        return [];
+    }
+
+    /**
+     * ベンダーで絞り込んだ Windows GPU 検出の共通処理。
+     * @param {{match: Function, build: Function, label: string}} opts
+     */
+    async detectWindowsGPUsByVendor({ match, build, label }) {
+        const gpus = [];
+        try {
+            const controllers = await this.queryWindowsVideoControllers();
+            for (const gpu of controllers) {
+                if (!gpu.Name) continue;
+                if (!match(gpu.AdapterCompatibility || '', gpu.Name)) continue;
+                gpus.push(build(gpu));
+            }
+        } catch (error) {
+            logger.error(`Windows ${label} GPU detection error:`, error);
+        }
         return gpus;
     }
 
@@ -283,51 +341,28 @@ class ExtendedGPUDetector {
     }
 
     async detectIntelGPUsWindows() {
-        const gpus = [];
-        
-        try {
-            const { stdout } = await exec(
-                'wmic path Win32_VideoController where "AdapterCompatibility like \'%Intel%\'" get * /format:csv'
-            );
-            
-            const lines = stdout.split('\n').filter(line => line.trim());
-            if (lines.length > 2) {
-                const headers = lines[1].split(',');
-                
-                for (let i = 2; i < lines.length; i++) {
-                    const values = lines[i].split(',');
-                    const gpu = {};
-                    
-                    headers.forEach((header, index) => {
-                        gpu[header] = values[index];
-                    });
-                    
-                    if (gpu.Name && this.isDiscreteIntelGPU(gpu.Name)) {
-                        gpus.push({
-                            uuid: `Intel-Win-${gpu.DeviceID}`,
-                            vendor: 'Intel',
-                            name: gpu.Name,
-                            model: this.parseIntelModelAdvanced(gpu.Name),
-                            vram: parseInt(gpu.AdapterRAM || 0) / (1024 * 1024),
-                            driver: {
-                                version: gpu.DriverVersion,
-                                date: gpu.DriverDate
-                            },
-                            capabilities: {
-                                opencl: true,
-                                vulkan: true,
-                                directx: true,
-                                quickSync: true
-                            }
-                        });
-                    }
+        return this.detectWindowsGPUsByVendor({
+            match: (compat, name) =>
+                /Intel/i.test(`${compat} ${name}`) && this.isDiscreteIntelGPU(name),
+            build: (gpu) => ({
+                uuid: `Intel-Win-${gpu.DeviceID}`,
+                vendor: 'Intel',
+                name: gpu.Name,
+                model: this.parseIntelModelAdvanced(gpu.Name),
+                vram: parseInt(gpu.AdapterRAM || 0) / (1024 * 1024),
+                driver: {
+                    version: gpu.DriverVersion,
+                    date: gpu.DriverDate
+                },
+                capabilities: {
+                    opencl: true,
+                    vulkan: true,
+                    directx: true,
+                    quickSync: true
                 }
-            }
-        } catch (error) {
-            logger.error('Windows Intel GPU detection error:', error);
-        }
-        
-        return gpus;
+            }),
+            label: 'Intel'
+        });
     }
 
     // ===== ヘルパーメソッド =====

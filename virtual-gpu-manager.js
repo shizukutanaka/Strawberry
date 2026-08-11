@@ -37,17 +37,27 @@ function sanitizeId(value) {
 
 class VirtualGPUManager extends EventEmitter {
     /**
-     * サービス死活判定: 初期化・仮想GPU数・プラットフォームごとの稼働状況を総合判定
+     * サービス死活判定: 初期化状態とプラットフォーム API の応答で判定する。
+     * 仮想GPUの「在庫数」は死活状態に含めない（0 個は正常な初期状態）。
      * @returns {Promise<boolean>}
      */
     async isHealthy() {
         // 1. initializedフラグ
         if (!this.initialized) return false;
-        // 2. 仮想GPUが1つ以上管理されているか
-        if (!this.virtualGPUs || this.virtualGPUs.size === 0) return false;
-        // 3. プラットフォームごとの追加チェック（例: Docker/k8sならAPI応答）
+        // 2. プラットフォームごとの追加チェック（例: Docker/k8sならAPI応答）
+        //
+        // 注: 以前はここに「仮想GPUが1つ以上管理されているか
+        // (this.virtualGPUs.size === 0 なら unhealthy)」という条件があったが、
+        // これは誤り。仮想GPU が 0 個なのは「まだ誰にも貸し出していない」という
+        // 正常な初期状態であって障害ではない。service-monitor は unhealthy を
+        // 見ると initialize() をやり直すため、貸出前のサーバーでは
+        //   [Monitor] VirtualGPUManager unhealthy. Attempting restart.
+        //   [Monitor] VirtualGPUManager restarted successfully.
+        // が監視周期（10秒）ごとに永久に繰り返され、毎回 GPU 検出コマンドと
+        // 設定復元 I/O が走っていた（実機で確認）。在庫数は死活とは無関係。
         if (this.platform === 'docker') {
             try {
+                if (!this.docker) return false;
                 await this.docker.ping();
             } catch (e) {
                 return false;

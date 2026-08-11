@@ -9,7 +9,9 @@ const KadDHT = require('@libp2p/kad-dht');
 const Gossipsub = require('@libp2p/gossipsub');
 const Bootstrap = require('@libp2p/bootstrap');
 const PeerId = require('peer-id');
-const { logger } = require('../utils/logger');
+// このファイルはリポジトリ直下にある（先頭コメントの src/core/ は移動時の取り残し）。
+// '../utils/logger' はリポジトリ外を指すため './src/utils/logger' が正。
+const { logger } = require('./src/utils/logger');
 const crypto = require('crypto');
 
 class P2PNetwork extends EventEmitter {

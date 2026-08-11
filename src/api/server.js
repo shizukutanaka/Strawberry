@@ -58,8 +58,18 @@ async function updateLightningMetrics() {
   // 支払い失敗数・再接続回数はLightningService側からインクリメント呼び出しを想定
 }
 // 10秒ごとに更新（unref: テスト等でプロセス終了を妨げないように）
-const metricsInterval = setInterval(updateLightningMetrics, 10000);
-if (metricsInterval.unref) metricsInterval.unref();
+// NODE_ENV==='test' では起動しない。Jest はテストファイルごとにモジュール
+// レジストリを分離するため、このファイルを require する各テストが独自の
+// setInterval を作るが、実タイマーは同一プロセスのイベントループに残り続ける。
+// 135 スイート分積み上がると 10 秒周期の Lightning メトリクス更新が延々と
+// 発火し、後続スイートの supertest リクエストが 30 秒のテストタイムアウトを
+// 超える（単体実行では PASS するのに全体実行だけ落ちる、の原因）。
+// /metrics ハンドラは毎回 updateLightningMetrics() を await するので、
+// このタイマーが無くてもテストのメトリクス値は正しい。
+const metricsInterval = process.env.NODE_ENV === 'test'
+  ? null
+  : setInterval(updateLightningMetrics, 10000);
+if (metricsInterval && metricsInterval.unref) metricsInterval.unref();
 
 // Expressアプリケーション初期化
 const app = express();
@@ -82,13 +92,25 @@ try {
   if (vgpuManager) svcRefs.VirtualGPUManager = vgpuManager;
   if (Object.keys(svcRefs).length > 0) {
     setServices(svcRefs);
-    startMonitor();
+    // NODE_ENV==='test' では監視ループを起動しない。metricsInterval と同じ理由で、
+    // テストファイルごとに積み上がる 10 秒周期のヘルスチェックがイベントループを
+    // 占有する。加えて監視は「不健全」と判定した LightningService/VirtualGPUManager
+    // の initialize() を毎周期呼び直すため、Jest 環境の破棄後に require が走り
+    // 「You are trying to `import` a file after the Jest environment has been torn
+    // down」を撒き散らしていた。監視ロジック自体は tests/service-monitor.e2e.test.js
+    // が monitorServices() を直接呼んで検証しているのでカバレッジは落ちない。
+    if (process.env.NODE_ENV !== 'test') {
+      startMonitor();
+    }
   }
 } catch (e) {
   logger.warn('Service monitor could not be started:', e);
 }
 
 // Lightningインボイス入金確認ループ（15秒間隔でポーリング、Lightning未導入時は無効）
+// テスト環境でのタイマー抑止は invoice-poller.start() 側で行う（start() は
+// Lightning サービス参照のバインドも兼ねており、ここで呼び出しごとスキップすると
+// pollOnce() を直接叩くテストが「poller not started」で動かなくなるため）。
 try {
   const invoicePoller = require('../core/invoice-poller');
   const { lightning: lightningForPoller } = require('../core/services');

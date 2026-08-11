@@ -92,10 +92,29 @@ class LightningService extends EventEmitter {
         let attempt = 0;
         let lastError = null;
         const backoff = (n) => Math.min(30000, 1000 * Math.pow(2, n)); // 最大30秒
+        // proto 定義が同梱されていない環境では何度リトライしても ENOENT は解消しない。
+        // 指数バックオフで 31 秒ブロックしてから結局モックに落ちるだけなので、
+        // 最初から再試行せずモックへフォールバックする（起動時間短縮 + ログのノイズ削減）。
+        const protoPathForCheck = process.env.LND_PROTO_PATH
+            ? path.resolve(process.env.LND_PROTO_PATH)
+            : path.join(__dirname, 'proto/lightning.proto');
+        if (!require('fs').existsSync(protoPathForCheck)) {
+            logger.warn(`LND proto definition not found at ${protoPathForCheck}; using mock LND (set LND_PROTO_PATH to enable real LND)`);
+            this.setupMockLND();
+            return;
+        }
         while (attempt <= maxRetries) {
             try {
             // Proto定義読み込み
-            const protoPath = path.join(__dirname, '../../proto/lightning.proto');
+            // Proto定義読み込み。
+            // 元コードは `__dirname, '../../proto/lightning.proto'` だったが、このファイルは
+            // リポジトリ直下にあるため C:\Users\<user>\proto\... のようにリポジトリ外を指し、
+            // LND 接続が環境に関係なく必ず ENOENT で失敗していた（ヘッダのパスコメント同様、
+            // src/core/ から移動した際の取り残し）。__dirname 基準の 'proto/' に修正し、
+            // 併せて LND_PROTO_PATH で上書きできるようにする。
+            const protoPath = process.env.LND_PROTO_PATH
+                ? path.resolve(process.env.LND_PROTO_PATH)
+                : path.join(__dirname, 'proto/lightning.proto');
             const packageDefinition = await protoLoader.load(protoPath, {
                 keepCase: true,
                 longs: String,
@@ -169,7 +188,6 @@ class LightningService extends EventEmitter {
                 this.setupMockLND();
                 return;
             }
-            this.setupMockLND();
         }
         }
     }
@@ -280,20 +298,89 @@ class LightningService extends EventEmitter {
             subscribeInvoices: () => {
                 // イベントストリームのモック
                 const stream = new EventEmitter();
-                
-                // テスト用の定期的な請求書イベント
-                setInterval(() => {
-                    if (Math.random() > 0.9) {
-                        const mockInvoice = {
-                            r_hash: crypto.randomBytes(32),
-                            value: Math.floor(Math.random() * 100000),
-                            settled: true,
-                            settle_date: Math.floor(Date.now() / 1000)
-                        };
-                        stream.emit('data', mockInvoice);
-                    }
-                }, 5000);
-                
+
+                // テスト用の定期的な請求書イベント。
+                // unref: このタイマーだけがイベントループに残ってプロセス終了を妨げるのを防ぐ
+                // （NODE_ENV==='test' では発火自体させない: ランダムな r_hash の「決済済み」
+                //  イベントは追跡外なので何の検証にも使われず、ノイズにしかならない）。
+                if (process.env.NODE_ENV !== 'test') {
+                    const t = setInterval(() => {
+                        if (Math.random() > 0.9) {
+                            const mockInvoice = {
+                                r_hash: crypto.randomBytes(32),
+                                value: Math.floor(Math.random() * 100000),
+                                settled: true,
+                                settle_date: Math.floor(Date.now() / 1000)
+                            };
+                            stream.emit('data', mockInvoice);
+                        }
+                    }, 5000);
+                    if (t.unref) t.unref();
+                }
+
+                return stream;
+            },
+
+            // --- 以下は「モック LND に実装が無かった」ために、モック稼働時に必ず
+            // TypeError: this.lnd.X is not a function となっていた RPC 群。
+            // 特に subscribeChannelEvents の欠落は致命的で、setupChannelStream() が
+            // catch → 5秒後に再試行 を永久に繰り返し、そのたびに監査ログ書き込みと
+            // エラーログを出し続けていた（LND 未接続で起動しただけでログが溢れる）。
+            // 実 LND と同じ (request, callback) / ストリーム返却の形に合わせる。
+            subscribeChannelEvents: () => {
+                // モック環境ではチャネルの開閉イベントは発生しない。
+                // 空のストリームを返す（end/close を emit すると呼び出し側の
+                // 再接続ロジックが回り続けるので、何も emit しない）。
+                return new EventEmitter();
+            },
+
+            channelBalance: (_request, callback) => {
+                // listChannels のモック 1 チャネル分と整合させる
+                callback(null, {
+                    balance: '5000000',
+                    pending_open_balance: '0',
+                    local_balance: { sat: '5000000', msat: '5000000000' },
+                    remote_balance: { sat: '5000000', msat: '5000000000' }
+                });
+            },
+
+            pendingChannels: (_request, callback) => {
+                callback(null, {
+                    total_limbo_balance: '0',
+                    pending_open_channels: [],
+                    pending_force_closing_channels: [],
+                    waiting_close_channels: []
+                });
+            },
+
+            settleInvoice: (_request, callback) => {
+                callback(null, {});
+            },
+
+            cancelInvoice: (_request, callback) => {
+                callback(null, {});
+            },
+
+            openChannelSync: (request, callback) => {
+                callback(null, {
+                    funding_txid_str: crypto.randomBytes(32).toString('hex'),
+                    output_index: 0,
+                    _mock_node_pubkey: request && request.node_pubkey_string
+                });
+            },
+
+            closeChannel: (_request) => {
+                // 実 LND は更新ストリームを返す。呼び出し側は 'data' の
+                // close_pending / chan_close を待つので、非同期で 1 回だけ emit する。
+                const stream = new EventEmitter();
+                setImmediate(() => {
+                    stream.emit('data', {
+                        close_pending: {
+                            txid: crypto.randomBytes(32),
+                            output_index: 0
+                        }
+                    });
+                });
                 return stream;
             }
         };

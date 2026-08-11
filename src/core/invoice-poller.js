@@ -164,10 +164,18 @@ function start(lightningService) {
     return;
   }
   _lightning = lightningService;
-  _timer = setInterval(pollOnce, POLL_INTERVAL_MS);
-  // unref so the timer does not prevent process exit
-  if (_timer.unref) _timer.unref();
-  logger.info(`invoice-poller: started (interval=${POLL_INTERVAL_MS}ms)`);
+  // NODE_ENV==='test': サービス参照のバインドと初回 pollOnce() は行うが、
+  // 周期タイマーは張らない。Jest はテストファイルごとにモジュールレジストリを
+  // 分離するため、server.js を require する各スイートがそれぞれ 15 秒周期の
+  // タイマーを生成し、実タイマーは同一プロセスに残り続けて 100 スイート超で
+  // イベントループを圧迫する（後続スイートの supertest が 30 秒タイムアウト）。
+  // pollOnce() を直接呼ぶテストは _lightning が要るのでバインドは残す。
+  if (process.env.NODE_ENV !== 'test') {
+    _timer = setInterval(pollOnce, POLL_INTERVAL_MS);
+    // unref so the timer does not prevent process exit
+    if (_timer.unref) _timer.unref();
+    logger.info(`invoice-poller: started (interval=${POLL_INTERVAL_MS}ms)`);
+  }
   // run immediately on start
   pollOnce();
 }

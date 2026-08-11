@@ -1,8 +1,22 @@
 // src/core/virtual-gpu-manager.js - Virtual GPU Manager
 const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
-const Docker = require('dockerode');
-const k8s = require('@kubernetes/client-node');
+// dockerode / @kubernetes/client-node は optionalDependencies。
+// トップレベルで eager require すると、(a) 未インストール環境でモジュール読込自体が
+// 落ちてルート契約テストごと死ぬ、(b) client-node は 1000 以上のモデルファイルを
+// 同期 require するため、jest の並行実行下で読込中のファイルに対する ENOENT が
+// 発生し、スイートが「Test suite failed to run」になる（Windows で再現）。
+// 実際に docker/k8s プラットフォームを使うときだけ遅延ロードする。
+let _Docker;
+function getDocker() {
+  if (_Docker === undefined) _Docker = require('dockerode');
+  return _Docker;
+}
+let _k8s;
+function getK8s() {
+  if (_k8s === undefined) _k8s = require('@kubernetes/client-node');
+  return _k8s;
+}
 const { logger } = require('./src/utils/logger');
 // child_process には .promises が存在しないため、util.promisify で exec を生成する
 // (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
@@ -52,12 +66,14 @@ class VirtualGPUManager extends EventEmitter {
 
     constructor() {
         super();
-        this.docker = new Docker();
+        this.platform = this.detectPlatform();
+        // docker クライアントは docker プラットフォーム時のみ生成（未インストール環境で
+        // コンストラクタが throw しないように）
+        this.docker = this.platform === 'docker' ? new (getDocker())() : null;
         this.k8sApi = null;
         this.virtualGPUs = new Map();
         this.containers = new Map();
         this.allocations = new Map();
-        this.platform = this.detectPlatform();
         this.initialized = false;
     }
 
@@ -111,6 +127,7 @@ class VirtualGPUManager extends EventEmitter {
 
     async initializeKubernetes() {
         try {
+            const k8s = getK8s();
             const kc = new k8s.KubeConfig();
             kc.loadFromDefault();
             

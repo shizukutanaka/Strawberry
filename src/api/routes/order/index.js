@@ -191,13 +191,17 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
 }
 
 // unref: テスト等でプロセス終了を妨げない（server.js の metricsInterval と同方針）
-const sessionTimeoutInterval = setInterval(() => {
+// NODE_ENV==='test' では起動しない。unref だけではタイマーの「蓄積」は防げず、
+// このモジュールを require するテストファイルごとに 30 秒周期のスイープが
+// 積み上がってイベントループを圧迫する。sweep/reap 関数はテストから直接
+// 呼び出して検証されている（tests 内 reapUsageSessions 参照）。
+const sessionTimeoutInterval = process.env.NODE_ENV === 'test' ? null : setInterval(() => {
   try {
     sweepHeartbeatSlaBreaches();
     reapUsageSessions();
   } catch (_) { /* jest teardown 後の発火等: 無視 */ }
 }, 30000);
-if (sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
+if (sessionTimeoutInterval && sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');

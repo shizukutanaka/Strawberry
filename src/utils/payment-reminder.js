@@ -5,9 +5,12 @@ const path = require('path');
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
 
-const PaymentRepository = require('../../db/json/PaymentRepository');
-const OrderRepository = require('../../db/json/OrderRepository');
-const UserRepository = require('../../db/json/UserRepository');
+// リポジトリは src/db/json/ 配下。このファイルは src/utils/ にあるため '../db/json/…' が正。
+// 元の '../../db/json/…' はリポジトリルート直下の存在しない db/ を指しており、
+// このモジュールを require した時点で MODULE_NOT_FOUND となり全機能が死んでいた。
+const PaymentRepository = require('../db/json/PaymentRepository');
+const OrderRepository = require('../db/json/OrderRepository');
+const UserRepository = require('../db/json/UserRepository');
 
 // リマインダー対象となる「未払い」状態の支払いを取得
 function getPendingPayments() {

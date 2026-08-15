@@ -41,6 +41,8 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
 | POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
 | `/api/v1/marketplace/escrow/*` (open/pay/verify/resolve) | エスクロー駆動 | JWT+admin | 🟡(LN実機未) |
+| GET `/api/v1/audit-anchors/latest`,`/{root}/receipt` | 監査ログの外部コミットメント（Merkle root / OTS レシート） | **公開** | ✅ |
+| `/api/v1/admin/audit-anchors`,`/run`,`/proof` | アンカー一覧・強制実行・包含証明 | JWT+admin | ✅ |
 | `/api/profit-addresses` | 運営受取先 | JWT+admin | ✅ |
 | GET `/metrics` | Prometheus | none | ✅ |
 | GET `/api/v1/node-info`,`/channels` | LN 情報 | JWT | 🟡(LN実機要) |
@@ -70,7 +72,22 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - ステーク/スラッシング/レピュテーション: 🟡 `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）実装済。**ルート配線は未**。
 
 ### F4. 運用・可観測性
-- Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **外部アンカリング(Merkle root)**: 🟡 `src/security/merkle-anchor.js`(root/証明/検証/digest) ＋ `src/security/audit-anchor.js`（audit.log を読みアンカー生成・永続化・包含証明、audit-log 結線済）。**残るは OTS への root 実提出のみ** / **OTel トレース**: ❌ / **カーボン配置**: ❌
+- Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **OTel トレース**: ❌ / **カーボン配置**: ❌
+- **監査ログの外部アンカリング**: ✅（2026-08）。
+  - 訂正: 本書は以前「`audit-log` 結線済。**残るは OTS への root 実提出のみ**」と書いていたが、
+    これは実態より楽観的だった。実際には `anchorAuditLogFile()` が `src/` のどこからも
+    呼ばれておらず（テストのみ）、**定期ジョブが無いためアンカーは 1 つも生成されていなかった**。
+    アンカーを外部へ公開する経路も無く、root が運営のディスクから出ないため §18 が名指しする
+    脅威（運営自身による遡及改ざん）は全く緩和されていなかった。
+  - 現状: `src/security/anchor-scheduler.js` が**増分アンカー**を定期生成し（既定 1 時間、
+    前回アンカーの byte offset から末尾だけを読む）、`src/security/ots-client.js` が
+    Merkle root を**複数の OpenTimestamps カレンダーへ冗長提出**する（`AUDIT_ANCHOR_OTS_ENABLED`
+    でオプトイン、fail-soft）。commitment は `GET /api/v1/audit-anchors/latest`（公開）、
+    OTS レシートは `GET /api/v1/audit-anchors/{root}/receipt`（公開）で第三者が取得できる。
+    admin は一覧・強制実行・包含証明 (`/admin/audit-anchors*`)。
+  - **やっていないこと**: OTS バイナリ証明の自前パース／Bitcoin アテステーションの自前検証
+    （レシートは不透明に保存し、第三者が標準 `ots verify` で検証する）。連続アンカー間の
+    consistency proof（RFC 6962 との差。詳細は `docs/improvement-research-2026.md` §18）。
 
 ## 5. 非機能要件
 
@@ -116,4 +133,6 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）
+- `src/security/ots-client.js` — OpenTimestamps カレンダー・クライアント（複数カレンダーへ冗長提出、レシートは不透明保存、既定無効・fail-soft・SSRF ガード経由, 10テスト）
+- `src/security/anchor-scheduler.js` — 監査ログの定期増分アンカリング（byte offset 再開、簿記エントリでの空回り防止、切詰め検出, 10テスト）
 - `src/gpu/perf-score.js` — 機種横断の正規化性能スコア／価格対性能（DLPerf 風。参照表照合・電力由来の TFLOPS 上限クランプ・未検証型番の上限・算出不能は null、feature-pricer への特徴量変換つき, 27テスト）

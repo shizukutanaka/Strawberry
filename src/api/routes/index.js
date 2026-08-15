@@ -80,7 +80,16 @@ function isPublicPath(path, method) {
     || (isGet && /^\/users\/[^/]+\/reputation$/.test(path))
     || (isGet && /^\/users\/[^/]+\/renter-profile$/.test(path))
     // マーケット公開統計（サプライ・ディマンド・価格帯の概要 — 閲覧のみ）
-    || (isGet && path === '/marketplace/stats');
+    || (isGet && path === '/marketplace/stats')
+    // 監査ログの外部コミットメント（Merkle root と OTS レシート）。
+    // 公開が目的そのもの: 第三者が commitment を保持していなければ、後日の遡及改ざんを
+    // 誰も検出できない（研究ドキュメント §18）。root は SHA-256 ハッシュで件数以上のことは
+    // 漏らさない。エントリ本体・包含証明は監査ログの内容を露出するので admin 側に置く。
+    || (isGet && path === '/audit-anchors/latest')
+    // root の形式検証はハンドラ側で行う（不正形式には 401 ではなく 400 を返したいため、
+    // ここでは segment 1 つ分だけを許す緩いパターンにする。ハンドラは 64 桁 hex 以外を
+    // ファイルに触れる前に弾く）。
+    || (isGet && /^\/audit-anchors\/[^/]{1,128}\/receipt$/.test(path));
 }
 router.use((req, res, next) => {
   if (isPublicPath(req.path, req.method)) return next();
@@ -97,7 +106,52 @@ router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
 router.use('/auth', authRoutes);
+// --- 監査ログの外部アンカリング: 公開エンドポイント（研究ドキュメント §18） ---
+// 監査ログは HMAC 連鎖で tamper-evident だが、運営が全ログ＋チェーンを書き換えれば遡及改ざんを
+// 否認できてしまう。定期的に Merkle root を作り OpenTimestamps へ提出し（src/security/
+// anchor-scheduler.js）、その commitment をここで公開することで、第三者が後日の書き換えを
+// 検出できるようにする。公開すること自体がこの機能の目的（誰も commitment を保持していなければ
+// 改ざんは検出できない）。root は SHA-256 ハッシュで、件数以上のことは漏らさない。
+//
+// **登録位置に注意**: 直下の notification-settings ルータはプレフィックス無しでマウントされ、
+// 内部で `router.use(authenticateJWT)`（src/api/notification-settings.js:65）を掛けている。
+// そのため**それ以降に登録したルートは、PUBLIC_PATHS に入れても問答無用で 401 になる**。
+// 認証不要のルートは必ずこの行より上に置くこと。
+const auditAnchor = require('../../security/audit-anchor');
+const anchorScheduler = require('../../security/anchor-scheduler');
+
+// 最新のコミットメント（公開）
+router.get('/audit-anchors/latest', asyncHandler(async (req, res) => {
+  const anchor = auditAnchor.lastAnchor();
+  if (!anchor) return res.status(404).json({ error: 'no audit anchor has been created yet' });
+  const receipts = anchorScheduler.readReceipts(anchor.root);
+  res.json({
+    algorithm: anchor.algorithm,
+    root: anchor.root,
+    count: anchor.count,
+    createdAt: anchor.createdAt,
+    fromIndex: anchor.fromIndex,
+    toIndex: anchor.toIndex,
+    prevAnchorRoot: anchor.prevAnchorRoot != null ? anchor.prevAnchorRoot : null,
+    // レシート本体(base64)は別エンドポイント。ここでは提出状況だけを返す。
+    ots: receipts.map((r) => ({ calendar: r.calendar, status: r.status, submittedAt: r.submittedAt })),
+    verify: 'GET /api/v1/audit-anchors/{root}/receipt で OTS レシートを取得し、標準の `ots verify` / `ots upgrade` で第三者検証できます',
+  });
+}));
+
+// OTS レシート（公開 — 第三者が自分で `ots verify` するのに必要）
+router.get('/audit-anchors/:root/receipt', asyncHandler(async (req, res) => {
+  const root = String(req.params.root || '');
+  if (!/^[0-9a-f]{64}$/.test(root)) {
+    return res.status(400).json({ error: 'root must be a 64-character lowercase hex string' });
+  }
+  const receipts = anchorScheduler.readReceipts(root);
+  if (receipts.length === 0) return res.status(404).json({ error: 'no receipt for this root' });
+  res.json({ root, receipts });
+}));
+
 // 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
+// 注意: 内部で全体に authenticateJWT を掛けるため、これ以降に公開ルートを足しても認証必須になる。
 router.use(require('../notification-settings').router);
 
 // Lightningノード情報API（管理者のみ: ノード公開鍵・ピア情報・容量を含む）
@@ -124,6 +178,48 @@ router.get('/channels', jwtAuth, rbac('admin'), cacheMiddleware(), async (req, r
     res.status(500).json({ error: 'Failed to get channels' });
   }
 });
+
+// --- 監査ログの外部アンカリング: 管理者向け（研究ドキュメント §18） ---
+// 公開エンドポイント（/audit-anchors/latest と .../receipt）は notification-settings の
+// マウントより前に登録してある（上記参照）。
+
+// アンカー一覧（管理者のみ — 範囲やバイトオフセットは運用情報）
+router.get('/admin/audit-anchors', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const all = auditAnchor.readAnchors();
+  const limitRaw = parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+  // 新しい順に返す（運用上ほぼ常に直近を見る）
+  res.json({ total: all.length, limit, anchors: all.slice(-limit).reverse() });
+}));
+
+// アンカー・サイクルの強制実行（管理者のみ）
+router.post('/admin/audit-anchors/run', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const result = await anchorScheduler.runOnce();
+  if (!result.anchor) {
+    return res.status(200).json({ anchored: false, reason: result.skipped || result.error || 'no new audit entries' });
+  }
+  res.status(201).json({ anchored: true, anchor: result.anchor, ots: result.receipts });
+}));
+
+// 特定エントリの包含証明（管理者のみ — エントリ本体を返すため）
+router.get('/admin/audit-anchors/proof', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
+  const index = parseInt(req.query.index, 10);
+  if (!Number.isInteger(index) || index < 0) {
+    return res.status(400).json({ error: 'index must be a non-negative integer' });
+  }
+  const result = auditAnchor.proveEntryAtIndex(index);
+  if (!result) {
+    return res.status(404).json({ error: 'no anchor covers this index, or the log no longer matches the anchor' });
+  }
+  res.json({
+    index,
+    localIndex: result.localIndex,
+    entry: result.entry,
+    proof: result.proof,
+    root: result.anchor.root,
+    anchoredAt: result.anchor.createdAt,
+  });
+}));
 
 // キャッシュ全体パージAPI（管理者のみ）
 router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {

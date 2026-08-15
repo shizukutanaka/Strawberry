@@ -6,7 +6,13 @@ const { sanitizeSensitiveFields } = require('../../utils/sanitize');
 // 重要: 改ざん検知ハッシュチェーン(src/utils/audit-log.js)が管理する logs/audit.log とは
 // 別ファイルにする。同一ファイルへ追記すると、ハッシュチェーンに含まれない本ミドルウェアの
 // エントリが間に挟まり、verifyAuditLogIntegrity / audit-anchor の検証が常に失敗していた。
-const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../../../logs/access-audit.log');
+//
+// 環境変数も別にする必要がある: 旧実装は上の警告に反して `AUDIT_LOG_PATH`（audit-log.js が
+// ハッシュチェーン付きログの移動に使う変数）を共用していたため、運用者がその変数を設定した
+// 瞬間に両者が同一ファイルへ書き込み、まさにこのコメントが警告するチェーン破壊が再発する
+// 状態だった。アクセス監査の移動には専用の ACCESS_AUDIT_LOG_PATH を使う。
+const AUDIT_LOG_PATH = process.env.ACCESS_AUDIT_LOG_PATH
+  || path.join(__dirname, '../../../logs/access-audit.log');
 
 function auditLogger(req, res, next) {
   const start = Date.now();

@@ -97,6 +97,14 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// 監査ログの定期増分アンカリング（Merkle root を生成し、有効なら OpenTimestamps へ提出）。
+// 外部提出は AUDIT_ANCHOR_OTS_ENABLED でオプトイン。無効でもローカルのアンカー生成は動く。
+try {
+  require('../security/anchor-scheduler').start();
+} catch (e) {
+  logger.warn(`anchor-scheduler: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

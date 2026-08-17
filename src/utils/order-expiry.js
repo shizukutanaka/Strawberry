@@ -215,6 +215,7 @@ function expireStaleActiveOrders() {
     });
     if (!result.ok) continue;
     expired.push({ id: order.id, gpuId: order.gpuId });
+    try { require('../verification/utilization-collector').clear(order.id); } catch (_) {}
     logger.info(`Order auto-expired (active timeout): ${order.id}`);
     try {
       const { notifyUser } = require('./user-notify');
@@ -264,6 +265,9 @@ function finalizePreemptedOrders() {
     if (!result.ok) continue; // 借り手が /stop で先に確定させた（冪等）
 
     finalized.push({ id: order.id, gpuId: order.gpuId });
+    // /stop を経由しない終了経路なので、収集済みサンプルはここで破棄する
+    // （放置すると preempting で終わった注文の分がプロセス内に残り続ける）。
+    try { require('../verification/utilization-collector').clear(order.id); } catch (_) {}
     logger.info(
       `Spot order preempted and finalized: ${order.id} `
       + `(delivered ${Math.round(settlement.deliveredSeconds)}s, ratio ${settlement.usage.deliveredRatio.toFixed(3)})`

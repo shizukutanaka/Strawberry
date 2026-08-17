@@ -203,6 +203,8 @@ const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-han
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
 const { appendAuditLog } = require('../../../utils/audit-log');
+// 稼働中の GPU 利用率サンプル収集（ゼロ負荷課金の検出。研究ドキュメント §1）
+const utilizationCollector = require('../../../verification/utilization-collector');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
 
@@ -548,12 +550,21 @@ router.post('/:id/heartbeat',
       usageSessions.set(orderId, session);
     }
     session.onHeartbeat(req.user.id, role);
+
+    // GPU 利用率の申告を収集する（任意フィールド）。両者から集めて食い違いを見るのが要点で、
+    // 片側の自己申告だけでは検証にならない（プロバイダは不正の当事者、借り手は返金目的で
+    // 偽る動機がある）。詳細は src/verification/utilization-collector.js のヘッダ。
+    // 不正な値は collector 側で無視されるため、ここでハートビート自体を失敗させない。
+    let utilizationRecorded = false;
+    if (req.body && req.body.utilizationPct !== undefined) {
+      utilizationRecorded = utilizationCollector.record(orderId, role, req.body.utilizationPct);
+    }
     // プロバイダー（lender）ハートビートは稼働実績として永続化し、信頼性スコアの母数にする。
     // best-effort（失敗してもハートビート応答は返す）。
     if (role === 'lender') {
       providerUptime.recordProviderHeartbeat(order.providerId, orderId, nowMs);
     }
-    res.json({ usageSeconds: session.getUsageSeconds() });
+    res.json({ usageSeconds: session.getUsageSeconds(), utilizationRecorded });
   })
 );
 
@@ -2011,6 +2022,13 @@ router.post('/:id/stop',
         }
       }
 
+      // ゼロ負荷課金の判定（収集済み利用率サンプルから）。セッション破棄より先に読む。
+      // **資金は自動で動かさない**: 判定は「両者が遊休で一致した」か「食い違った」かを
+      // 示すだけで、どちらが偽っているかを本システムは断定できない。証跡として残し、
+      // レピュテーションに反映し、係争の材料にするに留める（自動スラッシュは §5 の範疇）。
+      const utilizationAudit = utilizationCollector.assess(orderId);
+      utilizationCollector.clear(orderId);
+
       // ハートビートセッションを削除（メモリリーク防止）。
       // heartbeatTimestamps の対応エントリも同時に除去（旧実装は usageSessions だけ
       // 削除し timestamps Map が無限増加していた）。
@@ -2022,6 +2040,8 @@ router.post('/:id/stop',
       // preventing double-increment if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
       const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
+      // 判定できたときだけ記録する（no_data を保存すると「検証した結果シロ」と読めてしまう）
+      if (utilizationAudit.verdict !== 'no_data') updateData.utilizationAudit = utilizationAudit;
       if (isPreempting) {
         // 中断による終了であることを記録する。中断率（spot-tier.preemptionRate）はこの
         // terminationReason から導出され、借り手がプロバイダを選ぶ材料になる。
@@ -2050,6 +2070,26 @@ router.post('/:id/stop',
         } catch (e) {
           logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
         }
+      }
+
+      // ゼロ負荷監査の結果をレピュテーションへ反映する。
+      // active → auditPass、zero_load → auditFail。disputed は**どちらにも数えない**
+      // （食い違いは「プロバイダが不正」を意味しない。借り手が返金目的で偽った可能性も
+      // 同じだけあり、片方に不利益を付けるのは根拠が無い）。
+      if (order.providerId && (utilizationAudit.verdict === 'active' || utilizationAudit.verdict === 'zero_load')) {
+        try {
+          const { createReputationService } = require('../../../reputation/reputation-service');
+          createReputationService().recordAudit(order.providerId, utilizationAudit.verdict === 'active');
+        } catch (e) {
+          logger.warn(`reputation recordAudit failed for order ${orderId}: ${e.message}`);
+        }
+      }
+      if (utilizationAudit.verdict === 'zero_load' || utilizationAudit.verdict === 'disputed') {
+        appendAuditLog('order_utilization_audit', {
+          orderId, providerId: order.providerId, verdict: utilizationAudit.verdict,
+          lender: utilizationAudit.lender, renter: utilizationAudit.renter,
+        }, req.user.id);
+        logger.warn(`Utilization audit for order ${orderId}: ${utilizationAudit.verdict}`);
       }
 
       // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。

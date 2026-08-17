@@ -490,7 +490,32 @@ export async function render(container, params) {
     renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
   }
 
+  // ゼロ負荷監査の結果。両者（提供者・借り手）の利用率申告を突き合わせた判定を、
+  // 借り手にも提供者にも同じ文面で開示する。判定は証拠であって裁定ではないため、
+  // 「疑いがある」「食い違っている」とだけ言い、どちらが正しいとは書かない。
+  function renderUtilizationAudit(body, order) {
+    const audit = order.utilizationAudit;
+    if (!audit || audit.verdict === 'no_data' || audit.verdict === 'insufficient') return;
+    if (audit.verdict === 'active') {
+      body.appendChild(el('div', { class: 'banner banner-success' },
+        'GPU 利用率の記録から、実際に計算処理が行われたことを確認しました。'));
+      return;
+    }
+    if (audit.verdict === 'zero_load') {
+      body.appendChild(el('div', { class: 'banner banner-warning' },
+        '提供者・借り手の双方の記録が「GPU がほぼ稼働していなかった」で一致しています。'
+        + '課金に見合う計算が行われなかった疑いがあります。心当たりが無い場合は係争を申請してください。'));
+      return;
+    }
+    if (audit.verdict === 'disputed') {
+      body.appendChild(el('div', { class: 'banner banner-warning' },
+        'GPU 利用率について、提供者と借り手の記録が食い違っています。'
+        + 'どちらの記録が正しいかは自動では判定できません。必要であれば係争を申請してください。'));
+    }
+  }
+
   function renderCompleted(body, order, isRenter) {
+    renderUtilizationAudit(body, order);
     // SLA 違反による自動終了は、通常完了と区別して理由と返金を明示する（正直なUI原則）。
     if (order.slaBreach) {
       const pct = typeof order.deliveredRatio === 'number' ? Math.round(order.deliveredRatio * 100) : null;

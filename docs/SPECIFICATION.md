@@ -68,7 +68,15 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 8. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
 
 ### F2. 信頼基盤（最優先トリオ）
-- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。**ルート配線・実ジョブ収集は未**。
+- **計算検証 Proof-of-Compute**: 🟡→一部✅ `src/verification/work-verifier.js`（純関数）＋
+  `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋
+  `src/db/json/VerificationRepository.js`（永続化）。
+  **ゼロ負荷検出は実レンタルへ結線済（2026-08）**: `src/verification/utilization-collector.js` が
+  ハートビートの任意フィールド `utilizationPct` を提供者・借り手の**両方**から集め、終了時に
+  食い違いを判定して `order.utilizationAudit` に保存する（両者が遊休で一致=zero_load、
+  食い違い=disputed、断定しない）。資金は自動で動かさず、レピュテーション反映・監査ログ・
+  UI 開示・係争の材料に留める。
+  **未**: 再実行監査（別プロバイダへの同一ジョブ再投入）と ZK/TEE 系の検証パイプライン。
 - **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
 - **GPU アテステーション**: ❌（nvtrust 連携未, カテゴリ3）。
 
@@ -141,5 +149,6 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）
 - `src/security/ots-client.js` — OpenTimestamps カレンダー・クライアント（複数カレンダーへ冗長提出、レシートは不透明保存、既定無効・fail-soft・SSRF ガード経由, 10テスト）
 - `src/security/anchor-scheduler.js` — 監査ログの定期増分アンカリング（byte offset 再開、簿記エントリでの空回り防止、切詰め検出, 10テスト）
+- `src/verification/utilization-collector.js` — ゼロ負荷課金の検出（両者申告の突き合わせ、リングバッファ、断定しない判定, 15テスト）
 - `src/marketplace/spot-tier.js` — Spot（中断許容）ティアのポリシー（割引・猶予窓・最低課金を効かせない中断精算・中断率の導出, 18テスト）
 - `src/gpu/perf-score.js` — 機種横断の正規化性能スコア／価格対性能（DLPerf 風。参照表照合・電力由来の TFLOPS 上限クランプ・未検証型番の上限・算出不能は null、feature-pricer への特徴量変換つき, 27テスト）

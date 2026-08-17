@@ -2,7 +2,7 @@
 // Reached by clicking a GPU name/rating in market.js's cards (previously
 // there was no way to see full specs or read individual reviews before
 // deciding to rent — market.js's cards only ever showed a summary).
-import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge, attestationBadge, perfBadge, valueBadge } from '../ui.js';
+import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge, attestationBadge, perfBadge, valueBadge, spotBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -178,6 +178,7 @@ export async function render(container, params) {
         el('span', { class: 'chip' }, gpu.apiType),
         el('span', { class: 'chip' }, `${gpu.memoryGB}GB`),
         reliabilityBadge(gpu.reliability),
+        spotBadge(gpu.spot),
       ),
       el('p', { class: 'muted' }, ratingText),
       el('div', { class: 'row', style: 'gap:16px;align-items:baseline' },

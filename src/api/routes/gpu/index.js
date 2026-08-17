@@ -20,6 +20,8 @@ const { createReputationService } = require('../../../reputation/reputation-serv
 const providerUptime = require('../../../reputation/provider-uptime');
 // 機種横断で比較可能な正規化性能スコア（DLPerf 風）と価格対性能
 const perfScore = require('../../../gpu/perf-score');
+// Spot（中断許容）ティアのポリシーと中断率
+const spotTier = require('../../../marketplace/spot-tier');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -49,6 +51,37 @@ function getGpuRating(gpuId) {
 
 function invalidateGpuRatingCache(gpuId) {
   _gpuRatingCache.delete(gpuId);
+}
+
+/**
+ * 出品の spot（中断許容）ティア情報。提供していなければ enabled:false だけを返す。
+ * 割引後の実効時給まで返すのは、借り手が「中断リスクを負う見返り」を一目で比較できるように
+ * するため（Vast.ai が interruptible の入札価格を並記するのと同じ意図）。
+ */
+function spotSummary(gpu) {
+  const cfg = spotTier.resolveSpotConfig(gpu);
+  if (!cfg.enabled) return { enabled: false };
+  let pricePerHour = null;
+  try {
+    pricePerHour = spotTier.effectivePrice(gpu.pricePerHour, spotTier.TIERS.SPOT, gpu).pricePerHour;
+  } catch (_) { /* pricePerHour 不正な出品は価格を出さない */ }
+  return {
+    enabled: true,
+    discountPct: cfg.discountPct,
+    noticeSeconds: cfg.noticeSeconds,
+    pricePerHour,
+  };
+}
+
+/**
+ * プロバイダの中断率（注文履歴から導出）。中断は SLA 違反として減点しない代わりに、
+ * 借り手が選べるよう必ず開示する。「安いが中断される」ことと「約束を破る」ことは別で、
+ * 前者を隠すと spot ティアは信頼できない商品になる。
+ */
+function providerPreemptionRate(providerId) {
+  if (!providerId) return { rate: null, preempted: 0, spotOrders: 0, measuring: false };
+  const OrderRepository = require('../../../db/json/OrderRepository');
+  return spotTier.preemptionRate(OrderRepository.getAll().filter((o) => o.providerId === providerId));
 }
 
 module.exports._invalidateGpuRatingCache = invalidateGpuRatingCache;
@@ -163,7 +196,7 @@ router.get('/', asyncHandler(async (req, res) => {
   // 二重予約は注文作成時に 409 で拒否されるため、ここは閲覧時のヒント表示。
   // Single getAll() — derive both occupancy and ratings from one read to halve disk I/O.
   const OrderRepository = require('../../../db/json/OrderRepository');
-  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
   const nowMs = Date.now();
   const allOrders = OrderRepository.getAll();
   const occupiedGpuIds = new Set(
@@ -311,6 +344,8 @@ router.get('/', asyncHandler(async (req, res) => {
           score: perf.score, confidence: perf.confidence,
           matchedModel: perf.matchedModel, perfPerHourSat: perf.perfPerHourSat,
         },
+        // Spot（中断許容）ティアの提供状況と実効価格
+        spot: spotSummary(gpu),
       };
     }),
     timestamp: new Date().toISOString()
@@ -377,6 +412,12 @@ router.get('/:id', asyncHandler(async (req, res) => {
       // basis/findings は公開済みフィールド（型番・VRAM・電力・申告TFLOPS）からの導出値のみで、
       // 非公開情報は含まない。
       performanceScore: perfScore.summarize(gpu),
+      // Spot（中断許容）ティア。提供中なら中断率も併記する — 割引の代償がどれくらいの
+      // 頻度で現実になるかを借り手が判断できなければ、このティアは選びようがない。
+      spot: (() => {
+        const s = spotSummary(gpu);
+        return s.enabled ? { ...s, providerPreemptionRate: providerPreemptionRate(providerId) } : s;
+      })(),
     }
   };
   res.json(response);
@@ -855,7 +896,7 @@ router.delete('/:id',
     // 'disputed' を含めることでプロバイダが係争中に GPU を削除して管理者の裁定材料を
     // 消滅させる griefing パスを塞ぐ。
     const OrderRepository = require('../../../db/json/OrderRepository');
-    const BLOCKING = new Set(['pending', 'matched', 'active', 'disputed']);
+    const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting', 'disputed']);
     const activeOrders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && BLOCKING.has(o.status));
     if (activeOrders.length > 0) {
       return res.status(409).json({
@@ -910,7 +951,7 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
 
   // 空き状況チェック（見積もり時点の参考情報 — 確定は注文作成時に行う）
   const OrderRepository = require('../../../db/json/OrderRepository');
-  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
   let scheduledStart = Date.now();
   if (req.query.scheduledStartAt) {
     scheduledStart = Date.parse(req.query.scheduledStartAt);
@@ -1072,7 +1113,7 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
   }
 
   const OrderRepository = require('../../../db/json/OrderRepository');
-  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
 
   const blockedSlots = OrderRepository.getAll()
     .filter(o => o.gpuId === gpuId && BLOCKING.has(o.status))

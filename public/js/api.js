@@ -84,7 +84,12 @@ export const api = {
   providerEarnings: (query) => request('/api/v1/orders/provider/earnings', { query }),
   getOrder: (id) => request(`/api/v1/orders/${id}`),
   getOrderPayment: (id) => request(`/api/v1/orders/${id}/payment`),
-  createOrder: (gpuId, durationMinutes) => request('/api/v1/orders', { method: 'POST', body: { gpuId, durationMinutes } }),
+  // tier: 'ondemand'(既定) | 'spot'（中断許容・割引。出品側が spotEnabled の GPU のみ）
+  createOrder: (gpuId, durationMinutes, tier) => request('/api/v1/orders', {
+    method: 'POST',
+    body: tier && tier !== 'ondemand' ? { gpuId, durationMinutes, tier } : { gpuId, durationMinutes },
+  }),
+  preemptOrder: (orderId) => request(`/api/v1/orders/${orderId}/preempt`, { method: 'POST' }),
   acceptOrder: (id) => request(`/api/v1/orders/${id}/accept`, { method: 'POST' }),
   rejectOrder: (id) => request(`/api/v1/orders/${id}/reject`, { method: 'POST' }),
   startOrder: (id) => request(`/api/v1/orders/${id}/start`, { method: 'POST' }),

@@ -84,6 +84,12 @@ const schemas = {
     teraflops: Joi.number().min(0).max(100000),
     hashrate: Joi.number().min(0).max(100000000)
   }),
+  // Spot（中断許容）ティアの出品設定。プロバイダのオプトイン（既定は専有のみ）。
+  // 範囲の根拠は src/marketplace/spot-tier.js（割引 0% の「spot」は借り手に中断リスクだけ
+  // 負わせる出品になるため下限を設ける）。
+  spotEnabled: Joi.boolean().optional(),
+  spotDiscountPct: Joi.number().min(10).max(90).optional(),
+  spotNoticeSeconds: Joi.number().integer().min(30).max(900).optional(),
   minRenterRating: Joi.number().min(1).max(5).optional(),
   // 未評価（レビュー履歴ゼロ）の借り手を minRenterRating フロアで拒否するか。
   // 既定 false（新規借り手を許可）。Sybil 耐性を必須とするプロバイダがオプトインする。
@@ -119,6 +125,9 @@ const schemas = {
       }).unknown(false).optional(),
       minRenterRating: Joi.number().min(1).max(5).optional(),
       rejectUnratedRenters: Joi.boolean().optional(),
+      spotEnabled: Joi.boolean().optional(),
+      spotDiscountPct: Joi.number().min(10).max(90).optional(),
+      spotNoticeSeconds: Joi.number().integer().min(30).max(900).optional(),
       available: Joi.boolean().optional()
     }),
 
@@ -170,6 +179,9 @@ const schemas = {
       // 無制限だと totalPrice 計算が天文学的な値になりオーバーフロー/DoS の温床になる。
       durationMinutes: Joi.number().integer().min(5).max(43200).multiple(5).required(),
       description: Joi.string().max(1000).optional(),
+      // 課金ティア。spot は割引と引き換えにプロバイダ都合の中断を許容する
+      // （出品側が spotEnabled でオプトインしている GPU のみ）。未指定は専有(ondemand)。
+      tier: Joi.string().valid('ondemand', 'spot').optional(),
       paymentMethod: Joi.string().valid('lightning', 'onchain').optional(),
       // gpuId 指定時はハンドラ側で maxPricePerHour との併用を拒否する（排他）
       maxPricePerHour: Joi.number().min(0.00001).optional(),

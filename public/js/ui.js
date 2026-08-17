@@ -64,6 +64,7 @@ const STATUS_LABELS = {
   pending: '承認待ち',
   matched: '承認済み・決済待ち',
   active: '稼働中',
+  preempting: '中断通知中',
   completed: '完了',
   cancelled: 'キャンセル',
   disputed: '係争中',
@@ -149,12 +150,24 @@ export function valueBadge(performanceScore) {
   }, `コスパ ${v >= 0.01 ? v.toFixed(3) : v.toExponential(1)}/sat`);
 }
 
+// Spot（中断許容）ティアのバッジ。gpu.spot = { enabled, discountPct, noticeSeconds, pricePerHour }。
+// 正直なUI原則: 割引率だけを大きく見せて中断リスクを小さく書かない。「%引き」と
+// 「中断あり」を同じチップに並べ、猶予秒数をツールチップで必ず示す。
+export function spotBadge(spot) {
+  if (!spot || !spot.enabled) return null;
+  const title = `中断許容ティア: 定価より${spot.discountPct}%安く借りられますが、提供者の都合で中断されることがあります。`
+    + `中断通知から停止までの猶予は${spot.noticeSeconds}秒で、課金は実際に提供された時間分のみです。`;
+  return el('span', { class: 'chip chip-spot', title }, `中断許容 -${spot.discountPct}%`);
+}
+
 export function timeline(order) {
   const current = order.status;
   const list = el('ul', { class: 'timeline' });
   const steps = STATUS_ORDER;
   const isTerminalAlt = current === 'cancelled' || current === 'disputed';
-  const currentIdx = steps.indexOf(current);
+  // preempting は STATUS_ORDER に無い中間状態だが、稼働中であることに変わりはない。
+  // そのまま indexOf すると -1 になり、どの段階もハイライトされない空のタイムラインになる。
+  const currentIdx = steps.indexOf(current === 'preempting' ? 'active' : current);
   steps.forEach((step, idx) => {
     const li = el('li', {}, statusLabel(step));
     if (!isTerminalAlt && idx < currentIdx) li.classList.add('done');

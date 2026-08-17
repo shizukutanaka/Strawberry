@@ -220,9 +220,9 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
-const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../../utils/order-expiry');
+const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders } = require('../../../utils/order-expiry');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
-const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
+const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active', 'preempting']);
 
 // 事前予約の先行上限（既定 90 日）。durationMinutes の上限は Joi スキーマ
 // (validator.js: max 43200 = 30日) が担保するが、scheduledStartAt は isoDate
@@ -295,8 +295,11 @@ router.get('/',
         expireStaleDisputedOrders();
         // active タイムアウト: 返された各注文の GPU を解放する（vgpuManager 利用可能時のみ）
         const timedOutActive = expireStaleActiveOrders();
-        if (vgpuManager && timedOutActive.length > 0) {
-          for (const { id: oid, gpuId } of timedOutActive) {
+        // 猶予切れの spot 中断も同じスイープで確定させる。preempting のまま放置すると
+        // GPU が blocking 集合に入ったままロックされ続ける。
+        const preempted = finalizePreemptedOrders();
+        if (vgpuManager && (timedOutActive.length > 0 || preempted.length > 0)) {
+          for (const { id: oid, gpuId } of [...timedOutActive, ...preempted]) {
             try { await vgpuManager.releaseGPU(gpuId, oid); } catch (_) {}
           }
         }
@@ -1028,6 +1031,26 @@ router.post('/',
     // 予約時間帯を確定（scheduledStartAt 未指定 = 即時）
     orderData.scheduledStartAt = orderData.scheduledStartAt || new Date().toISOString();
     orderData.scheduledEndAt = new Date(new Date(orderData.scheduledStartAt).getTime() + durationMinutes * 60 * 1000).toISOString();
+    // 課金ティアの確定。spot（中断許容）は割引と引き換えにプロバイダ都合の中断を許容する。
+    // 出品側が spotEnabled でオプトインしていない GPU に spot を指定したら 400 で弾く
+    // （黙って ondemand 価格にすると、借り手は中断リスクだけ負って割引を得られない）。
+    const spotTier = require('../../../marketplace/spot-tier');
+    const requestedTier = spotTier.normalizeTier(orderData.tier);
+    if (requestedTier === spotTier.TIERS.SPOT && !spotTier.resolveSpotConfig(gpu).enabled) {
+      throw new APIError(ErrorTypes.VALIDATION, 'This GPU does not offer the spot (interruptible) tier', 400);
+    }
+    const priced = spotTier.effectivePrice(pricePerHour, requestedTier, gpu);
+    orderData.tier = priced.tier;
+    if (priced.tier === spotTier.TIERS.SPOT) {
+      // 合意時点の割引条件を注文に固定する。出品側が後から spotDiscountPct を変えても
+      // 既存注文の精算額が動かないようにする（escrow の price-lock と同じ考え方）。
+      orderData.spotDiscountPct = priced.discountPct;
+      orderData.listPricePerHour = priced.listPricePerHour;
+      orderData.spotNoticeSeconds = spotTier.resolveSpotConfig(gpu).noticeSeconds;
+    }
+    // 以降の価格計算はティア適用後の実効時給で行う（orderData.pricePerHour は下で設定される）
+    pricePerHour = priced.pricePerHour;
+
     // 5分単価
     const pricePer5Min = pricePerHour / 12;
     // totalPrice は整数 sats へ丸める（computeOrderPricing と同一規則）。丸めないと
@@ -1831,6 +1854,97 @@ router.post('/:id/start',
 );
 
 // オーダー実行終了 (認証必須)
+// Spot（中断許容）注文の中断通知。プロバイダ都合で稼働中の spot 注文を打ち切る。
+//
+// なぜ /stop ではなくこの専用経路なのか: /stop はプロバイダに禁止されている。許すと
+// 「accept → 借り手が支払い → 借り手が start → プロバイダが即 stop」で 0 秒の労働に対して
+// 全額を回収できるためである（zero-work theft）。spot はプロバイダによる打ち切りを
+// 仕様として認めるティアなので、その穴を別の形で塞ぐ必要がある:
+//   1. spot 注文にのみ許可する（専有注文は従来どおり打ち切れない）
+//   2. 即時停止ではなく**猶予窓**を置く（Bamboo arXiv:2204.12013 — 猶予ゼロの中断は
+//      借り手の計算を丸ごと捨てさせ、ティア自体を使い物にならなくする）
+//   3. 精算は最低課金を効かせない厳密な従量按分にする（src/marketplace/spot-tier.js の
+//      preemptionSettlement。これが無いと「受注→即中断→最低課金だけ回収」が成立する）
+router.post('/:id/preempt',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const orderId = req.params.id;
+    const spotTier = require('../../../marketplace/spot-tier');
+
+    return withLock(`order:${orderId}`, async () => {
+      const order = OrderRepository.getById(orderId);
+      if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+      const isProvider = order.providerId && order.providerId === req.user.id;
+      if (!isProvider && req.user.role !== 'admin') {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Only the provider (or an admin) can preempt an order', 403);
+      }
+      if (spotTier.normalizeTier(order.tier) !== spotTier.TIERS.SPOT) {
+        throw new APIError(
+          ErrorTypes.VALIDATION,
+          'Only spot (interruptible) orders can be preempted; raise a dispute for on-demand orders',
+          400,
+        );
+      }
+      // 「通知済み」の判定は status チェックより先に行う。通知後の status は 'preempting' なので
+      // 順序を逆にすると、再送が「active ではない」(400) として弾かれ、409 分岐が到達不能になる。
+      // 再送で締切が延び続けると借り手はいつ止まるか分からなくなるため、明示的に拒否する。
+      if (order.preemptionNoticeAt || order.status === 'preempting') {
+        return res.status(409).json({ error: 'This order has already been given a preemption notice' });
+      }
+      if (order.status !== 'active') {
+        throw new APIError(ErrorTypes.VALIDATION, 'Only an active order can be preempted', 400,
+          { details: `Current status: ${order.status}` });
+      }
+
+      // 猶予秒は注文作成時に固定した値を優先する（出品側が後から縮めて借り手の猶予を
+      // 削れないようにする。spotDiscountPct を注文へ固定するのと同じ理由）。
+      const gpuForNotice = { spotNoticeSeconds: order.spotNoticeSeconds, spotEnabled: true };
+      const notice = spotTier.buildPreemptionNotice(gpuForNotice);
+
+      const updateData = {
+        status: 'preempting',
+        preemptionNoticeAt: notice.noticeAt,
+        preemptionDeadlineAt: notice.deadlineAt,
+        preemptedBy: req.user.id,
+      };
+      const result = OrderRepository.updateIf(orderId, (o) => o.status === 'active', updateData);
+      if (!result.ok) {
+        return res.status(409).json({ error: 'Order was no longer active' });
+      }
+
+      appendAuditLog('order_preemption_notice', {
+        orderId, providerId: order.providerId, deadlineAt: notice.deadlineAt,
+      }, req.user.id);
+
+      // 借り手へ通知。猶予窓の存在意義そのものなので、失敗しても中断は進めるが必ず試みる。
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        notifyUser(
+          order.userId,
+          'order_preempting',
+          `【Strawberry】Spot注文が中断されます。${notice.noticeSeconds}秒以内に作業状態を保存してください。\n`
+            + `注文: #${orderId}\n停止予定: ${notice.deadlineAt}`,
+          {},
+        );
+      } catch (e) {
+        logger.warn(`preemption notice to renter failed for order ${orderId}: ${e.message}`);
+      }
+
+      logger.info(`Order ${orderId} preemption notice issued (deadline=${notice.deadlineAt})`);
+      return res.json({
+        message: 'Preemption notice issued',
+        orderId,
+        status: 'preempting',
+        preemptionNoticeAt: notice.noticeAt,
+        preemptionDeadlineAt: notice.deadlineAt,
+        noticeSeconds: notice.noticeSeconds,
+      });
+    });
+  })
+);
+
 router.post('/:id/stop',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
@@ -1861,7 +1975,11 @@ router.post('/:id/stop',
         }
         throw new APIError(ErrorTypes.FORBIDDEN, 'You do not have permission to stop this order', 403);
       }
-      if (order.status !== 'active') {
+      // preempting も停止可能にする。中断通知を受けた借り手が作業状態を保存し終えたら、
+      // 猶予切れを待たずに自分で確定できるべきである（待たされるほど課金が伸びるわけでは
+      // ないが、GPU を無為に占有し続ける理由も無い）。
+      const isPreempting = order.status === 'preempting';
+      if (order.status !== 'active' && !isPreempting) {
         throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
       }
 
@@ -1904,7 +2022,17 @@ router.post('/:id/stop',
       // preventing double-increment if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
       const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
-      const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);
+      if (isPreempting) {
+        // 中断による終了であることを記録する。中断率（spot-tier.preemptionRate）はこの
+        // terminationReason から導出され、借り手がプロバイダを選ぶ材料になる。
+        updateData.terminationReason = 'preempted';
+        updateData.preemptedAt = now43g;
+      }
+      const result = OrderRepository.updateIf(
+        orderId,
+        o => (isPreempting ? o.status === 'preempting' : o.status === 'active'),
+        updateData,
+      );
       if (!result.ok) {
         return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });
       }
@@ -1913,7 +2041,9 @@ router.post('/:id/stop',
       }
 
       // プロバイダ・レピュテーションへ完了を記録（updateIf 成功時のみ: 二重記録を防ぐ）。
-      if (order.providerId) {
+      // 中断終了は「成功した完了」ではないので加点しない。ただし失敗としても記録しない
+      // （ティア仕様どおりの中断を SLA 違反として罰することになるため）。可視化は中断率で行う。
+      if (order.providerId && !isPreempting) {
         try {
           const { createReputationService } = require('../../../reputation/reputation-service');
           createReputationService().recordJobResult(order.providerId, true);
@@ -1940,15 +2070,24 @@ router.post('/:id/stop',
         const elapsedSeconds = order.startedAt
           ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
           : 0;
+        // 中断終了は最低課金を効かせない厳密な従量按分にする。最低課金（既定 10%）は
+        // *借り手都合*の即時解約を想定した floor であり、プロバイダ都合の中断に適用すると
+        // 「受注 → 即中断 → 最低課金だけ回収」のゼロワーク課金が成立してしまう。
+        const spotTier = require('../../../marketplace/spot-tier');
         for (const escrow of escrows) {
-          const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
-            ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
-            : order.durationMinutes
-              ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
-              : 0;
-          escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
+          if (isPreempting) {
+            const s = spotTier.preemptionSettlement(order, Date.now());
+            escrowSvc.settle(escrow.id, s.usage, s.opts);
+          } else {
+            const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
+              ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
+              : order.durationMinutes
+                ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
+                : 0;
+            escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
+          }
           escrowSvc.apply(escrow.id, 'DELIVER_OK');
-          logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
+          logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}${isPreempting ? ' [preempted]' : ''}`);
         }
       } catch (e) {
         logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);

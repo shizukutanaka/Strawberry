@@ -74,6 +74,7 @@ export async function render(container, params) {
     if (order.status === 'pending') renderPending(body, order, isRenter, isProvider, isAdmin);
     else if (order.status === 'matched') renderMatched(body, order, paymentInfo, isRenter, isProvider, isAdmin, rateInfo);
     else if (order.status === 'active') renderActive(body, order, isRenter, isProvider, isAdmin);
+    else if (order.status === 'preempting') renderPreempting(body, order, isRenter);
     else if (order.status === 'completed') renderCompleted(body, order, isRenter);
     else if (order.status === 'cancelled') body.appendChild(el('div', { class: 'banner banner-warning' }, 'この注文はキャンセルされました。'));
     else if (order.status === 'disputed') renderDisputed(body, order, isRenter, isProvider, isAdmin);
@@ -364,6 +365,49 @@ export async function render(container, params) {
     pollPaymentStatus(box.parentElement, paymentRes.paymentId, order);
   }
 
+  // Spot 注文が中断通知を受けている状態。猶予窓の残り時間を秒単位で出すのがこの画面の
+  // 存在意義そのもの（Bamboo arXiv:2204.12013 — 猶予を使い切れないと借り手は計算を丸ごと
+  // 捨てることになる）。カウントダウンは「あと何秒で保存を終える必要があるか」を示す。
+  function renderPreempting(body, order, isRenter) {
+    const deadlineMs = order.preemptionDeadlineAt ? new Date(order.preemptionDeadlineAt).getTime() : null;
+    const countdown = el('p', { class: 'countdown', style: 'font-size:1.2rem;font-weight:700;margin:0' });
+
+    function tick() {
+      if (!deadlineMs) { countdown.textContent = 'まもなく停止します'; return; }
+      const remain = Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000));
+      countdown.textContent = remain > 0
+        ? `停止まで残り ${Math.floor(remain / 60)}分${remain % 60}秒`
+        : '猶予時間が終了しました。まもなく停止・精算されます。';
+    }
+    tick();
+    timers.push(setInterval(tick, 1000));
+
+    body.appendChild(el('div', { class: 'stack' },
+      el('div', { class: 'banner banner-warning' },
+        'この注文は中断許容（Spot）ティアで、提供者により中断されます。'
+        + '猶予時間内に作業状態を保存してください。課金は実際に提供された時間分のみです。'),
+      countdown,
+    ));
+
+    if (isRenter) {
+      const stopBtn = el('button', {
+        class: 'btn btn-danger',
+        onClick: async () => {
+          stopBtn.disabled = true;
+          try {
+            await api.stopOrder(order.id);
+            toast('保存を完了して停止しました', 'success');
+            await load();
+          } catch (err) {
+            toast(err instanceof ApiError ? err.message : '停止に失敗しました', 'error');
+            stopBtn.disabled = false;
+          }
+        },
+      }, '保存が終わったので今すぐ停止する');
+      body.appendChild(stopBtn);
+    }
+  }
+
   function renderActive(body, order, isRenter, isProvider, isAdmin) {
     const startedAt = order.startedAt ? new Date(order.startedAt).getTime() : Date.now();
     const totalMs = order.durationMinutes * 60 * 1000;
@@ -412,7 +456,36 @@ export async function render(container, params) {
       }, '利用を停止する');
       body.appendChild(stopBtn);
     } else if (isProvider) {
-      body.appendChild(el('p', { class: 'muted' }, 'プロバイダーは利用を停止できません。問題がある場合は管理者にお問い合わせください。'));
+      // 中断許容(Spot)注文に限り、プロバイダは猶予付きで打ち切れる。専有注文で打ち切れると
+      // 0秒の労働で全額を回収できてしまうため、そちらは従来どおり不可のまま。
+      if (order.tier === 'spot') {
+        const preemptBtn = el('button', {
+          class: 'btn btn-danger',
+          onClick: async () => {
+            const ok = await confirmDialog(
+              'この Spot 注文を中断しますか？ 借り手に中断が通知され、猶予時間の経過後に停止・精算されます。'
+              + '課金は実際に提供された時間分のみになります。',
+            );
+            if (!ok) return;
+            preemptBtn.disabled = true;
+            try {
+              const res = await api.preemptOrder(order.id);
+              toast(`中断を通知しました（${res.noticeSeconds}秒後に停止）`, 'info');
+              await load();
+            } catch (err) {
+              toast(err instanceof ApiError ? err.message : '中断の通知に失敗しました', 'error');
+              preemptBtn.disabled = false;
+            }
+          },
+        }, 'この注文を中断する（Spot）');
+        body.appendChild(el('div', { class: 'stack' },
+          el('p', { class: 'muted' },
+            'この注文は中断許容（Spot）ティアです。中断すると借り手に通知され、猶予後に停止・精算されます。'),
+          preemptBtn,
+        ));
+      } else {
+        body.appendChild(el('p', { class: 'muted' }, 'プロバイダーは利用を停止できません。問題がある場合は管理者にお問い合わせください。'));
+      }
     }
     renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
   }

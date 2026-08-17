@@ -226,4 +226,77 @@ function expireStaleActiveOrders() {
   return expired;
 }
 
-module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, resolveTimeoutMinutes };
+/**
+ * 中断通知の猶予が切れた spot 注文を実際に終了させ、従量按分で精算する。
+ *
+ * 猶予窓（POST /orders/:id/preempt が設定する preemptionDeadlineAt）は Bamboo
+ * (arXiv:2204.12013) が示す「猶予ゼロの中断は借り手の計算を丸ごと捨てさせる」問題への対処。
+ * ここはその窓が閉じたあとの確定処理で、借り手が /stop で早期確定しなかった場合の受け皿。
+ *
+ * 精算は spot-tier.preemptionSettlement に従い**最低課金を効かせない**厳密な従量按分。
+ * 最低課金を残すと「受注→即中断→最低課金だけ回収」のゼロワーク課金が成立してしまう。
+ *
+ * @returns {{ id: string, gpuId: string }[]} 終了させた注文
+ */
+function finalizePreemptedOrders() {
+  const spotTier = require('../marketplace/spot-tier');
+  const nowMs = Date.now();
+  const finalized = [];
+
+  for (const order of OrderRepository.getAll()) {
+    if (order.status !== 'preempting') continue;
+    const deadlineMs = Date.parse(order.preemptionDeadlineAt);
+    // 期限が読めない場合は放置せず即座に確定させる（不正な値で永久に preempting に
+    // 留まると GPU が blocking 集合に入ったままロックされ続ける）。
+    if (Number.isFinite(deadlineMs) && deadlineMs > nowMs) continue;
+
+    const now = new Date().toISOString();
+    const settlement = spotTier.preemptionSettlement(order, nowMs);
+    const result = OrderRepository.updateIf(order.id, (o) => o.status === 'preempting', {
+      status: 'completed',
+      terminationReason: 'preempted',
+      preemptedAt: now,
+      stoppedAt: now,
+      completedAt: now,
+      deliveredSeconds: Math.round(settlement.deliveredSeconds),
+      updatedAt: now,
+    });
+    if (!result.ok) continue; // 借り手が /stop で先に確定させた（冪等）
+
+    finalized.push({ id: order.id, gpuId: order.gpuId });
+    logger.info(
+      `Spot order preempted and finalized: ${order.id} `
+      + `(delivered ${Math.round(settlement.deliveredSeconds)}s, ratio ${settlement.usage.deliveredRatio.toFixed(3)})`
+    );
+
+    try {
+      const EscrowRepository = require('../db/json/EscrowRepository');
+      const { createEscrowService } = require('../payments/escrow-service');
+      const escrowSvc = createEscrowService();
+      const escrows = EscrowRepository.getAll().filter((e) => e.orderId === order.id && e.state === 'HELD');
+      for (const esc of escrows) {
+        try {
+          escrowSvc.settle(esc.id, settlement.usage, settlement.opts);
+          escrowSvc.apply(esc.id, 'DELIVER_OK');
+        } catch (inner) {
+          logger.warn(`Preemption escrow settle failed (escrow=${esc.id}): ${inner.message}`);
+        }
+      }
+    } catch (e) {
+      logger.warn(`Preemption escrow settle failed (order=${order.id}): ${e.message}`);
+    }
+
+    // 中断は SLA 違反ではないので reputation の失敗としては記録しない（ティア仕様どおりの動作を
+    // 罰することになる）。代わりに中断率を注文履歴から導出して公開する
+    // （spot-tier.preemptionRate → GET /users/:id/reputation・GPU 詳細）。
+    try {
+      const { notifyUser } = require('./user-notify');
+      const msg = `【Strawberry】Spot注文が中断により終了しました（提供時間分のみ課金されます）\n注文: #${order.id}`;
+      if (order.userId) notifyUser(order.userId, 'order_preempted', msg, {});
+      if (order.providerId) notifyUser(order.providerId, 'order_preempted', msg, {});
+    } catch (_) { /* 通知失敗は終了処理を妨げない */ }
+  }
+  return finalized;
+}
+
+module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders, resolveTimeoutMinutes };

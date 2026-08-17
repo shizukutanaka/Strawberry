@@ -255,7 +255,7 @@ router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
     }
   }
 
-  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
   const occupiedGpuIds = new Set(orders.filter(o => BLOCKING.has(o.status)).map(o => o.gpuId));
 
   res.json({
@@ -322,9 +322,9 @@ router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res
 // 期限切れ注文の手動スイープ（管理者のみ）— インシデント対応・テストで使用。
 // POST /admin/expire-orders { types?: ['pending','matched','disputed'] }
 router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../utils/order-expiry');
-  const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed', 'active'];
-  const VALID = new Set(['pending', 'matched', 'disputed', 'active']);
+  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders } = require('../../utils/order-expiry');
+  const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed', 'active', 'preempting'];
+  const VALID = new Set(['pending', 'matched', 'disputed', 'active', 'preempting']);
   const invalid = types.filter(t => !VALID.has(t));
   if (invalid.length > 0) {
     return res.status(400).json({ error: `Invalid types: ${invalid.join(', ')}. Valid: ${[...VALID].join(', ')}` });
@@ -334,6 +334,7 @@ router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (
   if (types.includes('matched'))   result.matchedExpired   = expireStaleMatchedOrders();
   if (types.includes('disputed'))  result.disputedResolved = expireStaleDisputedOrders();
   if (types.includes('active'))    result.activeExpired    = expireStaleActiveOrders().length;
+  if (types.includes('preempting')) result.preemptedFinalized = finalizePreemptedOrders().length;
   res.json({ message: 'Order expiry sweep completed', ...result });
 }));
 

@@ -120,14 +120,10 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
 
 ### 既知の重大ギャップ（要対応・資金フロー）
 
-- **エスクロー action の未配線（money-movement gap）**: `escrow-state-machine` は
-  `DELIVER_OK`/`RESOLVE_SETTLE` 等で `reveal_preimage`/`payout_provider`/`collect_fee` の
-  「副作用の意図」を返すが、`action-executor.executeActions()` は本番コードのどこからも
-  呼ばれていない（テストのみ）。さらに `settle()` が算出する `providerPayoutSats` は
-  状態遷移パス（`evaluate`/`verifyAndSettle`）に渡されない。結果、エスクローは
-  `SETTLED` でも実際の LN 払い出しが実行されず資金が滞留しうる。LND/CLN アダプタ実装と
-  合わせて `evaluate`→`settle`→`executeActions(ctx.payoutSats=settlement.providerPayoutSats)`
-  を結線すること。**LN 実機統合を伴う大改修のため本ブランチでは未着手**。
+- ~~**エスクロー action の未配線（money-movement gap）**~~ → **解決済み（2026-08 時点で確認）**:
+  `action-executor.executeActions()` は `src/payments/escrow-service.js:35` から呼ばれており、
+  本番経路に結線されている。上記の「テストからしか呼ばれない」という記述は古い。
+  残る前提は LND/CLN 実アダプタの実装（現状は MockLnAdapter）。
 - **JSON 層のクロスプロセス lost-update**: `createJsonRepository` の書き込みは
   temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
   flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で

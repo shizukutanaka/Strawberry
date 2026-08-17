@@ -182,7 +182,7 @@ router.get('/stats', (req, res) => {
     const allGpus = GpuRepository.getAll();
     const allOrders = OrderRepository.getAll();
     const nowMs = Date.now();
-    const BLOCKING = new Set(['pending', 'matched', 'active']);
+    const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
 
     const occupiedGpuIds = new Set(
       allOrders.filter(o => {

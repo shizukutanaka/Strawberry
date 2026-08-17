@@ -15,14 +15,50 @@ const DURATION_PRESETS = [
 
 export function openRentModal(gpu, rateInfo) {
   let selectedMinutes = 60;
+  // 課金ティア。spot（中断許容）は割引と引き換えにプロバイダ都合の中断を受け入れる。
+  const spot = gpu.spot && gpu.spot.enabled ? gpu.spot : null;
+  let selectedTier = 'ondemand';
   const backdrop = el('div', { class: 'modal-backdrop' });
   const estimateBox = el('div', { class: 'banner banner-info' });
+  // 中断の条件は「安さ」と同じ大きさで見せる。割引だけ見せて中断リスクを小さく書くのは
+  // 借り手に不利な情報の隠蔽になる。
+  const spotWarning = el('div', { class: 'banner banner-warning', style: 'display:none' });
+
+  function currentRate() {
+    return selectedTier === 'spot' && spot && spot.pricePerHour ? spot.pricePerHour : gpu.pricePerHour;
+  }
 
   function updateEstimate() {
-    const totalSats = Math.round((gpu.pricePerHour / 12) * (selectedMinutes / 5));
+    const totalSats = Math.round((currentRate() / 12) * (selectedMinutes / 5));
     const price = priceLine(totalSats, rateInfo);
     estimateBox.textContent = `合計目安: ${price.sats}${price.jpy ? '（' + price.jpy + '）' : ''}`;
+    if (spot && selectedTier === 'spot') {
+      const rate = spot.providerPreemptionRate;
+      const rateText = rate && rate.rate != null
+        ? `このプロバイダーの実績中断率: ${Math.round(rate.rate * 100)}%（${rate.spotOrders}件中）`
+        : 'このプロバイダーの中断実績はまだ十分に蓄積されていません';
+      spotWarning.textContent =
+        `中断される可能性があります。提供者が中断を通知してから停止までの猶予は ${spot.noticeSeconds} 秒です。`
+        + `作業状態はこの猶予内に保存してください。中断された場合、課金は実際に提供された時間分のみです。`
+        + ` ${rateText}`;
+      spotWarning.style.display = '';
+    } else {
+      spotWarning.style.display = 'none';
+    }
   }
+
+  const tierButtons = spot ? ['ondemand', 'spot'].map((t) =>
+    el('button', {
+      type: 'button',
+      class: `btn btn-ghost btn-sm${t === selectedTier ? ' active' : ''}`,
+      onClick: (e) => {
+        selectedTier = t;
+        [...e.target.parentElement.children].forEach((c) => c.classList.remove('active'));
+        e.target.classList.add('active');
+        updateEstimate();
+      },
+    }, t === 'ondemand' ? '専有（中断なし）' : `中断許容（${spot.discountPct}%引き）`)
+  ) : [];
 
   const presetButtons = DURATION_PRESETS.map((p) =>
     el('button', {
@@ -52,7 +88,7 @@ export function openRentModal(gpu, rateInfo) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = '注文作成中…';
       try {
-        const res = await api.createOrder(gpu.id, selectedMinutes);
+        const res = await api.createOrder(gpu.id, selectedMinutes, selectedTier);
         toast('注文を作成しました', 'success');
         backdrop.remove();
         navigate(`#/orders/${res.orderId}`);
@@ -68,6 +104,11 @@ export function openRentModal(gpu, rateInfo) {
 
   const modal = el('div', { class: 'modal' },
     el('h3', {}, `${gpu.name} を借りる`),
+    spot ? el('div', { class: 'field' },
+      el('label', {}, '課金ティア'),
+      el('div', { class: 'row', style: 'flex-wrap:wrap', 'data-testid': 'tier-picker' }, ...tierButtons),
+    ) : null,
+    spotWarning,
     el('div', { class: 'row', style: 'flex-wrap:wrap;margin-bottom:8px' }, ...presetButtons),
     el('div', { class: 'field' },
       el('label', {}, '利用時間（分・5分単位）'),

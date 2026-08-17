@@ -159,6 +159,10 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
 .chip-perf-unknown { background: var(--color-surface-2); color: var(--color-text-muted); }
 .chip-perf-value { background: var(--color-surface-2); color: var(--color-text); }
 
+/* Spot（中断許容）ティア。割引の魅力と中断リスクを同じ重みで見せるため、成功色ではなく
+   注意色を使う（「安い」だけを緑で強調すると、リスクの開示が装飾に負ける）。 */
+.chip-spot { background: var(--color-warning-bg); color: var(--color-warning); border-color: transparent; font-weight: 600; }
+
 .filter-bar {
   display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;
   background: var(--color-surface); border: 1px solid var(--color-border);
@@ -174,6 +178,8 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
 .badge-pending { background: var(--color-warning-bg); color: var(--color-warning); }
 .badge-matched { background: var(--color-info-bg); color: var(--color-info); }
 .badge-active { background: var(--color-success-bg); color: var(--color-success); }
+/* 中断通知中: 稼働はしているが猶予カウントダウン中 — 成功色ではなく注意色で見せる */
+.badge-preempting { background: var(--color-warning-bg); color: var(--color-warning); }
 .badge-completed { background: var(--color-surface-2); color: var(--color-text-muted); }
 .badge-cancelled { background: var(--color-danger-bg); color: var(--color-danger); }
 .badge-disputed { background: var(--color-danger-bg); color: var(--color-danger); }

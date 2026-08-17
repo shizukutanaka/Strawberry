@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { atomicWriteJSON } = require('./atomicWrite');
+const { withFileLock } = require('./fileLock');
 
 // プロトタイプ汚染対策（深層防御）。全リポジトリの create/update/updateIf がこの
 // チョークポイントを通るため、ここで危険キーを一括除去する。
@@ -49,6 +50,13 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
     throw new Error(`[json-repo] invalid fileName: "${fileName}". Must be a plain .json filename without path separators.`);
   }
   const filePath = path.resolve(__dirname, '../../../data', fileName);
+
+  // 変更系は必ずクロスプロセス・ロックの中で load→変更→write を行う。
+  // 書き込み自体は atomicWrite で原子的だが、read-modify-write の**系列**は保護されて
+  // おらず、複数プロセスが同時に別レコードを更新すると後勝ちで一方が消える
+  // （ARCHITECTURE.md「JSON 層のクロスプロセス lost-update」）。
+  // 読み取り系にロックは掛けない: 書き込みが rename で差し替わるため torn read は起きない。
+  const mutate = (fn) => withFileLock(filePath, fn);
 
   const audit = (action, detail) => {
     if (!onAccess) return;
@@ -98,50 +106,61 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       return row;
     },
     create: (rec) => {
-      const rows = load();
-      const safeRec = stripDangerousKeys(rec);
-      const row = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
-      rows.push(row);
-      atomicWriteJSON(filePath, rows);
+      const row = mutate(() => {
+        const rows = load();
+        const safeRec = stripDangerousKeys(rec);
+        const created = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
+        rows.push(created);
+        atomicWriteJSON(filePath, rows);
+        return created;
+      });
       audit('create', { id: row.id });
       return row;
     },
     update: (id, updates) => {
-      const rows = load();
-      const idx = rows.findIndex((r) => r.id === id);
-      if (idx === -1) {
+      const row = mutate(() => {
+        const rows = load();
+        const idx = rows.findIndex((r) => r.id === id);
+        if (idx === -1) return null;
+        rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+        atomicWriteJSON(filePath, rows);
+        return rows[idx];
+      });
+      if (row === null) {
         audit('update', { id, result: 'not_found' });
         return null;
       }
-      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
-      atomicWriteJSON(filePath, rows);
       audit('update', { id, updates });
-      return rows[idx];
+      return row;
     },
     // Atomic compare-and-swap: loads, checks predicate, and writes in one synchronous
     // section (no await between load and write), preventing TOCTOU race conditions.
     // Returns { ok: true, row } on success or { ok: false, reason, current } on failure.
     updateIf: (id, predicate, updates) => {
-      const rows = load();
-      const idx = rows.findIndex((r) => r.id === id);
-      if (idx === -1) {
-        audit('updateIf', { id, result: 'not_found' });
-        return { ok: false, reason: 'not_found' };
+      const result = mutate(() => {
+        const rows = load();
+        const idx = rows.findIndex((r) => r.id === id);
+        if (idx === -1) return { ok: false, reason: 'not_found' };
+        if (!predicate(rows[idx])) return { ok: false, reason: 'condition_failed', current: rows[idx] };
+        rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+        atomicWriteJSON(filePath, rows);
+        return { ok: true, row: rows[idx] };
+      });
+      if (!result.ok) {
+        audit('updateIf', { id, result: result.reason });
+        return result;
       }
-      if (!predicate(rows[idx])) {
-        audit('updateIf', { id, result: 'condition_failed' });
-        return { ok: false, reason: 'condition_failed', current: rows[idx] };
-      }
-      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
-      atomicWriteJSON(filePath, rows);
       audit('updateIf', { id, updates });
-      return { ok: true, row: rows[idx] };
+      return result;
     },
     delete: (id) => {
-      const rows = load();
-      const remaining = rows.filter((r) => r.id !== id);
-      const deleted = remaining.length < rows.length;
-      atomicWriteJSON(filePath, remaining);
+      const deleted = mutate(() => {
+        const rows = load();
+        const remaining = rows.filter((r) => r.id !== id);
+        const removed = remaining.length < rows.length;
+        atomicWriteJSON(filePath, remaining);
+        return removed;
+      });
       audit('delete', { id, deleted });
       return deleted;
     },

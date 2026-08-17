@@ -124,9 +124,16 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
   `action-executor.executeActions()` は `src/payments/escrow-service.js:35` から呼ばれており、
   本番経路に結線されている。上記の「テストからしか呼ばれない」という記述は古い。
   残る前提は LND/CLN 実アダプタの実装（現状は MockLnAdapter）。
-- **JSON 層のクロスプロセス lost-update**: `createJsonRepository` の書き込みは
-  temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
-  flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で
-  更新消失が起こりうる。マルチプロセス運用前に flock もしくは単一ライタープロセス化が必要。
-  （単一プロセス運用では問題なし。`profit-addresses`/`peerID`/`notification-settings` は
-  プロセス内 `withLock` で直列化済み。）
+- ~~**JSON 層のクロスプロセス lost-update**~~ → **解決済み（2026-08）**:
+  `src/db/json/fileLock.js` を追加し、`createJsonRepository` の変更系
+  （create/update/updateIf/delete）の `load → 変更 → write` 全体をクロスプロセス・ロックで
+  囲んだ。Node に `flock(2)` の組込みバインディングが無いため、POSIX が原子性を保証する
+  `open(O_CREAT|O_EXCL)`（`openSync(path,'wx')`）によるロックファイル方式を用いる。
+  リポジトリ API が同期関数なのでロックも同期で、待機は `Atomics.wait()`（CPU を焼かない）。
+  異常終了で残ったロックは 2 秒で stale とみなして奪い、5 秒で取得できなければ
+  **ロック無しで書かずに throw する**（黙って続行すると防ぎたい lost-update が静かに起きる）。
+  読み取りにロックは掛けない（rename により torn read は元から起きない）。
+  実際に子プロセスを起動する回帰テストあり（`tests/db/fileLock.test.js`,
+  `tests/db/json-repo-concurrency.test.js`）。ロックを外すと 60 書き込み中 41 が消えることを
+  確認済み。残る前提: ネットワーク FS（NFS v2 は O_EXCL の原子性を保証しない）での運用は
+  対象外 — その規模なら本物の DB へ移行すべき。

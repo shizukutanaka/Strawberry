@@ -116,7 +116,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | CORS | 仕様準拠(ワイルドカード時 credentials 無効) | ✅(修正済) |
 | P2P | libp2p で分散。peer scoring/signed records | ❌(libp2p ESM で無効) |
 | テスト | `npm test` 完走、コア green | ✅(40スイート/215テスト green, 2 skip=env依存) |
-| データ整合性 | 注文/決済/残高のトランザクション | ❌(JSON, 並行保護なし) |
+| データ整合性 | 注文/決済/残高のトランザクション | 🟡(JSON。クロスプロセス lost-update は `src/db/json/fileLock.js` で解決済。複数レコードにまたがるトランザクションは未) |
 
 ## 6. 不足部分の実装計画（優先順）
 
@@ -152,6 +152,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）
 - `src/security/ots-client.js` — OpenTimestamps カレンダー・クライアント（複数カレンダーへ冗長提出、レシートは不透明保存、既定無効・fail-soft・SSRF ガード経由, 10テスト）
 - `src/security/anchor-scheduler.js` — 監査ログの定期増分アンカリング（byte offset 再開、簿記エントリでの空回り防止、切詰め検出, 10テスト）
+- `src/db/json/fileLock.js` — JSON データファイルのクロスプロセス排他（open(O_EXCL) 方式、同期待機、stale 奪取、再入対応。子プロセス実起動の回帰テスト付き, 15テスト）
 - `src/gpu/carbon-intensity.js` — 申告所在地に基づく系統カーボン強度・排出量推定（サブリージョン対応、実データ差込口、不明は推測しない, 19テスト）
 - `src/verification/utilization-collector.js` — ゼロ負荷課金の検出（両者申告の突き合わせ、リングバッファ、断定しない判定, 15テスト）
 - `src/marketplace/spot-tier.js` — Spot（中断許容）ティアのポリシー（割引・猶予窓・最低課金を効かせない中断精算・中断率の導出, 18テスト）

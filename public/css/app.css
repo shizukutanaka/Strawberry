@@ -163,6 +163,16 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
    注意色を使う（「安い」だけを緑で強調すると、リスクの開示が装飾に負ける）。 */
 .chip-spot { background: var(--color-warning-bg); color: var(--color-warning); border-color: transparent; font-weight: 600; }
 
+/* カーボン強度チップ。低炭素を成功色で示すが、これは検証済みの環境認証ではなく
+   自己申告の所在地に基づく推定なので、控えめな配色に留める（グリーンウォッシング防止）。 */
+.chip-carbon { font-weight: 600; }
+.chip-carbon-very_low { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
+.chip-carbon-low { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
+.chip-carbon-moderate { background: var(--color-surface-2); color: var(--color-text); }
+.chip-carbon-high { background: var(--color-warning-bg); color: var(--color-warning); border-color: transparent; }
+.chip-carbon-very_high { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
+.chip-carbon-unknown { background: var(--color-surface-2); color: var(--color-text-muted); }
+
 .filter-bar {
   display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;
   background: var(--color-surface); border: 1px solid var(--color-border);

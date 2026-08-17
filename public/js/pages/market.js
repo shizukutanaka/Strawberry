@@ -1,5 +1,5 @@
 // public/js/pages/market.js — GPU browse with filters and cards.
-import { el, skeleton, emptyState, reliabilityBadge, attestationBadge, perfBadge, valueBadge, spotBadge } from '../ui.js';
+import { el, skeleton, emptyState, reliabilityBadge, attestationBadge, perfBadge, valueBadge, spotBadge, carbonBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
@@ -29,6 +29,7 @@ function gpuCard(gpu, rateInfo, onRent) {
       perfBadge(gpu.performanceScore),
       valueBadge(gpu.performanceScore),
       spotBadge(gpu.spot),
+      carbonBadge(gpu.carbon),
     ),
     el('div', { class: 'price' },
       el('div', { class: 'sats' }, price.sats),
@@ -55,6 +56,7 @@ export async function render(container) {
     el('option', { value: 'perf' }, '性能が高い順'),
     el('option', { value: 'rating' }, '評価が高い順'),
     el('option', { value: 'reliability' }, '稼働が安定している順'),
+    el('option', { value: 'carbon' }, 'カーボン強度が低い順'),
     el('option', { value: 'memory' }, 'メモリが大きい順'),
     el('option', { value: 'availability' }, '空き優先'),
   );

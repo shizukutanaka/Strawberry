@@ -86,7 +86,10 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 ### F4. 運用・可観測性
 - Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **OTel トレース**: ✅（`src/telemetry/instrumentation.js` を
   `src/api/server.js:5` で全 require より先に読み込み済。本書は長らく ❌ と記していたが誤り）/
-  **カーボン配置**: ❌
+  **カーボン配置**: 🟡（`src/gpu/carbon-intensity.js`。申告所在地の系統カーボン強度から
+  1時間あたり推定排出量を算出し、`GET /gpus` の `carbon` と `?sort=carbon` で公開。
+  所在地は自己申告・未検証のため confidence を必ず添え、不明な地域は推測せず順位も末尾に回す。
+  マッチング/価格への carbon-aware な重み付けは未）
 - **監査ログの外部アンカリング**: ✅（2026-08）。
   - 訂正: 本書は以前「`audit-log` 結線済。**残るは OTS への root 実提出のみ**」と書いていたが、
     これは実態より楽観的だった。実際には `anchorAuditLogFile()` が `src/` のどこからも
@@ -149,6 +152,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）
 - `src/security/ots-client.js` — OpenTimestamps カレンダー・クライアント（複数カレンダーへ冗長提出、レシートは不透明保存、既定無効・fail-soft・SSRF ガード経由, 10テスト）
 - `src/security/anchor-scheduler.js` — 監査ログの定期増分アンカリング（byte offset 再開、簿記エントリでの空回り防止、切詰め検出, 10テスト）
+- `src/gpu/carbon-intensity.js` — 申告所在地に基づく系統カーボン強度・排出量推定（サブリージョン対応、実データ差込口、不明は推測しない, 19テスト）
 - `src/verification/utilization-collector.js` — ゼロ負荷課金の検出（両者申告の突き合わせ、リングバッファ、断定しない判定, 15テスト）
 - `src/marketplace/spot-tier.js` — Spot（中断許容）ティアのポリシー（割引・猶予窓・最低課金を効かせない中断精算・中断率の導出, 18テスト）
 - `src/gpu/perf-score.js` — 機種横断の正規化性能スコア／価格対性能（DLPerf 風。参照表照合・電力由来の TFLOPS 上限クランプ・未検証型番の上限・算出不能は null、feature-pricer への特徴量変換つき, 27テスト）

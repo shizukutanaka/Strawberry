@@ -160,6 +160,29 @@ export function spotBadge(spot) {
   return el('span', { class: 'chip chip-spot', title }, `中断許容 -${spot.discountPct}%`);
 }
 
+// カーボン強度バッジ。carbon = { gCO2PerKWh, tier, gramsPerHour, confidence, matched }。
+// 正直なUI原則: **所在地は自己申告で未検証**なので、これは環境認証ではなく「申告地の系統
+// 平均に基づく推定」だと必ず断る。グリーンウォッシングがこの機能の失敗モードであり、
+// 検証済みの環境価値であるかのように見せてはならない。不明な地域は推測せず「不明」と出す。
+const CARBON_TIER_LABELS = {
+  very_low: '非常に低炭素', low: '低炭素', moderate: '中程度', high: '高炭素', very_high: '非常に高炭素',
+};
+export function carbonBadge(carbon) {
+  if (!carbon) return null;
+  if (carbon.gCO2PerKWh == null) {
+    return el('span', {
+      class: 'chip chip-carbon chip-carbon-unknown',
+      title: '所在地が未申告、または系統カーボン強度の参照データが無い地域です。推測値は表示しません。',
+    }, '炭素: 不明');
+  }
+  const label = CARBON_TIER_LABELS[carbon.tier] || '';
+  const title = `申告された所在地(${carbon.matched})の系統カーボン強度 約${carbon.gCO2PerKWh} gCO2eq/kWh に基づく推定です。`
+    + `この GPU を1時間動かすと約 ${Math.round(carbon.gramsPerHour)} gCO2eq（PUE ${carbon.pue} を含む）。`
+    + '所在地はプロバイダーの自己申告で未検証、かつ年間平均であって実時間の値ではありません。';
+  return el('span', { class: `chip chip-carbon chip-carbon-${carbon.tier}`, title },
+    `${label} ${Math.round(carbon.gramsPerHour)}g/時`);
+}
+
 export function timeline(order) {
   const current = order.status;
   const list = el('ul', { class: 'timeline' });

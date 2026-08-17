@@ -22,6 +22,8 @@ const providerUptime = require('../../../reputation/provider-uptime');
 const perfScore = require('../../../gpu/perf-score');
 // Spot（中断許容）ティアのポリシーと中断率
 const spotTier = require('../../../marketplace/spot-tier');
+// 申告所在地に基づく系統カーボン強度と排出量推定（研究ドキュメント §15）
+const carbonIntensity = require('../../../gpu/carbon-intensity');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -251,7 +253,7 @@ router.get('/', asyncHandler(async (req, res) => {
     });
   }
   // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)
-  //          |perf(性能スコア高→低)|value(価格対性能 高→低)|availability(空き優先)
+  //          |perf(性能スコア高→低)|value(価格対性能 高→低)|carbon(カーボン強度 低→高)|availability(空き優先)
   // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; その他は常に高→低）
   const sort = req.query.sort || 'price';
   const sortDir = req.query.sortDir === 'desc' ? -1 : 1;
@@ -261,6 +263,11 @@ router.get('/', asyncHandler(async (req, res) => {
   const perfFor = (gpu) => {
     if (!_perfCache.has(gpu.id)) _perfCache.set(gpu.id, perfScore.summarize(gpu));
     return _perfCache.get(gpu.id);
+  };
+  const _carbonCache = new Map();
+  const carbonFor = (gpu) => {
+    if (!_carbonCache.has(gpu.id)) _carbonCache.set(gpu.id, carbonIntensity.summarize(gpu));
+    return _carbonCache.get(gpu.id);
   };
   // 信頼性は providerId 単位でファイル読み取りを伴うため、リクエスト内でメモ化する
   // （ソート比較で同一 provider を何度も引くのと、レスポンス整形での再取得を防ぐ）。
@@ -293,6 +300,17 @@ router.get('/', asyncHandler(async (req, res) => {
   } else if (sort === 'value') {
     // 価格対性能（DLPerf/$ 相当）の高い順。算出不能は末尾へ。常に降順。
     gpus.sort((a, b) => (perfFor(b).perfPerHourSat || 0) - (perfFor(a).perfPerHourSat || 0));
+  } else if (sort === 'carbon') {
+    // 系統カーボン強度の低い順。強度不明（未知の地域／所在地未申告）は末尾へ回す
+    // ——「不明」を 0 扱いして最上位に出すと、申告を省いた出品が最もグリーンに見えてしまう。
+    gpus.sort((a, b) => {
+      const ca = carbonFor(a).gCO2PerKWh;
+      const cb = carbonFor(b).gCO2PerKWh;
+      if (ca == null && cb == null) return 0;
+      if (ca == null) return 1;
+      if (cb == null) return -1;
+      return ca - cb;
+    });
   } else if (sort === 'availability') {
     // 空き GPU を先に表示
     gpus.sort((a, b) => {
@@ -346,6 +364,8 @@ router.get('/', asyncHandler(async (req, res) => {
         },
         // Spot（中断許容）ティアの提供状況と実効価格
         spot: spotSummary(gpu),
+        // 申告所在地に基づく推定カーボン強度（検証済みの環境価値ではない）
+        carbon: carbonFor(gpu),
       };
     }),
     timestamp: new Date().toISOString()
@@ -418,6 +438,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
         const s = spotSummary(gpu);
         return s.enabled ? { ...s, providerPreemptionRate: providerPreemptionRate(providerId) } : s;
       })(),
+      // 推定カーボン強度と 1 時間あたりの推定排出量。所在地は自己申告で未検証のため、
+      // confidence を必ず添えて「検証済みのグリーン認証」と誤読されないようにする。
+      carbon: carbonIntensity.summarize(gpu),
     }
   };
   res.json(response);

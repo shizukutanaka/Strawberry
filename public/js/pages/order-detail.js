@@ -289,17 +289,26 @@ export async function render(container, params) {
   function pollPaymentStatus(body, paymentId, order) {
     const statusLine = el('p', { class: 'muted' }, '状態を確認しています…');
     body.appendChild(statusLine);
-    const timer = setInterval(async () => {
+    let timer = null;
+    const check = async () => {
       try {
         const status = await api.paymentStatus(paymentId);
         if (status.status === 'paid') {
-          clearInterval(timer);
+          if (timer) clearInterval(timer);
           toast('支払いが確認されました', 'success');
           await load();
+          return true;
         }
       } catch (_err) { /* transient poll failure — keep trying */ }
-    }, PAYMENT_POLL_MS);
-    timers.push(timer);
+      return false;
+    };
+    // 最初の 1 回はすぐ確認する。setInterval だけだと、既に承認済みの支払いでも
+    // 5 秒間「確認しています…」を見せることになる（画面を開き直した直後が典型）。
+    check().then((done) => {
+      if (done) return;
+      timer = setInterval(check, PAYMENT_POLL_MS);
+      timers.push(timer);
+    });
   }
 
   function renderPaymentMethodChooser(body, order, rateInfo) {

@@ -115,6 +115,26 @@ function _backgroundRefresh() {
   return _refreshInFlight;
 }
 
+// 全プロバイダが失敗した直後に再挑戦しないための冷却期間（負のキャッシュ）。
+//
+// これが無いと、上流が落ちている間**すべてのリクエストが 4 本の API を順に叩いて
+// 全部タイムアウトするまで待つ**（本番設定で最大 16 秒）。結果として
+//   (a) 障害が「1 リクエストが遅い」ではなく「全リクエストが遅い」に増幅され、
+//   (b) 弱っている上流をリクエスト数のまま叩き続けてレート制限を踏み、復旧を遅らせる。
+// 冷却中は即座にフォールバック（stale 値 or 既定値 or 503）へ落ちる。
+// コールドキャッシュ時の取得を 1 本に集約する（失敗も共有する）。
+let _coldFetchInFlight = null;
+function _sharedFetch() {
+  if (_coldFetchInFlight) return _coldFetchInFlight;
+  _coldFetchInFlight = _fetchFreshRate().finally(() => { _coldFetchInFlight = null; });
+  return _coldFetchInFlight;
+}
+
+const FAILURE_COOLDOWN_MS = process.env.NODE_ENV === 'test' ? 200 : 30 * 1000;
+let _cooldownUntil = 0;
+function _inCooldown(now) { return now < _cooldownUntil; }
+function _startCooldown(now) { _cooldownUntil = now + FAILURE_COOLDOWN_MS; }
+
 /**
  * BTC→JPYレート取得
  * @param {boolean} force - キャッシュ無視して強制取得
@@ -149,13 +169,20 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
   }
 
   // 3. コールドキャッシュ or force=true: 同期でフェッチする。
+  //    ただし直前に全滅していれば（冷却中）、叩かずにそのままフォールバックへ落ちる。
   exchangeRateCacheMissCounter.inc();
-  try {
-    const rate = await _fetchFreshRate();
-    endTimer();
-    return _formatReturn(rate, cache.timestamp, false, withTimestamp);
-  } catch (_err) {
-    // 全API失敗 — 以下のフォールバックへ
+  if (force || !_inCooldown(now)) {
+    try {
+      // 同時多発のコールドリクエストを 1 本に集約する。集約しないと、起動直後に
+      // N 人が同時アクセスしただけで上流へ N×4 本の呼び出しが飛ぶ（thundering herd）。
+      // force=true（管理者の明示的な再取得）だけは集約せず必ず自分で取りに行く。
+      const rate = force ? await _fetchFreshRate() : await _sharedFetch();
+      endTimer();
+      return _formatReturn(rate, cache.timestamp, false, withTimestamp);
+    } catch (_err) {
+      _startCooldown(Date.now());
+      // 全API失敗 — 以下のフォールバックへ
+    }
   }
 
   // stale-while-error: 期限切れでも直近の実レートがあれば、捏造した定数より優先する。
@@ -186,5 +213,10 @@ module.exports = { getBTCtoJPYRate, DEFAULT_RATE };
 // テスト用フック: キャッシュ状態を直接操作/検査してSWR挙動を検証する。
 module.exports._setCacheForTest = (rate, timestamp) => { cache.rate = rate; cache.timestamp = timestamp; };
 module.exports._getCacheForTest = () => ({ ...cache });
-module.exports._resetCacheForTest = () => { cache.rate = null; cache.timestamp = 0; _refreshInFlight = null; };
+module.exports._resetCacheForTest = () => {
+  cache.rate = null; cache.timestamp = 0;
+  _refreshInFlight = null; _coldFetchInFlight = null; _cooldownUntil = 0;
+};
+module.exports.FAILURE_COOLDOWN_MS = FAILURE_COOLDOWN_MS;
+module.exports._isInCooldownForTest = () => _inCooldown(Date.now());
 module.exports.CACHE_MS = CACHE_MS;

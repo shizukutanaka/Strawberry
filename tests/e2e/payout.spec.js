@@ -110,4 +110,60 @@ test.describe('provider payout', () => {
     await page.click('.modal button:has-text("実行")');
     await expect(page.locator('.toast-error')).toContainText('受取アドレス', { timeout: 5000 });
   });
+
+  test('a renter owed a refund can see and claim it (the ledger is not provider-only)', async ({ page, request, baseURL }) => {
+    // 未提供分は借り手の残高として計上される。以前は #/earnings が provider/admin
+    // ロールで閉じていたため、返金を受け取れる借り手がその存在すら見られなかった
+    // （＝誰にも見えない金になる）。
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'refprov', role: 'provider' });
+    const gpu = await apiCreateGpu(request, baseURL, provider.token, {
+      name: `Refund GPU ${uniqueId()}`, pricePerHour: 400000,
+      spotEnabled: true, spotDiscountPct: 50, spotNoticeSeconds: 300,
+    });
+    const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'refrent' });
+
+    const orderRes = await request.post(`${baseURL}/api/v1/orders`, {
+      headers: { Authorization: `Bearer ${renter.token}` },
+      data: { gpuId: gpu.id, durationMinutes: 60, tier: 'spot' },
+    });
+    const { orderId } = await orderRes.json();
+    await request.post(`${baseURL}/api/v1/orders/${orderId}/accept`,
+      { headers: { Authorization: `Bearer ${provider.token}` } });
+    const payRes = await request.post(`${baseURL}/api/v1/payments/order/${orderId}`, {
+      headers: { Authorization: `Bearer ${renter.token}` },
+      data: { paymentMethod: 'bank_transfer' },
+    });
+    const { paymentId } = await payRes.json();
+    const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'refadmin' });
+    const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
+    await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`,
+      { headers: { Authorization: `Bearer ${adminToken}` } });
+    await request.post(`${baseURL}/api/v1/orders/${orderId}/start`,
+      { headers: { Authorization: `Bearer ${renter.token}` } });
+
+    // プロバイダ都合の中断 → 実提供分だけ課金され、残りは借り手への返金になる
+    await request.post(`${baseURL}/api/v1/orders/${orderId}/preempt`,
+      { headers: { Authorization: `Bearer ${provider.token}` } });
+    await request.post(`${baseURL}/api/v1/orders/${orderId}/stop`,
+      { headers: { Authorization: `Bearer ${renter.token}` } });
+    const sweep = await request.post(`${baseURL}/api/v1/payments/admin/earnings/sweep`,
+      { headers: { Authorization: `Bearer ${adminToken}` } }).then((r) => r.json());
+    expect(sweep.credited).toBeGreaterThanOrEqual(1);
+
+    // 借り手としてログインすると、ナビに「残高」が出て開ける
+    await loginUI(page, renter.email, renter.password);
+    await expect(page.locator('#nav a[href="#/earnings"]')).toContainText('残高');
+    await page.goto('/#/earnings');
+    await expect(page.locator('.balance-card')).toContainText('受取可能残高', { timeout: 5000 });
+    await expect(page.locator('.ledger-table')).toContainText('返金受取');
+
+    // 貸し手向けの「注文総額の集計」は借り手には出さない（provider 専用 API のため）
+    await expect(page.locator('.gpu-breakdown')).toHaveCount(0);
+
+    // 返金額は支払い総額の一部であって全額ではない（提供時間分は課金されている）
+    const balanceText = await page.locator('.balance-amount').innerText();
+    const balanceSats = Number(balanceText.replace(/[^0-9]/g, ''));
+    expect(balanceSats).toBeGreaterThan(0);
+    expect(balanceSats).toBeLessThanOrEqual(400000);
+  });
 });

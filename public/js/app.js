@@ -55,8 +55,11 @@ function renderNav() {
     if (user && user.role === 'provider') {
       nav.appendChild(link('#/my-gpus', 'マイGPU'));
       nav.appendChild(link('#/gpus/new', 'GPU登録'));
-      nav.appendChild(link('#/earnings', '収益'));
     }
+    // 台帳は貸し手だけのものではない。未提供分の返金は借り手の残高として
+    // 計上されるため、借り手にも見えて出金申請できないと「誰にも見えない金」になる。
+    nav.appendChild(link('#/earnings',
+      user && (user.role === 'provider' || user.role === 'admin') ? '収益' : '残高'));
     if (user && user.role === 'admin') {
       nav.appendChild(link('#/admin/payments', '決済承認'));
     }
@@ -87,7 +90,8 @@ route('#/my-gpus', { render: myGpusPage.render, auth: true, roles: ['provider', 
 route('#/orders', { render: ordersPage.render, auth: true });
 route('#/orders/:id', { render: orderDetailPage.render, auth: true });
 route('#/admin/payments', { render: adminPaymentsPage.render, auth: true, roles: ['admin'] });
-route('#/earnings', { render: earningsPage.render, auth: true, roles: ['provider', 'admin'] });
+// 借り手も自分の残高（返金分）を見て出金申請する必要があるため role で絞らない
+route('#/earnings', { render: earningsPage.render, auth: true });
 setNotFound(notFoundPage.render);
 
 start('#/market');

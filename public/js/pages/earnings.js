@@ -8,6 +8,7 @@
 // 実装されていなかったので、貸し手は受け取れない金額を収益として見せられていた。
 import { el, skeleton, emptyState, fmtSats, fmtJpy, toast, confirmDialog } from '../ui.js';
 import { api, ApiError } from '../api.js';
+import { getUser } from '../auth.js';
 
 function statCard(label, satsValue, jpyValue, sub) {
   return el('div', { class: 'card' },
@@ -32,19 +33,31 @@ export async function render(container) {
   const resultBox = el('div', { class: 'stack' }, skeleton('card', 3));
   const balanceBox = el('div', { class: 'stack balance-box' }, skeleton('card', 1));
 
+  // 貸し手向けの「注文総額の集計」は provider/admin 専用 API を叩くため、
+  // 借り手には出さない（借り手にとっては台帳＝返金残高だけが意味を持つ）。
+  const user = getUser();
+  const isProvider = !!user && (user.role === 'provider' || user.role === 'admin');
+
   container.appendChild(
     el('div', { class: 'stack' },
-      el('h1', {}, '収益'),
+      el('h1', {}, isProvider ? '収益' : '残高'),
+      !isProvider
+        ? el('p', { class: 'muted' },
+            '未提供分の返金など、あなたが受け取れる金額がここに計上されます。'
+            + '出金するには、プロフィールに受取アドレスを登録してください。')
+        : null,
       balanceBox,
-      el('h2', { style: 'margin-top:8px' }, '注文総額の集計'),
-      el('p', { class: 'muted', style: 'font-size:0.85rem' },
-        '以下は注文の値段の合計です。運営手数料・未払い・未提供分の返金は差し引かれていません。実際に受け取れる額は上の「受取可能残高」を見てください。'),
-      el('div', { class: 'filter-bar' },
-        el('div', { class: 'field' }, el('label', {}, '開始日'), fromInput),
-        el('div', { class: 'field' }, el('label', {}, '終了日'), toInput),
-        applyBtn,
-      ),
-      resultBox,
+      ...(isProvider ? [
+        el('h2', { style: 'margin-top:8px' }, '注文総額の集計'),
+        el('p', { class: 'muted', style: 'font-size:0.85rem' },
+          '以下は注文の値段の合計です。運営手数料・未払い・未提供分の返金は差し引かれていません。実際に受け取れる額は上の「受取可能残高」を見てください。'),
+        el('div', { class: 'filter-bar' },
+          el('div', { class: 'field' }, el('label', {}, '開始日'), fromInput),
+          el('div', { class: 'field' }, el('label', {}, '終了日'), toInput),
+          applyBtn,
+        ),
+        resultBox,
+      ] : []),
     )
   );
 
@@ -158,5 +171,5 @@ export async function render(container) {
   }
 
   applyBtn.addEventListener('click', load);
-  await Promise.all([loadBalance(), load()]);
+  await Promise.all([loadBalance(), ...(isProvider ? [load()] : [])]);
 }

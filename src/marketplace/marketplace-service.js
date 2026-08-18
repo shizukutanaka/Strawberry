@@ -5,7 +5,6 @@
 // ラッパとして実装すればよい（ルート直書きを避け、テスト可能性を確保）。
 // 各サブサービスは DI（テストはインメモリ repo を注入）。
 const featurePricer = require('../pricing/feature-pricer');
-const { runAuction } = require('./auction-engine');
 const { toPricingFeatures } = require('../gpu/perf-score');
 
 function createMarketplaceService({
@@ -35,24 +34,11 @@ function createMarketplaceService({
     return reputationService.rank(providerIds, opts);
   }
 
-  /**
-   * 逆オークションでプロバイダを選定する（Akash/Golem 型マッチング）。
-   * 各 bid のレピュテーションは reputationService から自動補完する（bid に
-   * reputationScore があればそれを優先）。価格・レピュテーション・SLA・
-   * アテステーションを統合した効用スコアで勝者を選ぶ。
-   * @param {Array<object>} bids { providerId, pricePerHour, slaUptimePct?, attestationScore?, attestationPassed? }
-   * @param {object} auctionOpts auction-engine の opts（reservePrice/minReputation/weights 等）
-   * @returns {{winner, ranked, rejected}}
-   */
-  function selectProvider(bids, auctionOpts = {}) {
-    if (!Array.isArray(bids)) throw new Error('bids must be an array');
-    const enriched = bids.map((b) => {
-      if (typeof b.reputationScore === 'number') return b;
-      const rep = b.providerId ? reputationService.getScore(b.providerId) : { score: 0 };
-      return { ...b, reputationScore: rep.score };
-    });
-    return runAuction(enriched, auctionOpts);
-  }
+  // selectProvider（逆オークション）は削除した。唯一の呼び出し口だった
+  // POST /marketplace/auction が入札内容を呼び出し側から受け取っており、
+  // この製品には入札を保存する場所も貸し手が要件を見る画面も無いため、
+  // 「実装済み」に見えて何も意味しない機能だった。効用スコアの計算だけは
+  // GET /gpus?sort=recommended が実データに対して使っている。
 
   /**
    * 注文に対し価格を確定し、hold-invoice エスクローを開く（PENDING）。
@@ -115,7 +101,7 @@ function createMarketplaceService({
     return escrowService.get(escrowId);
   }
 
-  return { quoteGpu, rankCandidates, selectProvider, openOrderEscrow, recordPaid, verifyAndSettle, settleByUsage, resolveDispute, getEscrow };
+  return { quoteGpu, rankCandidates, openOrderEscrow, recordPaid, verifyAndSettle, settleByUsage, resolveDispute, getEscrow };
 }
 
 module.exports = { createMarketplaceService };

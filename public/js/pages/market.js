@@ -52,6 +52,7 @@ export async function render(container) {
   );
   const sortSelect = el('select', { onChange: (e) => { state.sort = e.target.value; load(); } },
     el('option', { value: '' }, '価格が安い順'),
+    el('option', { value: 'recommended' }, 'おすすめ順（価格×評価×稼働×検証）'),
     el('option', { value: 'value' }, 'コスパが良い順（価格対性能）'),
     el('option', { value: 'perf' }, '性能が高い順'),
     el('option', { value: 'rating' }, '評価が高い順'),

@@ -54,23 +54,18 @@ router.post('/rank', (req, res) => {
   }
 });
 
-// 逆オークションでプロバイダを選定（Akash/Golem 型マッチング）
-// bid に reputationScore が無ければ reputationService から自動補完される
-// opts は /rank と同様に呼び出し元から受け付けない。
-router.post('/auction', (req, res) => {
-  const { bids } = req.body || {};
-  if (!Array.isArray(bids)) {
-    return res.status(400).json({ error: 'bids array is required' });
-  }
-  if (bids.length > MAX_MARKETPLACE_BATCH) {
-    return res.status(400).json({ error: `bids may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
-  }
-  try {
-    return res.json(marketplace.selectProvider(bids, {}));
-  } catch (e) {
-    return res.status(400).json({ error: clientError(e) });
-  }
-});
+// 逆オークションのエンドポイント（POST /marketplace/auction）は削除した。
+//
+// この製品には**入札という概念が存在しない**: GPU は固定価格で出品され、入札を
+// 保存する場所も、貸し手が借り手の要件を見る画面も、入札の有効期限も無い。
+// 旧エンドポイントは「入札の配列」をリクエストボディから受け取っており、
+// 価格を含めて呼び出し側が捏造できた（＝返る「落札者」は何も意味しない）。
+// 実在しない機能を API と仕様書が「実装済み」と称している状態だった。
+//
+// 有用だったのは中身の効用スコア（価格×レピュテーション×稼働×アテステーション）
+// の方なので、それは残して GET /gpus?sort=recommended に移した。そちらは
+// サーバが持っている実データで実在の出品を並べる。auction-engine.js のテストは
+// 純関数として引き続き有効。
 
 // --- エスクロー・ライフサイクル（admin 限定）---
 

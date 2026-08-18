@@ -102,6 +102,19 @@ try {
   logger.warn(`anchor-scheduler: failed to start: ${e.message}`);
 }
 
+// 為替レートを起動直後に一度だけ取りに行く（fire-and-forget）。
+// これが無いと**最初の利用者**が外部 API の往復（実測 1.3〜1.6 秒、上流が全滅して
+// いれば冷却に入るまでその分）を丸ごと待つ。価格表示は全ページに出るので、
+// 再起動直後の初回アクセスが体感で最も遅くなる。起動時に温めれば誰も待たない。
+// 失敗しても何もしない（冷却と stale-while-revalidate が後を引き受ける）。
+try {
+  require('../utils/exchange-rate').getBTCtoJPYRate()
+    .then(() => logger.info('exchange-rate: cache warmed at startup'))
+    .catch(() => { /* 起動時の温めは best-effort。失敗してもアプリは動く */ });
+} catch (e) {
+  logger.warn(`exchange-rate warmup failed to start: ${e.message}`);
+}
+
 // 完了注文の収益計上（プロバイダの取り分・借り手への返金分を台帳へ書く）。
 // これが動かないと、借り手が払った sats が運営ノードに滞留したままプロバイダに
 // 渡らない — src/payments/payout-ledger.js のヘッダ参照。

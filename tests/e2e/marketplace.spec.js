@@ -69,6 +69,32 @@ test.describe('marketplace', () => {
     await expect(specCard).toContainText('未申告');
   });
 
+  test('the market offers a combined recommended sort, not just single-axis ones', async ({ page }) => {
+    // 単軸ソートの寄せ集めでは「安いが不安定」と「高いが堅い」を比べられない。
+    // この並びの計算はもともと逆オークション用に書かれたが、この製品には入札が
+    // 存在しないためエンドポイントごと削除し、実在の出品を並べる用途に移した。
+    await registerAndLoginUI(page, { prefix: 'recmkt', role: 'provider' });
+    const gpuName = `Recommend GPU ${uniqueId()}`;
+    await page.goto('/#/gpus/new');
+    await page.waitForSelector('#gpu-name');
+    await page.selectOption('#gpu-vendor', 'NVIDIA');
+    await page.fill('#gpu-name', gpuName);
+    await page.fill('#gpu-model', 'RTX 4090');
+    await page.fill('#gpu-memory', '24');
+    await page.fill('#gpu-price', '1900');
+    await page.click('button[type="submit"]');
+    await page.waitForFunction(() => location.hash === '#/my-gpus', { timeout: 8000 });
+
+    await page.goto('/#/market');
+    await page.fill('input[type="search"]', gpuName);
+    await page.click('button:has-text("絞り込み")');
+    await expect(page.locator('.gpu-card')).toHaveCount(1, { timeout: 5000 });
+
+    await page.selectOption('.filter-bar select >> nth=1', 'recommended');
+    await expect(page.locator('.gpu-card')).toHaveCount(1, { timeout: 5000 });
+    await expect(page.locator('.gpu-card')).toContainText(gpuName);
+  });
+
   test('provider cannot rent their own GPU', async ({ page }) => {
     await registerAndLoginUI(page, { prefix: 'selfprov', role: 'provider' });
     const gpuName = `Self GPU ${uniqueId()}`;

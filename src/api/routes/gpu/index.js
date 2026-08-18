@@ -26,6 +26,8 @@ const spotTier = require('../../../marketplace/spot-tier');
 const carbonIntensity = require('../../../gpu/carbon-intensity');
 // 出品時に申告されなかった項目を機種から導出する（必須項目を 5 つに絞るため）
 const { applyListingDefaults } = require('../../../gpu/listing-defaults');
+// 価格×レピュテーション×稼働×アテステーションの統合スコア（sort=recommended）
+const { runAuction } = require('../../../marketplace/auction-engine');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -256,9 +258,14 @@ router.get('/', asyncHandler(async (req, res) => {
   }
   // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)
   //          |perf(性能スコア高→低)|value(価格対性能 高→低)|carbon(カーボン強度 低→高)|availability(空き優先)
+  //          |recommended(価格×レピュテーション×稼働×アテステーションの総合)
   // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; その他は常に高→低）
   const sort = req.query.sort || 'price';
   const sortDir = req.query.sortDir === 'desc' ? -1 : 1;
+  // sort=recommended のときだけ埋まる（出品 id → 総合スコア）。
+  // 順位だけ返して根拠を返さないと「なぜこの順番なのか」が利用者に分からないため、
+  // レスポンスにスコアも載せる。
+  let _recommendScores = null;
   // 性能スコアは純関数だが型番の正規表現照合を伴うため、ソートとレスポンス整形で
   // 二重計算しないよう GPU ごとにメモ化する。
   const _perfCache = new Map();
@@ -313,6 +320,55 @@ router.get('/', asyncHandler(async (req, res) => {
       if (cb == null) return -1;
       return ca - cb;
     });
+  } else if (sort === 'recommended') {
+    // 価格・レピュテーション・稼働実績・アテステーションを 1 本の効用スコアに
+    // まとめた総合順位（src/marketplace/auction-engine.js の scoreBid）。
+    //
+    // このスコア計算はもともと「逆オークション」用に書かれたが、この製品には
+    // 入札という概念そのものが存在しない（GPU は固定価格で出品され、入札を
+    // 保存する場所も、貸し手が要件を見る画面も無い）。唯一の呼び出し口だった
+    // POST /marketplace/auction は**入札内容を呼び出し側が捏造できた**ため削除し、
+    // 計算だけを「サーバが持っている実データで実在の出品を並べる」用途に移した。
+    // 借り手が本当に欲しいのは「安いが不安定」と「高いが堅い」を一目で比べる
+    // 手段であり、単軸ソートの寄せ集めではそれができない。
+    // レピュテーション（stake 加重の実績スコア）と稼働信頼性（ハートビート由来の
+    // 稼働率）は**別のサービスで別のものを測っている**。前者を reputation 軸、
+    // 後者を SLA 軸に入れる。片方で両方を代用すると、実績のあるプロバイダと
+    // 単に無事故なだけの新規を区別できない。
+    const { createReputationService } = require('../../../reputation/reputation-service');
+    const reputationSvc = createReputationService();
+    const _repCache = new Map();
+    const repFor = (pid) => {
+      if (!pid) return 0;
+      if (!_repCache.has(pid)) {
+        const r = reputationSvc.getScore(pid);
+        _repCache.set(pid, (r && typeof r.score === 'number') ? r.score : 0);
+      }
+      return _repCache.get(pid);
+    };
+    const bids = gpus.map((g) => {
+      const rel = relFor(g.providerId);
+      return {
+        providerId: g.id, // ここでの識別子は出品単位（同一プロバイダが複数出品しうる）
+        pricePerHour: g.pricePerHour,
+        reputationScore: repFor(g.providerId),
+        // 稼働率は未計測なら null。scoreBid の既定 100 に落ちるが、それは
+        // 「まだ違反が観測されていない」の意味で妥当（違反があれば score が出る）。
+        slaUptimePct: typeof rel.score === 'number' ? rel.score * 100 : undefined,
+        attestationScore: (g.attestation && g.attestation.score) || 0,
+        attestationPassed: !!(g.attestation && g.attestation.passed),
+      };
+    });
+    const { ranked } = runAuction(bids, {});
+    const rank = new Map(ranked.map((r, i) => [r.providerId, i]));
+    const scoreOf = new Map(ranked.map((r) => [r.providerId, r.score]));
+    // ranked に載らない出品（価格が非正など不適格）は末尾へ。
+    gpus.sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id) : Number.MAX_SAFE_INTEGER;
+      const rb = rank.has(b.id) ? rank.get(b.id) : Number.MAX_SAFE_INTEGER;
+      return ra - rb;
+    });
+    _recommendScores = scoreOf;
   } else if (sort === 'availability') {
     // 空き GPU を先に表示
     gpus.sort((a, b) => {
@@ -368,6 +424,8 @@ router.get('/', asyncHandler(async (req, res) => {
         spot: spotSummary(gpu),
         // 申告所在地に基づく推定カーボン強度（検証済みの環境価値ではない）
         carbon: carbonFor(gpu),
+        // sort=recommended のときだけ付く総合スコア（0..1）。順位の根拠を示す。
+        ...(_recommendScores ? { recommendScore: _recommendScores.get(gpu.id) ?? null } : {}),
       };
     }),
     timestamp: new Date().toISOString()

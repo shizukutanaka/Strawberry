@@ -100,24 +100,8 @@ describe('marketplace-service', () => {
     expect(settlement.providerPayoutSats + settlement.operatorFeeSats).toBe(settlement.chargedSats);
   });
 
-  it('selectProvider runs a reverse auction, auto-filling reputation from the service', () => {
-    const { mkt, reputationService } = build();
-    // strong provider: many successes + stake; weak: a failure
-    for (let i = 0; i < 100; i++) reputationService.recordJobResult('strong', true);
-    reputationService.addStake('strong', 5_000_000);
-    reputationService.recordJobResult('weak', false);
-
-    // weak bids slightly cheaper but should lose under balanced weights
-    const { winner, ranked, rejected } = mkt.selectProvider([
-      { providerId: 'strong', pricePerHour: 160, slaUptimePct: 100 },
-      { providerId: 'weak', pricePerHour: 150, slaUptimePct: 95 },
-    ]);
-    expect(winner.providerId).toBe('strong');
-    expect(ranked).toHaveLength(2);
-    expect(rejected).toHaveLength(0);
-    // reputation was auto-filled (not provided in the bids)
-    expect(ranked.find((r) => r.providerId === 'strong').components.reputation).toBeGreaterThan(
-      ranked.find((r) => r.providerId === 'weak').components.reputation,
-    );
-  });
+  // selectProvider の検査は削除した（機能ごと削除したため）。ただしそこで見ていた
+  // 「レピュテーションの高いプロバイダは、少し安いだけの低評価プロバイダに勝つ」という
+  // 性質は借り手にとって重要なので、実在の出品を並べる GET /gpus?sort=recommended の
+  // テストへ移してある（tests/api/gpu-recommended-sort.test.js）。
 });

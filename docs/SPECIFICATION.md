@@ -47,7 +47,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | POST `/api/v1/orders/:id/access` | GPU接続情報の投入 | JWT+provider/admin | ✅ |
 | GET `/api/v1/orders/:id/access` | GPU接続情報の受け取り | JWT+**借り手のみ**・支払い済み・稼働中 | ✅ |
 | POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
-| POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
+| GET `/api/v1/gpus?sort=recommended` | 出品の総合順位（価格×レピュ×稼働×アテステーション） | JWT | ✅ |
 | `/api/v1/marketplace/escrow/*` (open/pay/verify/resolve) | エスクロー駆動 | JWT+admin | 🟡(LN実機未) |
 | GET `/api/v1/audit-anchors/latest`,`/{root}/receipt` | 監査ログの外部コミットメント（Merkle root / OTS レシート） | **公開** | ✅ |
 | `/api/v1/admin/audit-anchors`,`/run`,`/proof` | アンカー一覧・強制実行・包含証明 | JWT+admin | ✅ |
@@ -171,7 +171,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/payments/escrow-service.js` ＋ `src/db/json/EscrowRepository.js` — エスクロー永続化/オーケストレーション（9テスト）
 - `src/payments/settlement-calculator.js` — 従量・SLA 連動の精算分割（payout/refund/fee、最低課金/SLA ペナルティ、整数 sats 保存則, 12テスト）
 - `src/marketplace/marketplace-service.js` — 全サービスを束ねるドメイン合成層（6テスト, 正常系/不正系/オークション統合）
-- `src/marketplace/auction-engine.js` — 逆オークション・マッチング（価格×レピュ×SLA×アテステーション、price-ratio 正規化、reserve/minReputation/requireAttestation フィルタ, 13テスト）
+- `src/marketplace/auction-engine.js` — 出品の総合順位付け（価格×レピュ×SLA×アテステーション、price-ratio 正規化, 13テスト）。**逆オークションの API は削除済み**: この製品に入札を保存する場所も貸し手が要件を見る画面も無く、旧 `POST /marketplace/auction` は入札内容を呼び出し側が捏造できた。計算は `GET /gpus?sort=recommended` が実データに対して使う（6テスト＋E2E 1）
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
 - `src/payments/payout-ledger.js` ＋ `src/db/json/LedgerRepository.js` — 収益台帳・出金（orderId 冪等の計上、申請中の残高予約、txid 必須の送金記録、**支払い済みキャンセル注文の返金**（係争返金裁定・マッチ期限切れ・借り手キャンセル・プロバイダ拒否は全額返金、active_timeout のみ按分）, 43テスト＋API 22テスト）
 - `src/payments/earnings-sweeper.js` — 完了注文の収益自動計上（完了経路ごとのフックではなく状態観測。冪等なので過去分も拾う）

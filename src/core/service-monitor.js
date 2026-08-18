@@ -15,42 +15,29 @@ function setServices(refs) {
   services = refs;
 }
 
-// 外部通知hook（Slack/Sentry/LINE/他サービス拡張）
+// 外部通知hook（Slack/Sentry/LINE）。実装は src/utils/external-alerts.js。
+//
+// 以前はここから scripts/*.js を直接 require していたが、Slack は
+// export 名が食い違っていて（sendSlackMessage は export されていなかった）
+// **一度も送信できていなかった**。しかも例外は catch されて warn ログに消え、
+// 「通知が来ない」ことに誰も気づけない状態だった。
+// 通知モジュール側が結果を返すようにし、ここでは**送れたかどうか**をログに出す。
+// 設定済みなのに送れなかった場合は error にする — 死んでいる通知経路は、
+// 通知経路が無いより悪い（来ないことを異常だと気づけない）。
 async function notifyExternalAlert(event, data) {
-  // 各チャネルの通知モジュール require は、対応する env が設定されている場合のみ行う。
-  // 旧実装は env チェックより前に require していたため、未設定でも
-  // scripts/sentry-notify.js → @sentry/node（未導入）の解決に失敗し、アラートごとに
-  // 「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋もれる衛生問題）。
-  // env ゲートにより、未設定チャネルでは require 自体を行わずノイズを出さない。
-  // Slack通知（SLACK_WEBHOOK_URL 設定時のみ）
-  if (process.env.SLACK_WEBHOOK_URL) {
-    try {
-      const { sendSlackMessage } = require('../../scripts/slack-notify.js');
-      await sendSlackMessage(`[${event}] ${JSON.stringify(data)}`);
-      logger.info(`[ExternalAlert] Slack通知送信: ${event}`);
-    } catch (e) {
-      logger.warn(`[ExternalAlert] Slack通知モジュール呼び出し失敗:`, e);
+  try {
+    const results = await require('../utils/external-alerts').notifyAll(event, data);
+    for (const r of results) {
+      if (r.sent) {
+        logger.info(`[ExternalAlert] ${r.channel} 通知送信: ${event}`);
+      } else {
+        logger.error(
+          `[ExternalAlert] ${r.channel} は設定されているのに送信できませんでした (${r.reason}): ${event}`
+        );
+      }
     }
-  }
-  // Sentry通知（SENTRY_DSN 設定時のみ）
-  if (process.env.SENTRY_DSN) {
-    try {
-      const { sendSentryNotification } = require('../../scripts/sentry-notify.js');
-      await sendSentryNotification(event, data);
-      logger.info(`[ExternalAlert] Sentry通知送信: ${event}`);
-    } catch (e) {
-      logger.warn(`[ExternalAlert] Sentry通知モジュール呼び出し失敗:`, e);
-    }
-  }
-  // LINE通知（LINE_TOKEN 設定時のみ）
-  if (process.env.LINE_TOKEN) {
-    try {
-      const { sendLineNotification } = require('../../scripts/line-notify.js');
-      await sendLineNotification(event, data);
-      logger.info(`[ExternalAlert] LINE通知送信: ${event}`);
-    } catch (e) {
-      logger.warn(`[ExternalAlert] LINE通知モジュール呼び出し失敗:`, e);
-    }
+  } catch (e) {
+    logger.warn('[ExternalAlert] 通知処理で例外:', e);
   }
   // 外部チャネルの設定有無に関わらず、アラート自体はローカルログに残す（監査・障害追跡）。
   logger.warn(`[ExternalAlert] ${event}:`, data);

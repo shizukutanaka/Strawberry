@@ -3,7 +3,7 @@
 P2P GPU マーケットプレイス。GPU を持っている人が空き時間を貸し出し、計算資源が要る人が
 借りて、Bitcoin / 銀行振込で精算する。
 
-> **状態に関する注記（2026-06）**: 本READMEの一部と `improvement_checklist2.md` には、実装より
+> **状態に関する注記（2026-06）**: 本READMEの一部には、実装より
 > 先行した（未実装を含む）記述があります。リポジトリの**実態・既知の制約**は
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md) を一次情報として参照してください。
 
@@ -365,7 +365,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 - Lightning/P2P/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
 - 今後は外部通知hook本実装、現金換算ロジックの外部API化、E2E監視・テスト自動化を推奨
-- 詳細は`improvement_checklist2.md`参照
+- 詳細は `docs/SPECIFICATION.md` 参照
 
 ---
 
@@ -716,7 +716,7 @@ flowchart LR
 
 ### Q. 障害通知が来ない/通知先を増やしたい
 - .envのSLACK_WEBHOOK_URL, SENTRY_DSN, LINE_TOKENを再確認。複数同時通知も可
-- scripts/line-notify.jsなどを参考に独自hookも容易に追加可能
+- `src/utils/external-alerts.js` を参考に独自hookも容易に追加可能
 
 ### Q. 監査証跡はどこに記録される？
 - src/utils/audit-log.jsで全障害・復旧イベントがファイル/DB等に記録
@@ -735,7 +735,7 @@ flowchart LR
 - 監査証跡・障害通知・Prometheus監視も全て自動化済み
 
 ### Q. 障害通知先をさらに増やしたい場合は？
-- scripts/line-notify.jsの実装例を参考に、任意の外部サービスhookを容易に追加可能
+- `src/utils/external-alerts.js` の実装例を参考に、任意の外部サービスhookを容易に追加可能
 - notifyExternalAlert内で呼び出しを追加するだけで多重通知可能
 
 

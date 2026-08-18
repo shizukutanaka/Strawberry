@@ -1,6 +1,6 @@
 // GPU障害自動検知・復旧・Slack通知スクリプト
 const { exec } = require('child_process');
-const { sendSlackMessage } = require('./slack-feedback-bot');
+const { sendSlackMessage } = require('../src/utils/external-alerts');
 
 // Windows: nvidia-smi, Linux: nvidia-smi, Mac: 未対応
 const CHECK_CMD = 'nvidia-smi --query-gpu=temperature.gpu,pstate,utilization.gpu,fan.speed --format=csv,noheader,nounits';

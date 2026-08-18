@@ -3,7 +3,7 @@
 > P2P GPU マーケットプレイス — Node.js / Express バックエンド
 > 最終更新: 2026-06-21 / 対象ブランチ: `claude/deepresearch-ultrathink-improvement-NEMJb`
 
-本書は Strawberry の **実態に基づく** 仕様書である。README / `improvement_checklist2.md` の
+本書は Strawberry の **実態に基づく** 仕様書である。README の
 「実装済み」表記には実態と乖離があるため、本書はソースコードを一次情報として記述する。
 末尾に **長所・短所・改善点** を洗い出し、本サイクルで実装した改善を明記する。
 
@@ -163,7 +163,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 
 1. **単一プロセス前提**: `withLock` / `updateIf` の原子性はプロセスローカル。水平スケール時に
    競合防止が崩れる。JSON ファイル層も高頻度書き込みで I/O ボトルネック・破損リスクがある。
-2. **ドキュメントと実態の乖離**: README / `improvement_checklist2.md` の `[x]` が実装を保証
+2. **ドキュメントと実態の乖離**: README の記述が実装を保証
    しない（自動生成テンプレ断片の残骸もあった）。新規参加者が誤認しやすい。
 3. **インフラ層が未完**: P2P / 仮想 GPU / Lightning は本実装が薄く、`*-fixed.js` の孤立
    モジュールや未使用依存（knex/sqlite3/pg/ioredis）が残る。
@@ -191,7 +191,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | I-10 | 通知設定 `enabled` を任意キー許可（`pattern(/.*/)`）から消費側が実際に参照する6チャネルの明示スキーマに厳格化。Joi 既定の unknown:false で未知キー（`constructor` 等）を 400 拒否。`notification-settings.json` はリポジトリ層の `stripDangerousKeys` を経由しない別保存経路のため、入力スキーマ側で塞ぐ | probe54 / Qiita・Zenn 任意キー調査 |
 | I-11 | リクエスト相関 ID を強化（D-2 の一部）。`X-Request-Id` を (1) 上流の安全な値があれば再利用、(2) 不正・過長値はフォールバックで UUID 採番、(3) レスポンスヘッダに反映、(4) エラーログにも `requestId` を付与してアクセスログと相関 | probe55 / Qiita・Zenn request-id 調査 |
 | I-12 | `AsyncLocalStorage` でリクエストコンテキストを伝播し、リクエスト処理中の**全** `logger.*` 呼び出しへ `requestId` を自動付与（`stampRequestId` フォーマット）。明示指定は尊重、コンテキスト外（起動時・バックグラウンド）は no-op。D-2 をほぼ完了 | probe56 / Qiita・Zenn request-id 伝播調査 |
-| I-13 | `notifyExternalAlert` の通知モジュール `require` を env ゲートの**内側**へ移動。旧実装は env チェック前に `scripts/sentry-notify.js`→`@sentry/node`（未導入）を解決しようとし、アラートごとに「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋没）。未設定チャネルは完全に無音化 | probe57 / 運用ログ衛生 |
+| I-13 | 外部通知を `src/utils/external-alerts.js` に一本化。旧実装は `scripts/slack-notify.js` から `sendSlackMessage` を destructure していたが同モジュールは `notifyReport` しか export しておらず、**Slack 通知は一度も送信できていなかった**（例外は catch されて warn に消えていた）。未設定チャネルは無音、設定済みで送れない場合は error として可視化 | probe57 / external-alerts (9テスト) |
 | I-14 | W3C Trace Context（`traceparent`）取り込み。上流の有効な trace-id を厳格検証して ALS コンテキストに伝播し、全ログへ自動付与（`stampRequestId`）。version ff・全ゼロ・書式不正は拒否。D-2 を完了 | probe58 / Qiita・Zenn W3C Trace Context 調査 |
 | I-15 | プロセスレベルの最終防衛ライン（`registerProcessGuards`）。`unhandledRejection` は文脈付きでログし API を落とさず継続、`uncaughtException` はログ後にサーバを閉じて exit(1)（状態不定での継続を避け再起動はオーケストレータに委ねる）。従来ハンドラは未使用の `core/logger.js` 内にあり実サーバに未登録だった | probe59 / Qiita・Zenn プロセス管理調査 |
 | I-16 | `Permissions-Policy` ヘッダを追加（helmet 7 は未設定）。camera/microphone/geolocation/payment/usb 等の未使用ブラウザ機能を全拒否し、XSS・埋め込み時の悪用攻撃面を削る（最小権限）。I-5 の CSP と並ぶレスポンスヘッダ多層化 | probe60 / セキュリティヘッダ調査 |

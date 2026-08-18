@@ -1,7 +1,7 @@
 # Strawberry アーキテクチャと現状（2026-06）
 
 このドキュメントは、リポジトリの**実態**を簡潔にまとめたもの。README や
-`improvement_checklist2.md` の一部記述は実装より先行（aspirational）しているため、
+README の一部記述は実装より先行（aspirational）しているため、
 本ファイルを一次情報として扱うこと。
 
 ## 実体は何か

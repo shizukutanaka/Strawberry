@@ -3,8 +3,8 @@
 // notify script BEFORE checking its env var, so with no channel configured it still
 // tried to load scripts/sentry-notify.js -> @sentry/node (not installed) and logged a
 // "モジュール呼び出し失敗" warning on EVERY alert — flooding logs and burying real
-// failures. The require is now gated behind the env var, so unconfigured channels are
-// silent.
+// failures. 通知の実装は src/utils/external-alerts.js に移り、未設定チャネルは
+// ネットワークにも触れず静かに not_configured を返す。
 
 const { logger } = require('../../src/utils/logger');
 const monitor = require('../../src/core/service-monitor');
@@ -36,22 +36,20 @@ describe('notifyExternalAlert: no module-load noise when channels are unconfigur
     expect(alertLines.length).toBe(1);
   });
 
-  it('source: each notify require is gated behind its env var', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/core/service-monitor.js'), 'utf-8'
-    );
-    // The env check must precede the require for each channel
-    const sentryEnvIdx = src.indexOf("if (process.env.SENTRY_DSN)");
-    const sentryReqIdx = src.indexOf("require('../../scripts/sentry-notify.js')");
-    expect(sentryEnvIdx).toBeGreaterThan(-1);
-    expect(sentryReqIdx).toBeGreaterThan(sentryEnvIdx);
+  it('performs no work at all when no channel is configured', () => {
+    // 旧テストは service-monitor のソース構造（env チェックが require より前か）を
+    // 検査していた。通知の実装を src/utils/external-alerts.js へ移し、チャネルの
+    // 判定はモジュール内部で行うようになったので、構造ではなく**振る舞い**を見る。
+    const alerts = require('../../src/utils/external-alerts');
+    expect(alerts.configuredChannels()).toEqual([]);
+    return alerts.notifyAll('service_down', { service: 'x' })
+      .then((results) => expect(results).toEqual([]));
+  });
 
-    const slackEnvIdx = src.indexOf("if (process.env.SLACK_WEBHOOK_URL)");
-    const slackReqIdx = src.indexOf("require('../../scripts/slack-notify.js')");
-    expect(slackReqIdx).toBeGreaterThan(slackEnvIdx);
-
-    const lineEnvIdx = src.indexOf("if (process.env.LINE_TOKEN)");
-    const lineReqIdx = src.indexOf("require('../../scripts/line-notify.js')");
-    expect(lineReqIdx).toBeGreaterThan(lineEnvIdx);
+  it('reports not_configured per channel instead of throwing', async () => {
+    const alerts = require('../../src/utils/external-alerts');
+    expect(await alerts.sendSlackMessage('x')).toEqual({ sent: false, reason: 'not_configured' });
+    expect(await alerts.sendLineNotification('e', {})).toEqual({ sent: false, reason: 'not_configured' });
+    expect(await alerts.sendSentryNotification('e', {})).toEqual({ sent: false, reason: 'not_configured' });
   });
 });

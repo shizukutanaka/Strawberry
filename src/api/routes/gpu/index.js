@@ -24,6 +24,8 @@ const perfScore = require('../../../gpu/perf-score');
 const spotTier = require('../../../marketplace/spot-tier');
 // 申告所在地に基づく系統カーボン強度と排出量推定（研究ドキュメント §15）
 const carbonIntensity = require('../../../gpu/carbon-intensity');
+// 出品時に申告されなかった項目を機種から導出する（必須項目を 5 つに絞るため）
+const { applyListingDefaults } = require('../../../gpu/listing-defaults');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -561,13 +563,20 @@ router.post('/',
   asyncHandler(async (req, res) => {
     // 入力値サニタイズ
     // 入力値サニタイズ＋クロスベンダー必須項目
-    const gpuInfo = sanitizeObject(req.validatedBody, [
+    const submitted = sanitizeObject(req.validatedBody, [
       'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
       'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
       'features', 'capabilities', 'location', 'performance', 'minRenterRating',
       'rejectUnratedRenters',
     ]);
-    logger.info(`[GPU登録] ${gpuInfo.vendor} ${gpuInfo.model} (${gpuInfo.apiType}) by ${req.user.id}`);
+    // 出品者が申告しなかった項目のうち、機種から導出できるものを埋める
+    // （apiType/arch/powerWatt）。導出した項目名は derivedFields に残し、
+    // UI が「申告」と「推定」を区別できるようにする。詳細は
+    // src/gpu/listing-defaults.js のヘッダ。
+    const { gpu: gpuInfo, derivedFields } = applyListingDefaults(submitted);
+    if (derivedFields.length) gpuInfo.derivedFields = derivedFields;
+    logger.info(`[GPU登録] ${gpuInfo.vendor} ${gpuInfo.model} (${gpuInfo.apiType || 'API不明'}) by ${req.user.id}`
+      + (derivedFields.length ? ` [導出: ${derivedFields.join(',')}]` : ''));
 
     // 提供者ごとのGPU登録数上限チェック（スパム・在庫偽装防止）
     const MAX_GPUS = (() => {
@@ -778,11 +787,14 @@ router.post('/bulk',
         results.push({ success: false, id: entry.id || null, error: valErr.details.map(d => d.message).join('; ') });
         continue;
       }
-      const gpuInfo = sanitizeObject(value, [
+      const batchSubmitted = sanitizeObject(value, [
         'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
         'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
         'features', 'capabilities', 'location', 'performance', 'minRenterRating',
       ]);
+      // 単体登録と同じ導出を通す（一括登録だけ必須項目が多い、という食い違いを作らない）
+      const { gpu: gpuInfo, derivedFields: batchDerived } = applyListingDefaults(batchSubmitted);
+      if (batchDerived.length) gpuInfo.derivedFields = batchDerived;
       gpuInfo.providerId = req.user.id;
       const dedupKey = `${gpuInfo.name}|${gpuInfo.model}|${gpuInfo.vendor}|${gpuInfo.memoryGB}`;
       if (batchKeys.has(dedupKey)) {

@@ -7,21 +7,15 @@ test.describe('marketplace', () => {
     await registerAndLoginUI(page, { prefix: 'mktprov', role: 'provider' });
     const gpuName = `Market GPU ${uniqueId()}`;
 
+    // 必須 5 項目だけで登録する。以前は 11 項目すべてが必須だった。
+    // 位置指定（inputs[n]）ではなく id で埋める — 位置は項目が増減するたびに壊れる。
     await page.goto('/#/gpus/new');
-    await page.waitForSelector('form input');
-    const selects = await page.$$('select');
-    await selects[0].selectOption('NVIDIA');
-    await selects[1].selectOption('CUDA');
-    await selects[2].selectOption('x86_64');
-    const inputs = await page.$$('form input');
-    await inputs[0].fill(gpuName);
-    await inputs[1].fill('RTX 4090');
-    await inputs[2].fill('550.90.07');
-    await inputs[3].fill('Ubuntu 22.04');
-    await inputs[4].fill('24');
-    await inputs[5].fill('2500');
-    await inputs[6].fill('450');
-    await inputs[7].fill('1500');
+    await page.waitForSelector('#gpu-name');
+    await page.selectOption('#gpu-vendor', 'NVIDIA');
+    await page.fill('#gpu-name', gpuName);
+    await page.fill('#gpu-model', 'RTX 4090');
+    await page.fill('#gpu-memory', '24');
+    await page.fill('#gpu-price', '1500');
     await page.click('button[type="submit"]');
     await page.waitForFunction(() => location.hash === '#/my-gpus', { timeout: 8000 });
 
@@ -45,24 +39,46 @@ test.describe('marketplace', () => {
     await expect(page.locator('.gpu-card')).toContainText('1,500 sats');
   });
 
+  test('a minimal listing shows derived specs labelled as estimates, not as declarations', async ({ page }) => {
+    // 推定値を申告値として見せると「未確認のものを確認済みに見せる」ことになる。
+    // 申告していない項目は「未申告」、機種から補った項目は「推定」と出ること。
+    await registerAndLoginUI(page, { prefix: 'derivprov', role: 'provider' });
+    const gpuName = `Derived GPU ${uniqueId()}`;
+    await page.goto('/#/gpus/new');
+    await page.waitForSelector('#gpu-name');
+    await page.selectOption('#gpu-vendor', 'NVIDIA');
+    await page.fill('#gpu-name', gpuName);
+    await page.fill('#gpu-model', 'RTX 4090');
+    await page.fill('#gpu-memory', '24');
+    await page.fill('#gpu-price', '1700');
+    await page.click('button[type="submit"]');
+    await page.waitForFunction(() => location.hash === '#/my-gpus', { timeout: 8000 });
+
+    await page.goto('/#/market');
+    await page.fill('input[type="search"]', gpuName);
+    await page.click('button:has-text("絞り込み")');
+    await page.waitForSelector('.gpu-card', { timeout: 5000 });
+    await page.click('.gpu-card h3');
+    await page.waitForSelector('.spec-card', { timeout: 5000 });
+
+    const specCard = page.locator('.spec-card');
+    // 消費電力は機種の公称 TDP から補われ、「推定」バッジが付く
+    await expect(specCard).toContainText('450 W');
+    await expect(specCard.locator('.chip-derived').first()).toBeVisible();
+    // 申告していない表示専用項目は空欄でも 0 でもなく「未申告」
+    await expect(specCard).toContainText('未申告');
+  });
+
   test('provider cannot rent their own GPU', async ({ page }) => {
     await registerAndLoginUI(page, { prefix: 'selfprov', role: 'provider' });
     const gpuName = `Self GPU ${uniqueId()}`;
     await page.goto('/#/gpus/new');
-    await page.waitForSelector('form input');
-    const selects = await page.$$('select');
-    await selects[0].selectOption('AMD');
-    await selects[1].selectOption('ROCm');
-    await selects[2].selectOption('x86_64');
-    const inputs = await page.$$('form input');
-    await inputs[0].fill(gpuName);
-    await inputs[1].fill('MI300X');
-    await inputs[2].fill('24.10');
-    await inputs[3].fill('Debian 12');
-    await inputs[4].fill('192');
-    await inputs[5].fill('2100');
-    await inputs[6].fill('750');
-    await inputs[7].fill('2000');
+    await page.waitForSelector('#gpu-name');
+    await page.selectOption('#gpu-vendor', 'AMD');
+    await page.fill('#gpu-name', gpuName);
+    await page.fill('#gpu-model', 'MI300X');
+    await page.fill('#gpu-memory', '192');
+    await page.fill('#gpu-price', '2000');
     await page.click('button[type="submit"]');
     await page.waitForFunction(() => location.hash === '#/my-gpus', { timeout: 8000 });
 

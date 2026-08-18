@@ -4,14 +4,23 @@
 // deciding to rent — market.js's cards only ever showed a summary).
 import { el, skeleton, emptyState, toast, fmtDate, fmtSats, reliabilityBadge, attestationBadge, perfBadge, valueBadge, spotBadge, carbonBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
-import { getRate, priceLine } from '../rate.js';
+import { getRateWithin, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
 import { navigate } from '../router.js';
 import { openRentModal } from '../rent-modal.js';
 
-function specRow(label, value) {
-  return el('div', { class: 'row-between', style: 'padding:4px 0;border-bottom:1px solid var(--color-border)' },
-    el('span', { class: 'muted' }, label), el('span', {}, String(value)));
+// 値が無いときに空欄や 0 を出さない。「未申告」と「0 W」は別のことで、
+// 後者は誤った断定になる。導出値は「推定」と明示して申告値と区別する。
+function specRow(label, value, { derived = false, unit = '' } = {}) {
+  const missing = value == null || value === '' || (typeof value === 'number' && !Number.isFinite(value));
+  return el('div', { class: 'row-between spec-row', style: 'padding:4px 0;border-bottom:1px solid var(--color-border)' },
+    el('span', { class: 'muted' }, label),
+    missing
+      ? el('span', { class: 'muted' }, '未申告')
+      : el('span', {},
+          `${value}${unit}`,
+          derived ? el('span', { class: 'chip chip-derived', style: 'margin-left:6px' }, '推定') : null),
+  );
 }
 
 function reviewItem(r) {
@@ -104,7 +113,9 @@ export async function render(container, params) {
     [gpu, reviewsRes, rateInfo] = await Promise.all([
       api.getGpu(gpuId).then((r) => r.gpu),
       api.getGpuReviews(gpuId, { limit: 20 }),
-      getRate(),
+      // 円換算は表示上のおまけ。外部の為替 API が遅い／落ちているときに
+      // ページ全体の描画を止めないよう、待ち時間に上限を設ける。
+      getRateWithin(),
     ]);
   } catch (err) {
     root.replaceChildren(emptyState('⚠️', 'GPUが見つかりません', err instanceof ApiError ? err.message : ''));
@@ -127,17 +138,20 @@ export async function render(container, params) {
     },
   }, gpu.available === false ? '貸出中' : 'このGPUを借りる');
 
+  // 出品者が申告しなかったためサーバが機種から補った項目（src/gpu/listing-defaults.js）
+  const derivedSet = new Set(Array.isArray(gpu.derivedFields) ? gpu.derivedFields : []);
+  const isDerived = (f) => derivedSet.has(f);
   const specCard = el('div', { class: 'card stack spec-card' },
     attestationBadge(gpu.attestation),
     specRow('ベンダー', gpu.vendor),
     specRow('モデル', gpu.model),
-    specRow('APIタイプ', gpu.apiType),
+    specRow('APIタイプ', gpu.apiType, { derived: isDerived('apiType') }),
     specRow('ドライババージョン', gpu.driverVersion),
     specRow('OS', gpu.os),
-    specRow('アーキテクチャ', gpu.arch),
-    specRow('メモリ', `${gpu.memoryGB} GB`),
-    specRow('クロック', `${gpu.clockMHz} MHz`),
-    specRow('消費電力', `${gpu.powerWatt} W`),
+    specRow('アーキテクチャ', gpu.arch, { derived: isDerived('arch') }),
+    specRow('メモリ', gpu.memoryGB, { unit: ' GB' }),
+    specRow('クロック', gpu.clockMHz, { unit: ' MHz' }),
+    specRow('消費電力', gpu.powerWatt, { unit: ' W', derived: isDerived('powerWatt') }),
   );
 
   // 性能スコアの内訳。一覧のバッジだけでは「なぜこのスコアなのか」が分からないため、
@@ -175,7 +189,7 @@ export async function render(container, params) {
       ),
       el('div', { class: 'chips' },
         el('span', { class: 'chip' }, gpu.vendor),
-        el('span', { class: 'chip' }, gpu.apiType),
+        gpu.apiType ? el('span', { class: 'chip' }, gpu.apiType) : null,
         el('span', { class: 'chip' }, `${gpu.memoryGB}GB`),
         reliabilityBadge(gpu.reliability),
         spotBadge(gpu.spot),

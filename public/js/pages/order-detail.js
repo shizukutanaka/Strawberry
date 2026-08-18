@@ -8,8 +8,7 @@
 import { el, toast, statusBadge, timeline, fmtDate, fmtSats, fmtJpy, confirmDialog } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getUser } from '../auth.js';
-import { getRate, priceLine } from '../rate.js';
-import { navigate } from '../router.js';
+import { getRateWithin, priceLine } from '../rate.js';
 
 const PAYMENT_POLL_MS = 5000;
 const HEARTBEAT_MS = 60000;
@@ -31,7 +30,9 @@ export async function render(container, params) {
       [gpu, paymentInfo, rateInfo] = await Promise.all([
         api.getGpu(order.gpuId).then((r) => r.gpu).catch(() => null),
         api.getOrderPayment(orderId).catch(() => ({ payments: [], escrows: [] })),
-        getRate(),
+        // 円換算は表示上のおまけ。外部の為替 API が遅い／落ちているときに
+      // ページ全体の描画を止めないよう、待ち時間に上限を設ける。
+      getRateWithin(),
       ]);
     } catch (err) {
       root.replaceChildren(el('div', { class: 'empty-state' },

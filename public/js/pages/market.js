@@ -1,7 +1,7 @@
 // public/js/pages/market.js — GPU browse with filters and cards.
 import { el, skeleton, emptyState, reliabilityBadge, attestationBadge, perfBadge, valueBadge, spotBadge, carbonBadge } from '../ui.js';
 import { api, ApiError } from '../api.js';
-import { getRate, priceLine } from '../rate.js';
+import { withRate, priceLine } from '../rate.js';
 import { isAuthenticated } from '../auth.js';
 import { navigate } from '../router.js';
 import { openRentModal } from '../rent-modal.js';
@@ -92,30 +92,34 @@ export async function render(container) {
     const seq = ++loadSeq;
     grid.replaceChildren(skeleton('card', 6));
     try {
-      const [gpuRes, rateInfo] = await Promise.all([
-        api.listGpus({
-          vendor: state.vendor || undefined,
-          minMemoryGB: state.minMemoryGB || undefined,
-          maxPrice: state.maxPrice || undefined,
-          search: state.search || undefined,
-          sort: state.sort || undefined,
-        }),
-        getRate(),
-      ]);
+      const gpuRes = await api.listGpus({
+        vendor: state.vendor || undefined,
+        minMemoryGB: state.minMemoryGB || undefined,
+        maxPrice: state.maxPrice || undefined,
+        search: state.search || undefined,
+        sort: state.sort || undefined,
+      });
       if (seq !== loadSeq) return; // a newer load() superseded this one
-      grid.replaceChildren();
       if (!gpuRes.gpus.length) {
         grid.replaceChildren(emptyState('🖥️', '該当するGPUがありません', '条件を変えて再度お試しください。'));
         return;
       }
-      gpuRes.gpus.forEach((gpu) => {
-        grid.appendChild(gpuCard(gpu, rateInfo, (g) => {
-          if (!isAuthenticated()) {
-            navigate('#/login?next=market');
-            return;
-          }
-          openRentModal(g, rateInfo);
-        }));
+      // 円換算は表示上のおまけで、外部の為替 API に依存する。以前は
+      // Promise.all で一覧と一緒に待っており、為替が遅い・落ちているだけで
+      // マーケットが開かなくなっていた。一覧が来た時点で描画し、レートは
+      // 届き次第あとから反映する。
+      withRate((rateInfo) => {
+        if (seq !== loadSeq) return;
+        grid.replaceChildren();
+        gpuRes.gpus.forEach((gpu) => {
+          grid.appendChild(gpuCard(gpu, rateInfo, (g) => {
+            if (!isAuthenticated()) {
+              navigate('#/login?next=market');
+              return;
+            }
+            openRentModal(g, rateInfo);
+          }));
+        });
       });
     } catch (err) {
       if (seq !== loadSeq) return;

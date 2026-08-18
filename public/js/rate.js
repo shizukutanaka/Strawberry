@@ -20,6 +20,46 @@ export async function getRate() {
   }
 }
 
+/** 今すぐ返せるレート（キャッシュのみ）。無ければ null。ネットワークを待たない。 */
+export function peekRate() {
+  return cached;
+}
+
+/**
+ * 上限つきでレートを待つ。期限までに来なければキャッシュ（無ければ null）を返し、
+ * 取得自体はバックグラウンドで走り続ける（次の描画では間に合う）。
+ * 一度しか描画しない画面（GPU詳細・注文詳細）で使う。
+ * @param {number} ms 待つ上限（ミリ秒）
+ */
+export function getRateWithin(ms = 1500) {
+  return Promise.race([
+    getRate(),
+    new Promise((resolve) => setTimeout(() => resolve(cached), ms)),
+  ]);
+}
+
+/**
+ * レートを待たずに描画するためのヘルパー。
+ *
+ * これが無かったために market / gpu-detail / order-detail が
+ * `Promise.all([一覧の取得, getRate()])` を待っており、**円換算という
+ * 表示上のおまけのために本体の描画が止まっていた**。為替 API は外部依存で、
+ * 遅い・落ちることがある。実際 E2E で、一覧は取得できているのに描画が
+ * 5 秒を超えて失敗する形で表面化した（ユーザーには「マーケットが開かない」に見える）。
+ *
+ * 使い方: render(peekRate()) で即描画し、レートが届いたらもう一度 render する。
+ * @param {(rateInfo:object|null)=>void} render レート情報を受け取って描画する関数
+ */
+export function withRate(render) {
+  render(peekRate());
+  const before = cached;
+  getRate().then((info) => {
+    // 既に同じものを描画済みなら再描画しない（無駄な DOM 差し替えを避ける）
+    if (info === before) return;
+    render(info);
+  }).catch(() => { /* レート取得の失敗は本体の描画を妨げない */ });
+}
+
 export function satsToJpy(sats, rate) {
   if (sats == null || rate == null) return null;
   return (sats / 1e8) * rate;

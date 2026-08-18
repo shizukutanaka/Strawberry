@@ -39,13 +39,17 @@ const schemas = {
   name: Joi.string().max(128).required(),
   vendor: Joi.string().valid('NVIDIA', 'AMD', 'Intel').required(),
   model: Joi.string().max(128).required(),
-  apiType: Joi.string().valid('CUDA', 'ROCm', 'oneAPI', 'OpenCL').required(),
-  driverVersion: Joi.string().max(64).required(),
-  os: Joi.string().max(64).required(),
-  arch: Joi.string().valid('x86_64', 'arm64', 'aarch64', 'x86', 'arm').required(),
+  // 以下 5 項目は「機種が分かれば導出できる」か「表示にしか使わない」もので、
+  // 出品時に必須にすると供給側の登録が通らない（実サーバで確認済み）。
+  // 既定値の導出は src/gpu/listing-defaults.js が行い、導出した項目は
+  // derivedFields に記録して UI が申告値と区別できるようにする。
+  apiType: Joi.string().valid('CUDA', 'ROCm', 'oneAPI', 'OpenCL').optional(),
+  driverVersion: Joi.string().max(64).optional().allow(''),
+  os: Joi.string().max(64).optional().allow(''),
+  arch: Joi.string().valid('x86_64', 'arm64', 'aarch64', 'x86', 'arm').optional(),
   memoryGB: Joi.number().min(1).max(8192).required(),
-  clockMHz: Joi.number().min(100).max(20000).required(),
-  powerWatt: Joi.number().min(1).max(20000).required(),
+  clockMHz: Joi.number().min(100).max(20000).optional(),
+  powerWatt: Joi.number().min(1).max(20000).optional(),
   pricePerHour: Joi.number().min(0.00001).max(1000000).required(),
   availability: Joi.object({
     startTime: Joi.date().iso(),

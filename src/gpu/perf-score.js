@@ -30,48 +30,50 @@
 // 本モジュールは純関数のみ・依存ゼロ。インフラ非依存でテスト可能。
 
 // --- 参照表 ---------------------------------------------------------------
-// 公開スペックのおおよその値（dense FP16/BF16 テンソル TFLOPS・メモリ帯域 GB/s・VRAM GB）。
+// 公開スペックのおおよその値（dense FP16/BF16 テンソル TFLOPS・メモリ帯域 GB/s・VRAM GB・
+// カタログ TDP W）。tdpWatt は出品時に powerWatt が申告されなかったときの既定値に使う
+// （消費電力は出品者が手元で調べにくい一方、機種が分かれば公開値がある）。
 // sparsity 2x 表記のカタログ値は dense に揃えてある。あくまで**順位付けのための近似**であり、
 // 実測スループットの予測値ではない。SKU 差（SXM/PCIe 等）は代表値に丸めている。
 const MODEL_TABLE = {
   // NVIDIA データセンター
-  'h100 sxm': { fp16Tflops: 989, memBandwidthGBs: 3350, vramGB: 80 },
-  'h100 pcie': { fp16Tflops: 756, memBandwidthGBs: 2000, vramGB: 80 },
-  'h100': { fp16Tflops: 989, memBandwidthGBs: 3350, vramGB: 80 },
-  'h200': { fp16Tflops: 989, memBandwidthGBs: 4800, vramGB: 141 },
-  'b200': { fp16Tflops: 2250, memBandwidthGBs: 8000, vramGB: 192 },
-  'a100 80gb': { fp16Tflops: 312, memBandwidthGBs: 2039, vramGB: 80 },
-  'a100 40gb': { fp16Tflops: 312, memBandwidthGBs: 1555, vramGB: 40 },
-  'a100': { fp16Tflops: 312, memBandwidthGBs: 2039, vramGB: 80 },
-  'l40s': { fp16Tflops: 362, memBandwidthGBs: 864, vramGB: 48 },
-  'l40': { fp16Tflops: 181, memBandwidthGBs: 864, vramGB: 48 },
-  'l4': { fp16Tflops: 121, memBandwidthGBs: 300, vramGB: 24 },
-  'a10': { fp16Tflops: 125, memBandwidthGBs: 600, vramGB: 24 },
-  'a10g': { fp16Tflops: 140, memBandwidthGBs: 600, vramGB: 24 },
-  'v100': { fp16Tflops: 125, memBandwidthGBs: 900, vramGB: 32 },
-  't4': { fp16Tflops: 65, memBandwidthGBs: 320, vramGB: 16 },
+  'h100 sxm': { fp16Tflops: 989, memBandwidthGBs: 3350, vramGB: 80, tdpWatt: 700 },
+  'h100 pcie': { fp16Tflops: 756, memBandwidthGBs: 2000, vramGB: 80, tdpWatt: 350 },
+  'h100': { fp16Tflops: 989, memBandwidthGBs: 3350, vramGB: 80, tdpWatt: 700 },
+  'h200': { fp16Tflops: 989, memBandwidthGBs: 4800, vramGB: 141, tdpWatt: 700 },
+  'b200': { fp16Tflops: 2250, memBandwidthGBs: 8000, vramGB: 192, tdpWatt: 1000 },
+  'a100 80gb': { fp16Tflops: 312, memBandwidthGBs: 2039, vramGB: 80, tdpWatt: 400 },
+  'a100 40gb': { fp16Tflops: 312, memBandwidthGBs: 1555, vramGB: 40, tdpWatt: 400 },
+  'a100': { fp16Tflops: 312, memBandwidthGBs: 2039, vramGB: 80, tdpWatt: 400 },
+  'l40s': { fp16Tflops: 362, memBandwidthGBs: 864, vramGB: 48, tdpWatt: 350 },
+  'l40': { fp16Tflops: 181, memBandwidthGBs: 864, vramGB: 48, tdpWatt: 300 },
+  'l4': { fp16Tflops: 121, memBandwidthGBs: 300, vramGB: 24, tdpWatt: 72 },
+  'a10': { fp16Tflops: 125, memBandwidthGBs: 600, vramGB: 24, tdpWatt: 150 },
+  'a10g': { fp16Tflops: 140, memBandwidthGBs: 600, vramGB: 24, tdpWatt: 150 },
+  'v100': { fp16Tflops: 125, memBandwidthGBs: 900, vramGB: 32, tdpWatt: 300 },
+  't4': { fp16Tflops: 65, memBandwidthGBs: 320, vramGB: 16, tdpWatt: 70 },
   // NVIDIA ワークステーション
-  'rtx 6000 ada': { fp16Tflops: 364, memBandwidthGBs: 960, vramGB: 48 },
-  'rtx a6000': { fp16Tflops: 155, memBandwidthGBs: 768, vramGB: 48 },
-  'rtx a5000': { fp16Tflops: 111, memBandwidthGBs: 768, vramGB: 24 },
+  'rtx 6000 ada': { fp16Tflops: 364, memBandwidthGBs: 960, vramGB: 48, tdpWatt: 300 },
+  'rtx a6000': { fp16Tflops: 155, memBandwidthGBs: 768, vramGB: 48, tdpWatt: 300 },
+  'rtx a5000': { fp16Tflops: 111, memBandwidthGBs: 768, vramGB: 24, tdpWatt: 230 },
   // NVIDIA コンシューマ（rtx 4090 = 参照GPU）
-  'rtx 5090': { fp16Tflops: 419, memBandwidthGBs: 1792, vramGB: 32 },
-  'rtx 5080': { fp16Tflops: 225, memBandwidthGBs: 960, vramGB: 16 },
-  'rtx 4090': { fp16Tflops: 165.2, memBandwidthGBs: 1008, vramGB: 24 },
-  'rtx 4080': { fp16Tflops: 97.5, memBandwidthGBs: 717, vramGB: 16 },
-  'rtx 4070': { fp16Tflops: 58, memBandwidthGBs: 504, vramGB: 12 },
-  'rtx 3090': { fp16Tflops: 71, memBandwidthGBs: 936, vramGB: 24 },
-  'rtx 3080': { fp16Tflops: 59.5, memBandwidthGBs: 760, vramGB: 10 },
-  'rtx 3070': { fp16Tflops: 40.6, memBandwidthGBs: 448, vramGB: 8 },
-  'rtx 3060': { fp16Tflops: 25.6, memBandwidthGBs: 360, vramGB: 12 },
+  'rtx 5090': { fp16Tflops: 419, memBandwidthGBs: 1792, vramGB: 32, tdpWatt: 575 },
+  'rtx 5080': { fp16Tflops: 225, memBandwidthGBs: 960, vramGB: 16, tdpWatt: 360 },
+  'rtx 4090': { fp16Tflops: 165.2, memBandwidthGBs: 1008, vramGB: 24, tdpWatt: 450 },
+  'rtx 4080': { fp16Tflops: 97.5, memBandwidthGBs: 717, vramGB: 16, tdpWatt: 320 },
+  'rtx 4070': { fp16Tflops: 58, memBandwidthGBs: 504, vramGB: 12, tdpWatt: 200 },
+  'rtx 3090': { fp16Tflops: 71, memBandwidthGBs: 936, vramGB: 24, tdpWatt: 350 },
+  'rtx 3080': { fp16Tflops: 59.5, memBandwidthGBs: 760, vramGB: 10, tdpWatt: 320 },
+  'rtx 3070': { fp16Tflops: 40.6, memBandwidthGBs: 448, vramGB: 8, tdpWatt: 220 },
+  'rtx 3060': { fp16Tflops: 25.6, memBandwidthGBs: 360, vramGB: 12, tdpWatt: 170 },
   // AMD
-  'mi300x': { fp16Tflops: 1307, memBandwidthGBs: 5300, vramGB: 192 },
-  'mi250x': { fp16Tflops: 383, memBandwidthGBs: 3277, vramGB: 128 },
-  'mi210': { fp16Tflops: 181, memBandwidthGBs: 1638, vramGB: 64 },
-  'rx 7900 xtx': { fp16Tflops: 123, memBandwidthGBs: 960, vramGB: 24 },
+  'mi300x': { fp16Tflops: 1307, memBandwidthGBs: 5300, vramGB: 192, tdpWatt: 750 },
+  'mi250x': { fp16Tflops: 383, memBandwidthGBs: 3277, vramGB: 128, tdpWatt: 560 },
+  'mi210': { fp16Tflops: 181, memBandwidthGBs: 1638, vramGB: 64, tdpWatt: 300 },
+  'rx 7900 xtx': { fp16Tflops: 123, memBandwidthGBs: 960, vramGB: 24, tdpWatt: 355 },
   // Intel
-  'max 1550': { fp16Tflops: 832, memBandwidthGBs: 3277, vramGB: 128 },
-  'arc a770': { fp16Tflops: 39, memBandwidthGBs: 560, vramGB: 16 },
+  'max 1550': { fp16Tflops: 832, memBandwidthGBs: 3277, vramGB: 128, tdpWatt: 600 },
+  'arc a770': { fp16Tflops: 39, memBandwidthGBs: 560, vramGB: 16, tdpWatt: 225 },
 };
 
 // 参照GPU（この機種のスコアが 100 になる）。feature-pricer の reference と同一機種:

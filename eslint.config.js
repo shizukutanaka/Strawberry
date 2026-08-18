@@ -16,7 +16,10 @@ module.exports = [
       'coverage/**',
       'test-results/**',
       'playwright-report/**',
-      'public/js/**',   // ブラウザ向け ES module（別の環境。下で個別に設定する）
+      // 注意: ここに 'public/js/**' を書いてはいけない。flat config の
+      // グローバル ignores は後段の `files` ブロックより強く、下のブラウザ用
+      // 設定ごと無効化される（＝ SPA が一度も lint されない状態になる）。
+      // ブラウザ向け ES module は下の 3 番目のブロックで個別に設定している。
       'openapi.json',
       'data/**',
       'logs/**',
@@ -83,6 +86,7 @@ module.exports = [
         setInterval: 'readonly', clearInterval: 'readonly',
         URL: 'readonly', URLSearchParams: 'readonly', Node: 'readonly',
         alert: 'readonly', history: 'readonly', navigator: 'readonly',
+        CustomEvent: 'readonly', Event: 'readonly', HTMLElement: 'readonly',
       },
     },
     rules: {

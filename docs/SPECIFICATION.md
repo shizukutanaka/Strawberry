@@ -37,7 +37,11 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | GET `/api/v1/gpus`, `/gpus/:id` | GPU 検索/詳細 | JWT | ✅(JSON層で動作) |
 | POST/PUT `/api/v1/gpus` | 出品登録/更新 | JWT+role | 🟡(アテステーション無し) |
 | GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
-| POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |
+| POST `/api/v1/payments/...` | 決済（借り手→運営の受取） | JWT | ✅ |
+| GET `/api/v1/payments/earnings` | 受取可能残高と台帳明細 | JWT | ✅ |
+| POST/GET `/api/v1/payments/payouts` | 出金申請・自分の申請一覧 | JWT | ✅ |
+| `/api/v1/payments/admin/payouts`,`/:id/complete`,`/:id/reject` | 出金待ち一覧・送金記録・却下 | JWT+admin | 🟡(送金は運営が手動実行し txid を記録) |
+| POST `/api/v1/payments/admin/earnings/sweep` | 完了注文の収益計上を即時実行 | JWT+admin | ✅ |
 | POST `/api/v1/orders/:id/preempt` | Spot 注文の中断通知（猶予窓つき） | JWT+provider/admin | ✅ |
 | POST `/api/v1/orders/:id/access` | GPU接続情報の投入 | JWT+provider/admin | ✅ |
 | GET `/api/v1/orders/:id/access` | GPU接続情報の受け取り | JWT+**借り手のみ**・支払い済み・稼働中 | ✅ |
@@ -134,8 +138,21 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
    （quote/rank ＝ JWT、escrow open/pay/verify/resolve ＝ admin）。supertest で
    open→pay→verify→SETTLED を検証済。
    **actions→LN 操作の変換層も実装済**（`src/payments/action-executor.js` ＋
-   `src/payments/ln-adapter.js` の MockLnAdapter）。**残るは実 LND/CLN アダプタ実装、
-   既存 order/payment ルートからの呼び出し、実ジョブの出力/利用率収集**。← 次の山
+   `src/payments/ln-adapter.js` の MockLnAdapter）。
+
+   **ただし 2026-08 のコード確認で、この経路はプロバイダに金を届けていなかった**:
+   - 本番の呼び出し側（`marketplace/default.js`・`order/index.js`・`order-expiry.js`）は
+     すべて `createEscrowService()` を **lnAdapter 無し**で生成しており、actions は実行されない。
+   - 仮に実行されても `payout_provider` が使う `escrow.providerInvoice` は
+     **コード中のどこからも書き込まれていない**（送金先が存在しない）。
+   - 通常の決済経路（`POST /payments/order/:id`）はそもそもエスクローを開かない。
+     借り手が invoice を払うと sats は運営ノードに着金し、**その先の処理が無い**。
+
+   → hold invoice の preimage 公開は「運営が受け取る」ことしか意味せず、プロバイダへの
+   支払いは**別建ての送金**になる（FSM の 1 遷移では完結しない）。そこで
+   `src/payments/payout-ledger.js`（収益台帳）＋ `src/payments/earnings-sweeper.js`
+   （完了注文の自動計上）＋ 出金 API を追加した。**残るは実 LND/CLN アダプタ実装と
+   送金の自動実行**（現状は運営が送金して txid を記録する運用）。
 3. **永続化エンティティは全て実装済**（Escrow / Provider reputation / Verification record）。将来 Prisma へ移行。
 4. GPU アテステーション（nvtrust）、libp2p ESM 対応、OTel トレース、カーボン配置。
    監査ログ Merkle アンカリングは `merkle-anchor.js` 実装済（残るは OTS への実提出と audit.js 結線）。
@@ -155,6 +172,8 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/marketplace/marketplace-service.js` — 全サービスを束ねるドメイン合成層（6テスト, 正常系/不正系/オークション統合）
 - `src/marketplace/auction-engine.js` — 逆オークション・マッチング（価格×レピュ×SLA×アテステーション、price-ratio 正規化、reserve/minReputation/requireAttestation フィルタ, 13テスト）
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
+- `src/payments/payout-ledger.js` ＋ `src/db/json/LedgerRepository.js` — 収益台帳・出金（orderId 冪等の計上、申請中の残高予約、txid 必須の送金記録, 32テスト＋API 17テスト）
+- `src/payments/earnings-sweeper.js` — 完了注文の収益自動計上（完了経路ごとのフックではなく状態観測。冪等なので過去分も拾う）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）

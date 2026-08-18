@@ -108,6 +108,15 @@ export const api = {
   approveManualPayment: (paymentId) => request(`/api/v1/payments/manual/approve/${paymentId}`, { method: 'POST' }),
   pendingManualPayments: () => request('/api/v1/payments/admin/pending'),
 
+  // --- 収益台帳・出金 ---
+  // providerEarnings（注文の総額集計）と違い、こちらは**実際に受け取れる残高**。
+  ledger: (query) => request('/api/v1/payments/earnings', { query }),
+  requestPayout: (amountSats) => request('/api/v1/payments/payouts', { method: 'POST', body: { amountSats } }),
+  myPayouts: () => request('/api/v1/payments/payouts'),
+  pendingPayouts: () => request('/api/v1/payments/admin/payouts'),
+  completePayout: (id, txid) => request(`/api/v1/payments/admin/payouts/${id}/complete`, { method: 'POST', body: { txid } }),
+  rejectPayout: (id, reason) => request(`/api/v1/payments/admin/payouts/${id}/reject`, { method: 'POST', body: { reason } }),
+
   // --- exchange rate ---
   exchangeRate: (fresh) => request('/api/exchange-rate', { auth: false, query: fresh ? { fresh: 'true' } : undefined }),
 };

@@ -102,6 +102,15 @@ try {
   logger.warn(`anchor-scheduler: failed to start: ${e.message}`);
 }
 
+// 完了注文の収益計上（プロバイダの取り分・借り手への返金分を台帳へ書く）。
+// これが動かないと、借り手が払った sats が運営ノードに滞留したままプロバイダに
+// 渡らない — src/payments/payout-ledger.js のヘッダ参照。
+try {
+  require('../payments/earnings-sweeper').start();
+} catch (e) {
+  logger.warn(`earnings-sweeper: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

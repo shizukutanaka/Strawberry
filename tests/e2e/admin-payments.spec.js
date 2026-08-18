@@ -27,14 +27,14 @@ test.describe('admin payments', () => {
 
     await loginUI(page, admin.email, admin.password);
     await page.goto('/#/admin/payments');
-    await page.waitForSelector('table.data-table', { timeout: 5000 });
-    await expect(page.locator('table.data-table')).toContainText('900 sats');
-    await expect(page.locator('table.data-table')).toContainText(renter.username);
+    await page.waitForSelector('table.manual-payments', { timeout: 5000 });
+    await expect(page.locator('table.manual-payments')).toContainText('900 sats');
+    await expect(page.locator('table.manual-payments')).toContainText(renter.username);
 
-    await page.click('.js-approve');
+    await page.click('.manual-queue .js-approve');
     await page.waitForSelector('.modal');
     await page.click('.modal button:has-text("実行")');
-    await expect(page.locator('.empty-state')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.manual-queue .empty-state')).toBeVisible({ timeout: 5000 });
 
     const statusCheck = await request.get(`${baseURL}/api/v1/payments/${paymentId}/status`, {
       headers: { Authorization: `Bearer ${renter.token}` },
@@ -70,11 +70,11 @@ test.describe('admin payments', () => {
     await promoteToAdmin(request, baseURL, admin.email, admin.password);
     await loginUI(page, admin.email, admin.password);
     await page.goto('/#/admin/payments');
-    await page.waitForSelector('table.data-table', { timeout: 5000 });
-    await page.click('.js-approve');
+    await page.waitForSelector('table.manual-payments', { timeout: 5000 });
+    await page.click('.manual-queue .js-approve');
     await page.waitForSelector('.modal');
     await page.click('.modal button:has-text("キャンセル")');
     // Row still present, not removed.
-    await expect(page.locator('table.data-table tbody tr')).toHaveCount(1);
+    await expect(page.locator('table.manual-payments tbody tr')).toHaveCount(1);
   });
 });

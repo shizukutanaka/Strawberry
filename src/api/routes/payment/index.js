@@ -16,6 +16,7 @@ const OrderRepository = require('../../../db/json/OrderRepository');
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 // 並行リクエストによる二重請求書発行を防ぐためのミューテックス
 const { withLock } = require('../../../utils/async-lock');
+const { appendAuditLog } = require('../../../utils/audit-log');
 
 // インボイス作成 (管理者専用)
 // 汎用インボイス発行は注文との紐付けなしにプラットフォームノードのインバウンド容量を消費するため
@@ -510,6 +511,129 @@ router.post('/manual/approve/:id',
         paidAt: updated.paidAt
       });
     });
+  })
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 収益台帳と出金（src/payments/payout-ledger.js）
+//
+// ここまでの決済 API は「借り手 → 運営」の受取だけを扱っており、受け取った sats が
+// プロバイダへ渡る経路はコード上のどこにも存在しなかった。以下がその経路にあたる。
+// ─────────────────────────────────────────────────────────────────────────────
+const payoutLedger = require('../../../payments/payout-ledger');
+
+// 自分の残高と仕訳明細（プロバイダの稼ぎ・借り手への返金の両方がここに載る）
+router.get('/earnings',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const limitRaw = parseInt(req.query.limit, 10);
+    const offsetRaw = parseInt(req.query.offset, 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    const balance = payoutLedger.balanceFor(req.user.id);
+    const { total, entries } = payoutLedger.listEntries(req.user.id, { limit, offset });
+    res.json({
+      balance,
+      minimumPayoutSats: payoutLedger.MIN_PAYOUT_SATS,
+      total, limit, offset,
+      entries,
+    });
+  })
+);
+
+// 出金申請。送金先は body ではなくサーバ保持の user.payoutAddress のみを使う
+// （body から取ると、トークンを盗んだ攻撃者が送金先だけ差し替えて資金を抜ける）。
+router.post('/payouts',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const { amountSats } = req.body || {};
+    // 同一ユーザーの並行申請が両方とも「残高十分」と判定して二重出金になるのを防ぐ。
+    const result = await withLock(`payout:${req.user.id}`, async () =>
+      payoutLedger.requestPayout({ userId: req.user.id, amountSats })
+    );
+    if (!result.ok) {
+      const status = result.reason === 'user_not_found' ? 404 : 400;
+      return res.status(status).json({ error: result.reason, ...result });
+    }
+    appendAuditLog('payout_requested', {
+      payoutId: result.payout.id, amountSats: result.payout.amountSats,
+    }, req.user.id);
+    res.status(201).json({
+      message: 'Payout requested. An operator will send the funds and record the transaction id.',
+      payout: result.payout,
+      balance: result.balance,
+    });
+  })
+);
+
+// 自分の出金申請一覧
+router.get('/payouts',
+  authenticateJWT,
+  asyncHandler(async (req, res) => {
+    const { entries } = payoutLedger.listEntries(req.user.id, { limit: 200 });
+    res.json({ payouts: entries.filter((e) => e.kind === 'payout') });
+  })
+);
+
+// 運営: 送金待ちの出金申請一覧
+router.get('/admin/payouts',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const UserRepository = require('../../../db/json/UserRepository');
+    const pending = payoutLedger.pendingPayouts().map((p) => {
+      const user = p.userId ? UserRepository.getById(p.userId) : null;
+      return { ...p, username: user ? user.username : null };
+    });
+    res.json({ total: pending.length, payouts: pending });
+  })
+);
+
+// 運営: 実際に送金した事実を記録する（txid 必須）。
+// **このシステムは送金そのものを自動実行しない。** ノードを持たずに「送金済み」と
+// 記録する経路を作ると、台帳が現実と乖離したまま帳尻だけ合ってしまう。
+router.post('/admin/payouts/:id/complete',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const { txid } = req.body || {};
+    const result = await withLock(`payout-entry:${req.params.id}`, async () =>
+      payoutLedger.completePayout(req.params.id, { txid, byUserId: req.user.id })
+    );
+    if (!result.ok) {
+      return res.status(result.reason === 'not_found' ? 404 : 400).json({ error: result.reason, current: result.current });
+    }
+    appendAuditLog('payout_completed', {
+      payoutId: result.payout.id, amountSats: result.payout.amountSats, txid: result.payout.txid,
+    }, req.user.id);
+    res.json({ message: 'Payout marked as sent', payout: result.payout });
+  })
+);
+
+// 運営: 出金申請の却下（残高は自動的に戻る＝ reserved から外れる）
+router.post('/admin/payouts/:id/reject',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const { reason } = req.body || {};
+    const result = await withLock(`payout-entry:${req.params.id}`, async () =>
+      payoutLedger.rejectPayout(req.params.id, { reason, byUserId: req.user.id })
+    );
+    if (!result.ok) {
+      return res.status(result.reason === 'not_found' ? 404 : 400).json({ error: result.reason, current: result.current });
+    }
+    appendAuditLog('payout_rejected', { payoutId: result.payout.id, reason: reason || null }, req.user.id);
+    res.json({ message: 'Payout rejected', payout: result.payout });
+  })
+);
+
+// 運営: 収益計上を即時実行する（定期ジョブを待たずに確認するため）
+router.post('/admin/earnings/sweep',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const summary = require('../../../payments/earnings-sweeper').runOnce();
+    res.json(summary);
   })
 );
 

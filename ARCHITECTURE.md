@@ -41,8 +41,10 @@ src/api/server.js
  ├─ /api/exchange-rate→ routes/exchange-rate.js
  ├─ 定期ジョブ（いずれも try/catch 付きで起動、失敗しても API 本体は動く）
  │    ├─ core/invoice-poller.js       … LN 入金確認（15秒）
- │    └─ security/anchor-scheduler.js … 監査ログの増分 Merkle アンカー生成（既定1時間）＋
- │                                       OpenTimestamps 提出（AUDIT_ANCHOR_OTS_ENABLED でオプトイン）
+ │    ├─ security/anchor-scheduler.js … 監査ログの増分 Merkle アンカー生成（既定1時間）＋
+ │    │                                  OpenTimestamps 提出（AUDIT_ANCHOR_OTS_ENABLED でオプトイン）
+ │    └─ payments/earnings-sweeper.js … 完了注文の収益計上（既定5分）。プロバイダの取り分と
+ │                                      借り手への返金分を payout-ledger へ書く
  └─ /api/v1 (routes/index.js)  ※ /system/info 以外は JWT 必須
       ├─ /gpus /orders /payments /users  → JSON リポジトリで動作
       └─ コアサービス: src/core/services.js 経由のガード付きシングルトン

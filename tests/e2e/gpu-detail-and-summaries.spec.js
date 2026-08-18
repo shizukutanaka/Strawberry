@@ -177,7 +177,10 @@ test.describe('provider earnings', () => {
     await loginUI(page, provider.email, provider.password);
     await page.goto('/#/earnings');
     await expect(page.locator('.grid')).toContainText('1,300 sats', { timeout: 5000 });
-    await expect(page.locator('table.data-table')).toContainText(gpu.name);
+    await expect(page.locator('table.gpu-breakdown')).toContainText(gpu.name);
+    // 注文総額と受取可能残高は別物として出す。以前はこのページが注文総額だけを
+    // 「収益」と表示しており、貸し手は受け取る手段の無い金額を見せられていた。
+    await expect(page.locator('.balance-card')).toContainText('受取可能残高');
   });
 });
 

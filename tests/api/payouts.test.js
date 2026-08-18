@@ -1,0 +1,227 @@
+// tests/api/payouts.test.js
+// 収益台帳 API のエンド・ツー・エンド。ここが通らないと「プロバイダは自分の稼ぎを
+// 一切見られず、受け取る手段も無い」という以前の状態に戻る。
+const request = require('supertest');
+const { app } = require('../../src/api/server');
+const UserRepository = require('../../src/db/json/UserRepository');
+const OrderRepository = require('../../src/db/json/OrderRepository');
+const GpuRepository = require('../../src/db/json/GpuRepository');
+const PaymentRepository = require('../../src/db/json/PaymentRepository');
+const LedgerRepository = require('../../src/db/json/LedgerRepository');
+
+const uniq = Date.now().toString(36);
+let adminTok, provTok, renterTok, provId, renterId;
+
+async function registerUser(prefix) {
+  const name = `${prefix}${uniq}`.slice(0, 20);
+  const email = `${name}@example.com`;
+  await request(app).post('/api/v1/users/register').send({ username: name, email, password: 'Test1234!' });
+  const user = UserRepository.getByEmail(email);
+  const token = (await request(app).post('/api/v1/users/login').send({ email, password: 'Test1234!' })).body.token;
+  return { id: user.id, token, email };
+}
+
+beforeAll(async () => {
+  const adm = await registerUser('payadm');
+  UserRepository.update(adm.id, { role: 'admin' });
+  adminTok = (await request(app).post('/api/v1/users/login')
+    .send({ email: adm.email, password: 'Test1234!' })).body.token;
+
+  const prov = await registerUser('payprv');
+  provId = prov.id; provTok = prov.token;
+  UserRepository.update(provId, { payoutAddress: 'lnbc-provider-destination' });
+
+  const renter = await registerUser('payrnt');
+  renterId = renter.id; renterTok = renter.token;
+});
+
+const asAdmin = (r) => r.set('Authorization', `Bearer ${adminTok}`);
+const asProvider = (r) => r.set('Authorization', `Bearer ${provTok}`);
+const asRenter = (r) => r.set('Authorization', `Bearer ${renterTok}`);
+
+/** 完了済み・支払い済みの注文を 1 件作る（掃き出しの入力）。 */
+function seedPaidCompletedOrder(totalPrice = 100000, overrides = {}) {
+  const gpu = GpuRepository.create({
+    name: 'Payout Test GPU', vendor: 'NVIDIA', model: 'RTX-PAY', memoryGB: 8,
+    pricePerHour: totalPrice, providerId: provId,
+  });
+  const order = OrderRepository.create({
+    gpuId: gpu.id, userId: renterId, providerId: provId,
+    durationMinutes: 60, status: 'completed', totalPrice,
+    completedAt: new Date().toISOString(),
+    ...overrides,
+  });
+  PaymentRepository.create({
+    orderId: order.id, userId: renterId, amount: totalPrice,
+    status: 'paid', method: 'lightning', paidAt: new Date().toISOString(),
+  });
+  return order;
+}
+
+describe('GET /payments/earnings', () => {
+  it('requires authentication', async () => {
+    const res = await request(app).get('/api/v1/payments/earnings');
+    expect(res.status).toBe(401);
+  });
+
+  it('starts at a zero balance and reports the minimum payout', async () => {
+    const res = await asRenter(request(app).get('/api/v1/payments/earnings'));
+    expect(res.status).toBe(200);
+    expect(res.body.balance).toMatchObject({ availableSats: expect.any(Number) });
+    expect(res.body.minimumPayoutSats).toBeGreaterThan(0);
+  });
+});
+
+describe('earnings sweep → provider balance', () => {
+  let order;
+
+  it('credits the provider after the sweep runs', async () => {
+    const before = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance.availableSats;
+    order = seedPaidCompletedOrder(100000);
+
+    const sweep = await asAdmin(request(app).post('/api/v1/payments/admin/earnings/sweep'));
+    expect(sweep.status).toBe(200);
+    expect(sweep.body.credited).toBeGreaterThanOrEqual(1);
+
+    const after = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance.availableSats;
+    // 実提供 100%・手数料控除後なので、増分は 0 より大きく総額未満。
+    expect(after - before).toBeGreaterThan(0);
+    expect(after - before).toBeLessThan(100000);
+
+    const entries = LedgerRepository.getByOrderId(order.id);
+    expect(entries.some((e) => e.kind === 'earning' && e.userId === provId)).toBe(true);
+  });
+
+  it('does not credit the same order twice when the sweep runs again', async () => {
+    const before = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance.availableSats;
+    await asAdmin(request(app).post('/api/v1/payments/admin/earnings/sweep'));
+    const after = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance.availableSats;
+    expect(after).toBe(before);
+    expect(LedgerRepository.getByOrderId(order.id).filter((e) => e.kind === 'earning')).toHaveLength(1);
+  });
+
+  it('shows the earning entry in the provider ledger', async () => {
+    const res = await asProvider(request(app).get('/api/v1/payments/earnings?limit=200'));
+    const mine = res.body.entries.filter((e) => e.orderId === order.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ kind: 'earning', role: 'provider', status: 'settled' });
+    expect(mine[0].breakdown.operatorFeeSats).toBeGreaterThan(0);
+  });
+
+  it('refuses the admin sweep for a non-admin', async () => {
+    const res = await asProvider(request(app).post('/api/v1/payments/admin/earnings/sweep'));
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('POST /payments/payouts', () => {
+  it('rejects a payout larger than the balance', async () => {
+    const res = await asProvider(request(app).post('/api/v1/payments/payouts').send({ amountSats: 99999999 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('insufficient_balance');
+  });
+
+  it('rejects a payout when the user has no payout address registered', async () => {
+    const res = await asRenter(request(app).post('/api/v1/payments/payouts').send({ amountSats: 5000 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('no_payout_address');
+  });
+
+  it('ignores a destination supplied in the request body', async () => {
+    // 送金先を body から取ると、トークンを盗んだ攻撃者が宛先だけ差し替えて資金を抜ける。
+    const res = await asProvider(request(app).post('/api/v1/payments/payouts')
+      .send({ amountSats: 2000, destination: 'lnbc-attacker-address', payoutAddress: 'lnbc-attacker-address' }));
+    expect(res.status).toBe(201);
+    expect(res.body.payout.destination).toBe('lnbc-provider-destination');
+  });
+
+  it('reserves the requested sats so they cannot be requested again', async () => {
+    const balance = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance;
+    expect(balance.reservedSats).toBeGreaterThan(0);
+    const res = await asProvider(request(app).post('/api/v1/payments/payouts')
+      .send({ amountSats: balance.availableSats + 1 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('insufficient_balance');
+  });
+});
+
+describe('admin payout settlement', () => {
+  let payoutId;
+
+  it('lists the pending payout for the operator', async () => {
+    const res = await asAdmin(request(app).get('/api/v1/payments/admin/payouts'));
+    expect(res.status).toBe(200);
+    const mine = res.body.payouts.filter((p) => p.userId === provId);
+    expect(mine.length).toBeGreaterThanOrEqual(1);
+    payoutId = mine[0].id;
+    expect(mine[0].destination).toBe('lnbc-provider-destination');
+  });
+
+  it('refuses to mark a payout sent without a transaction id', async () => {
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${payoutId}/complete`).send({}));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('txid_required');
+  });
+
+  it('refuses a non-admin trying to settle a payout', async () => {
+    const res = await asProvider(request(app).post(`/api/v1/payments/admin/payouts/${payoutId}/complete`)
+      .send({ txid: 'deadbeef' }));
+    expect(res.status).toBe(403);
+  });
+
+  it('records the transaction id and moves the payout out of reserved', async () => {
+    const before = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance;
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${payoutId}/complete`)
+      .send({ txid: 'txid-abcdef123456' }));
+    expect(res.status).toBe(200);
+    expect(res.body.payout).toMatchObject({ status: 'paid', txid: 'txid-abcdef123456' });
+
+    const after = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance;
+    expect(after.reservedSats).toBe(before.reservedSats - res.body.payout.amountSats);
+    expect(after.paidOutSats).toBe(before.paidOutSats + res.body.payout.amountSats);
+    expect(after.availableSats).toBe(before.availableSats);
+  });
+
+  it('cannot settle the same payout twice', async () => {
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${payoutId}/complete`)
+      .send({ txid: 'txid-second-attempt' }));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('rejecting a payout returns the funds', () => {
+  it('restores the available balance', async () => {
+    const balance = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance;
+    const amount = Math.min(2000, balance.availableSats);
+    const req1 = await asProvider(request(app).post('/api/v1/payments/payouts').send({ amountSats: amount }));
+    expect(req1.status).toBe(201);
+    const id = req1.body.payout.id;
+
+    const rejected = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${id}/reject`)
+      .send({ reason: 'destination unreachable' }));
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.payout.status).toBe('rejected');
+
+    const after = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance;
+    expect(after.availableSats).toBe(balance.availableSats);
+  });
+});
+
+describe('an unpaid order never credits anyone', () => {
+  it('leaves the ledger untouched', async () => {
+    const gpu = GpuRepository.create({
+      name: 'Unpaid GPU', vendor: 'NVIDIA', model: 'RTX-UNPAID', memoryGB: 8,
+      pricePerHour: 1000, providerId: provId,
+    });
+    const order = OrderRepository.create({
+      gpuId: gpu.id, userId: renterId, providerId: provId,
+      durationMinutes: 60, status: 'completed', totalPrice: 50000,
+    });
+    // 支払いレコードは pending のみ（＝借り手はまだ払っていない）
+    PaymentRepository.create({
+      orderId: order.id, userId: renterId, amount: 50000, status: 'pending', method: 'lightning',
+    });
+    await asAdmin(request(app).post('/api/v1/payments/admin/earnings/sweep'));
+    expect(LedgerRepository.getByOrderId(order.id)).toHaveLength(0);
+  });
+});

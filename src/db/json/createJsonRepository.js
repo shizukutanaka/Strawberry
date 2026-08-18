@@ -117,6 +117,26 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       audit('create', { id: row.id });
       return row;
     },
+    // 述語に一致する行が既に存在しなければ create する（存在チェックと書き込みを
+    // ひとつのロック区間で行う）。呼び出し側で getByXxx→create と書くと、その 2 手の
+    // 間に別プロセスが同じレコードを作れてしまい、冪等キー（例: orderId 単位の
+    // 収益計上）が二重になる。台帳系では二重計上＝二重払いに直結するため、
+    // 「無ければ作る」を原子的な 1 操作として提供する。
+    // 返り値: { ok: true, row } / { ok: false, reason: 'exists', existing }
+    createUnique: (rec, predicate) => {
+      const result = mutate(() => {
+        const rows = load();
+        const existing = rows.find(predicate);
+        if (existing) return { ok: false, reason: 'exists', existing };
+        const safeRec = stripDangerousKeys(rec);
+        const created = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
+        rows.push(created);
+        atomicWriteJSON(filePath, rows);
+        return { ok: true, row: created };
+      });
+      audit('createUnique', { ok: result.ok, id: result.ok ? result.row.id : undefined });
+      return result;
+    },
     update: (id, updates) => {
       const row = mutate(() => {
         const rows = load();

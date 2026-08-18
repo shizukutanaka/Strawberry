@@ -167,7 +167,6 @@ describe('GPU: /accept TOCTOU — ex-provider blocked after GPU reassignment', (
     if (!adminTok || !gpuId || !orderId || !providerTok) return;
 
     // Admin reassigns GPU to a different provider (use admin user id as new provider)
-    const adminPayload = jwt.decode(adminTok);
     await request(app).put(`/api/v1/gpus/${gpuId}`)
       .set('Authorization', `Bearer ${adminTok}`)
       .send({ name: `TestGPU-${uniq}` }); // any update to touch it

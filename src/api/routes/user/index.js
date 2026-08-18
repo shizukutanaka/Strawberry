@@ -13,7 +13,7 @@ const { config } = require('../../../utils/config');
 // 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
 // リフレッシュトークンは resolveRefreshSecret を使い、JWT_REFRESH_SECRET が設定されている
 // 場合はアクセストークンとは別の鍵で署名・検証する（クロスタイプ代替攻撃を防ぐ）。
-const { resolveSecret, resolveRefreshSecret } = require('../../middleware/jwt-auth');
+const { resolveRefreshSecret } = require('../../middleware/jwt-auth');
 const { withLock } = require('../../../utils/async-lock');
 
 const { sanitizeObject } = require('../../../utils/sanitize');

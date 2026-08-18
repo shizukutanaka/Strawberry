@@ -3,7 +3,6 @@ const express = require('express');
 const crypto = require('crypto');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const speakeasy = require('speakeasy');
 const { verifyTOTP } = require('../utils/totp');
 const { sendMail } = require('../utils/mailer');
 const { masterSession } = require('../middleware/master-session');

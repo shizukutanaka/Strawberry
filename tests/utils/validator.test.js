@@ -1,5 +1,5 @@
 // バリデーションユーティリティの自動テスト雛形（Jest）
-const { schemas, validate, isUUID } = require('../../src/utils/validator');
+const { schemas, isUUID } = require('../../src/utils/validator');
 
 describe('validator', () => {
   it('GPU登録スキーマ: 正常系', () => {

@@ -90,7 +90,7 @@ class LightningService extends EventEmitter {
     async connectToLND(maxRetries = process.env.NODE_ENV === 'test' ? 0 : 5, notifyOnError = true) {
         const { appendAuditLog } = require('./src/utils/audit-log');
         let attempt = 0;
-        let lastError = null;
+        let _lastError = null;
         const backoff = (n) => Math.min(30000, 1000 * Math.pow(2, n)); // 最大30秒
         while (attempt <= maxRetries) {
             try {
@@ -143,7 +143,7 @@ class LightningService extends EventEmitter {
             return;
         } catch (error) {
             // エラー詳細・証明書/マカロン情報を監査ログ・logger両方に記録
-            lastError = error;
+            _lastError = error;
             const errorDetail = {
                 message: error.message,
                 stack: error.stack,
@@ -836,7 +836,7 @@ class LightningService extends EventEmitter {
         setInterval(() => {
             const now = Date.now();
             // 期限切れ請求書
-            for (const [hash, invoice] of this.invoices) {
+            for (const [_hash, invoice] of this.invoices) {
                 if (invoice.status === 'pending' && invoice.expiresAt < now) {
                     invoice.status = 'expired';
                     this.emit('invoice:expired', invoice);

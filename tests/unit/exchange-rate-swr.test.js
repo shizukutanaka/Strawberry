@@ -34,7 +34,7 @@ function coingeckoResponse(rate) {
 async function waitFor(cond, timeoutMs = 2000) {
   const start = Date.now();
   while (!cond() && Date.now() - start < timeoutMs) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await new Promise((r) => setTimeout(r, 10));
   }
 }

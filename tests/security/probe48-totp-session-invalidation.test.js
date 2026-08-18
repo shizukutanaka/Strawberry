@@ -4,8 +4,7 @@
 // 48b: Future passwordChangedAt/sessionsRevokedAt no longer bypasses session invalidation
 // 48c: Same counter tracking prevents multi-window replay (window:1 OK for clock drift)
 
-const request = require('supertest');
-const { app } = require('../../src/api/server');
+const { _app } = require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

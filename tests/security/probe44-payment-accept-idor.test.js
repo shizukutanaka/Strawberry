@@ -5,8 +5,7 @@
 // 44b-1: /accept updateIf predicate re-checks GPU ownership to close TOCTOU window
 //        between the pre-check and the write
 
-const request = require('supertest');
-const { app } = require('../../src/api/server');
+const { _app } = require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

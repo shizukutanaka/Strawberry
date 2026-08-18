@@ -12,7 +12,7 @@ const UserRepository = require('../../src/db/json/UserRepository');
 const OrderRepository = require('../../src/db/json/OrderRepository');
 
 const uniq = `p31${Date.now().toString(36)}`;
-let adminTok, providerTok, providerId, gpuId, userTok, userId;
+let adminTok, _providerTok, providerId, gpuId, userTok, _userId;
 
 beforeAll(async () => {
   const admName = `p31adm${uniq}`.slice(0, 20);
@@ -31,7 +31,7 @@ beforeAll(async () => {
   const prv = UserRepository.getByEmail(prvEmail);
   providerId = prv.id;
   UserRepository.update(providerId, { role: 'provider' });
-  providerTok = (await request(app).post('/api/v1/users/login')
+  _providerTok = (await request(app).post('/api/v1/users/login')
     .send({ email: prvEmail, password: 'Test1234!' })).body.token;
 
   const usrName = `p31usr${uniq}`.slice(0, 20);
@@ -39,7 +39,7 @@ beforeAll(async () => {
   await request(app).post('/api/v1/users/register')
     .send({ username: usrName, email: usrEmail, password: 'Test1234!' });
   const usr = UserRepository.getByEmail(usrEmail);
-  userId = usr.id;
+  _userId = usr.id;
   userTok = (await request(app).post('/api/v1/users/login')
     .send({ email: usrEmail, password: 'Test1234!' })).body.token;
 

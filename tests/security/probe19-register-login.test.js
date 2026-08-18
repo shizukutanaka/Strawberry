@@ -61,7 +61,6 @@ describe('POST /users/register: TOCTOU closed by withLock', () => {
 describe('POST /users/login: per-account brute-force lockout', () => {
   const request = require('supertest');
   const { app } = require('../../src/api/server');
-  const UserRepository = require('../../src/db/json/UserRepository');
 
   const uniq = `lockout${Date.now().toString(36)}`;
   const email = `${uniq}@example.com`;

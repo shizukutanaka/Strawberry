@@ -10,11 +10,9 @@
 const request = require('supertest');
 const { app } = require('../../src/api/server');
 const UserRepository = require('../../src/db/json/UserRepository');
-const GpuRepository = require('../../src/db/json/GpuRepository');
-const OrderRepository = require('../../src/db/json/OrderRepository');
 
 const uniq = `p32${Date.now().toString(36)}`;
-let adminTok, userTok, userId, adminId;
+let adminTok, _userTok, _userId, adminId;
 
 beforeAll(async () => {
   const admName = `p32adm${uniq}`.slice(0, 20);
@@ -32,8 +30,8 @@ beforeAll(async () => {
   await request(app).post('/api/v1/users/register')
     .send({ username: usrName, email: usrEmail, password: 'Test1234!' });
   const usr = UserRepository.getByEmail(usrEmail);
-  userId = usr.id;
-  userTok = (await request(app).post('/api/v1/users/login')
+  _userId = usr.id;
+  _userTok = (await request(app).post('/api/v1/users/login')
     .send({ email: usrEmail, password: 'Test1234!' })).body.token;
 });
 

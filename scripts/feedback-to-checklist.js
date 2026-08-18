@@ -22,7 +22,10 @@ function appendChecklist(feedbacks) {
   section += `${marker}\n`;
   // 既存の自動反映セクションを置換/追記
   if (checklist.includes(marker)) {
-    checklist = checklist.replace(new RegExp(`${marker}[\s\S]*?${marker}`), section);
+    // テンプレートリテラル内では \s / \S は無効なエスケープとして `s` / `S` に潰れるため、
+    // 旧コードの `[\s\S]` は「文字 s または S」にしかマッチせず、節の置換が働いていなかった。
+    // RegExp へ渡す文字列としてバックスラッシュを保つには `\\s\\S` と書く必要がある。
+    checklist = checklist.replace(new RegExp(`${marker}[\\s\\S]*?${marker}`), section);
   } else {
     checklist += section;
   }

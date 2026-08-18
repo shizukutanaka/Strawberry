@@ -1,6 +1,5 @@
 // DB障害時の自動フェイルオーバー・リカバリユーティリティ雛形
 const fs = require('fs');
-const path = require('path');
 
 class DBFailoverManager {
   constructor(primaryPath, backupPath) {

@@ -18,7 +18,7 @@ describe('GET /gpus/:id/schedule: status field removed from blockedSlots', () =>
       pricePerHour: 100, providerId: 'sched-prov-test',
     });
     OrderRepository.create({
-      gpuId: gpu.id, userId: 'sched-user-test', providerId: 'sched-prov-test',
+      gpuId: gpu.id, _userId: 'sched-user-test', providerId: 'sched-prov-test',
       durationMinutes: 60, status: 'active',
       pricePerHour: 100, totalPrice: 100, totalPriceJPY: 5000000,
       scheduledStartAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
@@ -51,13 +51,13 @@ describe('DELETE /me: sessionsRevokedAt invalidates sibling tokens', () => {
   const email = `${uniq}@example.com`;
   const username = uniq.slice(0, 20);
 
-  let token1, token2, userId;
+  let token1, token2, _userId;
 
   beforeAll(async () => {
     await request(app).post('/api/v1/users/register')
       .send({ username, email, password: 'Test1234!' });
     const u = UserRepository.getByEmail(email);
-    userId = u.id;
+    _userId = u.id;
 
     // Login from two "devices"
     const r1 = await request(app).post('/api/v1/users/login').send({ email, password: 'Test1234!' });

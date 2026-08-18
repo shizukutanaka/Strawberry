@@ -8,7 +8,7 @@ const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { config } = require('../../../utils/config');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { lightning, p2pNetwork, requireService } = require('../../../core/services');
+const { lightning, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const OrderRepository = require('../../../db/json/OrderRepository');
@@ -186,7 +186,7 @@ router.post('/order/:id',
     // ミューテックスなしだと並行リクエストが両方とも「未払いなし」と判断し
     // 同一注文に二重の Lightning インボイスが発行される。
     return withLock(`payment:${orderId}`, async () => {
-    const { paymentMethod, amount } = req.body;
+    const { paymentMethod } = req.body;
     logger.info(`Processing payment for order: ${orderId} (method: ${paymentMethod || 'lightning'})`);
 
     // 注文情報から金額自動取得（存在しない注文への 0 sats 請求書発行を防ぐ）

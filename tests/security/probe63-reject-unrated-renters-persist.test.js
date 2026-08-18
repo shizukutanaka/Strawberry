@@ -11,7 +11,6 @@ const request = require('supertest');
 const { app } = require('../../src/api/server');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 const UserRepository = require('../../src/db/json/UserRepository');
-const OrderRepository = require('../../src/db/json/OrderRepository');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

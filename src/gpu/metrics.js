@@ -371,7 +371,7 @@ class MetricsCollector {
     // レンタルメトリクス記録
     recordRentalMetrics(rentalData) {
         try {
-            const { gpu_model, region, price_per_hour, duration_hours, revenue, payment_method } = rentalData;
+            const { gpu_model, price_per_hour, duration_hours, revenue, payment_method } = rentalData;
 
             this.rentalMetrics.rentalRevenue.inc(
                 { gpu_model, payment_method },

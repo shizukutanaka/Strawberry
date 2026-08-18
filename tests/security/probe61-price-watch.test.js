@@ -549,7 +549,6 @@ describe('GET /api/v1/users/me/watches', () => {
   it('returns gpu:null for watches on deleted GPUs (orphan handling)', async () => {
     const WatchRepository = require('../../src/db/json/WatchRepository');
     const { v4: uuidv4 } = require('uuid');
-    const provider = await registerAndLogin('prov61null');
     const renter = await registerAndLogin('rent61null');
     const deletedGpuId = uuidv4(); // never actually exists
     // Seed a watch for a non-existent GPU directly (simulates orphan after delete)
@@ -575,7 +574,6 @@ describe('GET /api/v1/users/me/watches', () => {
 
 describe('watch resource limits and lifecycle', () => {
   const WatchRepository = require('../../src/db/json/WatchRepository');
-  const GpuRepo = require('../../src/db/json/GpuRepository');
 
   it('enforces a per-user watch cap (429) and does not persist the over-limit watch', async () => {
     const provider = await registerAndLogin('provcap');

@@ -10,7 +10,7 @@ const GpuRepository = require('../../src/db/json/GpuRepository');
 const UserRepository = require('../../src/db/json/UserRepository');
 
 const uniq = `p28${Date.now().toString(36)}`;
-let adminTok, providerTok, providerId;
+let _adminTok, providerTok, providerId;
 
 beforeAll(async () => {
   const admName = `p28adm${uniq}`.slice(0, 20);
@@ -19,7 +19,7 @@ beforeAll(async () => {
     .send({ username: admName, email: admEmail, password: 'Test1234!' });
   const admUser = UserRepository.getByEmail(admEmail);
   UserRepository.update(admUser.id, { role: 'admin' });
-  adminTok = (await request(app).post('/api/v1/users/login')
+  _adminTok = (await request(app).post('/api/v1/users/login')
     .send({ email: admEmail, password: 'Test1234!' })).body.token;
 
   const prvName = `p28prv${uniq}`.slice(0, 20);

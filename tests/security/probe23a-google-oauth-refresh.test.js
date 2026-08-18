@@ -7,7 +7,6 @@
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
-const UserRepository = require('../../src/db/json/UserRepository');
 
 // ─── 1. Google OAuth: email_verified guard ────────────────────────────────────
 describe('POST /auth/google: rejects unverified email', () => {
@@ -36,14 +35,14 @@ describe('POST /users/refresh: single-use enforcement', () => {
   const uniq = `p23a${Date.now().toString(36)}`;
   const email = `${uniq}@example.com`;
   const username = uniq.slice(0, 20);
-  let accessToken, refreshToken;
+  let _accessToken, refreshToken;
 
   beforeAll(async () => {
     await request(app).post('/api/v1/users/register')
       .send({ username, email, password: 'Test1234!' });
     const login = await request(app).post('/api/v1/users/login')
       .send({ email, password: 'Test1234!' });
-    accessToken = login.body.token;
+    _accessToken = login.body.token;
     refreshToken = login.body.refreshToken;
   });
 

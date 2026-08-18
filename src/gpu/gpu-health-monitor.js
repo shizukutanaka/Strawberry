@@ -2,7 +2,6 @@
 const { logger } = require('../utils/logger');
 const { sendNotification, NotifyType } = require('../utils/notifier');
 const { recordGpuError } = require('./gpu-error-history');
-const os = require('os');
 
 // GPU情報取得はnvidia-smi, rocm-smi, WMI等で拡張可能
 const execSync = require('child_process').execSync;

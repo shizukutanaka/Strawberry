@@ -176,7 +176,7 @@ async function sendTelegramNotify(message, { botToken, chatId }) {
 }
 
 // Email（SendGrid/Mailgun等は別途実装）
-async function sendEmailNotify(message, { to, subject = '通知', from, sendFunc }) {
+async function _sendEmailNotify(message, { to, subject = '通知', from, sendFunc }) {
   if (!sendFunc) throw new Error('メール送信関数未設定');
   return await sendFunc({ to, subject, text: message, from });
 }

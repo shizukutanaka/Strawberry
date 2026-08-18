@@ -7,8 +7,7 @@
 //        can opt into Sybil-resistant strictness with gpu.rejectUnratedRenters:true.
 // 41b-2: certChain schema accepts array (matches verifier expectation)
 
-const request = require('supertest');
-const { app } = require('../../src/api/server');
+const { _app } = require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

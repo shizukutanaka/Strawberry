@@ -854,7 +854,7 @@ describe('API Integration', () => {
     const OrderRepository = require('../src/db/json/OrderRepository');
     const UserRepository = require('../src/db/json/UserRepository');
 
-    let renterToken, providerToken, gpuId, providerId;
+    let renterToken, _providerToken, gpuId, providerId;
 
     beforeAll(async () => {
       const r = `dr${unique}`.slice(0, 28);
@@ -868,7 +868,7 @@ describe('API Integration', () => {
         .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
       const providerLogin = await request(app).post('/api/v1/users/login')
         .send({ email: `${p}@example.com`, password: 'Test1234!' });
-      providerToken = providerLogin.body.token;
+      _providerToken = providerLogin.body.token;
       providerId = providerLogin.body.user?.id || UserRepository.getByEmail(`${p}@example.com`)?.id;
 
       // GPU with a ★4 review so minRating filter can find it.
@@ -880,7 +880,7 @@ describe('API Integration', () => {
       });
       gpuId = gpu.id;
       // Seed a completed order with a ★4 review
-      const seedOrder = OrderRepository.create({
+      const _seedOrder = OrderRepository.create({
         gpuId, userId: 'seed-user', providerId, durationMinutes: 60,
         status: 'completed', totalPrice: 100, createdAt: new Date().toISOString(),
         review: { rating: 4, comment: 'Good', reviewerId: 'seed-user', reviewedAt: new Date().toISOString() }
@@ -1021,7 +1021,6 @@ describe('API Integration', () => {
       // All GPUs with reviews should appear before unrated ones
       const gpus = res.body.gpus;
       let foundRated = false;
-      let ratedAfterUnrated = false;
       for (const g of gpus) {
         if (typeof g.pricePerHour === 'number') {
           // just verify the response has GPUs
@@ -1643,14 +1642,14 @@ describe('API Integration', () => {
     const OrderRepository = require('../src/db/json/OrderRepository');
     const UserRepository = require('../src/db/json/UserRepository');
 
-    let providerToken, providerId, renterToken, renterId, lowRaterToken, lowRaterId;
+    let _providerToken, providerId, renterToken, _renterId, lowRaterToken, lowRaterId;
 
     beforeAll(async () => {
       // Provider
       const p = `rfp${unique}`.slice(0, 28);
       await request(app).post('/api/v1/users/register')
         .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
-      providerToken = (await request(app).post('/api/v1/users/login')
+      _providerToken = (await request(app).post('/api/v1/users/login')
         .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
       providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
 
@@ -1660,7 +1659,7 @@ describe('API Integration', () => {
         .send({ username: r, email: `${r}@example.com`, password: 'Test1234!' });
       renterToken = (await request(app).post('/api/v1/users/login')
         .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
-      renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
+      _renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
 
       // Low-rated renter (average ★2 from existing renter reviews)
       const l = `rfl${unique}`.slice(0, 28);
@@ -2501,7 +2500,7 @@ describe('API Integration', () => {
     const OrderRepository = require('../src/db/json/OrderRepository');
     const UserRepository = require('../src/db/json/UserRepository');
 
-    let renterToken, renterId, providerToken, providerId, gpuId;
+    let renterToken, renterId, _providerToken, providerId, gpuId;
 
     beforeAll(async () => {
       const r = `cmp${unique}`.slice(0, 28);
@@ -2514,7 +2513,7 @@ describe('API Integration', () => {
       const p = `cmpp${unique}`.slice(0, 28);
       await request(app).post('/api/v1/users/register')
         .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
-      providerToken = (await request(app).post('/api/v1/users/login')
+      _providerToken = (await request(app).post('/api/v1/users/login')
         .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
       providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
 
@@ -2637,8 +2636,8 @@ describe('API Integration', () => {
     const UserRepository = require('../src/db/json/UserRepository');
 
     let renterToken, renterId, gpuId;
-    const past = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days ago
-    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // tomorrow
+    const _past = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days ago
+    const _future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // tomorrow
 
     beforeAll(async () => {
       const r = `drr${unique}`.slice(0, 28);
@@ -2686,8 +2685,6 @@ describe('API Integration', () => {
   });
 
   describe('Bulk GPU registration POST /gpus/bulk (#52)', () => {
-    const GpuRepository = require('../src/db/json/GpuRepository');
-    const UserRepository = require('../src/db/json/UserRepository');
 
     let providerToken;
 
@@ -2821,7 +2818,6 @@ describe('API Integration', () => {
   });
 
   describe('GPU price upper bound validation (#49)', () => {
-    const UserRepository = require('../src/db/json/UserRepository');
 
     let providerToken;
 
@@ -2859,7 +2855,6 @@ describe('API Integration', () => {
   });
 
   describe('Username uniqueness check on PUT /me (#50)', () => {
-    const UserRepository = require('../src/db/json/UserRepository');
 
     let token1, token2;
     const u1name = `un1${unique}`.slice(0, 28);
@@ -3196,7 +3191,7 @@ describe('API Integration', () => {
   });
 
   describe('User order stats GET /orders/stats (#71)', () => {
-    let token, gpuId;
+    let token, _gpuId;
     const u71 = `stats71${unique}`.slice(0, 28);
 
     beforeAll(async () => {
@@ -3221,7 +3216,7 @@ describe('API Integration', () => {
           powerWatt: 200,
           pricePerHour: 0.5,
         });
-      gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
+      _gpuId = gpuRes.body.gpu && gpuRes.body.gpu.id;
     });
 
     it('GET /orders/stats requires authentication', async () => {
@@ -3531,7 +3526,7 @@ describe('API Integration', () => {
   });
 
   describe('User activity feed GET /users/me/activity (#65)', () => {
-    let token, userId, gpuId, orderId;
+    let token, _userId, gpuId, orderId;
     const u65 = `act65${unique}`.slice(0, 28);
 
     beforeAll(async () => {
@@ -4035,7 +4030,7 @@ describe('API Integration', () => {
     let token;
     let refreshToken;
     let email;
-    let userId;
+    let _userId;
 
     beforeAll(async () => {
       const u = `pwdinv${Date.now().toString(36)}`.slice(0, 18);
@@ -4049,7 +4044,7 @@ describe('API Integration', () => {
       // Fetch userId via /me
       const me = (await request(app).get('/api/v1/users/me')
         .set('Authorization', `Bearer ${token}`)).body;
-      userId = me.id;
+      _userId = me.id;
     });
 
     it('token is valid before password change', async () => {

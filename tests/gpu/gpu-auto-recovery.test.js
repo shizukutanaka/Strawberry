@@ -2,9 +2,6 @@
 // 既存バグ: OrderRepository/PaymentRepository を `{ X }` で分割代入していたため undefined になり、
 // 障害発生時に autoHandleGpuFailure 内で TypeError クラッシュしていた（リポジトリはメソッド集合を
 // 直接 export する）。default import に修正したことを検証する。
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
 
 describe('gpu-auto-recovery repository wiring', () => {
   it('imports OrderRepository/PaymentRepository as usable objects (not undefined)', () => {

@@ -4,7 +4,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { _execFileSync } = require('child_process');
 
 const lock = require('../../src/db/json/fileLock');
 

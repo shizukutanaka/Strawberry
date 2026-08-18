@@ -5,8 +5,7 @@
 // 49b: Manual payment approval wraps order-status guard + updateIf CAS in withLock
 //      to close the TOCTOU window between the order-status check and the write.
 
-const request = require('supertest');
-const { app } = require('../../src/api/server');
+const { _app } = require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

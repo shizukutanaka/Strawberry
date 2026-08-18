@@ -5,8 +5,7 @@
 // 2. POST /payment/btc creates a PaymentRecord (status:'paid') on successful settlement,
 //    so order/start/stop/dispute gates (hasPaidPayment) work correctly for btc-onchain orders.
 
-const request = require('supertest');
-const { app } = require('../../src/api/server');
+const { _app } = require('../../src/api/server');
 const fs = require('fs');
 const path = require('path');
 

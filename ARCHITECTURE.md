@@ -95,7 +95,11 @@ src/api/server.js
 skip をゼロにしたのは意図的である。以前は Prisma/SQLite 前提の 2 スイートが永久に skip され、
 存在しないデータ層を覆っているかのような見かけを作っていた。実体が無いので削除した。
 
-実行: `npm ci` → `npm test` / `npm run test:e2e`。サーバ起動確認: `npm start`
+`npm run lint`（ESLint v9 flat config）も **0 件**で通る。ルールは整形ではなく**バグを捕まえる
+ものだけ**に絞ってある（`eslint.config.js` のヘッダ参照）。以前は `eslint.config.js` が無く
+lint が常に失敗しており、品質ゲートとして機能していなかった。
+
+実行: `npm ci` → `npm test` / `npm run test:e2e` / `npm run lint`。サーバ起動確認: `npm start`
 （`http://localhost:3000` で実際に動くマーケットプレイスUI。`/metrics` はPrometheusメトリクス、
 `/swagger.html` はAPIドキュメント）。`npm run setup` は `npm ci → OpenAPI生成 → テスト`。
 

@@ -55,8 +55,7 @@ function _getOrInitPrevHash(logPath, hashPath) {
         if (process.env.NODE_ENV !== 'test' && process.env.AUDIT_LOG_FORCE_REPAIR !== '1') {
           throw new Error(`${msg} Set AUDIT_LOG_FORCE_REPAIR=1 after manual review to allow self-repair.`);
         }
-        // eslint-disable-next-line no-console
-        console.error(`${msg} Repair allowed (test mode or AUDIT_LOG_FORCE_REPAIR=1).`);
+            console.error(`${msg} Repair allowed (test mode or AUDIT_LOG_FORCE_REPAIR=1).`);
         atomicWriteString(hashPath, recomputed);
         prevHash = recomputed;
       } else {
@@ -94,8 +93,7 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     try {
       const stat = fs.statSync(logPath);
       if (stat.size >= MAX_AUDIT_LOG_BYTES) {
-        // eslint-disable-next-line no-console
-        console.error(`[audit-log] ALERT: audit log has reached size limit (${Math.round(stat.size / 1024 / 1024)}MB >= ${MAX_AUDIT_LOG_BYTES / 1024 / 1024}MB). Entry dropped: ${action}`);
+            console.error(`[audit-log] ALERT: audit log has reached size limit (${Math.round(stat.size / 1024 / 1024)}MB >= ${MAX_AUDIT_LOG_BYTES / 1024 / 1024}MB). Entry dropped: ${action}`);
         return;
       }
     } catch (_statErr) { /* file may not exist yet — that's fine */ }
@@ -107,7 +105,6 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     // 監査ログ書き込み失敗はサイレントに記録し、呼び出し元をクラッシュさせない。
     // ENOSPC（ディスクフル）の場合は特に目立つメッセージで警告。
     const isEnospc = e && (e.code === 'ENOSPC' || (e.message && e.message.includes('ENOSPC')));
-    // eslint-disable-next-line no-console
     console.error(`[audit-log] ${isEnospc ? 'CRITICAL DISK FULL — ' : ''}Failed to write audit entry: ${action}`, e && e.message);
   }
 }

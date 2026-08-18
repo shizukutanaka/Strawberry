@@ -7,7 +7,6 @@ const Mplex = require('@libp2p/mplex');
 const { Noise } = require('@chainsafe/libp2p-noise');
 const KadDHT = require('@libp2p/kad-dht');
 const Gossipsub = require('@libp2p/gossipsub');
-const Bootstrap = require('@libp2p/bootstrap');
 const PeerId = require('peer-id');
 const { logger } = require('../utils/logger');
 const crypto = require('crypto');

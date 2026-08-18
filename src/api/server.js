@@ -42,8 +42,6 @@ try {
 // チャネル数・容量・失敗数などのカスタムメトリクス
 const channelCountGauge = new client.Gauge({ name: 'lightning_channel_count', help: 'Number of Lightning channels' });
 const channelCapacityGauge = new client.Gauge({ name: 'lightning_channel_total_capacity', help: 'Total capacity of Lightning channels (sats)' });
-const paymentFailureCounter = new client.Counter({ name: 'lightning_payment_failure_total', help: 'Total number of payment failures' });
-const reconnectCounter = new client.Counter({ name: 'lightning_reconnect_total', help: 'Total number of Lightning gRPC reconnects' });
 
 // メトリクス更新関数
 async function updateLightningMetrics() {
@@ -66,9 +64,8 @@ const app = express();
 const PORT = config.server.port || 3000;
 
 // キャッシュメトリクス統合
-const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./middleware/cache');
 // サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
-const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
+const { setServices, startMonitor } = require('../core/service-monitor');
 
 // 新規為替レートAPIルート
 app.use('/api/exchange-rate', exchangeRateRouter);

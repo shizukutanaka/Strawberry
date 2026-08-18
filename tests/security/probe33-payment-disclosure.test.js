@@ -12,14 +12,14 @@ const UserRepository = require('../../src/db/json/UserRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 
 const uniq = `p33${Date.now().toString(36)}`;
-let userTok, userId, providerId, gpuId, providerTok;
+let userTok, _userId, providerId, gpuId, _providerTok;
 
 beforeAll(async () => {
   const usrName = `p33usr${uniq}`.slice(0, 20);
   const usrEmail = `${usrName}@example.com`;
   const regRes = await request(app).post('/api/v1/users/register')
     .send({ username: usrName, email: usrEmail, password: 'Test1234!' });
-  userId = regRes.body.user?.id;
+  _userId = regRes.body.user?.id;
   userTok = (await request(app).post('/api/v1/users/login')
     .send({ email: usrEmail, password: 'Test1234!' })).body.token;
 
@@ -30,7 +30,7 @@ beforeAll(async () => {
   const prv = UserRepository.getByEmail(prvEmail);
   providerId = prv.id;
   UserRepository.update(providerId, { role: 'provider' });
-  providerTok = (await request(app).post('/api/v1/users/login')
+  _providerTok = (await request(app).post('/api/v1/users/login')
     .send({ email: prvEmail, password: 'Test1234!' })).body.token;
 
   const gpu = GpuRepository.create({

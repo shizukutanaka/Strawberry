@@ -15,7 +15,7 @@ const { isSessionInvalidated } = require('../../src/api/utils/session-invalidati
 const { revoke, isRevoked } = require('../../src/api/middleware/token-denylist');
 
 const uniq = `p25${Date.now().toString(36)}`;
-let adminTok, userTok, userId, adminId;
+let _adminTok, userTok, userId, _adminId;
 
 beforeAll(async () => {
   const admName = `p25adm${uniq}`.slice(0, 20);
@@ -23,9 +23,9 @@ beforeAll(async () => {
   await request(app).post('/api/v1/users/register')
     .send({ username: admName, email: admEmail, password: 'Test1234!' });
   const admUser = UserRepository.getByEmail(admEmail);
-  adminId = admUser.id;
+  _adminId = admUser.id;
   UserRepository.update(admUser.id, { role: 'admin' });
-  adminTok = (await request(app).post('/api/v1/users/login')
+  _adminTok = (await request(app).post('/api/v1/users/login')
     .send({ email: admEmail, password: 'Test1234!' })).body.token;
 
   const usrName = `p25usr${uniq}`.slice(0, 20);

@@ -16,7 +16,6 @@ const jwtAuth = require('../../../src/api/middleware/jwt-auth');
 
 const SECRET = 'test_secret';
 const userPayload = { id: 1, role: 'admin' };
-const token = jwt.sign(userPayload, SECRET);
 
 function mockReq(token) {
   return {

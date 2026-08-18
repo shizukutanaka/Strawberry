@@ -52,7 +52,6 @@ describe('audit-log: size limit guard', () => {
     // We test via the exported function, which reads MAX_AUDIT_LOG_BYTES at call time
     // since we set the env var before requiring.
     // Since the module may be cached, we test the logic inline instead:
-    const sizeBefore = fs.statSync(logPath).size;
 
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {

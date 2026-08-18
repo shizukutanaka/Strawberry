@@ -1,5 +1,4 @@
 // OpenAPI仕様自動生成スクリプト（Joiスキーマ→OpenAPI）
-const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const j2s = require('joi-to-swagger');
@@ -66,7 +65,7 @@ function generateOpenAPISpec({ persist = false } = {}) {
 
   // schemas構造から主要pathsを自動生成（CRUD, 検索, 認証, 支払い等）
   for (const [group, groupValue] of Object.entries(schemas)) {
-    for (const [name, joiSchema] of Object.entries(normalizeGroup(group, groupValue))) {
+    for (const [name, _joiSchema] of Object.entries(normalizeGroup(group, groupValue))) {
       let path = `/` + group + (name !== 'register' && name !== 'create' && name !== 'search' ? `/${name}` : '');
       let method = 'post';
       let summary = `${group} ${name}`;

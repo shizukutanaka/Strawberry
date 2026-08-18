@@ -212,7 +212,7 @@ const { withLock } = require('../../../utils/async-lock');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
 const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
-const { v4: uuidv4 } = require('uuid');
+const { v4: _uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
 const GpuRepository = require('../../../db/json/GpuRepository');
@@ -1130,20 +1130,10 @@ router.post('/',
         chatId: process.env.TELEGRAM_CHAT_ID
       }).catch(() => {});
     }
-    // Googleカレンダー連携（非同期で実行、失敗はログのみ。googleapis は optional）
-    try {
-      const { addEventToCalendar } = require('../../../utils/google-calendar');
-      const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
-      addEventToCalendar({
-        summary: `GPU予約 #${createdOrder.id}`,
-        description: `ユーザー: ${req.user.id}\nGPU: ${gpu.name}\n合計: ${totalPrice} sat (${totalPriceJPY}円)`,
-        start: { dateTime: startDate.toISOString() },
-        end: { dateTime: endDate.toISOString() },
-      }).catch(err => logger.error('Googleカレンダー登録失敗', { error: err.message }));
-    } catch (e) {
-      logger.error('Googleカレンダー連携モジュール読込失敗', { error: e.message });
-    }
+    // Googleカレンダー連携は削除した（2026-08）。`googleapis` が依存に宣言されておらず
+    // モジュールは決してロードできない一方で、この try/catch が**注文作成のたびに**
+    // ERROR ログを吐いていた（本物のエラーが埋もれる）。動かない機能のためにログを
+    // 汚す価値は無い。必要になったら googleapis を正式に依存へ入れて書き直すこと。
     // オーダーイベントをログに記録
     logger.info(`Order created: ${createdOrder.id}`, {
       orderId: createdOrder.id,

@@ -65,7 +65,7 @@ class ExtendedGPUDetector {
             const rocmData = JSON.parse(stdout);
             
             for (const [cardId, cardInfo] of Object.entries(rocmData)) {
-                if (cardInfo.hasOwnProperty('Card series')) {
+                if (Object.prototype.hasOwnProperty.call(cardInfo, 'Card series')) {
                     const gpu = {
                         uuid: `AMD-ROCm-${cardId}`,
                         vendor: 'AMD',
@@ -122,7 +122,6 @@ class ExtendedGPUDetector {
                     try {
                         const vendor = await fs.readFile(path.join(devicePath, 'vendor'), 'utf8');
                         if (vendor.trim() === '0x1002') { // AMD vendor ID
-                            const device = await fs.readFile(path.join(devicePath, 'device'), 'utf8');
                             const gpu = await this.parseAMDGPUFromSysfs(devicePath, entry);
                             if (gpu) gpus.push(gpu);
                         }
@@ -268,7 +267,6 @@ class ExtendedGPUDetector {
                     try {
                         const vendor = await fs.readFile(path.join(devicePath, 'vendor'), 'utf8');
                         if (vendor.trim() === '0x8086') { // Intel vendor ID
-                            const device = await fs.readFile(path.join(devicePath, 'device'), 'utf8');
                             const gpu = await this.parseIntelGPUFromSysfs(devicePath, entry);
                             if (gpu) gpus.push(gpu);
                         }
@@ -464,7 +462,7 @@ class ExtendedGPUDetector {
             // ROCm経由で詳細情報取得
             if (gpu.capabilities.rocm) {
                 const deviceIndex = gpu.uuid.split('-').pop().replace(/[^0-9a-fA-F]/g, '');
-                const { stdout } = await exec(`rocm-smi -d ${deviceIndex} --showproductname`);
+                const { _stdout } = await exec(`rocm-smi -d ${deviceIndex} --showproductname`);
                 // 詳細解析
             }
         } catch {}
@@ -484,7 +482,7 @@ class ExtendedGPUDetector {
         try {
             // Level Zero経由で詳細情報取得
             if (gpu.capabilities.levelZero) {
-                const { stdout } = await exec('level-zero-info');
+                const { _stdout } = await exec('level-zero-info');
                 // 詳細解析
             }
         } catch {}
@@ -503,7 +501,7 @@ class ExtendedGPUDetector {
             // 簡易ベンチマーク実行
             if (gpu.capabilities.rocm) {
                 // rocm-bandwidth-test
-                const { stdout } = await exec('rocm-bandwidth-test --quick');
+                const { _stdout } = await exec('rocm-bandwidth-test --quick');
                 // 結果解析
             }
         } catch {}
@@ -522,7 +520,7 @@ class ExtendedGPUDetector {
             // 簡易ベンチマーク実行
             if (gpu.capabilities.levelZero) {
                 // ze_peak benchmark
-                const { stdout } = await exec('ze_peak');
+                const { _stdout } = await exec('ze_peak');
                 // 結果解析
             }
         } catch {}

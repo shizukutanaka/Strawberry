@@ -12,7 +12,6 @@ const os = require('os');
 const path = require('path');
 const { appendAuditLog, verifyAuditLogIntegrity } = require('../../src/utils/audit-log');
 
-const GLOBAL_LOG = path.join(__dirname, '../../logs/audit.log');
 
 let TMP_DIR, LOG, HASH;
 const savedEnv = {};

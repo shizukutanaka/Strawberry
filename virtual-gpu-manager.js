@@ -196,7 +196,7 @@ class VirtualGPUManager extends EventEmitter {
         // Docker GPU サポート
         if (this.platform === 'docker') {
             try {
-                const containers = await this.docker.listContainers({
+                const _containers = await this.docker.listContainers({
                     all: true,
                     filters: { label: ['com.nvidia.volume.version'] }
                 });
@@ -462,7 +462,7 @@ class VirtualGPUManager extends EventEmitter {
             const vgpuType = this.selectVGPUType(physicalGPU, config);
             
             // vGPUインスタンス作成コマンド（実際の実装はハイパーバイザー依存）
-            const result = await exec(
+            const _result = await exec(
                 `nvidia-smi vgpu -c ${vgpuType} -i ${this.getGPUIndex(physicalGPU.id)}`
             );
             

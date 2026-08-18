@@ -14,7 +14,7 @@ const UserRepository = require('../../src/db/json/UserRepository');
 const EscrowRepository = require('../../src/db/json/EscrowRepository');
 
 const uniq = `p26${Date.now().toString(36)}`;
-let adminTok, userTok, userId, adminId;
+let adminTok, userTok, userId, _adminId;
 
 beforeAll(async () => {
   const admName = `p26adm${uniq}`.slice(0, 20);
@@ -22,7 +22,7 @@ beforeAll(async () => {
   await request(app).post('/api/v1/users/register')
     .send({ username: admName, email: admEmail, password: 'Test1234!' });
   const admUser = UserRepository.getByEmail(admEmail);
-  adminId = admUser.id;
+  _adminId = admUser.id;
   UserRepository.update(admUser.id, { role: 'admin' });
   adminTok = (await request(app).post('/api/v1/users/login')
     .send({ email: admEmail, password: 'Test1234!' })).body.token;

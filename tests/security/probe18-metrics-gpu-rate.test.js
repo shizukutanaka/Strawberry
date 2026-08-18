@@ -132,7 +132,7 @@ describe('GPU delete: disputed order blocks deletion', () => {
 });
 
 describe('getBTCtoJPYRate: throws in production when cold-start all-API-fail', () => {
-  const { getBTCtoJPYRate, DEFAULT_RATE } = require('../../src/utils/exchange-rate');
+  const { DEFAULT_RATE } = require('../../src/utils/exchange-rate');
   const origEnv = process.env.NODE_ENV;
 
   afterEach(() => {

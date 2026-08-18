@@ -64,7 +64,7 @@ test.describe('dispute', () => {
   });
 
   test('admin resolves as uphold; order completes instead of cancelling', async ({ page, request, baseURL }) => {
-    const { provider, renter, admin, orderId } = await setUpActiveOrder(request, baseURL, `disp2${uniqueId()}`.slice(0, 10));
+    const { provider, admin, orderId } = await setUpActiveOrder(request, baseURL, `disp2${uniqueId()}`.slice(0, 10));
 
     await request.post(`${baseURL}/api/v1/orders/${orderId}/dispute`, {
       headers: { Authorization: `Bearer ${provider.token}` },

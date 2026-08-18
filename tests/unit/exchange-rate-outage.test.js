@@ -11,6 +11,12 @@
 //   (b) 弱っている上流をリクエスト数のまま叩き続けてレート制限を踏み、復旧を遅らせる。
 // SWR（tests/unit/exchange-rate-swr.test.js）はキャッシュが**ある**場合を守るが、
 // キャッシュが空の場合はこの経路に落ちる。
+// 冷却時間はモジュール読み込み時に決まるので、require より前に設定する。
+// 既定は全環境 30 秒。ここだけ短くして「冷却明けに再挑戦する」経路を検証する
+// （以前は製品側が NODE_ENV==='test' で 200ms にしており、その副作用で E2E の
+// サーバが上流障害時に毎リクエスト 1.2〜1.9 秒待つ状態になっていた）。
+process.env.EXCHANGE_RATE_COOLDOWN_MS = '200';
+
 jest.mock('axios');
 const axios = require('axios');
 

@@ -130,7 +130,17 @@ function _sharedFetch() {
   return _coldFetchInFlight;
 }
 
-const FAILURE_COOLDOWN_MS = process.env.NODE_ENV === 'test' ? 200 : 30 * 1000;
+// 冷却時間は**全環境で同じ**にする。以前ここだけ NODE_ENV==='test' で 200ms に
+// していたが、それは「冷却明けに再挑戦する」ユニットテストを速く回すためだけの値で、
+// 副作用として E2E のサーバが**上流が死んでいる間ずっと、200ms より間隔の空いた
+// リクエストのたびに 4 本の API を順に叩いて 1.2〜1.9 秒待つ**状態になっていた。
+// 実測で毎回 1.4s / 1.6s / 1.9s / 1.2s。重い UI 通しテストが 5 秒の要素待ちを
+// 断続的に超えていた原因がこれ。テストの都合で走っている系の挙動を悪くするのは
+// 本末転倒なので、値は env で上書きできるようにし、テスト側が明示的に短くする。
+const FAILURE_COOLDOWN_MS = (() => {
+  const v = Number(process.env.EXCHANGE_RATE_COOLDOWN_MS);
+  return Number.isFinite(v) && v >= 0 ? v : 30 * 1000;
+})();
 let _cooldownUntil = 0;
 function _inCooldown(now) { return now < _cooldownUntil; }
 function _startCooldown(now) { _cooldownUntil = now + FAILURE_COOLDOWN_MS; }

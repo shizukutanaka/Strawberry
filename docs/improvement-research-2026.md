@@ -1,5 +1,26 @@
 # Strawberry 改善点リサーチ（同種ソフト・arXiv 参照 / 2026-06）
 
+---
+
+> ## ⚠️ 2026-08 デッドコード削除の注記
+>
+> 本書が「〜の基盤あり」として挙げているモジュールのうち、以下は**どこからも require されて
+> おらず到達不能**だったため削除した（実際のモジュールグラフで確認）。改善案を実装する際は
+> これらを拡張するのではなく、新規に書くこと。「基盤がある」という記述は当てにしないこと。
+>
+> `src/core/market-pricing-engine.js` / `src/utils/sla-tracker.js` / `src/api/sla.js` /
+> `src/utils/ai-benchmark.js` / `src/gpu/gpu-metrics.js` / `src/utils/anomaly-detector.js` /
+> `src/core/auto-performance-optimizer.js` / `src/utils/gpu-monitor.js` /
+> `src/gpu/gpu-liveness-monitor.js` / `src/utils/gpu-price-compare.js` /
+> `src/utils/perf-auto-optimize.js` / `src/utils/payment-reminder.js` /
+> `src/utils/backup.js` / `src/utils/cloud-storage.js` / `src/utils/resilient-notify.js` /
+> `src/security-audit.js` / `src/cli.js` / `src/p2p-{gpu,order,sync,notify,health,node}.js` /
+> `src/api/sandbox-apikey.js` / `src/web/` / `src/db/migrations/`
+>
+> なお SLA 自動終了・GPU 利用率収集・レピュテーションは**別の実装**（`src/utils/order-expiry.js`,
+> `src/verification/utilization-collector.js`, `src/reputation/*`）で実際に稼働している。
+
+
 本書は、Strawberry（P2P GPU マーケットプレイス＋BTC Lightning 決済）の**実コードの弱点**を、
 同種ソフトウェア（Akash / Render / io.net / Golem / Vast.ai / Bittensor / Gensyn / Prime Intellect）
 および **arXiv 論文**に対応づけて洗い出したもの。各項目は「現状(コード) → 同種ソフト → 参考研究 → 推奨アクション → 優先度」で記載する。

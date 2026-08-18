@@ -87,22 +87,10 @@ describe('notify modules disable redirect following in their shared axios config
     expect(src).toMatch(/AXIOS_SAFE_CONFIG\s*=\s*Object\.freeze\(\{[\s\S]*maxRedirects:\s*0[\s\S]*\}\)/);
   });
 
-  it('resilient-notify.js SAFE_CONFIG sets maxRedirects:0', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/resilient-notify.js'), 'utf-8'
-    );
-    expect(src).toMatch(/SAFE_CONFIG\s*=\s*Object\.freeze\(\{[\s\S]*maxRedirects:\s*0[\s\S]*\}\)/);
-  });
-
-  it('resilient-notify.js applies SAFE_CONFIG to every axios.post call', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/resilient-notify.js'), 'utf-8'
-    );
-    // Each of the 4 channel branches must reference SAFE_CONFIG
-    const matches = src.match(/SAFE_CONFIG/g) || [];
-    // 1 definition + at least 4 usages
-    expect(matches.length).toBeGreaterThanOrEqual(5);
-  });
+  // （`src/utils/resilient-notify.js` を検証していたケースは削除。モジュール自体が
+  //   どこからも require されておらず、到達不能なコードの堅牢性を検証していた。
+  //   2026-08 のデッドコード掃除でモジュールごと削除。live な通知経路である
+  //   notifier.js / webhook.js の検証はそのまま残している。）
 });
 
 // ── Integration: notifier send funcs reject a redirecting webhook ───────────────

@@ -365,10 +365,108 @@ export async function render(container, params) {
     pollPaymentStatus(box.parentElement, paymentRes.paymentId, order);
   }
 
+
+  // GPU アクセスの受け渡し。プロダクトが売っているものが実際に届く唯一の場所。
+  // 借り手には接続情報を、プロバイダには投入フォームを出す。
+  function renderAccessSection(body, order, isRenter, isProvider) {
+    const box = el('div', { class: 'card stack access-card' });
+    body.appendChild(box);
+
+    if (isRenter) {
+      box.replaceChildren(el('p', { class: 'muted' }, '接続情報を確認しています…'));
+      api.getAccess(order.id).then(({ delivered, access }) => {
+        if (!delivered) {
+          box.replaceChildren(
+            el('h3', { style: 'margin:0' }, 'GPUへの接続'),
+            el('div', { class: 'banner banner-info' },
+              'プロバイダーがまだ接続情報を登録していません。登録されるとここに表示され、通知が届きます。'),
+          );
+          return;
+        }
+        box.replaceChildren(
+          el('h3', { style: 'margin:0' }, 'GPUへの接続'),
+          specLine('方式', access.method),
+          specLine('接続先', access.endpoint),
+          access.username ? specLine('ユーザー名', access.username) : null,
+          access.credential ? el('div', { class: 'stack', style: 'gap:4px' },
+            el('label', { class: 'muted', style: 'font-size:0.85rem' }, '認証情報'),
+            el('textarea', { rows: '4', readOnly: true, value: access.credential, class: 'access-credential' }),
+          ) : null,
+          access.instructions ? el('p', { class: 'muted', style: 'font-size:0.85rem;margin:0' }, access.instructions) : null,
+        );
+      }).catch((err) => {
+        const msg = err instanceof ApiError && err.status === 404
+          ? 'プロバイダーがまだ接続情報を登録していません。登録されるとここに表示され、通知が届きます。'
+          : (err instanceof ApiError ? err.message : '接続情報の取得に失敗しました');
+        box.replaceChildren(
+          el('h3', { style: 'margin:0' }, 'GPUへの接続'),
+          el('div', { class: 'banner banner-info' }, msg),
+        );
+      });
+      return;
+    }
+
+    if (isProvider) {
+      const delivered = order.accessDelivery && order.accessDelivery.delivered;
+      const methodSel = el('select', {},
+        ...['ssh', 'jupyter', 'http', 'vnc', 'other'].map((m) =>
+          el('option', { value: m, selected: delivered && order.accessDelivery.method === m }, m)),
+      );
+      const endpointInput = el('input', { type: 'text', placeholder: '例: gpu1.example.com:2222', value: delivered ? order.accessDelivery.endpoint : '' });
+      const userInput = el('input', { type: 'text', placeholder: '例: renter', value: delivered && order.accessDelivery.username ? order.accessDelivery.username : '' });
+      const credInput = el('textarea', { rows: '3', placeholder: 'パスワード / SSH秘密鍵 / トークン（保存時に暗号化されます）' });
+      const instrInput = el('textarea', { rows: '2', placeholder: '接続手順の補足（任意）' });
+      const status = el('p', { class: 'muted', style: 'font-size:0.85rem;margin:0' },
+        delivered ? `登録済み: ${order.accessDelivery.endpoint}（借り手のみ閲覧できます）` : 'まだ登録されていません。借り手は接続できません。');
+
+      const submit = el('button', {
+        class: 'btn btn-primary',
+        onClick: async () => {
+          submit.disabled = true;
+          try {
+            await api.deliverAccess(order.id, {
+              method: methodSel.value,
+              endpoint: endpointInput.value,
+              username: userInput.value || undefined,
+              credential: credInput.value || undefined,
+              instructions: instrInput.value || undefined,
+            });
+            toast('接続情報を借り手に渡しました', 'success');
+            await load();
+          } catch (err) {
+            toast(err instanceof ApiError ? err.message : '登録に失敗しました', 'error');
+            submit.disabled = false;
+          }
+        },
+      }, delivered ? '接続情報を更新する' : '接続情報を借り手に渡す');
+
+      box.replaceChildren(
+        el('h3', { style: 'margin:0' }, 'GPUへの接続情報を渡す'),
+        el('p', { class: 'muted', style: 'font-size:0.85rem;margin:0' },
+          'この GPU はあなたのマシン上にあるため、接続手段を用意できるのはあなただけです。'
+          + '入力した認証情報は暗号化して保存され、支払い済みのこの注文の借り手だけが閲覧でき、'
+          + 'レンタル終了時に破棄されます。'),
+        status,
+        el('div', { class: 'field' }, el('label', {}, '方式'), methodSel),
+        el('div', { class: 'field' }, el('label', {}, '接続先（ホスト:ポート または URL）'), endpointInput),
+        el('div', { class: 'field' }, el('label', {}, 'ユーザー名（任意）'), userInput),
+        el('div', { class: 'field' }, el('label', {}, '認証情報（任意）'), credInput),
+        el('div', { class: 'field' }, el('label', {}, '補足（任意）'), instrInput),
+        submit,
+      );
+    }
+  }
+
+  function specLine(label, value) {
+    return el('div', { class: 'row-between', style: 'padding:2px 0' },
+      el('span', { class: 'muted' }, label), el('span', { style: 'word-break:break-all' }, String(value)));
+  }
+
   // Spot 注文が中断通知を受けている状態。猶予窓の残り時間を秒単位で出すのがこの画面の
   // 存在意義そのもの（Bamboo arXiv:2204.12013 — 猶予を使い切れないと借り手は計算を丸ごと
   // 捨てることになる）。カウントダウンは「あと何秒で保存を終える必要があるか」を示す。
   function renderPreempting(body, order, isRenter) {
+    renderAccessSection(body, order, isRenter, false);
     const deadlineMs = order.preemptionDeadlineAt ? new Date(order.preemptionDeadlineAt).getTime() : null;
     const countdown = el('p', { class: 'countdown', style: 'font-size:1.2rem;font-weight:700;margin:0' });
 
@@ -409,6 +507,7 @@ export async function render(container, params) {
   }
 
   function renderActive(body, order, isRenter, isProvider, isAdmin) {
+    renderAccessSection(body, order, isRenter, isProvider);
     const startedAt = order.startedAt ? new Date(order.startedAt).getTime() : Date.now();
     const totalMs = order.durationMinutes * 60 * 1000;
     const statusLine = el('p', {});

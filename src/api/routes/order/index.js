@@ -205,6 +205,8 @@ const { logger } = require('../../../utils/logger');
 const { appendAuditLog } = require('../../../utils/audit-log');
 // 稼働中の GPU 利用率サンプル収集（ゼロ負荷課金の検出。研究ドキュメント §1）
 const utilizationCollector = require('../../../verification/utilization-collector');
+// GPU アクセスの受け渡し（プロバイダが接続情報を投入し、サーバが仲介する）
+const accessDelivery = require('../../../marketplace/access-delivery');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
 
@@ -371,6 +373,9 @@ router.get('/',
         // with GET /users/:id/renter-profile to identify who left a specific review.
         if (o.review) o.review = { ...o.review, reviewerId: undefined };
         if (o.renterReview) o.renterReview = { ...o.renterReview, reviewerId: undefined };
+        // 接続情報は一覧に載せない。暗号文であっても配る理由が無いし、endpoint/username も
+        // 「配信済みか」以上の情報を一覧で流す必要はない（受け取りは GET /:id/access のみ）。
+        o.accessDelivery = accessDelivery.summarize(order.accessDelivery);
         return o;
       });
       res.json({
@@ -600,6 +605,9 @@ router.get('/:id',
           ...computeOrderPricing(order, rateInfo),
           renterProfile: { ratingAverage: renterRatingAverage, reviewCount: renterReviewCount },
           timeline,
+          // `...order` の生スプレッドで封をした credential が流れないよう、必ず要約で上書きする。
+          // 実際の受け取りは GET /:id/access（借り手のみ・支払い済み・稼働中）に限定する。
+          accessDelivery: accessDelivery.summarize(order.accessDelivery),
         },
         exchangeRateTimestamp: rateInfo.timestamp
       });
@@ -1865,6 +1873,115 @@ router.post('/:id/start',
 );
 
 // オーダー実行終了 (認証必須)
+
+// --- GPU アクセスの受け渡し（プロダクトの中核） ---
+//
+// サーバは他人のマシンに権限を持たないので GPU を「割り当てる」ことはできない。接続手段を
+// 作れるのは GPU を物理的に持っているプロバイダだけである。したがってプロバイダが接続情報を
+// 投入し、サーバは**支払い済みで稼働中の借り手にだけ**渡す仲介に徹する。
+// 設計の詳細は src/marketplace/access-delivery.js のヘッダ。
+
+// プロバイダが接続情報を投入する（自分が提供している稼働中の注文のみ）
+router.post('/:id/access',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const orderId = req.params.id;
+    return withLock(`order:${orderId}`, async () => {
+      const order = OrderRepository.getById(orderId);
+      if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+      const isProvider = order.providerId && order.providerId === req.user.id;
+      if (!isProvider && req.user.role !== 'admin') {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider can deliver access for this order', 403);
+      }
+      // 稼働していない注文に接続情報を置いても意味が無く、借り手に渡す条件も満たさない。
+      if (order.status !== 'active' && order.status !== 'preempting') {
+        throw new APIError(ErrorTypes.VALIDATION, 'Access can only be delivered for an active rental', 400,
+          { details: `Current status: ${order.status}` });
+      }
+
+      let sealed;
+      try {
+        sealed = accessDelivery.seal(req.body || {});
+      } catch (e) {
+        throw new APIError(ErrorTypes.VALIDATION, e.message, 400);
+      }
+
+      const updated = OrderRepository.update(orderId, { accessDelivery: sealed });
+      if (!updated) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+      // 監査ログには接続先だけを残す。credential は絶対に書かない（ログは平文で残るため）。
+      appendAuditLog('order_access_delivered', {
+        orderId, providerId: order.providerId, method: sealed.method, endpoint: sealed.endpoint,
+      }, req.user.id);
+
+      try {
+        const { notifyUser } = require('../../../utils/user-notify');
+        notifyUser(order.userId, 'order_access_delivered',
+          `【Strawberry】GPUの接続情報が届きました\n注文: #${orderId}`, {});
+      } catch (e) {
+        logger.warn(`access delivery notice failed for order ${orderId}: ${e.message}`);
+      }
+
+      logger.info(`Access delivered for order ${orderId} (${sealed.method})`);
+      return res.status(201).json({ message: 'Access delivered', accessDelivery: accessDelivery.summarize(sealed) });
+    });
+  })
+);
+
+// 借り手が接続情報を受け取る（支払い済み・稼働中のあいだだけ）
+router.get('/:id/access',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const orderId = req.params.id;
+    const order = OrderRepository.getById(orderId);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    const isRenter = order.userId === req.user.id;
+    if (!isRenter && req.user.role !== 'admin') {
+      // プロバイダにも返さない。自分が投入した値であっても、復号して配る必要が無い
+      // （投入内容の確認は GET /:id の accessDelivery 要約で足りる）。
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the renter of this order can retrieve the access details', 403);
+    }
+    if (order.status !== 'active' && order.status !== 'preempting') {
+      throw new APIError(ErrorTypes.VALIDATION, 'Access is only available while the rental is running', 409,
+        { details: `Current status: ${order.status}` });
+    }
+    // 未払いの注文で接続情報を渡すと、支払わずに GPU を使えてしまう。
+    if (req.user.role !== 'admin') {
+      const PaymentRepository = require('../../../db/json/PaymentRepository');
+      const paid = (PaymentRepository.getByOrderId(orderId) || []).some((p) => p.status === 'paid');
+      if (!paid) {
+        throw new APIError(ErrorTypes.FORBIDDEN,
+          'Cannot retrieve access: no confirmed payment found for this order', 402);
+      }
+    }
+    if (!order.accessDelivery) {
+      // 「まだ配信されていない」は稼働中レンタルの**正常な状態**であってエラーではない。
+      // 404 で返すとブラウザのコンソールにエラーとして残り、監視・E2E のノイズになる
+      // （実際 order-lifecycle の E2E がこれを回帰として検出した）。
+      return res.json({
+        delivered: false,
+        access: null,
+        message: 'The provider has not delivered access details for this rental yet',
+      });
+    }
+
+    let opened;
+    try {
+      opened = accessDelivery.open(order.accessDelivery);
+    } catch (e) {
+      logger.error(`access decrypt failed for order ${orderId}: ${e.message}`);
+      throw new APIError(ErrorTypes.INTERNAL, 'Stored access details could not be decrypted', 500);
+    }
+    // 受け渡しは監査対象。誰がいつ受け取ったかを残す（credential は書かない）。
+    appendAuditLog('order_access_retrieved', { orderId, method: opened.method }, req.user.id);
+    return res.json({ delivered: true, access: opened });
+  })
+);
+
 // Spot（中断許容）注文の中断通知。プロバイダ都合で稼働中の spot 注文を打ち切る。
 //
 // なぜ /stop ではなくこの専用経路なのか: /stop はプロバイダに禁止されている。許すと
@@ -2040,6 +2157,10 @@ router.post('/:id/stop',
       // preventing double-increment if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
       const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
+      // レンタル終了時に接続情報を破棄する。終わった注文の SSH 鍵を保持し続ける理由は無く、
+      // 保持期間が長いほど data/orders.json 流出時の被害が広がる（保存は暗号化済みだが、
+      // そもそも持たないのが一番安全）。
+      if (order.accessDelivery) updateData.accessDelivery = null;
       // 判定できたときだけ記録する（no_data を保存すると「検証した結果シロ」と読めてしまう）
       if (utilizationAudit.verdict !== 'no_data') updateData.utilizationAudit = utilizationAudit;
       if (isPreempting) {

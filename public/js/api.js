@@ -90,6 +90,9 @@ export const api = {
     body: tier && tier !== 'ondemand' ? { gpuId, durationMinutes, tier } : { gpuId, durationMinutes },
   }),
   preemptOrder: (orderId) => request(`/api/v1/orders/${orderId}/preempt`, { method: 'POST' }),
+  // GPU アクセスの受け渡し（プロバイダが投入 / 借り手が受け取る）
+  deliverAccess: (orderId, body) => request(`/api/v1/orders/${orderId}/access`, { method: 'POST', body }),
+  getAccess: (orderId) => request(`/api/v1/orders/${orderId}/access`),
   acceptOrder: (id) => request(`/api/v1/orders/${id}/accept`, { method: 'POST' }),
   rejectOrder: (id) => request(`/api/v1/orders/${id}/reject`, { method: 'POST' }),
   startOrder: (id) => request(`/api/v1/orders/${id}/start`, { method: 'POST' }),

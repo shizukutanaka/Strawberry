@@ -256,6 +256,8 @@ function finalizePreemptedOrders() {
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'preempting', {
       status: 'completed',
       terminationReason: 'preempted',
+      // 終了した注文の接続情報は保持しない（/stop 経路と同じ扱い）
+      accessDelivery: null,
       preemptedAt: now,
       stoppedAt: now,
       completedAt: now,

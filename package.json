@@ -36,12 +36,8 @@
     "alert-overdue": "node scripts/alert-overdue.js",
     "alert-overdue-high": "node scripts/alert-overdue-high.js",
     "alert-kpi-trend": "node scripts/alert-kpi-trend.js",
-    "prisma": "prisma",
-    "prisma-generate": "prisma generate",
-    "prisma-migrate": "prisma migrate dev --name init",
-    "prisma-studio": "prisma studio",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
-    "setup": "npm ci && npm run prisma-migrate && npm run openapi-gen && npm test"
+    "setup": "npm ci && npm run openapi-gen && npm test"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.78.0",

@@ -23,8 +23,8 @@
   名乗る 24GB 出品）は詳細ページで警告として開示する。
   厳格CSP（`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。`/swagger.html`
   も同様の理由で CDN+インライン版から同一オリジンの自前ビューア（`public/js/docs.js`）に
-  **GPU接続情報の実配信は実装済（2026-08）**: 稼働中の注文の画面で、プロバイダは接続情報を
-  投入でき、支払い済みの借り手はそれを受け取れる（`.access-card`）。
+  置換済み。**GPU接続情報の実配信は実装済（2026-08）**: 稼働中の注文の画面で、プロバイダは
+  接続情報を投入でき、支払い済みの借り手はそれを受け取れる（`.access-card`）。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
   `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
   （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`
@@ -89,24 +89,25 @@ src/api/server.js
 
 ## テスト状況（正直版）
 
-`npm test`（Jest）は完走する。**約半数のスイートが green**（`tests/security/*` 全件、
-API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）。
-残りの失敗は**本ブランチの回帰ではなく**、以下いずれかの既存（aspirational）テスト：
+`npm test`（Jest）は **147 スイート / 1363 テスト すべて green、skip ゼロ**（2026-08）。
+`npm run test:e2e`（Playwright）は **34 テスト green**で、実ブラウザで全行程を通している。
 
-- 未実装エンドポイントを叩く（`/notification/create` 等。JWT で 401 になる）。
-- 実装と異なる旧 API/スキーマを参照（`validator`・`logger`・`jwt-auth` 等）。
-- 実 DB/Prisma 前提（`prisma-basic`・`migration-rollback` は未提供時スキップ化済み）。
+skip をゼロにしたのは意図的である。以前は Prisma/SQLite 前提の 2 スイートが永久に skip され、
+存在しないデータ層を覆っているかのような見かけを作っていた。実体が無いので削除した。
 
-実行: `npm install` → `npm test`。サーバ起動確認: `npm start`（`http://localhost:3000` で
-実際に動くマーケットプレイスUIが表示される。`/metrics` はPrometheusメトリクス、
-`/swagger.html` はAPIドキュメント）。
+実行: `npm ci` → `npm test` / `npm run test:e2e`。サーバ起動確認: `npm start`
+（`http://localhost:3000` で実際に動くマーケットプレイスUI。`/metrics` はPrometheusメトリクス、
+`/swagger.html` はAPIドキュメント）。`npm run setup` は `npm ci → OpenAPI生成 → テスト`。
 
 ## フォローアップ（未対応・推奨順）
 
 1. `p2p-network` の有効化（libp2p ESM 対応 or 代替実装）。他3サービスは実機(Docker/k8s/LND)での結合検証。
-2. データ層を一本化（当面 JSON 維持、将来 Prisma へ。`prisma/schema.prisma` は User/Feedback/Task
-   のみで GPU/Order/Payment/Escrow 等の実ドメインモデルを欠いており、移行には未着手のスキーマ
-   設計から必要）。
+2. データ層は **JSON 単一**に確定（2026-08）。`prisma/schema.prisma` は User/Feedback/Task のみで
+   GPU/Order/Payment/Escrow 等の実ドメインモデルを欠き、`@prisma/client` は依存にすら
+   入っていなかった（＝`npm run setup` が必ず失敗していた）。実体の無い「将来の移行先」を
+   残しておくと三重化の錯覚が続くため、`prisma/` と永久 skip の Prisma/SQLite テスト2本を
+   削除し、npm scripts からも prisma を外した。将来 RDB へ移すなら、その時点で実ドメインに
+   合わせたスキーマを新規に設計すること。
 3. サービスの DI/シングルトン統一、孤立 `*-fixed.js` の削除。
 4. ~~Electron の本実装 or 撤去判断~~ → **解決済み（2026-07）**: Electron 断片は削除し、
    代わりに `public/` の実フロントエンド（上記）を新規実装。デスクトップアプリが必要になれば

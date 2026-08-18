@@ -627,6 +627,29 @@ router.post('/admin/payouts/:id/reject',
   })
 );
 
+// 運営: 帳簿の突き合わせ。「今いくら預かっていて、いくら払う義務があるか」と、
+// 保存則・取りこぼしゼロの 2 つの不変条件を返す（src/payments/reconciliation.js）。
+// カストディアル運用では他人の金を預かるため、これを機械的に確認できることが前提。
+router.get('/admin/reconciliation',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const report = require('../../../payments/reconciliation').reconcile();
+    const healthy = report.invariants.conservationHolds
+      && report.invariants.noUncreditedTerminalOrders
+      && report.invariants.noOrphanCredits;
+    if (!healthy) {
+      // 帳簿の不一致は運用者が必ず見るべき事象なので監査ログにも残す。
+      appendAuditLog('ledger_reconciliation_mismatch', {
+        discrepancies: report.discrepancies.length,
+        uncreditedTerminal: report.uncreditedTerminal.length,
+        orphanCredits: report.orphanCredits.length,
+      }, req.user.id);
+    }
+    res.json({ healthy, ...report });
+  })
+);
+
 // 運営: 収益計上を即時実行する（定期ジョブを待たずに確認するため）
 router.post('/admin/earnings/sweep',
   authenticateJWT,

@@ -264,6 +264,31 @@ describe('a dispute resolved for the renter actually refunds them', () => {
   });
 });
 
+describe('GET /payments/admin/reconciliation', () => {
+  it('is admin-only', async () => {
+    expect((await asProvider(request(app).get('/api/v1/payments/admin/reconciliation'))).status).toBe(403);
+    expect((await request(app).get('/api/v1/payments/admin/reconciliation')).status).toBe(401);
+  });
+
+  it('reports the books as balanced after the sweep has run', async () => {
+    await asAdmin(request(app).post('/api/v1/payments/admin/earnings/sweep'));
+    const res = await asAdmin(request(app).get('/api/v1/payments/admin/reconciliation'));
+    expect(res.status).toBe(200);
+    expect(res.body.discrepancies).toEqual([]);
+    expect(res.body.invariants.conservationHolds).toBe(true);
+    expect(res.body.invariants.noUncreditedTerminalOrders).toBe(true);
+    expect(res.body.healthy).toBe(true);
+  });
+
+  it('reports what the operator is still holding on behalf of others', async () => {
+    const res = await asAdmin(request(app).get('/api/v1/payments/admin/reconciliation'));
+    const t = res.body.totals;
+    expect(t.outstandingLiabilitySats)
+      .toBe(t.providerEarnedSats + t.renterRefundedSats - t.payoutPaidSats);
+    expect(t.renterPaidSats).toBeGreaterThan(0);
+  });
+});
+
 describe('an unpaid order never credits anyone', () => {
   it('leaves the ledger untouched', async () => {
     const gpu = GpuRepository.create({

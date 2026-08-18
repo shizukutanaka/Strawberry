@@ -47,7 +47,30 @@ const KINDS = Object.freeze(['earning', 'refund', 'payout', 'adjustment']);
 const PAYOUT_STATUSES = Object.freeze(['requested', 'paid', 'rejected']);
 
 // 収益計上の対象になる注文ステータス。
-const CREDITABLE_ORDER_STATUSES = Object.freeze(new Set(['completed']));
+//
+// **completed だけでは足りない。** この製品で異常終了はすべて 'cancelled' に集約され、
+// 区別は cancelReason が持つ。そして cancelled になる経路のうち複数は「借り手が既に
+// 払ったあと」に起きる（係争の返金裁定・マッチ期限切れ・借り手のキャンセル・
+// プロバイダの拒否）。completed しか見ていなかったため、
+// **係争で借り手が勝っても 1 sat も返らず、運営が全額持ったままだった**
+// （実サーバで確認: 60,000 sats を払った注文が refund 裁定を受け、
+// 掃き出しは credited=0、借り手の残高は 0 のまま）。
+const CREDITABLE_ORDER_STATUSES = Object.freeze(new Set(['completed', 'cancelled']));
+
+// キャンセルのうち「実際に稼働していた」もの。ここだけ実提供量で按分し、
+// それ以外のキャンセルは提供ゼロ＝全額返金として扱う。
+// 最低課金の床（既定 10%）も効かせない: 床は*借り手都合の即時解約*を想定した
+// セットアップ費であって、係争で借り手が勝った注文やプロバイダが断った注文に
+// 課してよいものではない。
+const DELIVERED_CANCEL_REASONS = Object.freeze(new Set(['active_timeout']));
+
+// 借り手に全額返す（提供が無かった）と判断するキャンセル理由。
+// 明示的に列挙し、未知の理由が増えたときは**全額返金側**に倒す
+// （知らない理由で課金を続けるより、返しすぎる方が安全）。
+const FULL_REFUND_CANCEL_REASONS = Object.freeze(new Set([
+  'dispute_resolved_refund', 'dispute_auto_resolved_refund',
+  'match_timeout', 'user_cancelled', 'provider_rejected', 'payment_timeout',
+]));
 
 function num(v, def = 0) {
   return typeof v === 'number' && Number.isFinite(v) ? v : def;
@@ -61,6 +84,11 @@ function num(v, def = 0) {
  * @returns {{ratio:number, source:string}}
  */
 function deliveredRatioOf(order) {
+  // キャンセルされた注文は「最後まで走った」の推定を絶対に適用しない。
+  // 稼働実績があるのは active_timeout だけで、それも計測値がある場合に限る。
+  if (order.status === 'cancelled' && !DELIVERED_CANCEL_REASONS.has(order.cancelReason)) {
+    return { ratio: 0, source: `cancelled:${order.cancelReason || 'unspecified'}` };
+  }
   if (typeof order.deliveredRatio === 'number' && Number.isFinite(order.deliveredRatio)) {
     return { ratio: Math.max(0, Math.min(1, order.deliveredRatio)), source: 'order.deliveredRatio' };
   }
@@ -69,7 +97,10 @@ function deliveredRatioOf(order) {
   if (totalSeconds > 0 && Number.isFinite(used)) {
     return { ratio: Math.max(0, Math.min(1, used / totalSeconds)), source: 'usageStats' };
   }
-  if (!order.terminationReason) return { ratio: 1, source: 'assumed_full_completion' };
+  // 通常完了で計測だけが落ちた場合に限り全量とみなす。
+  if (order.status === 'completed' && !order.terminationReason) {
+    return { ratio: 1, source: 'assumed_full_completion' };
+  }
   return { ratio: 0, source: 'unmeasured_abnormal_termination' };
 }
 
@@ -112,9 +143,13 @@ function settlementForOrder(order, deps = {}) {
 
   const { ratio, source } = deliveredRatioOf(order);
   const slaUptimePct = order.slaBreach ? Math.round(ratio * 100) : 100;
-  // プロバイダ都合の終了（中断・ハートビート途絶）に最低課金の床を効かせない。
-  // 「受注 → 即中断 → 最低課金だけ回収」を成立させないため（spot-tier と同じ方針）。
-  const providerFault = order.terminationReason === 'preempted' || order.slaBreach === true;
+  // プロバイダ都合の終了（中断・ハートビート途絶）と、完了しなかったキャンセルには
+  // 最低課金の床を効かせない。床は*借り手都合の即時解約*を想定したセットアップ費で、
+  // 「受注 → 即中断 → 最低課金だけ回収」や「係争で負けても 10% は取る」を
+  // 成立させてはいけない。
+  const providerFault = order.terminationReason === 'preempted'
+    || order.slaBreach === true
+    || order.status === 'cancelled';
   const s = computeSettlement(
     { totalSats, deliveredRatio: ratio, slaUptimePct, feeRate: FEE_RATE },
     providerFault ? { minChargeRatio: 0 } : {},
@@ -288,6 +323,8 @@ function pendingPayouts(deps = {}) {
 
 module.exports = {
   KINDS,
+  DELIVERED_CANCEL_REASONS,
+  FULL_REFUND_CANCEL_REASONS,
   PAYOUT_STATUSES,
   MIN_PAYOUT_SATS,
   CREDITABLE_ORDER_STATUSES,

@@ -180,6 +180,94 @@ describe('creditOrder', () => {
   });
 });
 
+describe('cancelled orders that were already paid', () => {
+  // 実サーバで見つけた最悪のバグ: 借り手が 60,000 sats を払った注文が係争の
+  // 返金裁定を受けても、掃き出しは credited=0 で借り手の残高は 0 のままだった。
+  // 異常終了はすべて 'cancelled' に集約され cancelReason で区別されるのに、
+  // 台帳が 'completed' しか見ていなかったため、運営が全額持ったままになる。
+  function ctx(order) {
+    const ledger = memLedger();
+    return { ledger, d: deps({ ledger, payments: { o1: [{ status: 'paid', amount: 60000 }] } }), order };
+  }
+
+  const CANCELLED = { ...ORDER, status: 'cancelled' };
+
+  it('refunds the renter in full when a dispute is resolved in their favour', () => {
+    const { ledger, d } = ctx();
+    const res = payoutLedger.creditOrder({ ...CANCELLED, cancelReason: 'dispute_resolved_refund' }, d);
+    expect(res.credited).toBe(true);
+    const refund = res.entries.find((e) => e.kind === 'refund');
+    expect(refund).toMatchObject({ userId: 'renter1', amountSats: 60000 });
+    // 貸し手には 1 sat も渡らない（返金裁定なので当然）
+    expect(res.entries.find((e) => e.kind === 'earning')).toBeUndefined();
+    expect(ledger.rows.filter((r) => r.kind === 'earning')).toHaveLength(0);
+  });
+
+  it('refunds in full for the auto-resolved dispute path too', () => {
+    const { d } = ctx();
+    const res = payoutLedger.creditOrder({ ...CANCELLED, cancelReason: 'dispute_auto_resolved_refund' }, d);
+    expect(res.entries.find((e) => e.kind === 'refund').amountSats).toBe(60000);
+  });
+
+  it.each(['match_timeout', 'user_cancelled', 'provider_rejected'])(
+    'refunds in full when the order was cancelled as %s', (cancelReason) => {
+      const { d } = ctx();
+      const res = payoutLedger.creditOrder({ ...CANCELLED, cancelReason }, d);
+      expect(res.credited).toBe(true);
+      expect(res.entries.find((e) => e.kind === 'refund').amountSats).toBe(60000);
+    });
+
+  it('charges no minimum on a cancelled order', () => {
+    // 最低課金の床（既定10%）は借り手都合の即時解約を想定したもので、
+    // 「係争で負けても 10% は取る」を成立させてはいけない。
+    const { d } = ctx();
+    const s = payoutLedger.settlementForOrder({ ...CANCELLED, cancelReason: 'dispute_resolved_refund' }, d);
+    expect(s.chargedSats).toBe(0);
+    expect(s.operatorFeeSats).toBe(0);
+  });
+
+  it('never assumes full delivery for a cancelled order', () => {
+    // deliveredRatioOf の「計測が落ちた完了注文は全量」推定を、キャンセルにも
+    // 適用してしまうと、返金裁定の注文で貸し手に満額払うことになる。
+    const r = payoutLedger.deliveredRatioOf({ ...CANCELLED, cancelReason: 'user_cancelled' });
+    expect(r.ratio).toBe(0);
+    expect(r.source).toBe('cancelled:user_cancelled');
+  });
+
+  it('falls back to a full refund for an unrecognised cancel reason', () => {
+    // 知らない理由で課金を続けるより、返しすぎる方が安全。
+    const { d } = ctx();
+    const res = payoutLedger.creditOrder({ ...CANCELLED, cancelReason: 'some_future_reason' }, d);
+    expect(res.entries.find((e) => e.kind === 'refund').amountSats).toBe(60000);
+  });
+
+  it('settles an active-timeout cancellation pro-rata rather than refunding everything', () => {
+    // 稼働していた時間はプロバイダの取り分。ここだけは全額返金ではない。
+    const { d } = ctx();
+    const res = payoutLedger.creditOrder(
+      { ...CANCELLED, cancelReason: 'active_timeout', deliveredRatio: 0.5 }, d);
+    const earning = res.entries.find((e) => e.kind === 'earning');
+    const refund = res.entries.find((e) => e.kind === 'refund');
+    expect(earning.amountSats).toBeGreaterThan(0);
+    expect(refund.amountSats).toBe(30000);
+  });
+
+  it('credits nothing for an order cancelled before it was ever paid', () => {
+    // payment_timeout は「払わなかったから失効した」なので返す原資が無い。
+    const ledger = memLedger();
+    const d = deps({ ledger, payments: { o1: [{ status: 'pending', amount: 60000 }] } });
+    expect(payoutLedger.creditOrder({ ...CANCELLED, cancelReason: 'payment_timeout' }, d))
+      .toEqual({ credited: false, reason: 'unpaid' });
+  });
+
+  it('is still idempotent across the cancelled path', () => {
+    const { d } = ctx();
+    const order = { ...CANCELLED, cancelReason: 'dispute_resolved_refund' };
+    expect(payoutLedger.creditOrder(order, d).credited).toBe(true);
+    expect(payoutLedger.creditOrder(order, d).reason).toBe('already_credited');
+  });
+});
+
 describe('balanceFor', () => {
   function seeded() {
     const ledger = memLedger();

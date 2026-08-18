@@ -172,7 +172,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/marketplace/marketplace-service.js` — 全サービスを束ねるドメイン合成層（6テスト, 正常系/不正系/オークション統合）
 - `src/marketplace/auction-engine.js` — 逆オークション・マッチング（価格×レピュ×SLA×アテステーション、price-ratio 正規化、reserve/minReputation/requireAttestation フィルタ, 13テスト）
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
-- `src/payments/payout-ledger.js` ＋ `src/db/json/LedgerRepository.js` — 収益台帳・出金（orderId 冪等の計上、申請中の残高予約、txid 必須の送金記録, 32テスト＋API 17テスト）
+- `src/payments/payout-ledger.js` ＋ `src/db/json/LedgerRepository.js` — 収益台帳・出金（orderId 冪等の計上、申請中の残高予約、txid 必須の送金記録、**支払い済みキャンセル注文の返金**（係争返金裁定・マッチ期限切れ・借り手キャンセル・プロバイダ拒否は全額返金、active_timeout のみ按分）, 43テスト＋API 22テスト）
 - `src/payments/earnings-sweeper.js` — 完了注文の収益自動計上（完了経路ごとのフックではなく状態観測。冪等なので過去分も拾う）
 - `src/gpu/listing-defaults.js` — 出品の必須項目を 5 つに絞り、残りを機種から導出（vendor→apiType、既定 arch、参照表の TDP→powerWatt。未知機種は推測せず未設定のまま。導出項目は derivedFields に記録し UI が「推定」と区別, 11テスト＋API 10テスト）
 - `src/utils/exchange-rate.js` — 為替レート（stale-while-revalidate ＋ 全滅時の冷却期間 ＋ コールド取得の集約。上流障害を「全リクエストが遅い」に増幅させない, 15テスト）

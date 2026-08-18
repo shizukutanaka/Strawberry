@@ -207,6 +207,63 @@ describe('rejecting a payout returns the funds', () => {
   });
 });
 
+describe('a dispute resolved for the renter actually refunds them', () => {
+  // 実サーバで見つけた最悪のバグの統合レベル回帰テスト。
+  // 借り手が払い、稼働し、係争を起こして勝っても、台帳が 'completed' しか
+  // 見ていなかったため 1 sat も返らず、運営が全額持ったままだった。
+  let order;
+
+  it('runs the full pay → dispute → refund ruling → sweep chain', async () => {
+    const gpu = GpuRepository.create({
+      name: 'Dispute Refund GPU', vendor: 'NVIDIA', model: 'RTX-DISP', memoryGB: 8,
+      pricePerHour: 60000, providerId: provId,
+    });
+    order = OrderRepository.create({
+      gpuId: gpu.id, userId: renterId, providerId: provId,
+      durationMinutes: 60, status: 'disputed', totalPrice: 60000,
+      dispute: { raisedBy: renterId, reason: 'never reachable', raisedAt: new Date().toISOString() },
+    });
+    PaymentRepository.create({
+      orderId: order.id, userId: renterId, amount: 60000,
+      status: 'paid', method: 'lightning', paidAt: new Date().toISOString(),
+    });
+
+    const resolved = await asAdmin(request(app).post(`/api/v1/orders/${order.id}/dispute/resolve`)
+      .send({ decision: 'refund', note: 'provider never delivered access' }));
+    expect(resolved.status).toBe(200);
+    expect(OrderRepository.getById(order.id)).toMatchObject({
+      status: 'cancelled', cancelReason: 'dispute_resolved_refund',
+    });
+
+    await asAdmin(request(app).post('/api/v1/payments/admin/earnings/sweep'));
+  });
+
+  it('credits the renter the full amount they paid', () => {
+    const entries = LedgerRepository.getByOrderId(order.id);
+    const refund = entries.find((e) => e.kind === 'refund');
+    expect(refund).toBeDefined();
+    expect(refund.userId).toBe(renterId);
+    expect(refund.amountSats).toBe(60000);
+  });
+
+  it('pays the provider nothing for a dispute they lost', () => {
+    const entries = LedgerRepository.getByOrderId(order.id);
+    expect(entries.filter((e) => e.kind === 'earning')).toHaveLength(0);
+  });
+
+  it('takes no operator fee and no minimum charge', () => {
+    const refund = LedgerRepository.getByOrderId(order.id).find((e) => e.kind === 'refund');
+    expect(refund.breakdown.totalSats).toBe(60000);
+    expect(refund.breakdown.deliveredRatio).toBe(0);
+  });
+
+  it('makes the refund visible on the renter ledger endpoint', async () => {
+    const res = await asRenter(request(app).get('/api/v1/payments/earnings?limit=200'));
+    expect(res.status).toBe(200);
+    expect(res.body.entries.some((e) => e.orderId === order.id && e.kind === 'refund')).toBe(true);
+  });
+});
+
 describe('an unpaid order never credits anyone', () => {
   it('leaves the ledger untouched', async () => {
     const gpu = GpuRepository.create({

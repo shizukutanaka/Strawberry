@@ -256,7 +256,7 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 
 ## 9. Spot / 中断可能インスタンスとチェックポイント耐性
 
-**現状**: `virtual-gpu-manager.js` ＋ `src/gpu/gpu-auto-recovery.js` に復旧基盤はあるが、
+**現状**: `virtual-gpu-manager.js` に復旧基盤はあるが、
 **プロバイダ都合の中断（preemption）を前提とした料金ティアもチェックポイント・プロトコルも無い**。
 注文は固定時間枠（`order/index.js`）のみで、安価な空き GPU を中断許容で貸す手段が無い。
 
@@ -272,7 +272,7 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 
 **推奨アクション**:
 1. (中期) **中断許容ティア**を価格表に追加（§4 のオークションと統合、Vast.ai 流の入札）。
-2. (中期) 中断前 30 秒通知 → 自動チェックポイント退避（三層, TierCheck 流）→ 別プロバイダへ再スケジュール（`gpu-auto-recovery.js` を拡張）。
+2. (中期) 中断前 30 秒通知 → 自動チェックポイント退避（三層, TierCheck 流）→ 別プロバイダへ再スケジュール（新規モジュールとして実装する）。
 3. SLA（`src/api/sla.js`）に中断率・復旧時間を組み込み、レピュテーション（§5）へ反映。
 
 優先度: **中（コスト競争力に直結）**
@@ -614,3 +614,5 @@ root が運営のディスクから出ない以上、本節が名指しする脅
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+> 注記（2026-08）: 本書が拡張元として挙げていた `src/gpu/gpu-auto-recovery.js` は削除した。src/ のどこからも呼ばれておらず、自前のテストだけが存在を維持していた（障害時の停止・返金は現在 SLA ハートビート掃き出しと収益台帳が担う）。

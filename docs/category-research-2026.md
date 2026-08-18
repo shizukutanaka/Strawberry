@@ -194,7 +194,7 @@ gossip 配信の peer scoring・signed peer records 等のセキュリティ機�
 
 ## 7. スケジューリング・中断耐性・チェックポイント（spot / orchestration）
 
-**Strawberry の現状**: `virtual-gpu-manager.js`＋`src/gpu/gpu-auto-recovery.js` に復旧基盤はあるが、
+**Strawberry の現状**: `virtual-gpu-manager.js` に復旧基盤はあるが、
 **preemption 前提の料金ティアもチェックポイント・プロトコルも無い**。注文は固定時間枠（`order/index.js`）のみ。
 
 ### 参照（arXiv / GitHub / 一次情報）
@@ -210,7 +210,7 @@ gossip 配信の peer scoring・signed peer records 等のセキュリティ機�
 10. Vast.ai — interruptible（spot）入札（cross-ref カテゴリ4）— https://vast.ai/article/starting-smart-why-spot-gpus-are-ideal-for-ai-startups
 
 ### 改善点
-- (中期) **中断許容ティア**を価格表へ（カテゴリ4 のオークションと統合）。中断前 30 秒通知 → **三層チェックポイント退避**（TierCheck 流）→ 別プロバイダへ自動再スケジュール（`gpu-auto-recovery.js` を拡張）。
+- (中期) **中断許容ティア**を価格表へ（カテゴリ4 のオークションと統合）。中断前 30 秒通知 → **三層チェックポイント退避**（TierCheck 流）→ 別プロバイダへ自動再スケジュール（新規モジュールとして実装する）。
 - (中期) **SkyPilot Managed Jobs 風のジョブ層**（起動時 checkpoint ロード）を採用 or 連携。
 - (中期) k8s 経路（`virtual-gpu-manager`）では **Volcano/Kueue** で gang scheduling・preemption・rescheduling。
 - (短期) SLA（`src/api/sla.js`）に**中断率・復旧時間**を記録し、カテゴリ5 レピュテーションへ反映。
@@ -307,3 +307,5 @@ gossip 配信の peer scoring・signed peer records 等のセキュリティ機�
 **運用・健全性**: 可観測性/データ層統一/監査アンカリング/カーボン（10）。
 
 > 関連資料: `docs/improvement-research-2026.md`（全18領域の横断分析・優先度表）。本書はその**カテゴリ×参照のリンク集（10×10）**。
+
+> 注記（2026-08）: 本書が拡張元として挙げていた `src/gpu/gpu-auto-recovery.js` は削除した。src/ のどこからも呼ばれておらず、自前のテストだけが存在を維持していた（障害時の停止・返金は現在 SLA ハートビート掃き出しと収益台帳が担う）。

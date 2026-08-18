@@ -275,6 +275,14 @@ table.data-table tr:hover td { background: var(--color-surface-2); cursor: point
 .rating-input button.active { color: var(--color-primary); }
 .stars { color: var(--color-primary); letter-spacing: 2px; }
 
+/* 帳簿の突き合わせ（管理画面）。不整合は預かり金の欠損に直結するので、
+   一目で色が変わることが要件（ログの中に埋もれさせない）。 */
+.recon-card { border-left: 4px solid var(--color-success); }
+.recon-card.recon-bad { border-left-color: var(--color-danger); background: var(--color-danger-bg); }
+.recon-problems { margin: var(--space-2) 0 0; padding-left: 1.2em; color: var(--color-danger); }
+.recon-liability { font-size: 1.1rem; }
+.recon-card hr { border: none; border-top: 1px solid var(--color-border); margin: var(--space-2) 0; }
+
 @media (max-width: 640px) {
   main#app { padding: var(--space-3); }
   .app-header { padding: var(--space-2) var(--space-3); flex-wrap: wrap; }

@@ -111,6 +111,35 @@ test.describe('provider payout', () => {
     await expect(page.locator('.toast-error')).toContainText('受取アドレス', { timeout: 5000 });
   });
 
+  test('the operator sees the ledger reconciliation and what they are holding', async ({ page, request, baseURL }) => {
+    // 帳簿の突き合わせは「運営が他人の金をいくら預かっているか」を答えるもの。
+    // エンドポイントを用意しただけでは誰も見ないので、管理画面に出ていること自体が要件。
+    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'reconprov', role: 'provider' });
+    const gpu = await apiCreateGpu(request, baseURL, provider.token, {
+      name: `Recon GPU ${uniqueId()}`, pricePerHour: 200000,
+    });
+    const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'reconrent' });
+    const { adminToken } = await apiCompleteOrderCycle(request, baseURL, {
+      providerToken: provider.token, renterToken: renter.token, gpuId: gpu.id,
+    });
+    await request.post(`${baseURL}/api/v1/payments/admin/earnings/sweep`,
+      { headers: { Authorization: `Bearer ${adminToken}` } });
+
+    const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'reconadmin' });
+    await promoteToAdmin(request, baseURL, admin.email, admin.password);
+    await loginUI(page, admin.email, admin.password);
+    await page.goto('/#/admin/payments');
+
+    const card = page.locator('.recon-card');
+    await expect(card).toBeVisible({ timeout: 5000 });
+    await expect(card).toContainText('帳簿は整合しています');
+    await expect(card).toContainText('未払いの債務');
+    // 不整合が無いので危険色のクラスは付かない
+    await expect(page.locator('.recon-card.recon-bad')).toHaveCount(0);
+    // 預かり額が実際に数字として出ている（0 sats のプレースホルダではない）
+    await expect(page.locator('.recon-liability')).not.toHaveText('0 sats');
+  });
+
   test('a renter owed a refund can see and claim it (the ledger is not provider-only)', async ({ page, request, baseURL }) => {
     // 未提供分は借り手の残高として計上される。以前は #/earnings が provider/admin
     // ロールで閉じていたため、返金を受け取れる借り手がその存在すら見られなかった

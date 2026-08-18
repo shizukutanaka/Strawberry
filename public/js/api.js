@@ -114,6 +114,7 @@ export const api = {
   requestPayout: (amountSats) => request('/api/v1/payments/payouts', { method: 'POST', body: { amountSats } }),
   myPayouts: () => request('/api/v1/payments/payouts'),
   pendingPayouts: () => request('/api/v1/payments/admin/payouts'),
+  reconciliation: () => request('/api/v1/payments/admin/reconciliation'),
   completePayout: (id, txid) => request(`/api/v1/payments/admin/payouts/${id}/complete`, { method: 'POST', body: { txid } }),
   rejectPayout: (id, reason) => request(`/api/v1/payments/admin/payouts/${id}/reject`, { method: 'POST', body: { reason } }),
 

@@ -1,27 +1,11 @@
-// tests/e2e/globalSetup.js — Playwright globalSetup, mirroring tests/globalSetup.js
-// (jest's own reset) for the same reason: without it, data/*.json accumulates
-// across the whole E2E run (the webServer stays up for every test file, unlike
-// jest's per-suite isolation), so a later test's "the queue is now empty"
-// assertion can see leftover rows from an earlier, unrelated test.
-const fs = require('fs');
-const path = require('path');
-
-const DATA_DIR = path.join(__dirname, '../../data');
+// tests/e2e/globalSetup.js — Playwright globalSetup
+// jest 側（tests/globalSetup.js）と同じ理由で data/*.json を初期化する:
+// webServer は E2E 実行全体で起動しっぱなし（jest のようなスイート単位の分離が無い）
+// ため、リセットしないと後続テストの「キューが空になった」といった検査が
+// 無関係な先行テストの残骸を見てしまう。
+// 実装は tests/reset-data.js に一本化（両者が別々にファイル名を手書きしていた）。
+const { resetDataFiles } = require('../reset-data');
 
 module.exports = async function globalSetup() {
-  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'watches', 'uptime'];
-  const objectFiles = ['revoked-tokens', 'notification-settings'];
-
-  // クリーンチェックアウト（CI 等）には data/ が無いため作成する。以前は
-  // existsSync ガードで「無ければスキップ」していたが、それだと data/ が空の
-  // 環境で前回実行分のリセットが行われず決定性が崩れる。jest 側（tests/globalSetup.js）
-  // と同じく無条件で書き出し、確実に空状態から始める。
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-
-  for (const name of arrayFiles) {
-    fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), '[]', 'utf-8');
-  }
-  for (const name of objectFiles) {
-    fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), '{}', 'utf-8');
-  }
+  resetDataFiles();
 };

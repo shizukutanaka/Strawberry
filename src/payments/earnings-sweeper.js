@@ -63,9 +63,46 @@ function runOnce(deps = {}) {
     if (credited > 0) {
       logger.info(`earnings-sweeper: credited ${credited} order(s) to the ledger (skipped=${skipped}, errors=${errors})`);
     }
-    return { credited, skipped, errors, entries };
+
+    // 計上のあとで帳簿を突き合わせる。エンドポイントを用意しただけでは、
+    // 誰かが叩くのを思い出さない限り不整合に気づけない — このセッションで
+    // 繰り返し直してきた「作ったが誰も呼ばない」と同じ失敗になる。
+    // 計上直後は「取りこぼしゼロ」が成立しているはずの唯一のタイミングでもある。
+    const reconciliation = safeReconcile(deps);
+    return { credited, skipped, errors, entries, reconciliation };
   } finally {
     _running = false;
+  }
+}
+
+/**
+ * 帳簿の突き合わせを実行し、不整合があれば監査ログと警告ログに残す。
+ * 突き合わせ自体の失敗で収益計上を巻き戻さない（読み取り専用の検査なので、
+ * 落ちても計上結果は有効）。
+ */
+function safeReconcile(deps = {}) {
+  try {
+    const report = require('./reconciliation').reconcile(deps);
+    const inv = report.invariants;
+    const healthy = inv.conservationHolds && inv.noUncreditedTerminalOrders && inv.noOrphanCredits;
+    if (!healthy) {
+      appendAuditLog('ledger_reconciliation_mismatch', {
+        conservationHolds: inv.conservationHolds,
+        uncreditedTerminal: report.uncreditedTerminal.length,
+        orphanCredits: report.orphanCredits.length,
+        discrepancies: report.discrepancies.length,
+        outstandingLiabilitySats: report.totals.outstandingLiabilitySats,
+      });
+      logger.error(
+        `earnings-sweeper: LEDGER MISMATCH — discrepancies=${report.discrepancies.length} `
+        + `uncreditedTerminal=${report.uncreditedTerminal.length} orphanCredits=${report.orphanCredits.length}. `
+        + 'Inspect GET /api/v1/payments/admin/reconciliation.'
+      );
+    }
+    return { healthy, totals: report.totals, invariants: inv };
+  } catch (e) {
+    logger.warn(`earnings-sweeper: reconciliation failed: ${e.message}`);
+    return null;
   }
 }
 
@@ -82,4 +119,4 @@ function stop() {
   if (_timer) { clearInterval(_timer); _timer = null; }
 }
 
-module.exports = { start, stop, runOnce, intervalMs, DEFAULT_INTERVAL_MS, MAX_PER_CYCLE };
+module.exports = { start, stop, runOnce, safeReconcile, intervalMs, DEFAULT_INTERVAL_MS, MAX_PER_CYCLE };

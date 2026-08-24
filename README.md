@@ -1,7 +1,15 @@
 # Strawberry
 
-P2P GPU マーケットプレイス。GPU を持っている人が空き時間を貸し出し、計算資源が要る人が
+GPU マーケットプレイス。GPU を持っている人が空き時間を貸し出し、計算資源が要る人が
 借りて、Bitcoin / 銀行振込で精算する。
+
+**運営者が仲介する（カストディアル）設計です。** 借り手の支払いはいったん運営に着金し、
+運営がプロバイダへ送金します。接続情報も運営のサーバが暗号化して預かり、支払い済みの
+借り手にだけ渡します。係争は運営が裁定し、レピュテーションと台帳も運営が保持します。
+つまり**利用者は運営を信頼する必要があります**。以前 README は本製品を「P2P」「分散型」と
+称していましたが、価値のやり取りに関わる機能はすべて中央のサーバが担っており、実態と
+異なる説明でした（P2P レイヤのコードは読み込みにすら失敗する状態のまま放置されていたので
+削除しました）。
 
 > **状態に関する注記（2026-06）**: 本READMEの一部には、実装より
 > 先行した（未実装を含む）記述があります。リポジトリの**実態・既知の制約**は
@@ -157,20 +165,19 @@ flowchart TD
 
 ---
 
-> **日本語/English: OSS P2P GPUマーケットプレイス実装。セットアップ・運用・貢献・質問は日英どちらも歓迎です。**
+> **日本語/English: OSS GPU マーケットプレイス実装。セットアップ・運用・貢献・質問は日英どちらも歓迎です。**
 
 ---
 
 ## 概要
 
-Strawberryは、分散型GPUリソースの貸借を可能とするオープンソースのP2Pマーケットプレイスです。Lightning Networkによる決済、現金換算、監査証跡、死活監視、高可用性を重視した堅牢な設計を採用しています。
+Strawberryは、GPUリソースの貸借を仲介するオープンソースのマーケットプレイスです。Lightning Networkによる決済、現金換算、監査証跡、死活監視を備えます。運営者が資金と接続情報を預かるカストディアル設計であり、非中央集権ではありません（上記「概要」冒頭の注記を参照）。
 
 ---
 
 ## 主な機能・品質／セキュリティ強化ポイント（2025年6月版）
 
 - Google OAuth認証、APIキー＋JWTによる認可、ロールベースアクセス制御
-- Ed25519ピアIDおよび署名検証によるP2P信頼性担保
 - UUIDバリデーション、Joiスキーマによる厳格な入力検証
 - Lightning Network決済および現金換算API（多重API、Prometheus監視、監査証跡対応）
 - 死活監視、自動復旧、外部通知フック（Slack/Sentry等）
@@ -194,8 +201,10 @@ Strawberryは、分散型GPUリソースの貸借を可能とするオープン�
    # または
    node src/cli.js
    ```
-4. **P2Pノード構成**
-   - 複数の端末またはサーバーで同時に起動し、P2Pネットワークを構成します
+4. **単一サーバ構成**
+   - 本製品は運営者が 1 つの API サーバを動かす構成です。複数ノードでの
+     ピアツーピア構成は提供していません（データ層が JSON ファイルのため、
+     複数プロセスからの同時利用は `src/db/json/fileLock.js` の範囲に限られます）
 
 ---
 
@@ -287,7 +296,7 @@ sequenceDiagram
 
 ## 死活監視・監査証跡・障害通知
 
-- LightningService/P2PNetwork/VirtualGPUManager全サービスでisHealthy()による詳細死活監視
+- LightningService/VirtualGPUManager の各サービスで isHealthy() による死活監視
 - 異常時は自動再起動・監査証跡・Prometheusメトリクス・外部通知hook（Slack/Sentry等）
 - 監査ログは改ざん検知付き・全操作を記録
 - 為替APIの障害も監査証跡・外部通知・メトリクス化
@@ -363,7 +372,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ## 改善履歴・今後の推奨運用
 
-- Lightning/P2P/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
+- Lightning/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
 - 今後は外部通知hook本実装、現金換算ロジックの外部API化、E2E監視・テスト自動化を推奨
 - 詳細は `docs/SPECIFICATION.md` 参照
 
@@ -372,37 +381,10 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ## コントリビューション・運用者向け
 
 - 品質・セキュリティ・本物性を最優先
-- 詳細API設計・P2Pノード・テスト・運用ガイドも随時更新
+- 詳細API設計・テスト・運用ガイドも随時更新
 - PR/Issue/質問は日英どちらも歓迎
 
 ---
-
-## P2Pノード運用・スケールアウト例
-
-### P2Pノード構成・障害時フロー図（Mermaid）
-```mermaid
-flowchart LR
-  subgraph ClusterA[ノードクラスタA]
-    A1[ノードA1] --- A2[ノードA2]
-    A2 --- A3[ノードA3]
-  end
-  subgraph ClusterB[ノードクラスタB]
-    B1[ノードB1] --- B2[ノードB2]
-  end
-  A1 -- P2P通信 --> B1
-  A2 -- P2P通信 --> B2
-  A3 -- 障害発生 --> F[自動切断/復旧試行]
-  F -- フェイルオーバー通知 --> A1
-  F -- ノード削除通知 --> ClusterA
-  C[新ノードC1] -- 追加/再参加 --> ClusterA
-```
-
-### P2P運用Tips
-- ノードは複数台・複数クラスタで構成し、障害時は自動で切断/復旧/フェイルオーバー
-- 新ノードの追加・障害ノードの自動削除は全てP2Pネットワーク内で自律的に処理
-- 死活監視・Prometheus・障害通知hookでノード健全性を常時監視
-- ノード追加/削除/障害時のイベントは全て監査証跡・通知hookに記録
-- スケールアウト/フェイルオーバーも全自動化可能
 
 ## 運用FAQ・トラブルシュート・運用Tips
 
@@ -429,7 +411,7 @@ flowchart LR
 - README・FAQ・運用Tips・障害対応フローも自動生成・更新（AI活用推奨）
 
 ### 5. ノード追加/削除・障害時の自律運用
-- ノード追加/削除/障害時イベントは全て自動でP2Pネットワーク内に伝播
+- サービス障害イベントは死活監視から外部通知フックへ伝播
 - 追加/削除/障害通知・監査証跡も全自動
 
 ### 推奨運用フローまとめ
@@ -464,7 +446,7 @@ flowchart LR
 - 通知が来ない→.envのWebhook/Token/DSN値を再確認、curlで手動テスト
 - 監査証跡が記録されない→logs/audit-*.logや出力先パス、権限を確認
 - Prometheus/Grafanaでメトリクスが見えない→/metricsエンドポイントやPrometheusの設定を再確認
-- ノード自動追加/削除が反映されない→P2Pネットワークの疎通・死活監視ログをチェック
+- サービスの死活が反映されない→死活監視ログ（service-monitor）をチェック
 - E2Eテストが失敗する→テスト用.envや外部APIのモック設定を見直し
 
 ### おすすめOSS/サービスでさらに自動化
@@ -574,7 +556,7 @@ flowchart LR
   ```
 - キャッシュミス急増: `exchange_rate_cache_miss_total`の急増を監視
 - 障害再発: 監査証跡で同一障害の連続発生を検知し通知
-- ノード離脱: ノード死活監視でP2Pノードの切断を即時アラート
+- サービス停止: 死活監視で即時アラート
 - 監査証跡改ざん: ハッシュ値不整合を検知したらSlack/LINEへ即時通知
 
 ### AI月次レポートのテンプレート例
@@ -739,16 +721,16 @@ flowchart LR
 - notifyExternalAlert内で呼び出しを追加するだけで多重通知可能
 
 
-> **🇯🇵 日本語: このリポジトリはP2P型GPUマーケットプレイスのOSS実装です。セットアップ・運用・コントリビュートは日本語/英語どちらでも歓迎します。README・ガイドはバイリンガル対応です。ご質問・PR・Issueもお気軽にどうぞ！**
+> **🇯🇵 日本語: このリポジトリは GPU マーケットプレイスの OSS 実装です。セットアップ・運用・コントリビュートは日本語/英語どちらでも歓迎します。README・ガイドはバイリンガル対応です。ご質問・PR・Issueもお気軽にどうぞ！**
 >
-> **🇬🇧 English: This repository is an OSS implementation of a P2P GPU marketplace. Setup, usage, and contributions are welcome in both Japanese and English. README and guides are bilingual. Feel free to ask questions, open PRs, or Issues!**
+> **🇬🇧 English: This repository is an OSS implementation of an operator-run GPU marketplace. Setup, usage, and contributions are welcome in both Japanese and English. README and guides are bilingual. Feel free to ask questions, open PRs, or Issues!**
 
 ---
 
 ## 品質・セキュリティ強化ポイント（2025年6月最新／MVP構成）
 
 - **Google認証・OAuthアカウント認証**：Google（およびGitHub等）によるOAuth認証でユーザー識別・なりすまし防止
-- **ピアID（公開鍵）＋署名検証**：P2PノードはEd25519ピアIDで識別、すべての注文・支払い・GPUイベントは署名検証
+- **監査ログのハッシュ連鎖＋外部アンカリング**：注文・支払い・GPU イベントは改ざん検知可能な監査ログに記録し、Merkle root を OpenTimestamps へ提出できる
 - **APIキー＋JWT認証＋ロール制御（中央API利用時）**：重要操作は多重認証＋権限チェック
 - **UUIDバリデーション・入力サニタイズ**：全リソースID/主要入力の厳格検証
 - **一貫したAPIレスポンス＆エラーハンドリング**：`{ message, ... }`形式で統一
@@ -768,7 +750,7 @@ flowchart LR
 
 ## 今後の推奨運用・拡張方針
 
-- **Google認証・OAuth連携の標準化**：P2Pノード・Web UIともGoogleアカウント認証で本人性を担保
+- **Google認証・OAuth連携**：Web UI で Google アカウント認証を利用できる（環境変数設定時のみ有効）
 - **ピアID管理UI/アカウント連携**：ピアIDとGoogleアカウントの紐付け・失効・権限管理UI/API追加
 - **永続ストレージ（分散DB/クラウド）移行**：OrbitDB, GunDB, IPFS等への段階的移行＋クラウド連携
 - **Rate Limit/監査ログ強化**：DoS・悪用対策、操作履歴の永続化
@@ -782,7 +764,7 @@ flowchart LR
 
 - セキュリティ・品質・本人性を最優先した設計方針
 - Google認証・署名検証・監査ログ・死活監視など自動化を推奨
-- 詳細は各APIルート・P2Pノード・テストコード・運用ガイドを参照
+- 詳細は各APIルート・テストコード・運用ガイドを参照
 
 ---
 
@@ -797,11 +779,11 @@ flowchart LR
 2. **環境変数の設定**
    - `.env`ファイルまたは環境変数で`LINE_TOKEN`などを設定（障害アラート通知用）
 
-3. **P2Pノードの起動とCLI操作**
+3. **サーバの起動**
    ```sh
-   node src/cli.js
+   npm start
    ```
-   - 複数端末・サーバーで同時に起動することでP2Pネットワークを構成
+   - 運営者が 1 つの API サーバを動かす構成です（ピアツーピア構成はありません）
 
 ---
 

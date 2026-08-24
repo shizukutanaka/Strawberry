@@ -14,7 +14,7 @@ const marketplaceRoutes = require('./marketplace');
 const authRoutes = require('./auth');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
-const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../core/services');
+const { gpuDetector, vgpuManager, lightning, requireService } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
 
@@ -31,10 +31,6 @@ const { cacheMiddleware, purgeCache } = require('../middleware/cache');
     if (vgpuManager && typeof vgpuManager.initialize === 'function') {
       logger.info('Initializing Virtual GPU Manager...');
       await vgpuManager.initialize(gpus);
-    }
-    if (p2pNetwork && typeof p2pNetwork.start === 'function') {
-      logger.info('Starting P2P Network...');
-      await p2pNetwork.start();
     }
     if (lightning && typeof lightning.initialize === 'function') {
       logger.info('Connecting to Lightning Network...');
@@ -359,24 +355,10 @@ router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
 // 将来的に削除予定
 // 注: 旧 GET /gpus はここより前に gpuRoutes（router.use('/gpus')）が必ず応答するため
 // 到達不能となっており削除済み。
-// セキュリティ: これらは生のインフラ・パススルー（P2P ブロードキャスト・任意インボイス送金）
-// であり、特に /payment は運営ノードから任意の BOLT11 を送金できてしまう。注文所有権等の
-// 検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
-router.post('/order', rbac('admin'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /order accessed, use /api/v1/orders instead');
-  if (!requireService(p2pNetwork, res)) return;
-  const order = req.body;
-  await p2pNetwork.broadcastOrder(order);
-  res.status(201).json({ message: 'Order created', order });
-}));
-
-router.post('/match', rbac('admin'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /match accessed, use /api/v1/orders/:id/match instead');
-  if (!requireService(p2pNetwork, res)) return;
-  const matchResult = await p2pNetwork.matchOrder(req.body);
-  res.json({ matched: !!matchResult, detail: matchResult });
-}));
-
+// セキュリティ: /payment は運営ノードから任意の BOLT11 を送金できてしまう生のパススルー。
+// 注文所有権等の検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
+// 旧 /order・/match（P2P ブロードキャストとピア間マッチング）は削除した。
+// P2P レイヤ自体を削除したため（README / ARCHITECTURE.md 参照）。
 router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
   if (!requireService(lightning, res)) return;

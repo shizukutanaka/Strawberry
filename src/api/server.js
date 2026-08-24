@@ -72,10 +72,9 @@ app.use('/api/exchange-rate', exchangeRateRouter);
 
 // コアサービス参照のセットと監視起動
 try {
-  const { lightning, p2pNetwork, vgpuManager } = require('../core/services');
+  const { lightning, vgpuManager } = require('../core/services');
   const svcRefs = {};
   if (lightning) svcRefs.LightningService = lightning;
-  if (p2pNetwork) svcRefs.P2PNetwork = p2pNetwork;
   if (vgpuManager) svcRefs.VirtualGPUManager = vgpuManager;
   if (Object.keys(svcRefs).length > 0) {
     setServices(svcRefs);
@@ -206,8 +205,8 @@ app.get('/ready', readyLimiter, (req, res) => {
   // オプショナルサービス（情報のみ。readiness をブロックしない）
   let optional = {};
   try {
-    const { lightning, p2pNetwork } = require('../core/services');
-    optional = { lightning: lightning ? 'available' : 'disabled', p2pNetwork: p2pNetwork ? 'available' : 'disabled' };
+    const { lightning } = require('../core/services');
+    optional = { lightning: lightning ? 'available' : 'disabled' };
   } catch (_) { /* services 未解決時は省略 */ }
 
   res.status(ready ? 200 : 503).json({

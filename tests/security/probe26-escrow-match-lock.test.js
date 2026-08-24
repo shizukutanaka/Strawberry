@@ -109,47 +109,38 @@ describe('escrowSvc.settle(): updateIf prevents double-settlement overwrite', ()
   });
 });
 
-// ─── 3. POST /orders/:id/match: double-booking guard under gpu lock ───────────
-describe('POST /orders/:id/match: GPU double-booking check via lock', () => {
-  it('order/index.js source: /match uses withLock(gpu:${gpuId}:book) with booking check', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    expect(src).toMatch(/withLock\(`gpu:\$\{matchedGpuId\}:book`/);
-    expect(src).toMatch(/gpu_double_booked/);
+// ─── 3. GPU の二重予約ガード ─────────────────────────────────────────────────
+// 旧テストは POST /orders/:id/match（P2P ピア間マッチング）の GPU ロックを見ていた。
+// P2P レイヤごと削除したのでそのエンドポイントは無いが、**同じ GPU が二重に予約
+// されない**という性質自体は借り手・貸し手双方にとって重要なので、実際にその性質を
+// 担っている経路（注文作成時のガード）へ移した。
+describe('a GPU cannot be booked by two orders at once', () => {
+  it('rejects a second pending order for the same GPU with 409', async () => {
+    const gpu = GpuRepository.create({
+      name: 'P26 Book GPU', vendor: 'NVIDIA', model: 'RTX 4090', memoryGB: 24,
+      pricePerHour: 100, providerId: 'p26b-prov', available: true,
+    });
+    const first = await request(app).post('/api/v1/orders')
+      .set('Authorization', `Bearer ${userTok}`)
+      .send({ gpuId: gpu.id, durationMinutes: 60 });
+    expect(first.statusCode).toBe(201);
+
+    const second = await request(app).post('/api/v1/orders')
+      .set('Authorization', `Bearer ${userTok}`)
+      .send({ gpuId: gpu.id, durationMinutes: 60 });
+    expect(second.statusCode).toBe(409);
+    expect(String(second.body.error && second.body.error.message || second.body.error))
+      .toMatch(/not available|already exists/i);
+
+    OrderRepository.delete(first.body.orderId);
+    GpuRepository.delete(gpu.id);
   });
 
-  it('/match returns 404 when order does not exist', async () => {
+  it('the removed /match endpoint is gone rather than silently 503ing', async () => {
+    // P2P レイヤは削除済み。残しておくと「あるが常に 503」という最悪の形になる。
     const res = await request(app)
       .post('/api/v1/orders/00000000-0000-4000-8000-000000000099/match')
       .set('Authorization', `Bearer ${userTok}`);
     expect(res.statusCode).toBe(404);
   });
-
-  it('/match returns 400 when order is not in pending state', async () => {
-    const gpu = GpuRepository.create({
-      name: 'P26 Match GPU', vendor: 'NVIDIA', model: 'RTX-P26M', memoryGB: 8,
-      pricePerHour: 1, providerId: 'p26m-prov',
-    });
-    const order = OrderRepository.create({
-      gpuId: gpu.id, userId, providerId: 'p26m-prov',
-      durationMinutes: 60, status: 'active',  // not pending
-      pricePerHour: 1, totalPrice: 1, totalPriceJPY: 100,
-      createdAt: new Date().toISOString(),
-    });
-
-    const res = await request(app)
-      .post(`/api/v1/orders/${order.id}/match`)
-      .set('Authorization', `Bearer ${userTok}`);
-    expect(res.statusCode).toBe(400);
-
-    OrderRepository.delete(order.id);
-    GpuRepository.delete(gpu.id);
-  });
-});
-
-afterAll((done) => {
-  const { server } = require('../../src/api/server');
-  if (server && server.close) server.close(() => done());
-  else done();
 });

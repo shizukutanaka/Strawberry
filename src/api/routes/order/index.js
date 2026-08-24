@@ -211,7 +211,7 @@ const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middlew
 const { withLock } = require('../../../utils/async-lock');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
+const { vgpuManager, requireService } = require('../../../core/services');
 const { v4: _uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
@@ -1695,80 +1695,11 @@ router.post('/:id/renter-review',
 );
 
 // マッチング要求 (認証必須)
-router.post('/:id/match',
-  authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
-  asyncHandler(async (req, res) => {
-    const orderId = req.params.id;
-    logger.info(`Requesting matching for order: ${orderId}`);
-
-    // ローカルリポジトリから取得（ソースオブトゥルース）
-    const order = OrderRepository.getById(orderId);
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
-    }
-    if (req.user.role !== 'admin' && order.userId !== req.user.id) {
-      return res.status(403).json({ error: 'You do not have permission to match this order' });
-    }
-    if (order.status !== 'pending') {
-      return res.status(400).json({ error: 'Order cannot be matched', details: `Current status: ${order.status}` });
-    }
-
-    // P2Pマッチングはネットワークサービスが必要
-    if (!requireService(p2pNetwork, res)) return;
-    const matchResult = await p2pNetwork.matchOrder(orderId);
-
-    if (!matchResult || !matchResult.matched) {
-      return res.json({ matched: false, message: 'No suitable GPU found for this order' });
-    }
-
-    // P2P ピアは信頼境界の外にいる。matchResult.gpu.providerId をそのまま採用すると、
-    // 悪意あるピアが「実 GPU の ID + 被害者プロバイダの ID」を返して注文の providerId を
-    // 被害者にすり替えられ、レピュテーション操作・払い出し先誤誘導につながる。
-    // 必ずローカル GpuRepository の providerId を真とし、不一致なら 409 で拒否する。
-    const matchedGpuId = matchResult.gpu && matchResult.gpu.id;
-    const localGpu = matchedGpuId ? GpuRepository.getById(matchedGpuId) : null;
-    if (!localGpu) {
-      return res.status(409).json({ error: 'P2P match returned a GPU not present in the local registry' });
-    }
-    if (matchResult.gpu.providerId && localGpu.providerId !== matchResult.gpu.providerId) {
-      logger.warn(`P2P providerId mismatch for GPU ${matchedGpuId}: local=${localGpu.providerId} peer=${matchResult.gpu.providerId}`);
-      return res.status(409).json({ error: 'P2P match providerId conflicts with local GPU registry' });
-    }
-
-    const updateData = {
-      status: 'matched',
-      gpuId: matchedGpuId,
-      providerId: localGpu.providerId,
-      matchedAt: new Date().toISOString()
-    };
-    // Atomic write: guards against /accept or a second /match completing while
-    // p2pNetwork.matchOrder() was awaiting above. Also double-booking check:
-    // serialize all booking writes for this GPU under a per-GPU lock so that
-    // two concurrent /match calls can't both observe "GPU is free" and both commit.
-    const matchWriteResult = await withLock(`gpu:${matchedGpuId}:book`, async () => {
-      const existingForGpu = OrderRepository.getAll().filter(
-        o => o.gpuId === matchedGpuId && o.id !== orderId && BLOCKING_ORDER_STATUSES.has(o.status)
-      );
-      if (existingForGpu.length > 0) {
-        return { ok: false, reason: 'gpu_double_booked' };
-      }
-      return OrderRepository.updateIf(orderId, o => o.status === 'pending', updateData);
-    });
-    if (!matchWriteResult.ok) {
-      if (matchWriteResult.reason === 'gpu_double_booked') {
-        return res.status(409).json({ error: 'GPU is already booked by another order; match aborted' });
-      }
-      return res.status(409).json({ error: 'Order status changed while matching; match aborted', details: `Current status: ${(matchWriteResult.current || {}).status}` });
-    }
-    if (typeof p2pNetwork.updateOrder === 'function') {
-      try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
-    }
-
-    logger.info(`Order matched: ${orderId}`, { orderId, userId: req.user.id, gpuId: matchResult.gpu.id });
-    res.json({ matched: true, message: 'Order successfully matched with GPU', matchResult });
-  })
-);
+// POST /orders/:id/match（P2P ピア間マッチング）は削除した。P2P レイヤ自体を
+// 削除したため常に 503 だった。GPU の二重予約は POST /orders の作成時点で
+// 409 で弾かれる（実サーバで確認済み: 同一 GPU への 2 件目の pending 注文は
+// "GPU is not available: an order in 'pending' state already exists" になる）ので、
+// このエンドポイントが持っていた予約チェックを失うわけではない。
 
 // オーダー実行開始 (認証必須)
 // Joi は冒頭の validator から import 済み
@@ -1845,9 +1776,6 @@ router.post('/:id/start',
         // Another concurrent request already transitioned this order — release the GPU we just allocated.
         try { await vgpuManager.releaseGPU(order.gpuId, orderId); } catch (_) {}
         return res.status(409).json({ error: 'Order was already started by a concurrent request' });
-      }
-      if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
-        try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
       }
       // 借り手へ利用開始通知
       try {
@@ -2166,9 +2094,6 @@ router.post('/:id/stop',
       );
       if (!result.ok) {
         return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });
-      }
-      if (p2pNetwork && typeof p2pNetwork.updateOrder === 'function') {
-        try { await p2pNetwork.updateOrder(orderId, updateData); } catch (_) {}
       }
 
       // プロバイダ・レピュテーションへ完了を記録（updateIf 成功時のみ: 二重記録を防ぐ）。

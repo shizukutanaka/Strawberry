@@ -1,6 +1,6 @@
 // src/core/services.js - インフラ系コアサービスのシングルトン提供（ガード付き）
 //
-// virtual-gpu-manager(dockerode/k8s)・p2p-network(libp2p, ESM)・
+// virtual-gpu-manager(dockerode/k8s)・
 // lightning-service(gRPC) はネイティブ/ESM依存であり、未導入や読込失敗が起こり得る。
 // それらをモジュール読込時に new するとサーバ全体が起動不能になるため、
 // ここで一括して安全に読み込み、失敗時は null（無効化モード）にフォールバックする。
@@ -23,7 +23,6 @@ function safeLoad(label, loader) {
 
 const gpuDetector = safeLoad('gpu-detector-extended', () => require('./gpu-detector-extended').ExtendedGPUDetector);
 const vgpuManager = safeLoad('virtual-gpu-manager', () => require('../../virtual-gpu-manager').VirtualGPUManager);
-const p2pNetwork = safeLoad('p2p-network', () => require('../../p2p-network').P2PNetwork);
 const lightning = safeLoad('lightning-service', () => require('../../lightning-service').LightningService);
 
 /**
@@ -38,4 +37,4 @@ function requireService(svc, res) {
   return true;
 }
 
-module.exports = { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService };
+module.exports = { gpuDetector, vgpuManager, lightning, requireService };

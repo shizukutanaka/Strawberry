@@ -1,6 +1,6 @@
 # Strawberry 仕様書（SPECIFICATION）/ 2026-06
 
-P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**あるべき仕様**を定義し、
+GPU マーケットプレイス（運営者仲介・カストディアル）＋BTC Lightning 決済。本書は**あるべき仕様**を定義し、
 各要件に**実装ステータス**を付すことで不足部分（gap）を明示する。
 詳細な改善根拠は `docs/improvement-research-2026.md`（18領域）/`docs/category-research-2026.md`（10×10）参照。
 
@@ -127,7 +127,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | 秘密鍵管理 | 本番 fail-fast、ハードコード禁止 | ✅ |
 | マスター認証 | 3要素(Google+TOTP+メール)、暗号乱数/定時間比較/TTL | ✅(Math.random/timing/await バグ修正済) |
 | CORS | 仕様準拠(ワイルドカード時 credentials 無効) | ✅(修正済) |
-| P2P | libp2p で分散。peer scoring/signed records | ❌(libp2p ESM で無効) |
+| P2P | — | ⛔削除。価値のやり取り（資金の預かり・接続情報の仲介・係争裁定・レピュテーション）が**すべて運営のサーバ**にある以上、P2P トランスポート層を足しても信頼の分散にはならない。libp2p が ESM 専用で読み込みにすら失敗したまま放置されていたコードごと削除した |
 | テスト | `npm test` 完走、コア green | ✅(40スイート/215テスト green, 2 skip=env依存) |
 | データ整合性 | 注文/決済/残高のトランザクション | 🟡(JSON。クロスプロセス lost-update は `src/db/json/fileLock.js` で解決済。複数レコードにまたがるトランザクションは未) |
 
@@ -155,7 +155,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
    （完了注文の自動計上）＋ 出金 API を追加した。**残るは実 LND/CLN アダプタ実装と
    送金の自動実行**（現状は運営が送金して txid を記録する運用）。
 3. **永続化エンティティは全て実装済**（Escrow / Provider reputation / Verification record）。将来 Prisma へ移行。
-4. GPU アテステーション（nvtrust）、libp2p ESM 対応、OTel トレース、カーボン配置。
+4. GPU アテステーション（nvtrust）、OTel トレース、カーボン配置。
    監査ログ Merkle アンカリングは `merkle-anchor.js` 実装済（残るは OTS への実提出と audit.js 結線）。
 
 ---

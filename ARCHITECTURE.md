@@ -51,14 +51,12 @@ src/api/server.js
            ├─ virtual-gpu-manager.js (dockerode/k8s)   … ロード可（要 Docker/k8s 実機）
            ├─ gpu-detector-extended.js                  … ロード可
            ├─ lightning-service.js (gRPC)               … ロード可（要 LND。未接続時は mock）
-           └─ p2p-network.js (libp2p, **ESM**)          … 無効（libp2p が ESM 専用で require 不可）
 ```
 
 ### コアサービスのガード方針（重要）
 
-`virtual-gpu-manager` / `p2p-network` / `lightning-service` はリポジトリ直下に置かれた
-大型モジュールで、ネイティブ/ESM 依存（dockerode・libp2p・gRPC）を持つ。とくに現行
-`libp2p` は **ESM 専用で `require()` 不可**。これらをモジュール読込時に `new` していたため、
+`virtual-gpu-manager` / `lightning-service` はリポジトリ直下に置かれた大型モジュールで、
+ネイティブ依存（dockerode・gRPC）を持つ。これらをモジュール読込時に `new` していたため、
 従来は Web API 全体が起動不能だった。
 
 現在は `src/core/services.js` が全て **try/catch で安全に読み込み、失敗時は `null`**
@@ -70,10 +68,10 @@ src/api/server.js
 `child_process.promises`・`fs.promises` 誤用、`lightning-service` のブレース不整合に
 よる構文エラー）を解消し、これら3つは**ロード・インスタンス化が可能**になった
 （実機能は Docker/k8s・LND 実機が必要。`virtual-gpu-manager` のコマンド実行は
-識別子サニタイズ済み）。`p2p-network` のみ **libp2p が ESM 専用で `require()` 不可**の
+識別子サニタイズ済み）。以前あった `p2p-network`（libp2p, ESM 専用で require 不可）の
 ため依然無効。
 
-これらインフラ系依存は `package.json` の `optionalDependencies`（libp2p 一式は未宣言）に置く。
+これらインフラ系依存は `package.json` の `optionalDependencies` に置く。
 
 ## このブランチで修正した主な内容
 
@@ -107,7 +105,7 @@ lint が常に失敗しており、品質ゲートとして機能していなか
 
 ## フォローアップ（未対応・推奨順）
 
-1. `p2p-network` の有効化（libp2p ESM 対応 or 代替実装）。他3サービスは実機(Docker/k8s/LND)での結合検証。
+1. 各サービスは実機(Docker/k8s/LND)での結合検証が残る。P2P レイヤは削除した（下記参照）。
 2. データ層は **JSON 単一**に確定（2026-08）。`prisma/schema.prisma` は User/Feedback/Task のみで
    GPU/Order/Payment/Escrow 等の実ドメインモデルを欠き、`@prisma/client` は依存にすら
    入っていなかった（＝`npm run setup` が必ず失敗していた）。実体の無い「将来の移行先」を

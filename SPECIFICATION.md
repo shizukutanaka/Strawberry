@@ -1,6 +1,6 @@
 # Strawberry 仕様書（Specification）
 
-> P2P GPU マーケットプレイス — Node.js / Express バックエンド
+> GPU マーケットプレイス（運営者仲介） — Node.js / Express バックエンド
 > 最終更新: 2026-06-21 / 対象ブランチ: `claude/deepresearch-ultrathink-improvement-NEMJb`
 
 本書は Strawberry の **実態に基づく** 仕様書である。README の
@@ -17,8 +17,10 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 - **借り手（renter）**: GPU を検索し、注文を作成し、Lightning / オンチェーン BTC で支払う。
 - **運営**: 手数料を受け取り、紛争を裁定し、管理操作を行う。
 
-決済は Lightning Network（LND）とオンチェーン BTC を想定。P2P レイヤ（libp2p）と
-仮想 GPU 管理（Docker/K8s）はオプション扱いで、未導入でも API 本体は起動する。
+決済は Lightning Network（LND）とオンチェーン BTC を想定。仮想 GPU 管理（Docker/K8s）は
+オプション扱いで、未導入でも API 本体は起動する。P2P レイヤ（libp2p）は削除した — 資金の
+預かり・接続情報の仲介・係争裁定・レピュテーションがすべて運営のサーバにある以上、
+P2P トランスポートを足しても信頼は分散しない。
 
 ### 1.1 技術スタック
 

@@ -7,7 +7,7 @@ const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { gpuDetector, vgpuManager, p2pNetwork, requireService } = require('../../../core/services');
+const { gpuDetector, vgpuManager, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const GpuRepository = require('../../../db/json/GpuRepository');
 // GPU アテステーション（申告スペック vs デバイス計測の照合）
@@ -151,15 +151,6 @@ router.get('/', asyncHandler(async (req, res) => {
   };
   // ファイル永続化されたGPUリストを取得
   let gpus = GpuRepository.getAll();
-  // P2Pネットワークから提供されているGPUも取得（P2P無効時はスキップ）
-  if (p2pNetwork && typeof p2pNetwork.getAvailableGPUs === 'function') {
-    try {
-      const p2pGpus = await p2pNetwork.getAvailableGPUs();
-      if (Array.isArray(p2pGpus)) gpus = [...gpus, ...p2pGpus];
-    } catch (e) {
-      logger.warn(`P2P GPU fetch failed, returning local GPUs only: ${e.message}`);
-    }
-  }
   // フィルタリング
   if (filters.minMemoryGB > 0) {
     gpus = gpus.filter(gpu => gpu.memoryGB >= filters.minMemoryGB);
@@ -454,11 +445,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const gpuId = req.params.id;
   logger.info(`Fetching GPU detail: ${gpuId}`);
   // ファイル永続化GPUリポジトリから取得
-  let gpu = GpuRepository.getById(gpuId);
-  if (!gpu && p2pNetwork && typeof p2pNetwork.getGPUById === 'function') {
-    // P2Pネットワークからも検索（P2P無効時はスキップ）
-    try { gpu = await p2pNetwork.getGPUById(gpuId); } catch (_) {}
-  }
+  const gpu = GpuRepository.getById(gpuId);
   if (!gpu) {
     return res.status(404).json({ error: 'GPU not found' });
   }
@@ -699,10 +686,6 @@ router.post('/',
       gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
     }
 
-    // P2Pネットワークへアナウンス
-    if (p2pNetwork && typeof p2pNetwork.announceGPU === 'function') {
-      try { await p2pNetwork.announceGPU(gpuInfo); } catch (_) { /* P2P は optional */ }
-    }
     // ファイル永続化リポジトリに登録
     const registeredGpu = GpuRepository.create(gpuInfo);
     // GPUイベントをログに記録
@@ -1002,10 +985,6 @@ router.delete('/:id',
     const deleted = GpuRepository.delete(gpuId);
     if (!deleted) {
       return res.status(404).json({ error: 'GPU not found' });
-    }
-    // P2Pネットワークに削除を通知（P2P無効時はスキップ）
-    if (p2pNetwork && typeof p2pNetwork.removeGPU === 'function') {
-      try { await p2pNetwork.removeGPU(gpuId); } catch (_) {}
     }
     // 価格ウォッチの後始末: GPU が消えたウォッチは二度と発火せず、watches.json に
     // 永久に残るストレージリークになる。削除と同時に孤児ウォッチを除去する。

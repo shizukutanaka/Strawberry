@@ -1274,45 +1274,20 @@ router.get('/:id/usage',
   })
 );
 
-// GPUのベンチマーク結果を取得 (オーナー/管理者のみ — 過去計測値もテレメトリ扱い)
-router.get('/:id/benchmark',
-  authenticateJWT,
-  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
-  asyncHandler(async (req, res) => {
-    if (!requireService(vgpuManager, res)) return;
-    const gpuId = req.params.id;
-    logger.info(`Fetching benchmark results for GPU: ${gpuId}`);
-    const benchmarkResults = await vgpuManager.getGPUBenchmarkResults(gpuId);
-    if (!benchmarkResults) {
-      return res.status(404).json({ error: 'GPU benchmark results not found' });
-    }
-    res.json(benchmarkResults);
-  })
-);
-
-// GPUのベンチマークを実行 (オーナー/管理者のみ)
-// allowOwnerOrAdmin なしだと任意の認証済みユーザーが他プロバイダの GPU で
-// ベンチマークをトリガーでき、負荷攻撃・レピュテーション汚染の経路になる。
-router.post('/:id/benchmark',
-  authenticateJWT,
-  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
-  asyncHandler(async (req, res) => {
-    if (!requireService(vgpuManager, res)) return;
-    const gpuId = req.params.id;
-    const VALID_BENCHMARK_TYPES = new Set(['standard', 'compute', 'memory', 'render']);
-    const benchmarkType = req.body.type || 'standard';
-    if (!VALID_BENCHMARK_TYPES.has(benchmarkType)) {
-      return res.status(400).json({ error: `Invalid benchmark type. Allowed: ${[...VALID_BENCHMARK_TYPES].join(', ')}` });
-    }
-    logger.info(`Running ${benchmarkType} benchmark on GPU: ${gpuId}`);
-    const benchmarkJob = await vgpuManager.runGPUBenchmark(gpuId, benchmarkType);
-    res.json({
-      message: 'Benchmark started',
-      jobId: benchmarkJob.id,
-      estimatedCompletionTime: benchmarkJob.estimatedCompletionTime
-    });
-  })
-);
+// ベンチマークのエンドポイント（GET/POST /gpus/:id/benchmark）は削除した。
+//
+// サーバは**プロバイダのマシンでコードを実行する権限を持たない**。他人の GPU で
+// ベンチマークを「走らせる」API はこの構成では原理的に成立せず、実装も
+// `throw new Error('GPU benchmarking is not implemented')` のまま登録だけされていて、
+// 叩くと 500 を返していた（全ルート走査で唯一の 5xx がこれ）。GET 側も常に null→404。
+//
+// 性能の裏取りは既に別の仕組みが担っている:
+//   - src/gpu/perf-score.js … 型番の公開スペックから正規化スコアを出し、
+//     「型番一致（実機検証は未実施）」であることを confidence と根拠として明示する
+//   - src/security/gpu-attestation-verifier.js … プロバイダが提出した
+//     アテステーションを申告スペックと突き合わせて検証する（出品時に任意提出）
+// どちらも「測っていないものを測ったことにしない」形になっているので、
+// 走らないベンチマーク API を残す理由が無い。
 
 // GPU 価格ウォッチ登録（値下げアラート）
 // POST /gpus/:id/watch — 認証必須（自分が提供していないGPUのみ登録可）

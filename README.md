@@ -515,7 +515,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - 運用ドキュメントの自動生成・API仕様書の自動更新も拡張予定
 
 ### 自動ベンチマーク・自己診断の自動化例
-- API応答速度・障害復旧時間・通知遅延などを`npm run benchmark`等で自動測定
+- API応答速度・障害復旧時間・通知遅延は Prometheus メトリクス（`GET /metrics`）で測定
 - cronやGitHub Actionsで定期実行し、結果をPrometheus/README/Slack等へ自動送信
 - 例（週次ベンチマーク）:
   ```yaml
@@ -528,7 +528,6 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v3
-        - run: npm run benchmark > logs/bench-$(date +\%F).txt
         - run: cat logs/bench-$(date +\%F).txt | curl -X POST $SLACK_WEBHOOK_URL -d @-
   ```
 

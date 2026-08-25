@@ -1,21 +1,39 @@
 // VirtualGPUManager のルート互換 API 契約テスト
 //
 // 背景: src/api/routes/{gpu,order} は vgpuManager.allocateGPU / releaseGPU /
-// getGPUUsageStats / getGPUDetails / getGPUAvailability / getGPUBenchmarkResults /
-// runGPUBenchmark を呼ぶが、クラス本来の API 名は allocateVirtualGPU /
+// getGPUUsageStats 等を呼ぶが、クラス本来の API 名は allocateVirtualGPU /
 // releaseVirtualGPU / getVirtualGPUStats だった。名前・シグネチャの差異で vgpu 有効時に
 // 必ず TypeError になり、レンタル開始/終了フローが壊れていた。互換メソッドの存在と
 // allocate→release のラウンドトリップ（{success} 返却・gpuId 起点の解放）を固定する。
 const { VirtualGPUManager } = require('../../virtual-gpu-manager');
 
 describe('VirtualGPUManager route-compat API', () => {
-  const required = [
-    'allocateGPU', 'releaseGPU', 'getGPUUsageStats',
-    'getGPUDetails', 'getGPUAvailability', 'getGPUBenchmarkResults', 'runGPUBenchmark'
-  ];
+  // 必要なメソッド名は**ルートのソースから機械的に抽出する**。手書きのリストにすると
+  // 両方向に腐る: ルートが新しいメソッドを呼び始めても気づけず、逆にルートが呼ぶのを
+  // やめたメソッドを消したときにこのテストだけが落ちる（実際、ベンチマーク API を
+  // 削除したときに後者が起きた）。
+  const fs = require('fs');
+  const path = require('path');
+  const ROUTE_FILES = [
+    '../../src/api/routes/gpu/index.js',
+    '../../src/api/routes/order/index.js',
+  ].map((r) => path.resolve(__dirname, r));
 
-  it('exposes all method names the routes call', () => {
-    for (const name of required) {
+  function methodsCalledByRoutes() {
+    const names = new Set();
+    for (const f of ROUTE_FILES) {
+      const src = fs.readFileSync(f, 'utf-8');
+      for (const m of src.matchAll(/vgpuManager\.(\w+)\s*\(/g)) names.add(m[1]);
+    }
+    return [...names];
+  }
+
+  it('routes actually call something (guards against the extractor finding nothing)', () => {
+    expect(methodsCalledByRoutes().length).toBeGreaterThan(0);
+  });
+
+  it('exposes every method name the routes call', () => {
+    for (const name of methodsCalledByRoutes()) {
       expect(typeof VirtualGPUManager.prototype[name]).toBe('function');
     }
   });

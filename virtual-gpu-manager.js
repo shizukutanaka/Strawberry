@@ -665,15 +665,11 @@ nvidia-cuda-mps-control -d
         return { status: vgpu.status, available: vgpu.status === 'available' };
     }
 
-    async getGPUBenchmarkResults(gpuId) {
-        // ベンチマーク結果の永続化は未実装。結果なしを正直に返す（ルートは null→404）。
-        return null;
-    }
-
-    async runGPUBenchmark(gpuId, type) {
-        // ベンチマーク実行は未実装。捏造ジョブを返さず明示的に失敗させる。
-        throw new Error('GPU benchmarking is not implemented');
-    }
+    // getGPUBenchmarkResults / runGPUBenchmark は削除した。サーバはプロバイダの
+    // マシンでコードを実行する権限を持たないため、他人の GPU でベンチマークを走らせる
+    // API は原理的に成立しない。性能の裏取りは src/gpu/perf-score.js（型番からの
+    // 正規化スコア）と src/security/gpu-attestation-verifier.js（提出された
+    // アテステーションの検証）が担う。
 
     async releaseVirtualGPU(allocationId) {
         const allocation = this.allocations.get(allocationId);

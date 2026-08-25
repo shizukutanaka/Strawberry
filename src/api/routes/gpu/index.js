@@ -1225,11 +1225,17 @@ router.get('/system/detected',
   asyncHandler(async (req, res) => {
     if (!requireService(gpuDetector, res)) return;
     logger.info('Detecting system GPUs');
-    const detectedGPUs = await gpuDetector.detectAllGPUs();
+    // 検出できるのは **このサーバが動いているホスト** の GPU であって、
+    // 出品されている GPU ではない。また NVIDIA の検出は実装されていないので、
+    // 「見つからなかった」と「そもそも見ていない」を混同させないよう明示して返す。
+    const result = await gpuDetector.detectAllGPUs();
     res.json({
-      message: 'System GPUs detected',
-      count: detectedGPUs.length,
-      gpus: detectedGPUs
+      message: 'System GPUs detected on the host running this server',
+      count: result.gpus.length,
+      gpus: result.gpus,
+      vendorsCovered: result.vendorsCovered,
+      vendorsNotDetected: result.vendorsNotDetected,
+      errors: result.errors,
     });
   })
 );

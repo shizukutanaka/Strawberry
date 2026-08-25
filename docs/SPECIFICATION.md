@@ -177,6 +177,7 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - `src/payments/earnings-sweeper.js` — 完了注文の収益自動計上（完了経路ごとのフックではなく状態観測。冪等なので過去分も拾う）
 - `src/payments/reconciliation.js` — 帳簿の突き合わせ（保存則・取りこぼしゼロ・出所のない計上ゼロの 3 不変条件と、運営が預かっている債務額, 14テスト＋API 3テスト）
 - `src/gpu/listing-defaults.js` — 出品の必須項目を 5 つに絞り、残りを機種から導出（vendor→apiType、既定 arch、参照表の TDP→powerWatt。未知機種は推測せず未設定のまま。導出項目は derivedFields に記録し UI が「推定」と区別, 11テスト＋API 10テスト）
+- `tests/api/route-reachability.test.js` — **登録済み全ルートの全数調査**。ルート表そのものを入力にして 5xx がゼロであることを検査する（人が経路を思い出して確認する方式は経路が増えるたびに漏れる）。認証が死んだまま緑にならないよう、通過本数の下限とカナリアで検査の実体を担保する（6テスト）
 - `src/utils/audit-log.js` — 監査ログ（ハッシュ連鎖＋書き込み失敗の可視化）。チェーン破損・ディスクフル・サイズ上限で**記録が静かに止まらない**: 失敗を状態として保持し `/ready` を 503 に落とし、外部チャネルへ 1 度通知し、繋げられなかったエントリは隔離ファイルへ退避する（7テスト）
 - `src/utils/exchange-rate.js` — 為替レート（stale-while-revalidate ＋ 全滅時の冷却期間 ＋ コールド取得の集約。上流障害を「全リクエストが遅い」に増幅させない, 15テスト）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）

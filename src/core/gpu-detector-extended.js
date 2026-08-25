@@ -571,6 +571,44 @@ class ExtendedGPUDetector {
             return null;
         }
     }
+
+    /**
+     * このホスト上の GPU を検出する。
+     *
+     * `GET /gpus/system/detected` はこのメソッドを呼んでいたが、**存在しなかった**。
+     * 常に `gpuDetector.detectAllGPUs is not a function` で 500 になっていた
+     * （全 129 ルートを機械的に当たって見つけた唯一の 5xx）。
+     *
+     * このクラスが実装しているのは AMD と Intel だけで、**NVIDIA の検出は無い**。
+     * 単に空配列や AMD/Intel だけを返すと「このホストに GPU は無い」と読めてしまい、
+     * NVIDIA 機で使った運用者を誤らせる。カバーしているベンダを明示して返す。
+     *
+     * @returns {Promise<{gpus:Array, vendorsCovered:string[], vendorsNotDetected:string[], errors:object[]}>}
+     */
+    async detectAllGPUs() {
+        const gpus = [];
+        const errors = [];
+        for (const [vendor, fn] of [
+            ['AMD', () => this.detectAMDGPUsAdvanced()],
+            ['Intel', () => this.detectIntelGPUsAdvanced()],
+        ]) {
+            try {
+                const found = await fn();
+                if (Array.isArray(found)) gpus.push(...found);
+            } catch (e) {
+                // 1 ベンダの検出失敗で全体を落とさない。ただし黙って握り潰さず、
+                // どのベンダで何が起きたかを呼び出し元へ返す。
+                errors.push({ vendor, error: e && e.message ? e.message : String(e) });
+                logger.warn(`GPU detection failed for ${vendor}: ${e && e.message}`);
+            }
+        }
+        return {
+            gpus,
+            vendorsCovered: ['AMD', 'Intel'],
+            vendorsNotDetected: ['NVIDIA'],
+            errors,
+        };
+    }
 }
 
 module.exports = { ExtendedGPUDetector };

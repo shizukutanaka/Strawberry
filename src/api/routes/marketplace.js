@@ -14,6 +14,29 @@ const isProd = process.env.NODE_ENV === 'production';
 const clientError = (e) => e.message || 'Invalid request';
 const internalError = (e) => isProd ? 'Internal server error' : (e.message || 'Internal server error');
 
+// エスクロー操作の例外を HTTP ステータスへ写像する。
+//
+// 以前はすべて 500 で返していたため、存在しない ID を渡しただけで
+// 「サーバ障害」として報告されていた（全ルート走査で
+// POST /escrow/:id/pay が 500 を返して発覚）。クライアントは自分の誤りと
+// サーバの異常を区別できず、監視側は通常の 404 相当をエラー率に数えてしまう。
+// escrow-service は業務上の失敗を Error のメッセージで表現するので、
+// ここで既知の形だけを 4xx に落とし、それ以外は 500 のままにする。
+function escrowErrorResponse(res, e) {
+  const msg = (e && e.message) || '';
+  if (/^escrow not found/i.test(msg)) {
+    return res.status(404).json({ error: msg });
+  }
+  // 無効な状態遷移・二重オープン等は呼び出し側の誤りなので 409。
+  if (/state changed concurrently|already exists for order|invalid transition|cannot .* from/i.test(msg)) {
+    return res.status(409).json({ error: msg });
+  }
+  if (/required|must be/i.test(msg)) {
+    return res.status(400).json({ error: msg });
+  }
+  return res.status(500).json({ error: internalError(e) });
+}
+
 // エスクロー操作は資金フローに直結するため admin 限定
 const adminOnly = rbac('admin');
 
@@ -97,7 +120,7 @@ router.post('/escrow/open', adminOnly, (req, res) => {
     });
     return res.status(201).json(result);
   } catch (e) {
-    return res.status(500).json({ error: internalError(e) });
+    return escrowErrorResponse(res, e);
   }
 });
 
@@ -113,7 +136,7 @@ router.post('/escrow/:id/pay', adminOnly, (req, res) => {
   try {
     return res.json(marketplace.recordPaid(req.params.id));
   } catch (e) {
-    return res.status(500).json({ error: internalError(e) });
+    return escrowErrorResponse(res, e);
   }
 });
 
@@ -134,7 +157,7 @@ router.post('/escrow/:id/verify', adminOnly, async (req, res) => {
     }));
     return res.json(result);
   } catch (e) {
-    return res.status(500).json({ error: internalError(e) });
+    return escrowErrorResponse(res, e);
   }
 });
 

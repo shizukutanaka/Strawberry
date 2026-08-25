@@ -13,14 +13,24 @@ let _timer = null;
 let _running = false;
 let _lightning = null; // set via start()
 
+/**
+ * 1 巡だけポーリングする。
+ *
+ * 戻り値で**実際に走ったかどうか**を返す。以前は再入時・サービス未設定時に
+ * `return;` するだけで、呼び出し側は「巡回した結果やることが無かった」のか
+ * 「そもそも巡回していない」のかを区別できなかった。運用でも試験でも、
+ * 実行されなかったことが観測できないのは困る。
+ * @returns {Promise<{ran:boolean, skipped?:string, checked?:number}>}
+ */
 async function pollOnce() {
-  if (!_lightning || _running) return;
+  if (!_lightning) return { ran: false, skipped: 'no_lightning_service' };
+  if (_running) return { ran: false, skipped: 'already_running' };
   _running = true;
   try {
     const pending = PaymentRepository.getAll().filter(
       (p) => p.method === 'lightning' && p.status === 'pending' && p.paymentHash
     );
-    if (pending.length === 0) return;
+    if (pending.length === 0) return { ran: true, checked: 0 };
 
     for (const payment of pending) {
       try {
@@ -145,8 +155,10 @@ async function pollOnce() {
         logger.warn(`invoice-poller: error checking paymentId=${payment.id}: ${err.message}`);
       }
     }
+    return { ran: true, checked: pending.length };
   } catch (err) {
     logger.error(`invoice-poller: unexpected error: ${err.message}`);
+    return { ran: true, error: err.message };
   } finally {
     _running = false;
   }
@@ -158,9 +170,20 @@ function _isExpired(payment) {
 }
 
 function start(lightningService) {
-  if (_timer) return; // already running
   if (!lightningService) {
     logger.warn('invoice-poller: Lightning service unavailable — poller not started');
+    return;
+  }
+  if (_timer) {
+    // 既に起動済み。ただし**新しいサービス参照は必ず採用する**。
+    // 旧実装はここで即 return しており、渡された lightningService を黙って捨てていた。
+    // LND が再接続して新しいクライアントで start() が呼ばれても、ポーラーは
+    // 古い（死んだ）参照を叩き続ける。入金確認が静かに止まり、何の兆候も出ない
+    // ——「動いているように見えて記録・確認だけが止まる」壊れ方にあたる。
+    if (_lightning !== lightningService) {
+      logger.info('invoice-poller: adopting a new Lightning service reference (already running)');
+      _lightning = lightningService;
+    }
     return;
   }
   _lightning = lightningService;

@@ -23,15 +23,26 @@ function sanitizeId(value) {
 
 class VirtualGPUManager extends EventEmitter {
     /**
-     * サービス死活判定: 初期化・仮想GPU数・プラットフォームごとの稼働状況を総合判定
+     * サービス死活判定: 初期化済みかつ、プラットフォーム API が応答するか。
+     *
+     * **「暇な状態」を「壊れた状態」と混同しない。** 以前はここに
+     *   if (this.virtualGPUs.size === 0) return false;
+     * があり、割り当て中の仮想 GPU が 1 つも無いと unhealthy と判定していた。
+     * 稼働中のレンタルがゼロというのはマーケットプレイスの**通常の状態**であって
+     * 障害ではない。この判定のせいで service-monitor が 10 秒ごとに
+     *   unhealthy → restart → （まだ 0 件なので）unhealthy → …
+     * を延々と繰り返し、そのたびに service_down / service_restart の
+     * 外部通知を 2 通ずつ発火し続けていた（外部通知が実際に届くようになった
+     * 直後に判明。届かない間は誰も気づけなかった）。
+     *
+     * 健全性が意味するのは「求められた仕事ができる状態か」であって
+     * 「いま仕事を持っているか」ではない。
      * @returns {Promise<boolean>}
      */
     async isHealthy() {
         // 1. initializedフラグ
         if (!this.initialized) return false;
-        // 2. 仮想GPUが1つ以上管理されているか
-        if (!this.virtualGPUs || this.virtualGPUs.size === 0) return false;
-        // 3. プラットフォームごとの追加チェック（例: Docker/k8sならAPI応答）
+        // 2. プラットフォームごとの追加チェック（例: Docker/k8sならAPI応答）
         if (this.platform === 'docker') {
             try {
                 await this.docker.ping();

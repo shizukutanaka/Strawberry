@@ -223,7 +223,13 @@ app.get('/ready', readyLimiter, (req, res) => {
   let optional = {};
   try {
     const { lightning } = require('../core/services');
-    optional = { lightning: lightning ? 'available' : 'disabled' };
+    // モックで動いている場合に "available" と報告してはいけない。モックは
+    // 支払えない請求書しか作れないので、運営は「Lightning が動いている」と
+    // 誤解したまま借り手に支払えない請求書を配ることになる。
+    optional = {
+      lightning: !lightning ? 'disabled'
+        : (lightning.mockMode ? 'mock (invoices are NOT payable)' : 'available'),
+    };
   } catch (_) { /* services 未解決時は省略 */ }
 
   res.status(ready ? 200 : 503).json({

@@ -14,7 +14,24 @@ function makeLightning(statusByHash) {
 }
 
 describe('invoice-poller underpayment guard', () => {
+  // ポーラーはモジュール単位のシングルトンで、src/api/server.js を読み込む
+  // 全スイート（30 本以上）が 15 秒間隔でこれを起動する。同じ jest ワーカー内で
+  // その interval が発火すると再入ガード（_running）に当たり、こちらの
+  // pollOnce() が黙って何もせず返る＝断続的に「pending のまま」で落ちる。
+  // このスイートがシングルトンを占有できるよう、前後で必ず止める。
+  beforeEach(() => poller.stop());
   afterEach(() => poller.stop());
+
+  // 背景 interval（src/api/server.js を読み込む 30 本以上のスイートが起動する）と
+  // 再入ガードで衝突すると pollOnce() は何もせず返る。実際に巡回できるまで待つ。
+  async function pollUntilRan() {
+    for (let i = 0; i < 50; i++) {
+      const r = await poller.pollOnce();
+      if (r && r.ran) return r;
+      await new Promise((res) => setTimeout(res, 10));
+    }
+    throw new Error('invoice-poller never ran (re-entrancy guard never cleared)');
+  }
 
   it('confirms payment and advances order when the settled amount is sufficient', async () => {
     const order = OrderRepository.create({ status: 'pending' });
@@ -26,7 +43,7 @@ describe('invoice-poller underpayment guard', () => {
     poller.start(makeLightning({
       [payment.paymentHash]: { settled: true, value: 100000, amountPaid: 100000, settleDate: Date.now() },
     }));
-    await poller.pollOnce();
+    await pollUntilRan();
 
     expect(PaymentRepository.getById(payment.id).status).toBe('paid');
     expect(OrderRepository.getById(order.id).status).toBe('matched');
@@ -43,7 +60,7 @@ describe('invoice-poller underpayment guard', () => {
     poller.start(makeLightning({
       [payment.paymentHash]: { settled: true, value: 1, amountPaid: 1, settleDate: Date.now() },
     }));
-    await poller.pollOnce();
+    await pollUntilRan();
 
     const updated = PaymentRepository.getById(payment.id);
     expect(updated.status).toBe('failed');
@@ -61,7 +78,7 @@ describe('invoice-poller underpayment guard', () => {
     poller.start(makeLightning({
       [payment.paymentHash]: { settled: true, value: 10, settleDate: Date.now() }, // value < amount, no amountPaid
     }));
-    await poller.pollOnce();
+    await pollUntilRan();
 
     expect(PaymentRepository.getById(payment.id).status).toBe('failed');
     expect(OrderRepository.getById(order.id).status).toBe('pending');

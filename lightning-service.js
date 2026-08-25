@@ -7,6 +7,20 @@ const path = require('path');
 const crypto = require('crypto');
 const { logger } = require('./src/utils/logger');
 
+/**
+ * モック LND を使ってよいか。
+ *
+ * モックは `lnbc<金額>1<ランダム文字列>` という「BOLT11 に見えるが支払えない文字列」を
+ * 返す。これを本番で黙って使うと、借り手は支払えない請求書を渡され、運営は Lightning が
+ * 動いていると思い込む。**明示的に許可されたときだけ**使う。
+ *   - LIGHTNING_MOCK=1 … 開発者が意図して有効化した場合
+ *   - NODE_ENV=test    … テストは実 LND を持たない
+ * 本番で LND に繋がらなければサービスは利用不可（503）になるのが正しい。
+ */
+function isMockAllowed() {
+  return process.env.LIGHTNING_MOCK === '1' || process.env.NODE_ENV === 'test';
+}
+
 class LightningService extends EventEmitter {
     /**
      * サービス死活判定: gRPC接続状態・イベントストリーム・initializedを総合判定
@@ -95,7 +109,11 @@ class LightningService extends EventEmitter {
         while (attempt <= maxRetries) {
             try {
             // Proto定義読み込み
-            const protoPath = path.join(__dirname, '../../proto/lightning.proto');
+            // このファイルはリポジトリ直下にあるので __dirname はプロジェクトルート。
+            // '../../proto/...' はルートの 2 つ上（/home/proto/...）を指してしまい、
+            // プロジェクトの外に出ていた。LND の proto はディストリビューション同梱なので
+            // 配置場所を env で指定できるようにし、既定はリポジトリ内の proto/ とする。
+            const protoPath = process.env.LND_PROTO_PATH || path.join(__dirname, 'proto/lightning.proto');
             const packageDefinition = await protoLoader.load(protoPath, {
                 keepCase: true,
                 longs: String,
@@ -164,18 +182,31 @@ class LightningService extends EventEmitter {
                 await new Promise(r => { const t = setTimeout(r, wait); if (t.unref) t.unref(); });
                 attempt++;
             } else {
-                logger.error('LND自動再接続失敗: モックモードへ', errorDetail);
-                appendAuditLog('lnd_connect_fallback', errorDetail);
+                // **決済システムがモックへ勝手に落ちてはいけない。**
+                // モック LND は 'lnbc' + 金額 + ランダム文字列 という「BOLT11 に見えるが
+                // 支払えない文字列」を返す。API はそれを 201 で返し、画面は
+                // 「ウォレットで支払ってください」と表示する。つまり借り手は
+                // 支払えない請求書を渡され、運営は Lightning が動いていると思い込む。
+                // 失敗を確定させて 503 を返す方が、確信を持って嘘をつくよりはるかに良い。
+                if (!isMockAllowed()) {
+                    logger.error('LND接続に失敗しました。モックへのフォールバックは無効です（LIGHTNING_MOCK=1 で明示的に許可）', errorDetail);
+                    appendAuditLog('lnd_connect_failed_no_mock', errorDetail);
+                    this.lnd = null;
+                    this.mockMode = false;
+                    throw new Error(`LND connection failed and mock mode is not enabled: ${error.message}`);
+                }
+                logger.warn('LND接続失敗: 明示的に許可されたモックモードへ切り替えます（支払い不可の請求書を返します）', errorDetail);
+                appendAuditLog('lnd_connect_fallback_mock', errorDetail);
                 this.setupMockLND();
                 return;
             }
-            this.setupMockLND();
         }
         }
     }
 
     setupMockLND() {
-        // 開発/テスト用のモックLND
+        // 開発/テスト用のモックLND。**支払える請求書は作れない**ことを状態として持つ。
+        this.mockMode = true;
         this.lnd = {
             // 実呼び出し側（getInfo()）は real gRPC の呼び出し規約に合わせ
             // this.lnd.getInfo({}, callback) と2引数で呼ぶ。旧モックは (callback) の
@@ -396,6 +427,11 @@ class LightningService extends EventEmitter {
                 id: paymentHash,
                 paymentHash,
                 paymentRequest: invoice.payment_request,
+                // モック時の paymentRequest は BOLT11 に見えるだけの文字列で、
+                // どのウォレットでも支払えない。呼び出し側が「支払ってください」と
+                // 表示してよいかを判断できるよう、事実として同梱する。
+                payable: !this.mockMode,
+                mock: !!this.mockMode,
                 amountSats: amountSats,
                 memo: memo,
                 createdAt: Date.now(),

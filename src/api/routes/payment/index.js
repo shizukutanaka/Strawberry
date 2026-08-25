@@ -298,6 +298,11 @@ router.post('/order/:id',
       method: 'lightning',
       invoiceExpiresAt: expiresAt
     });
+    // モック LND が返す paymentRequest は「BOLT11 に見えるが支払えない文字列」。
+    // それを 201 で返して「ウォレットで支払ってください」と案内すると、借り手は
+    // 支払えない請求書を渡され、運営は Lightning が動いていると思い込む。
+    // 支払えない場合はその事実をレスポンスに明記する。
+    const payable = invoice.payable !== false;
     res.status(201).json({
       status: 'pending',
       paymentRequest: invoice.paymentRequest,
@@ -310,7 +315,11 @@ router.post('/order/:id',
       pricePer5Min,
       durationMinutes,
       expiresAt,
-      message: 'Lightning invoice created. Pay using your Lightning wallet.'
+      payable,
+      message: payable
+        ? 'Lightning invoice created. Pay using your Lightning wallet.'
+        : 'This server is running without a real Lightning node, so this invoice CANNOT be paid. '
+          + 'Use another payment method, or configure LND.'
     });
     }); // end withLock
   })

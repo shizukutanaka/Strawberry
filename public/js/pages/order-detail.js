@@ -361,15 +361,28 @@ export async function render(container, params) {
         }
       },
     }, 'コピー');
+    // サーバが payable:false を返すのは、実 LND が無くモックが
+    // 「BOLT11 に見えるが支払えない文字列」を生成した場合。そのまま
+    // 「ウォレットで開く」を出すと、借り手は支払えない請求書を渡されて
+    // ウォレット側のエラーに困惑するだけなので、事実を出して導線を止める。
+    const payable = paymentRes.payable !== false;
     box.replaceChildren(
       el('div', { class: 'stack' },
         el('p', {}, `請求額: ${fmtSats(paymentRes.amountSats)}`),
+        !payable
+          ? el('div', { class: 'banner banner-warning ln-not-payable' },
+              'このサーバは実際の Lightning ノードに接続していないため、'
+              + 'この請求書は支払えません。別の支払い方法を選ぶか、運営に連絡してください。')
+          : null,
         el('div', { class: 'copy-box' },
           el('div', { class: 'mono' }, paymentRes.paymentRequest),
           copyBtn,
         ),
-        el('a', { href: `lightning:${paymentRes.paymentRequest}`, class: 'btn btn-primary btn-block' }, 'ウォレットで開く'),
-        el('p', { class: 'muted', style: 'font-size:0.8rem' }, '支払い完了後、自動的に反映されます。'),
+        payable
+          ? el('a', { href: `lightning:${paymentRes.paymentRequest}`, class: 'btn btn-primary btn-block' }, 'ウォレットで開く')
+          : null,
+        el('p', { class: 'muted', style: 'font-size:0.8rem' },
+          payable ? '支払い完了後、自動的に反映されます。' : '支払えないため、入金確認は行われません。'),
       )
     );
     pollPaymentStatus(box.parentElement, paymentRes.paymentId, order);

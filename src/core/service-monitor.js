@@ -11,8 +11,19 @@ const serviceDownCounter = new client.Counter({ name: 'service_down_total', help
 
 // 監視対象サービスの参照を保持
 let services = {};
+const _svcState = new Map();
+const RESTART_BASE_DELAY_MS = 30 * 1000;   // 初回リトライまで 30 秒
+const RESTART_MAX_DELAY_MS = 30 * 60 * 1000; // 上限 30 分
+const GIVE_UP_AFTER = 10;                  // これを超えたら再起動を諦めて通知だけ残す
+
 function setServices(refs) {
   services = refs;
+  // 監視対象から外れたサービスの状態を捨てる。残したままだと、同名のサービスを
+  // 後から登録し直したときに「前回落ちていた」状態を引き継ぎ、初回のヘルスチェックが
+  // 通っただけで service_recovered を誤発報する。
+  for (const name of [..._svcState.keys()]) {
+    if (!refs || !Object.prototype.hasOwnProperty.call(refs, name)) _svcState.delete(name);
+  }
 }
 
 // 外部通知hook（Slack/Sentry/LINE）。実装は src/utils/external-alerts.js。
@@ -57,36 +68,90 @@ async function isServiceHealthy(name, svc) {
   return !!svc.initialized;
 }
 
-// サービスの死活監視・自動復旧
+// サービスごとの復旧状態。復旧できないサービスを 10 秒ごとに再起動し続け、
+// そのたびに通知を撃つのを防ぐ。
+//   consecutiveFailures … 連続で unhealthy だった回数
+//   nextAttemptAt       … 次に再起動を試みてよい時刻（指数バックオフ）
+//   alerted             … ダウン通知を既に送ったか（状態遷移でのみ通知する）
+function _stateFor(name) {
+  if (!_svcState.has(name)) {
+    _svcState.set(name, { consecutiveFailures: 0, nextAttemptAt: 0, alerted: false });
+  }
+  return _svcState.get(name);
+}
+
+/**
+ * サービスの死活監視・自動復旧。
+ *
+ * **通知は状態が変わったときだけ出す。** 以前は unhealthy を検出するたびに
+ * service_down と service_restart を送っていたため、復旧しないサービスが 1 つでも
+ * あると 10 秒ごとに通知が 2 通ずつ延々と飛び続けた（VirtualGPUManager の
+ * isHealthy が「割り当て中の GPU が 0 件＝unhealthy」と誤判定していたため、
+ * 実際に無限ループしていた）。通知が届かない間は誰も気づけなかったが、
+ * 外部通知が実際に機能するようになった以上、これはチャネルを埋め尽くす。
+ *
+ * 再起動も指数バックオフし、一定回数を超えたら諦める。同じやり方で失敗し続ける
+ * 再起動を無限に繰り返しても復旧しないうえ、本物の障害シグナルを覆い隠す。
+ */
 async function monitorServices() {
   for (const [name, svc] of Object.entries(services)) {
     if (!svc || typeof svc !== 'object') continue;
     try {
       const healthy = await isServiceHealthy(name, svc);
-      if (!healthy) {
-        logger.error(`[Monitor] ${name} unhealthy. Attempting restart.`);
+      const st = _stateFor(name);
+
+      if (healthy) {
+        // 復旧した場合だけ通知する（正常が続いている間は無言）。
+        if (st.alerted) {
+          logger.info(`[Monitor] ${name} recovered after ${st.consecutiveFailures} failed check(s).`);
+          auditLog.appendAuditLog('service_recovered', { service: name, afterFailures: st.consecutiveFailures });
+          await notifyExternalAlert('service_recovered', { service: name });
+        }
+        st.consecutiveFailures = 0;
+        st.nextAttemptAt = 0;
+        st.alerted = false;
+        continue;
+      }
+
+      st.consecutiveFailures += 1;
+      // ダウン通知は落ちた瞬間に 1 度だけ。
+      if (!st.alerted) {
+        st.alerted = true;
+        logger.error(`[Monitor] ${name} unhealthy.`);
         auditLog.appendAuditLog('service_down', { service: name });
         serviceDownCounter.inc({ service: name });
         await notifyExternalAlert('service_down', { service: name });
-        try {
-          if (typeof svc.initialize === 'function') {
-            await svc.initialize();
-            logger.info(`[Monitor] ${name} restarted successfully.`);
-            auditLog.appendAuditLog('service_restart', { service: name });
-            serviceRestartCounter.inc({ service: name });
-            await notifyExternalAlert('service_restart', { service: name });
-          } else if (typeof svc.start === 'function') {
-            await svc.start();
-            logger.info(`[Monitor] ${name} started successfully.`);
-            auditLog.appendAuditLog('service_restart', { service: name });
-            serviceRestartCounter.inc({ service: name });
-            await notifyExternalAlert('service_restart', { service: name });
-          }
-        } catch (e) {
-          logger.error(`[Monitor] ${name} restart failed:`, e);
-          auditLog.appendAuditLog('service_restart_failed', { service: name, error: e.message });
-          await notifyExternalAlert('service_restart_failed', { service: name, error: e.message });
-        }
+      }
+
+      if (st.consecutiveFailures > GIVE_UP_AFTER) {
+        // 諦めた後も監視は続ける（復旧すれば service_recovered が飛ぶ）。
+        continue;
+      }
+      const now = Date.now();
+      if (now < st.nextAttemptAt) continue; // バックオフ中
+
+      // 次回の待ち時間を先に伸ばす（再起動が例外で抜けても効くように）。
+      const backoff = Math.min(
+        RESTART_BASE_DELAY_MS * Math.pow(2, st.consecutiveFailures - 1),
+        RESTART_MAX_DELAY_MS,
+      );
+      st.nextAttemptAt = now + backoff;
+
+      try {
+        const restart = typeof svc.initialize === 'function' ? svc.initialize.bind(svc)
+          : typeof svc.start === 'function' ? svc.start.bind(svc)
+          : null;
+        if (!restart) continue;
+        await restart();
+        // ここで「復旧した」と通知はしない。次回のヘルスチェックが通って初めて
+        // service_recovered を出す（起動しただけで健全とは限らない）。
+        logger.info(`[Monitor] ${name} restart attempted (failure #${st.consecutiveFailures}).`);
+        auditLog.appendAuditLog('service_restart', { service: name, attempt: st.consecutiveFailures });
+        serviceRestartCounter.inc({ service: name });
+      } catch (e) {
+        logger.error(`[Monitor] ${name} restart failed:`, e);
+        auditLog.appendAuditLog('service_restart_failed', { service: name, error: e.message });
+        // 再起動失敗の通知もダウン通知に含まれているので繰り返さない。
       }
     } catch (e) {
       logger.error(`[Monitor] Exception during monitoring ${name}:`, e);
@@ -125,6 +190,8 @@ function stopMonitor() {
 }
 
 module.exports = {
+  _resetMonitorStateForTest: () => _svcState.clear(),
+  _monitorStateForTest: (name) => _svcState.get(name),
   setServices,
   startMonitor,
   stopMonitor,

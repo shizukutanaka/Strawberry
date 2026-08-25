@@ -75,14 +75,14 @@ function _getOrInitPrevHash(logPath, hashPath) {
  * 業務レスポンス（決済・部分決済通知など）をマスクしてはならないため。
  */
 function appendAuditLog(action, detail = {}, user = 'system') {
+  // catch 側で隔離に使うため try の外で組み立てる（try 内で宣言すると
+  // 書き込み失敗時にエントリ本体が参照できず、記録を丸ごと失う）。
+  const entryStr = JSON.stringify({ timestamp: new Date().toISOString(), action, detail, user });
   try {
     const logPath = auditLogPath();
     const hashPath = hashChainPath();
     // ディレクトリが存在しない場合に作成（起動時・テスト時の ENOENT を防ぐ）
     try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch (_) {}
-    const timestamp = new Date().toISOString();
-    const entry = { timestamp, action, detail, user };
-    const entryStr = JSON.stringify(entry);
 
     // prevHash: 起動時に1回だけディスクから読み込み、以降はキャッシュを使う（O(1)）。
     const prevHash = _getOrInitPrevHash(logPath, hashPath);
@@ -93,7 +93,10 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     try {
       const stat = fs.statSync(logPath);
       if (stat.size >= MAX_AUDIT_LOG_BYTES) {
-            console.error(`[audit-log] ALERT: audit log has reached size limit (${Math.round(stat.size / 1024 / 1024)}MB >= ${MAX_AUDIT_LOG_BYTES / 1024 / 1024}MB). Entry dropped: ${action}`);
+        _recordFailure(action,
+          `audit log reached its size limit (${Math.round(stat.size / 1024 / 1024)}MB >= ${MAX_AUDIT_LOG_BYTES / 1024 / 1024}MB)`,
+          'size_limit');
+        _quarantine(entryStr, 'size_limit');
         return;
       }
     } catch (_statErr) { /* file may not exist yet — that's fine */ }
@@ -102,11 +105,79 @@ function appendAuditLog(action, detail = {}, user = 'system') {
     // キャッシュ更新: 次回呼び出しのための prevHash
     _hashCache.set(logPath, { prevHash: hash });
   } catch (e) {
-    // 監査ログ書き込み失敗はサイレントに記録し、呼び出し元をクラッシュさせない。
-    // ENOSPC（ディスクフル）の場合は特に目立つメッセージで警告。
+    // 監査ログ書き込み失敗で呼び出し元をクラッシュさせないのは従来どおり。
+    // ただし**黙って消さない**。以前はここが console.error だけで、
+    //   - ハッシュチェーンが壊れると以降**すべての**エントリが書けなくなる
+    //   - それでもアプリは平常どおり動き続ける
+    //   - 唯一の痕跡は誰も見ない標準エラー出力
+    // という状態だった。非否認性のために監査ログを持ち、その root を外部へ
+    // アンカーしている製品で、記録が静かに止まるのは最悪の壊れ方にあたる
+    // （アンカラーは伸びない末尾をアンカーし続けるので、外から見ると健全に映る）。
     const isEnospc = e && (e.code === 'ENOSPC' || (e.message && e.message.includes('ENOSPC')));
-    console.error(`[audit-log] ${isEnospc ? 'CRITICAL DISK FULL — ' : ''}Failed to write audit entry: ${action}`, e && e.message);
+    _recordFailure(action, e && e.message, isEnospc ? 'disk_full' : 'write_failed');
+    _quarantine(entryStr, e && e.message);
   }
+}
+
+// ── 書き込み失敗の可視化 ────────────────────────────────────────────────────
+// 監査ログが書けない状態は「アプリが動いている」ことと両立してしまうため、
+// プロセス内に状態を持ち、health / admin から見えるようにする。さらに設定済みの
+// 外部チャネルへ 1 度だけ通知する（毎エントリで通知すると障害中にチャネルを溢れさせる）。
+const _failureState = {
+  failures: 0,
+  droppedEntries: 0,
+  firstFailureAt: null,
+  lastFailureAt: null,
+  lastReason: null,
+  lastAction: null,
+  alerted: false,
+};
+
+function _recordFailure(action, message, reason) {
+  const now = new Date().toISOString();
+  _failureState.failures += 1;
+  _failureState.droppedEntries += 1;
+  if (!_failureState.firstFailureAt) _failureState.firstFailureAt = now;
+  _failureState.lastFailureAt = now;
+  _failureState.lastReason = `${reason}: ${message || 'unknown'}`;
+  _failureState.lastAction = action;
+
+  // 標準エラーは残す（コンテナログでの追跡用）が、それだけに頼らない。
+  console.error(`[audit-log] entry NOT recorded (${reason}): ${action} — ${message || ''}`);
+
+  if (!_failureState.alerted) {
+    _failureState.alerted = true;
+    // 通知は best-effort。ここで失敗しても呼び出し元には影響させない。
+    try {
+      require('./external-alerts').notifyAll('audit_log_write_failed', {
+        reason, action, message: message || null,
+      }).catch(() => {});
+    } catch (_) { /* 通知経路が無くても監査の失敗記録自体は残る */ }
+  }
+}
+
+/**
+ * チェーンに繋げられなかったエントリを隔離ファイルへ退避する。
+ * 記録そのものを失うより、繋がっていなくても残っている方がよい
+ * （後から人が突き合わせられる）。隔離ファイルはチェーンの一部ではない。
+ */
+function quarantinePath() {
+  const log = auditLogPath();
+  return log.endsWith('.log') ? `${log.slice(0, -4)}-quarantine.log` : `${log}-quarantine.log`;
+}
+
+function _quarantine(entryStr, reason) {
+  if (!entryStr) return;
+  try {
+    fs.mkdirSync(path.dirname(quarantinePath()), { recursive: true });
+    fs.appendFileSync(quarantinePath(),
+      JSON.stringify({ quarantinedAt: new Date().toISOString(), reason: reason || null, entry: entryStr }) + '\n');
+  } catch (_) { /* 隔離にも失敗したらこれ以上できることは無い */ }
+}
+
+/** 監査ログの書き込み健全性。healthy=false なら記録が落ちている。 */
+function auditWriteHealth() {
+  return { healthy: _failureState.failures === 0, ..._failureState };
 }
 
 /**
@@ -127,4 +198,12 @@ function verifyAuditLogIntegrity() {
   return prevHash === lastHash;
 }
 
-module.exports = { appendAuditLog, verifyAuditLogIntegrity };
+module.exports = {
+  appendAuditLog, verifyAuditLogIntegrity, auditWriteHealth, quarantinePath,
+  _resetAuditHealthForTest: () => {
+    Object.assign(_failureState, {
+      failures: 0, droppedEntries: 0, firstFailureAt: null,
+      lastFailureAt: null, lastReason: null, lastAction: null, alerted: false,
+    });
+  },
+};

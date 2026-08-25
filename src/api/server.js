@@ -202,6 +202,23 @@ app.get('/ready', readyLimiter, (req, res) => {
     checks.repositoriesReadable = `failed: ${e.message}`;
   }
 
+  // 3) 監査ログが書けているか。書けない状態はアプリが平常に動いていることと
+  //    両立してしまう（記録だけが静かに止まる）ため、readiness に含める。
+  //    非否認性のために監査ログを持つ製品で、記録が落ちたまま
+  //    トラフィックを受け続けるのは受け入れられない。
+  try {
+    const { auditWriteHealth } = require('../utils/audit-log');
+    const h = auditWriteHealth();
+    if (h.healthy) {
+      checks.auditLogWritable = 'ok';
+    } else {
+      ready = false;
+      checks.auditLogWritable = `failed: ${h.lastReason} (dropped ${h.droppedEntries})`;
+    }
+  } catch (e) {
+    checks.auditLogWritable = `unknown: ${e.message}`;
+  }
+
   // オプショナルサービス（情報のみ。readiness をブロックしない）
   let optional = {};
   try {

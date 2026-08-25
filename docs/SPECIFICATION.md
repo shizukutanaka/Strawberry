@@ -23,11 +23,13 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 | Gpu | id, vendor, memoryGB, pricePerHour, features, providerId | GpuRepository | ✅ |
 | Order | id, userId, gpuId, durationMinutes, status, price | OrderRepository | ✅ |
 | Payment | id, orderId, amount, method, status | PaymentRepository | ✅ |
-| **Provider reputation** | stake, slashCount, sla, auditPass/Fail | ReputationRepository | 🟡(永続化+サービス実装, 配線未) |
+| **Provider reputation** | stake, slashCount, sla, auditPass/Fail | ReputationRepository | ✅(注文完了・ゼロ負荷監査・係争裁定から記録、`sort=recommended` と `/rank` が参照) |
 | **Escrow** | orderId, invoice, state, history, deadline | EscrowRepository | 🟡(永続化+サービス実装, 配線/LN未) |
-| **Verification record** | jobId, audited, outputs, consensus, verdict | VerificationRepository | 🟡(永続化+サービス実装, 配線未) |
+| **Verification record** | jobId, audited, outputs, consensus, verdict | VerificationRepository | 🟡(`POST /marketplace/escrow/:id/verify` から配線済。実ジョブ出力の収集経路は未) |
 
-> データ層は JSON のみ稼働。Prisma/pg/knex は未配線（三重化, `ARCHITECTURE.md`）。並行書込み保護なし=🟡。
+> データ層は JSON のみ稼働（Prisma/pg/knex は削除済, 2026-08）。クロスプロセスの並行書込みは
+> `src/db/json/fileLock.js` で保護済み（子プロセスを実起動する回帰テスト付き）。
+> 複数レコードにまたがるトランザクションは未対応=🟡。
 
 ## 3. API 仕様（実装ベース）
 
@@ -66,8 +68,13 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は `POST /marketplace/quote`・`openOrderEscrow` に配線済**（`feature-pricer`）。注文の実課金経路（`order/index.js`）はまだフラットのまま。
    なお feature-pricer は `vramGB/memBandwidthGBs/benchmarkScore` 語彙、出品レコードは `memoryGB/performance.teraflops` 語彙で噛み合っておらず、実レコードを渡すと全特徴量 0 で見積が価格フロアに張り付いていた。`perf-score.toPricingFeatures()` で橋渡し済（2026-08）。
 3. 性能比較: ✅ **正規化性能スコア実装済**（`src/gpu/perf-score.js`、Vast.ai DLPerf 相当）。演算・帯域・VRAM の加重幾何平均で参照GPU(RTX 4090 級)=100 の機種横断指数を算出し、`GET /gpus`・`/gpus/:id` の `performanceScore` と `?sort=perf|value`（価格対性能 = DLPerf/$ 相当）で公開。自己申告での順位買いを防ぐため、参照表と矛盾する申告は表を採用せず（`vram_mismatch`）、申告 TFLOPS は消費電力由来の物理上限でクランプし、未検証の未知型番は参照GPU 超えを認めない。根拠が無い場合はスコアを推測せず null（未算出）。
-4. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
-5. 決済: 直接二段送金 `btc-payment.sendBTC` … ❌ **エスクロー無し**（本書で実装）
+4. マッチング: 借り手が一覧から選び、貸し手が承認する。✅ **総合順位付けを実装**（`GET /gpus?sort=recommended`。価格・レピュテーション・稼働実績・アテステーションを統合した効用スコアで実在の出品を並べる。計算は `src/marketplace/auction-engine.js`）。
+   なお**逆オークション（入札）は削除した**。この製品には入札を保存する場所も、貸し手が借り手の要件を見る画面も無く、旧 `POST /marketplace/auction` は入札内容を呼び出し側が捏造できた（2026-08）。
+5. 決済: Lightning／銀行振込は運営がいったん預かり、**収益台帳**（`src/payments/payout-ledger.js`）で
+   貸し手の取り分と借り手への返金を計上し、出金申請 → 運営が送金 → txid 記録という流れ ✅。
+   帳簿は 3 つの不変条件で自動突き合わせ（`src/payments/reconciliation.js`）。
+   なお**オンチェーン BTC 経路（`payment/btc-onchain.js`）は従来どおり直接二段送金**で、
+   台帳を通らない 🟡。
 6. 稼働・アクセス受け渡し: ✅ **実装済（2026-08）**。従来は `virtual-gpu-manager` が
    マーケットプレイス GPU を「割り当てる」ことになっていたが、サーバは他人のマシンに権限が
    無いため `endpoint: null` しか返せず、**支払っても借りられなかった**（要件の誤り）。
@@ -91,10 +98,10 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
   UI 開示・係争の材料に留める。
   **未**: 再実行監査（別プロバイダへの同一ジョブ再投入）と ZK/TEE 系の検証パイプライン。
 - **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
-- **GPU アテステーション**: ❌（nvtrust 連携未, カテゴリ3）。
+- **GPU アテステーション**: 🟡 検証の枠組みは実装・配線済（`src/security/gpu-attestation-verifier.js`、出品時に `attestationReport` を任意提出 → 申告スペックとの突き合わせ 8 チェック → `attestation.passed/score` を保存し一覧・詳細・`sort=recommended` が参照）。ただし**実機の署名検証（nvtrust）は未対応**で、現在の検証器は Mock。したがって「検証済み」と称してよいのは*申告の内部整合性*までで、ハードウェアの真正性ではない。
 
 ### F3. レピュテーション/インセンティブ
-- ステーク/スラッシング/レピュテーション: 🟡 `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）実装済。**ルート配線は未**。
+- ステーク/スラッシング/レピュテーション: ✅ `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）。**配線済**: 注文完了時の成否記録、ゼロ負荷監査の結果反映、係争の返金裁定での slash、`GET /gpus?sort=recommended` と `POST /marketplace/rank` での参照。
 
 ### F4. 運用・可観測性
 - Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **OTel トレース**: ✅（`src/telemetry/instrumentation.js` を

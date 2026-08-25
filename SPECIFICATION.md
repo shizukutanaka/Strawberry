@@ -32,7 +32,7 @@ P2P トランスポートを足しても信頼は分散しない。
 | セキュリティ | helmet（CSP）、cors、express-rate-limit、bcrypt、speakeasy（TOTP） |
 | 監視 | prom-client（`/metrics`）、service-monitor、invoice-poller |
 | API ドキュメント | joi-to-swagger |
-| オプション | libp2p（P2P）、@grpc/grpc-js（LND）、dockerode / @kubernetes/client-node（仮想GPU） |
+| オプション | @grpc/grpc-js（LND）、dockerode / @kubernetes/client-node（仮想GPU） |
 
 ---
 
@@ -54,7 +54,7 @@ P2P トランスポートを足しても信頼は分散しない。
                      data/*.json  (atomicWrite: fs.rename)
 
   オプション（未導入時は null フォールバック → 503）:
-    core/services.js → LightningService / P2PNetwork / VirtualGPUManager
+    core/services.js → LightningService / VirtualGPUManager
   バックグラウンド: service-monitor, invoice-poller
 ```
 
@@ -154,8 +154,10 @@ P2P トランスポートを足しても信頼は分散しない。
    監査ハッシュチェーンなど、実運用を意識した防御が揃う。
 2. **明快なデータ原子性**: `updateIf`（CAS）＋ `withLock` ＋ `atomicWrite`（rename）で、
    単一プロセス内では二重承認・二重請求・ロストアップデートを防げている。
-3. **回帰テストの厚み**: `tests/security/` に 43 本の probe テスト、統合テスト含め全 830 件
-   （828 passed / 2 infra-skip）。設計判断がテストで固定されている。
+3. **回帰テストの厚み**: `tests/security/` の probe テスト群に加え、統合・E2E を含め
+   jest 1498 件＋playwright 40 件が green（2026-08）。設計判断がテストで固定されている。
+   登録済み全ルートを走査して「決して成功しないエンドポイントがゼロ」であることと、
+   ドキュメントが実在しないファイル・API を指していないことも機械的に検査している。
 4. **オプション依存の隔離**: libp2p / gRPC / Docker 等の重い依存を `core/services.js` で
    ガードし、未導入でも API が起動する。pre-alpha でも触れる土台がある。
 5. **フェイルセーフ志向**: 秘密情報未設定で本番起動失敗、未知 iat の拒否、送金失敗の例外化など、
@@ -167,8 +169,9 @@ P2P トランスポートを足しても信頼は分散しない。
    競合防止が崩れる。JSON ファイル層も高頻度書き込みで I/O ボトルネック・破損リスクがある。
 2. **ドキュメントと実態の乖離**: README の記述が実装を保証
    しない（自動生成テンプレ断片の残骸もあった）。新規参加者が誤認しやすい。
-3. **インフラ層が未完**: P2P / 仮想 GPU / Lightning は本実装が薄く、`*-fixed.js` の孤立
-   モジュールや未使用依存（knex/sqlite3/pg/ioredis）が残る。
+3. **インフラ層が未完**: 仮想 GPU / Lightning は実機（Docker/k8s/LND）が要る。
+   孤立モジュール（`*-fixed.js`）と未使用依存（knex/sqlite3/pg/ioredis/aws-sdk）、
+   および P2P レイヤは削除済み（2026-08）。ランタイム依存 29 件はすべてコードから参照されている。
 4. **テスト実行の分断**: probe テストのみを個別実行していたため、統合テストとの **契約矛盾**
    （minRenterRating / block 404）が長く検出されなかった（本サイクルで是正）。
 5. **可観測性の不足（一部改善）**: 構造化ログに加え相関 ID（`X-Request-Id`）を導入し
@@ -193,7 +196,7 @@ P2P トランスポートを足しても信頼は分散しない。
 | I-10 | 通知設定 `enabled` を任意キー許可（`pattern(/.*/)`）から消費側が実際に参照する6チャネルの明示スキーマに厳格化。Joi 既定の unknown:false で未知キー（`constructor` 等）を 400 拒否。`notification-settings.json` はリポジトリ層の `stripDangerousKeys` を経由しない別保存経路のため、入力スキーマ側で塞ぐ | probe54 / Qiita・Zenn 任意キー調査 |
 | I-11 | リクエスト相関 ID を強化（D-2 の一部）。`X-Request-Id` を (1) 上流の安全な値があれば再利用、(2) 不正・過長値はフォールバックで UUID 採番、(3) レスポンスヘッダに反映、(4) エラーログにも `requestId` を付与してアクセスログと相関 | probe55 / Qiita・Zenn request-id 調査 |
 | I-12 | `AsyncLocalStorage` でリクエストコンテキストを伝播し、リクエスト処理中の**全** `logger.*` 呼び出しへ `requestId` を自動付与（`stampRequestId` フォーマット）。明示指定は尊重、コンテキスト外（起動時・バックグラウンド）は no-op。D-2 をほぼ完了 | probe56 / Qiita・Zenn request-id 伝播調査 |
-| I-13 | 外部通知を `src/utils/external-alerts.js` に一本化。旧実装は `scripts/slack-notify.js` から `sendSlackMessage` を destructure していたが同モジュールは `notifyReport` しか export しておらず、**Slack 通知は一度も送信できていなかった**（例外は catch されて warn に消えていた）。未設定チャネルは無音、設定済みで送れない場合は error として可視化 | probe57 / external-alerts (9テスト) |
+| I-13 | 外部通知を `src/utils/external-alerts.js` に一本化。旧実装は `scripts/slack-notify.js`（削除済み）から `sendSlackMessage` を destructure していたが同モジュールは `notifyReport` しか export しておらず、**Slack 通知は一度も送信できていなかった**（例外は catch されて warn に消えていた）。未設定チャネルは無音、設定済みで送れない場合は error として可視化 | probe57 / external-alerts (9テスト) |
 | I-14 | W3C Trace Context（`traceparent`）取り込み。上流の有効な trace-id を厳格検証して ALS コンテキストに伝播し、全ログへ自動付与（`stampRequestId`）。version ff・全ゼロ・書式不正は拒否。D-2 を完了 | probe58 / Qiita・Zenn W3C Trace Context 調査 |
 | I-15 | プロセスレベルの最終防衛ライン（`registerProcessGuards`）。`unhandledRejection` は文脈付きでログし API を落とさず継続、`uncaughtException` はログ後にサーバを閉じて exit(1)（状態不定での継続を避け再起動はオーケストレータに委ねる）。従来ハンドラは未使用の `core/logger.js` 内にあり実サーバに未登録だった | probe59 / Qiita・Zenn プロセス管理調査 |
 | I-16 | `Permissions-Policy` ヘッダを追加（helmet 7 は未設定）。camera/microphone/geolocation/payment/usb 等の未使用ブラウザ機能を全拒否し、XSS・埋め込み時の悪用攻撃面を削る（最小権限）。I-5 の CSP と並ぶレスポンスヘッダ多層化 | probe60 / セキュリティヘッダ調査 |

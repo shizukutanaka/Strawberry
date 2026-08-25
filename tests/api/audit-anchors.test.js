@@ -4,6 +4,21 @@
 // 公開エンドポイントであることが要件そのもの: 第三者が commitment（Merkle root）と
 // OTS レシートを保持していなければ、運営による後日の遡及改ざんを誰も検出できない。
 // 逆にエントリ本体・包含証明は監査ログの中身を露出するので admin 限定でなければならない。
+// 監査ログとアンカーのパスを**このスイート専用**に隔離する。require より前に
+// 設定する必要がある（src/api/server.js が起動時にアンカラーを走らせるため）。
+//
+// 以前は共有の logs/audit.log をそのまま使っていた。jest は 150 スイートを並列で
+// 走らせ、その多くが監査エントリを書く。同じファイルにハッシュ連鎖を張り合うと
+// 検証が壊れ、全体実行のときだけ落ちる（単体では常に通る）不安定さの原因になる。
+// audit-log.js のコメントが AUDIT_LOG_PATH の存在理由としてまさにこれを挙げている。
+const os = require('os');
+const nodePath = require('path');
+const nodeFs = require('fs');
+const _isolatedDir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'anchors-suite-'));
+process.env.AUDIT_LOG_PATH = nodePath.join(_isolatedDir, 'audit.log');
+process.env.AUDIT_ANCHOR_PATH = nodePath.join(_isolatedDir, 'audit-anchors.jsonl');
+process.env.AUDIT_ANCHOR_RECEIPT_PATH = nodePath.join(_isolatedDir, 'audit-anchors-receipts.jsonl');
+
 const request = require('supertest');
 const { app } = require('../../src/api/server');
 const UserRepository = require('../../src/db/json/UserRepository');

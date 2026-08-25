@@ -26,11 +26,11 @@ README の一部記述は実装より先行（aspirational）しているため�
   置換済み。**GPU接続情報の実配信は実装済（2026-08）**: 稼働中の注文の画面で、プロバイダは
   接続情報を投入でき、支払い済みの借り手はそれを受け取れる（`.access-card`）。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
-  `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
-  （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`
-  （`ioredis`/`rate-limiter-flexible` も未インストール）はどこからも import されず、
-  かつ依存先パッケージ自体が存在しないため import すれば即座に失敗するコードだった。
-  `knex`/`sqlite3` 依存とあわせて削除済み（2026-07）。当面 JSON のみが正。
+  過去に存在した二重・三重のデータ層はすべて削除済み: core/database.js（pg・ioredis）と
+  core/security.js（ioredis・rate-limiter-flexible）はどこからも import されず、
+  依存パッケージ自体が無いため import すれば即座に失敗するコードだった（2026-07 に
+  knex・sqlite3 依存ごと削除）。prisma/ も未配線のまま残っていたが削除済み（2026-08）。
+  JSON のみが正。
 
 ## 起動パスとサービス
 

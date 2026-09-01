@@ -102,6 +102,11 @@ export const api = {
   raiseDispute: (id, reason) => request(`/api/v1/orders/${id}/dispute`, { method: 'POST', body: { reason } }),
   resolveDispute: (id, decision, note) => request(`/api/v1/orders/${id}/dispute/resolve`, { method: 'POST', body: { decision, note } }),
 
+  // --- 参考価格 ---
+  // 出品フォームで「いくらに設定すればいいか」を貸し手に示す。特徴量ベースの
+  // 見積（src/pricing/feature-pricer.js）で、課金には使われない助言値。
+  quoteGpu: (gpu) => request('/api/v1/marketplace/quote', { method: 'POST', body: { gpu } }),
+
   // --- payments ---
   createPayment: (orderId, paymentMethod) => request(`/api/v1/payments/order/${orderId}`, { method: 'POST', body: { paymentMethod } }),
   paymentStatus: (paymentId) => request(`/api/v1/payments/${paymentId}/status`),

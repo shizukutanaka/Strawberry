@@ -6,6 +6,14 @@
 // 落ちると市場そのものが立ち上がらない。残りはサーバが機種から導出するか
 // （apiType / arch / 消費電力）、表示専用（ドライバ・OS・クロック）なので任意にした。
 // 制約は src/utils/validator.js の schemas.gpu.register と対応している。
+//
+// 参考価格（2026-09 追加）: 貸し手はこれまで値段を勘で決めるしかなかった。特徴量ベースの
+// 価格エンジン（src/pricing/feature-pricer.js）は実装もテストも揃っていたのに
+// `POST /marketplace/quote` から呼べるだけで、UI からは一度も呼ばれておらず
+// **値段を一つも決めていなかった**。ここで初めて人の目に触れる。
+// 提示するのは参照表で型番が特定できたときだけにする（`basis.quotable`）。
+// 未知の型番でもエンジンは VRAM だけで数字を返すが、それを「参考価格」と称するのは
+// 知らないのに知っているふりをすることになる。
 import { el, toast } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { navigate } from '../router.js';
@@ -35,6 +43,59 @@ export function render(container) {
   const osInput = el('input', { id: 'gpu-os', type: 'text', maxlength: '64', placeholder: '例: Ubuntu 22.04' });
   const clockInput = el('input', { id: 'gpu-clock', type: 'number', min: '100', max: '20000', placeholder: 'MHz' });
   const powerInput = el('input', { id: 'gpu-power', type: 'number', min: '1', max: '20000', placeholder: 'W（未入力なら機種の公称TDP）' });
+
+  // --- 参考価格 -------------------------------------------------------------
+  const suggestBox = el('div', { class: 'hint', id: 'price-suggestion' });
+  let suggestSeq = 0;
+
+  const renderSuggestion = (node) => {
+    suggestBox.textContent = '';
+    if (node) suggestBox.appendChild(node);
+  };
+
+  async function refreshSuggestion() {
+    const vendor = vendorSelect.value;
+    const model = modelInput.value.trim();
+    const memoryGB = Number(memoryInput.value);
+    if (!vendor || !model || !Number.isFinite(memoryGB) || memoryGB <= 0) {
+      return renderSuggestion(null);
+    }
+    // 入力のたびに走るので、遅れて返ってきた古い応答で上書きしない。
+    const seq = ++suggestSeq;
+    try {
+      const q = await api.quoteGpu({ vendor, model, memoryGB });
+      if (seq !== suggestSeq) return;
+      if (!q || !q.basis || !q.basis.quotable) {
+        return renderSuggestion(el('span', { class: 'muted' },
+          'この型番は参照表に無いため参考価格を出せません。'
+          + '（推測で数字を出すより、出さない方が正直です）'));
+      }
+      const sats = Math.round(q.pricePerHour);
+      renderSuggestion(el('span', {},
+        `参考価格: 約 ${sats.toLocaleString()} sats/時`,
+        el('button', {
+          type: 'button', class: 'btn btn-link', id: 'apply-suggestion',
+          style: 'margin-left:.5em',
+          onClick: () => { priceInput.value = String(sats); },
+        }, 'この値を使う'),
+        el('div', { class: 'muted' },
+          `${q.basis.matchedModel} の仕様（VRAM・帯域・世代）から算出した目安です。`
+          + '実際の課金はあなたが設定した価格で行われます。'),
+      ));
+    } catch (_) {
+      if (seq !== suggestSeq) return;
+      renderSuggestion(null); // 見積が取れなくても出品は妨げない
+    }
+  }
+
+  let suggestTimer = null;
+  const scheduleSuggestion = () => {
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(refreshSuggestion, 400);
+  };
+  vendorSelect.addEventListener('change', scheduleSuggestion);
+  modelInput.addEventListener('input', scheduleSuggestion);
+  memoryInput.addEventListener('input', scheduleSuggestion);
 
   const submitBtn = el('button', { type: 'submit', class: 'btn btn-primary btn-block' }, 'GPUを登録する');
   const errorBox = el('p', { class: 'error-msg', style: 'display:none' });
@@ -121,6 +182,7 @@ export function render(container) {
       field('メモリ', memoryInput, 'GB単位'),
       field('価格', priceInput, 'sats/時（1時間あたりの貸出料金）'),
     ),
+    suggestBox,
     details,
     errorBox,
     submitBtn,

@@ -41,6 +41,45 @@ describe('marketplace API', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  // 見積は「根拠があるときだけ提示してよい」。feature-pricer は特徴量が全部欠けていても
+  // 数字を返す（未知型番でも VRAM だけで 333 sats/時 のような値が出る）ので、それを
+  // そのまま参考価格として人に見せると、知らないのに知っているふりをすることになる。
+  describe('a quote says whether it has any basis', () => {
+    it('marks a known model as quotable and names the matched reference', async () => {
+      const res = await auth(request(app).post('/api/v1/marketplace/quote'))
+        .send({ gpu: { vendor: 'NVIDIA', model: 'RTX 4090', memoryGB: 24 } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.basis).toMatchObject({ quotable: true, matchedModel: 'rtx 4090' });
+      expect(res.body.pricePerHour).toBeGreaterThan(0);
+    });
+
+    it('refuses to vouch for a model that is not in the reference table', async () => {
+      const res = await auth(request(app).post('/api/v1/marketplace/quote'))
+        .send({ gpu: { vendor: 'NVIDIA', model: 'Totally Made Up 9000', memoryGB: 16 } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.basis.quotable).toBe(false);
+      expect(res.body.basis.matchedModel).toBeNull();
+      expect(res.body.basis.confidence).toBe('unknown');
+    });
+
+    it('refuses when the declared VRAM contradicts the named model', async () => {
+      // 「H100」を名乗って 8GB と申告するような自己申告。参照表を信用しない。
+      const res = await auth(request(app).post('/api/v1/marketplace/quote'))
+        .send({ gpu: { vendor: 'NVIDIA', model: 'H100', memoryGB: 8 } });
+      expect(res.statusCode).toBe(200);
+      expect(res.body.basis.quotable).toBe(false);
+      expect(res.body.basis.findings.join(' ')).toMatch(/vram_mismatch/);
+    });
+
+    it('prices a stronger card above a weaker one', async () => {
+      const strong = await auth(request(app).post('/api/v1/marketplace/quote'))
+        .send({ gpu: { vendor: 'NVIDIA', model: 'H100', memoryGB: 80 } });
+      const weak = await auth(request(app).post('/api/v1/marketplace/quote'))
+        .send({ gpu: { vendor: 'NVIDIA', model: 'RTX 3060', memoryGB: 12 } });
+      expect(strong.body.pricePerHour).toBeGreaterThan(weak.body.pricePerHour);
+    });
+  });
+
   it('POST /rank returns a ranked list and validates input', async () => {
     const ok = await auth(request(app).post('/api/v1/marketplace/rank')).send({ providerIds: ['a', 'b'] });
     expect(ok.statusCode).toBe(200);

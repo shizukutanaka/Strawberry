@@ -5,7 +5,7 @@
 // ラッパとして実装すればよい（ルート直書きを避け、テスト可能性を確保）。
 // 各サブサービスは DI（テストはインメモリ repo を注入）。
 const featurePricer = require('../pricing/feature-pricer');
-const { toPricingFeatures } = require('../gpu/perf-score');
+const { toPricingFeatures, computePerfScore } = require('../gpu/perf-score');
 
 function createMarketplaceService({
   escrowService,
@@ -26,7 +26,25 @@ function createMarketplaceService({
    * 張り付いていた（openOrderEscrow から実 GPU レコードが渡る経路）。
    */
   function quoteGpu(gpu, market = {}) {
-    return pricer.computePrice(toPricingFeatures(gpu), market, pricingOpts);
+    const price = pricer.computePrice(toPricingFeatures(gpu), market, pricingOpts);
+    // **根拠の有無を必ず添える。** feature-pricer は特徴量が全部欠けていても
+    // 数字を返す（VRAM だけの未知型番でも 333 sats/時 のような値が出る）。
+    // それを「参考価格」として人に見せるのは、この製品が避けてきた
+    // 「知らないのに知っているふりをする」やり方にあたる。
+    // perf-score は同じ問題に対して既に答えを持っている——参照表に当たらない、
+    // または演算性能の根拠が無い型番は score=null / confidence='unknown' を返す。
+    // その判定をそのまま価格側にも通す。
+    const perf = computePerfScore(gpu);
+    return {
+      ...price,
+      basis: {
+        confidence: perf.confidence,          // reference / attested / declared / unknown
+        matchedModel: perf.matchedModel,      // 参照表で当たった型番（当たらなければ null）
+        // 提示してよいか。unknown は「VRAM だけで値段を作った」状態なので出さない。
+        quotable: perf.confidence !== 'unknown',
+        findings: perf.findings,
+      },
+    };
   }
 
   /** 候補プロバイダをレピュテーション順に並べる（マッチング）。 */

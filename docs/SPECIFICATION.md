@@ -65,7 +65,8 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … ✅ だが **真正性検証なし** ❌（カテゴリ3）
-2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格（`feature-pricer`）は助言用であって課金経路ではない**。`POST /marketplace/quote` から取れるが UI からは呼ばれておらず（`public/` に出現ゼロ）、`openOrderEscrow` も見積額を注文の `totalPrice` で上書きする（`routes/marketplace.js:118`）。したがって feature-pricer は現時点で**値段を一つも決めていない**。注文の実課金経路（`order/index.js`）はフラットのまま。
+2. 価格: 課金は `pricePerHour/12` のフラットのまま（`order/index.js`）。特徴量/需給価格（`feature-pricer`）は**課金経路ではなく、貸し手への助言**として位置づけを確定した 🟡→✅。2026-08 時点の「配線済」という記述は誤りで、`POST /marketplace/quote` から取れるだけで UI からは一度も呼ばれておらず（`public/` に出現ゼロ）、`openOrderEscrow` も見積額を注文の `totalPrice` で上書きする（`routes/marketplace.js:118`）——値段を一つも決めていなかった。2026-09 に**出品フォームの参考価格**として結線し、初めて人の目に触れるようにした（`public/js/pages/gpu-new.js`）。
+   提示するのは参照表で型番が特定できたときだけにする。エンジンは特徴量が全部欠けていても数字を返す（未知型番でも VRAM だけで 333 sats/時 のような値が出る）ため、`quoteGpu` は `computePerfScore` の判定をそのまま通して `basis.quotable` を添え、`unknown`（参照表に無い／VRAM 申告が型番と矛盾する）なら UI は数字を出さず理由を述べる。知らないものに値段を付けない。
    なお feature-pricer は `vramGB/memBandwidthGBs/benchmarkScore` 語彙、出品レコードは `memoryGB/performance.teraflops` 語彙で噛み合っておらず、実レコードを渡すと全特徴量 0 で見積が価格フロアに張り付いていた。`perf-score.toPricingFeatures()` で橋渡し済（2026-08）。
 3. 性能比較: ✅ **正規化性能スコア実装済**（`src/gpu/perf-score.js`、Vast.ai DLPerf 相当）。演算・帯域・VRAM の加重幾何平均で参照GPU(RTX 4090 級)=100 の機種横断指数を算出し、`GET /gpus`・`/gpus/:id` の `performanceScore` と `?sort=perf|value`（価格対性能 = DLPerf/$ 相当）で公開。自己申告での順位買いを防ぐため、参照表と矛盾する申告は表を採用せず（`vram_mismatch`）、申告 TFLOPS は消費電力由来の物理上限でクランプし、未検証の未知型番は参照GPU 超えを認めない。根拠が無い場合はスコアを推測せず null（未算出）。
 4. マッチング: 借り手が一覧から選び、貸し手が承認する。✅ **総合順位付けを実装**（`GET /gpus?sort=recommended`。価格・レピュテーション・稼働実績・アテステーションを統合した効用スコアで実在の出品を並べる。計算は `src/marketplace/auction-engine.js`）。

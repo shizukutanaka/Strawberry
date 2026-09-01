@@ -39,6 +39,27 @@ test.describe('marketplace', () => {
     await expect(page.locator('.gpu-card')).toContainText('1,500 sats');
   });
 
+  test('the listing form suggests a price for a known model, and refuses to guess for an unknown one', async ({ page }) => {
+    // 貸し手はこれまで値段を勘で決めるしかなかった。価格エンジンは実装もテストも
+    // 揃っていたのに UI から一度も呼ばれておらず、値段を一つも決めていなかった。
+    await registerAndLoginUI(page, { prefix: 'quoteprov', role: 'provider' });
+    await page.goto('/#/gpus/new');
+    await page.waitForSelector('#gpu-name');
+
+    // 参照表に載っている型番 → 目安を出し、ワンクリックで価格欄に入る
+    await page.selectOption('#gpu-vendor', 'NVIDIA');
+    await page.fill('#gpu-model', 'RTX 4090');
+    await page.fill('#gpu-memory', '24');
+    await expect(page.locator('#price-suggestion')).toContainText('参考価格', { timeout: 8000 });
+    await page.click('#apply-suggestion');
+    await expect(page.locator('#gpu-price')).not.toHaveValue('');
+
+    // 未知の型番 → 数字を作らず、出せない理由を言う
+    await page.fill('#gpu-model', 'Totally Made Up 9000');
+    await expect(page.locator('#price-suggestion')).toContainText('参照表に無い', { timeout: 8000 });
+    await expect(page.locator('#apply-suggestion')).toHaveCount(0);
+  });
+
   test('a minimal listing shows derived specs labelled as estimates, not as declarations', async ({ page }) => {
     // 推定値を申告値として見せると「未確認のものを確認済みに見せる」ことになる。
     // 申告していない項目は「未申告」、機種から補った項目は「推定」と出ること。

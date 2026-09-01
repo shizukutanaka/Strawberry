@@ -26,8 +26,6 @@ const { appendAuditLog } = require('../../../utils/audit-log');
 
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
-// ピアID管理サブルート
-const peeridRouter = require('./peerid');
 
 // Dummy bcrypt hash for constant-time comparison when the email doesn't exist.
 // Without this, an attacker can enumerate valid emails by measuring whether the
@@ -987,8 +985,11 @@ router.put('/:id/role',
   })
 );
 
-// ピアID管理 /api/v1/users/peerid/*
-router.use('/peerid', peeridRouter);
+// ピアID管理 /api/v1/users/peerid/* は削除した（2026-09）。
+// PeerID は libp2p 上の身元で、announceGPU / updateOrder といったピア間トラフィックの
+// 送り主を識別するための値だった。その P2P レイヤは既に削除済みで、peerId を読む側は
+// アクセス監査ログに 1 行載せる以外どこにも無かった。149 人のユーザーのうち設定した者は
+// ゼロ。**目的が消えたのに入口だけ残っていた**ので、フィールドごと撤去した。
 
 // 自分の GPU 価格ウォッチ一覧（GPU スナップショット付き）
 // GET /users/me/watches — 認証必須

@@ -375,6 +375,8 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - Lightning/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
 - 今後は外部通知hook本実装、現金換算ロジックの外部API化、E2E監視・テスト自動化を推奨
 - 詳細は `docs/SPECIFICATION.md` 参照
+- 長所・短所・改善点の点検記録は `docs/product-review-2026-09.md` 参照
+  （決済経路の二重化と「帳簿に映らない金」をどう見つけ、何を削除したか）
 
 ---
 

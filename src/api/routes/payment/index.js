@@ -64,83 +64,17 @@ router.post('/invoice',
     });
   })
 );
-
-// インボイス支払い (管理者専用)
-// 任意 BOLT11 invoice をプラットフォームの Lightning ノードから払い出すため、
-// 一般ユーザーに開放すると攻撃者が自分宛の invoice を生成して送金させ、
-// チャネル容量を吸い上げることが可能（資金喪失に直結）。
-// 通常の注文支払いは /payments/order/:id を使うこと。
-router.post('/pay',
-  authenticateJWT,
-  checkRole(['admin']),
-  validateMiddleware(schemas.payment.pay),
-  asyncHandler(async (req, res) => {
-    const { paymentRequest, amount, maxFeePercent, paymentMethod } = req.validatedBody;
-    logger.info('Processing payment');
-
-    // Lightning or manual (現金/銀行振込) 支払い対応
-    if (paymentMethod === 'lightning' || (!paymentMethod && paymentRequest)) {
-      // Lightning Network 支払い
-      if (!requireService(lightning, res)) return;
-      try {
-        const paymentResult = await lightning.payInvoice(paymentRequest, amount, maxFeePercent);
-        logger.info(`Payment successful: ${paymentResult.paymentHash.substring(0, 10)}...`, {
-          userId: req.user.id,
-          amountPaid: paymentResult.valueSat,
-          fee: paymentResult.feeSat
-        });
-        // PaymentRepositoryにも記録
-        PaymentRepository.create({
-          userId: req.user.id,
-          amount: paymentResult.valueSat,
-          status: 'paid',
-          paymentHash: paymentResult.paymentHash,
-          paidAt: new Date().toISOString(),
-          method: 'lightning'
-        });
-        res.json({
-          message: 'Payment successful',
-          paymentHash: paymentResult.paymentHash,
-          status: 'paid',
-          fee: paymentResult.feeSat,
-          amountPaid: paymentResult.valueSat,
-          paymentMethod: 'lightning'
-        });
-      } catch (error) {
-        logger.error(`Payment failed: ${error.message}`);
-        res.status(400).json({
-          message: 'Payment failed',
-          status: 'failed',
-          error: process.env.NODE_ENV === 'production' ? 'Lightning payment failed' : error.message,
-          paymentMethod: 'lightning'
-        });
-      }
-    } else {
-      // Lightning以外の支払い（現金/銀行振込など）
-      const paymentRecord = PaymentRepository.create({
-        userId: req.user.id,
-        amount,
-        status: 'pending', // 管理者承認後に'paid'へ
-        paymentHash: null,
-        paidAt: null,
-        method: paymentMethod || 'manual'
-      });
-      logger.info('Manual payment recorded (pending admin approval)', {
-        userId: req.user.id,
-        amount,
-        paymentMethod: paymentMethod || 'manual',
-        paymentId: paymentRecord.id
-      });
-      res.json({
-        message: 'Manual payment request recorded. Please complete the transfer and contact admin for approval.',
-        status: 'pending',
-        amount,
-        paymentMethod: paymentMethod || 'manual',
-        paymentId: paymentRecord.id
-      });
-    }
-  })
-);
+// 旧 `POST /payments/pay`（admin が任意の BOLT11 を運営ノードから送金する）は
+// 削除した（2026-09）。理由は 2 つ。
+//   1. **送金なのに台帳へ payout の行を書かなかった。** プロバイダの出金申請と紐づかず、
+//      送っても台帳残高が減らないため、同じ額をもう一度申請できた。btc-onchain と
+//      同じ「台帳に映らない金」の穴で、削除し損ねていた
+//   2. 記録の向きが逆だった。出ていく金を `status:'paid'` の PaymentRecord——本来は
+//      借り手から**入ってきた**金の記録——として書いていた。しかも orderId が無いので
+//      注文単位の突き合わせにも載らない
+// 送金は `POST /payments/admin/payouts/:id/complete` 一本にした。出金申請の行が無ければ
+// 送れないので、金が動けば必ず台帳に残る。注文の支払いは
+// `POST /payments/order/:orderId`（Lightning / 手動の両方に対応）を使う。
 
 // インボイス状態確認
 router.get('/invoice/:id',
@@ -606,19 +540,77 @@ router.get('/admin/payouts',
 // 運営: 実際に送金した事実を記録する（txid 必須）。
 // **このシステムは送金そのものを自動実行しない。** ノードを持たずに「送金済み」と
 // 記録する経路を作ると、台帳が現実と乖離したまま帳尻だけ合ってしまう。
+// **このコードベースで唯一、外部へ資金が出ていく経路**（`lightning.payInvoice`）。
+// 出金申請の行に束縛されているので、金が動けば必ず台帳に残る。2 つの使い方がある:
+//   { txid }          … 運営が自分のノード/ウォレットから送り、証跡だけ記録する（従来どおり）
+//   { paymentRequest } … その BOLT11 をこのサーバが LND 経由で払い、実 payment hash を記録する
+// 後者は「送金したのに台帳を更新し忘れる」窓を無くす。前者を残すのは、オンチェーン送金や
+// LND を持たない運用が実在するため。どちらも申請 → 送金 → 記録が 1 つのロックの中で完結する。
 router.post('/admin/payouts/:id/complete',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
-    const { txid } = req.body || {};
-    const result = await withLock(`payout-entry:${req.params.id}`, async () =>
-      payoutLedger.completePayout(req.params.id, { txid, byUserId: req.user.id })
-    );
+    const { txid, paymentRequest, maxFeePercent } = req.body || {};
+    if (txid && paymentRequest) {
+      return res.status(400).json({ error: 'provide either txid (already sent) or paymentRequest (send now), not both' });
+    }
+    const result = await withLock(`payout-entry:${req.params.id}`, async () => {
+      if (!paymentRequest) {
+        return payoutLedger.completePayout(req.params.id, { txid, byUserId: req.user.id });
+      }
+      // ── 送金してから記録する経路 ───────────────────────────────────────────
+      // 送金の前に必ず申請の実在と状態を確かめる。存在しない/既に払った申請に対して
+      // 送ってしまうと、その送金はどの台帳行にも紐づかない（=見えない金になる）。
+      if (!requireService(lightning, res)) return null;
+      if (typeof paymentRequest !== 'string' || !/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(paymentRequest)) {
+        return { ok: false, reason: 'invalid_payment_request' };
+      }
+      const pending = payoutLedger.pendingPayouts().find((p) => p.id === req.params.id);
+      if (!pending) return { ok: false, reason: 'not_found_or_not_pending' };
+
+      // インボイス額が申請額を超えていないこと。超過分は台帳のどこにも計上されない
+      // 支払いになるため、ここで止める。
+      let invoiceSats;
+      try {
+        const decoded = await lightning.decodePaymentRequest(paymentRequest);
+        invoiceSats = Number(decoded && (decoded.num_satoshis || decoded.numSatoshis));
+      } catch (e) {
+        return { ok: false, reason: 'undecodable_payment_request', detail: e.message };
+      }
+      if (!Number.isFinite(invoiceSats) || invoiceSats <= 0) {
+        return { ok: false, reason: 'invoice_has_no_amount' };
+      }
+      if (invoiceSats > pending.amountSats) {
+        return { ok: false, reason: 'invoice_exceeds_payout', invoiceSats, payoutSats: pending.amountSats };
+      }
+
+      let sent;
+      try {
+        sent = await lightning.payInvoice(paymentRequest, invoiceSats, maxFeePercent);
+      } catch (e) {
+        // 送金は成立していない。申請は requested のまま残るので再試行できる。
+        appendAuditLog('payout_send_failed', { payoutId: req.params.id, invoiceSats, error: e.message }, req.user.id);
+        return { ok: false, reason: 'send_failed', detail: e.message };
+      }
+      const hash = sent && (sent.paymentHash || sent.payment_hash);
+      if (!hash) {
+        // 送金が成立したのに証跡が取れない最悪のケース。台帳を勝手に確定させず、
+        // 監査ログに残して人間が照合できるようにする（黙って paid にすると、
+        // 実際に送ったかどうかを誰も検証できなくなる）。
+        appendAuditLog('payout_sent_without_txid', { payoutId: req.params.id, invoiceSats }, req.user.id);
+        return { ok: false, reason: 'sent_but_no_payment_hash' };
+      }
+      return payoutLedger.completePayout(req.params.id, { txid: hash, byUserId: req.user.id });
+    });
+    if (result === null) return; // requireService が既に 503 を返している
     if (!result.ok) {
-      return res.status(result.reason === 'not_found' ? 404 : 400).json({ error: result.reason, current: result.current });
+      const status = result.reason === 'not_found' || result.reason === 'not_found_or_not_pending' ? 404
+        : result.reason === 'send_failed' || result.reason === 'sent_but_no_payment_hash' ? 502 : 400;
+      return res.status(status).json({ error: result.reason, current: result.current, detail: result.detail });
     }
     appendAuditLog('payout_completed', {
       payoutId: result.payout.id, amountSats: result.payout.amountSats, txid: result.payout.txid,
+      sentByServer: Boolean(paymentRequest),
     }, req.user.id);
     res.json({ message: 'Payout marked as sent', payout: result.payout });
   })

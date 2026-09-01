@@ -9,13 +9,15 @@
 //    callers use — only declared 2 parameters, so callers passing 3
 //    (paymentRequest, amount, maxFeePercent) had maxFeePercent silently
 //    dropped, and `amount` (a SATS value) landed in the `maxFee` slot and
-//    got double-converted as if it were USD. schemas.payment.pay defines
+//    got double-converted as if it were USD. schemas.payment.payout (then .pay) defines
 //    maxFeePercent as a 0-10 percentage (default 1), never a USD amount —
 //    the whole USD-conversion path was wrong for this call regardless of
 //    the dead convertUSDToSats() being removed.
 //
 // 2. decodePayReq was never implemented on the mock LND (setupMockLND()),
-//    so POST /payments/pay — a live, real, admin-only route — always threw
+//    so POST /payments/pay — then a live, real, admin-only route; since removed,
+//    its送金 capability now lives only in POST /payments/admin/payouts/:id/complete
+//    — always threw
 //    "this.lnd.decodePayReq is not a function" in any environment without a
 //    real LND connection. Same missing-mock-method pattern as the
 //    getNodeInfo/listChannels bugs fixed earlier this session.
@@ -54,7 +56,7 @@ describe('LightningService.sendPayment: fee limit computed as a percentage of in
     expect(capturedFeeLimit).toEqual({ fixed: 20 });
   });
 
-  it('defaults to 1% when maxFeePercent is omitted (matches schemas.payment.pay default)', async () => {
+  it('defaults to 1% when maxFeePercent is omitted (matches schemas.payment.payout default)', async () => {
     const svc = makeMockService();
     let capturedFeeLimit = null;
     const originalSendPaymentSync = svc.lnd.sendPaymentSync;

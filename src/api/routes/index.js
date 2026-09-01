@@ -355,35 +355,13 @@ router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
 // 将来的に削除予定
 // 注: 旧 GET /gpus はここより前に gpuRoutes（router.use('/gpus')）が必ず応答するため
 // 到達不能となっており削除済み。
-// セキュリティ: /payment は運営ノードから任意の BOLT11 を送金できてしまう生のパススルー。
-// 注文所有権等の検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
-// 旧 /order・/match（P2P ブロードキャストとピア間マッチング）は削除した。
-// P2P レイヤ自体を削除したため（README / ARCHITECTURE.md 参照）。
-router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
-  if (!requireService(lightning, res)) return;
-  const { paymentRequest, amount, orderId } = req.body;
-  // BOLT11 最低限の形式チェック: lnbc/lntb/lnbcrt で始まる文字列のみ受け入れる
-  if (typeof paymentRequest !== 'string' || !/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(paymentRequest)) {
-    return res.status(400).json({ error: 'paymentRequest must be a valid BOLT11 invoice string' });
-  }
-  // 注文相関チェック: 任意送金によるノードドレインを防ぐため、orderId を必須とし
-  // 実在する注文の totalPrice を超える送金を拒否する（上限を注文額に束縛）。
-  if (!orderId || typeof orderId !== 'string') {
-    return res.status(400).json({ error: 'orderId is required — payment must correspond to a real order' });
-  }
-  const OrderRepository = require('../../db/json/OrderRepository');
-  const order = OrderRepository.getById(orderId);
-  if (!order) {
-    return res.status(404).json({ error: `Order ${orderId} not found` });
-  }
-  const orderMaxSats = order.totalPrice && order.totalPrice > 0 ? Math.ceil(order.totalPrice * 1.05) : 100000;
-  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > orderMaxSats)) {
-    return res.status(400).json({ error: `amount must be a positive number not exceeding the order total (${orderMaxSats} sats)` });
-  }
-  const result = await lightning.payInvoice(paymentRequest, amount);
-  res.json({ status: 'paid', result });
-}));
+// 旧 `POST /payment`（deprecated な生の BOLT11 パススルー）は削除した（2026-09）。
+// admin 限定・注文額に上限を束縛と、防御は積んであったが、**運営ノードから金が出ていくのに
+// 台帳へ payout の行を書かない**という一点で btc-onchain と同じ穴だった。プロバイダの
+// 出金申請と紐づかないため、送金しても台帳残高は減らず、同じ額をもう一度申請できた。
+// 旧 /order・/match（P2P ブロードキャストとピア間マッチング）も P2P レイヤごと削除済み。
+// 送金は `POST /payments/admin/payouts/:id/complete` 一本に集約した。出金申請の行が
+// 無ければ送れない＝金が動けば必ず台帳に残る。
 
 // --- 共通エラーハンドリング ---
 const { errorMiddleware } = require('../../utils/error-handler');

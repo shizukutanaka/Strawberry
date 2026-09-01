@@ -189,6 +189,87 @@ describe('admin payout settlement', () => {
   });
 });
 
+describe('settling a payout by actually sending it', () => {
+  // 2026-09 に追加した経路。それまで「運営ノードから任意の BOLT11 を送る」admin ルートが
+  // 2 本あり（POST /payment・POST /payments/pay）、どちらも**送金しても台帳の payout 行を
+  // 書かなかった**。送っても残高が減らないので、プロバイダは同じ額をもう一度申請できた。
+  // 削除して、送金を出金申請の確定と同じ 1 つの操作にした。申請の行が無ければ送れない。
+  const { lightning } = require('../../src/core/services');
+
+  async function freshPayout(amountSats) {
+    const res = await asProvider(request(app).post('/api/v1/payments/payouts').send({ amountSats }));
+    expect(res.status).toBe(201);
+    return res.body.payout.id;
+  }
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('pays the invoice and records the real payment hash as the txid', async () => {
+    const id = await freshPayout(1000);
+    jest.spyOn(lightning, 'decodePaymentRequest').mockResolvedValue({ num_satoshis: '1000' });
+    jest.spyOn(lightning, 'payInvoice').mockResolvedValue({ paymentHash: 'a'.repeat(64) });
+
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${id}/complete`)
+      .send({ paymentRequest: 'lnbc10u1pabcdef' }));
+    expect(res.status).toBe(200);
+    expect(res.body.payout).toMatchObject({ status: 'paid', txid: 'a'.repeat(64) });
+    expect(lightning.payInvoice).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an invoice larger than the payout it settles', async () => {
+    // 超過分はどの台帳行にも計上されない支払いになる。
+    const id = await freshPayout(1000);
+    jest.spyOn(lightning, 'decodePaymentRequest').mockResolvedValue({ num_satoshis: '9999999' });
+    jest.spyOn(lightning, 'payInvoice').mockResolvedValue({ paymentHash: 'b'.repeat(64) });
+
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${id}/complete`)
+      .send({ paymentRequest: 'lnbc99u1pabcdef' }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invoice_exceeds_payout');
+    expect(lightning.payInvoice).not.toHaveBeenCalled();
+  });
+
+  it('never sends against a payout that does not exist', async () => {
+    jest.spyOn(lightning, 'payInvoice').mockResolvedValue({ paymentHash: 'c'.repeat(64) });
+    const res = await asAdmin(request(app).post('/api/v1/payments/admin/payouts/no-such-id/complete')
+      .send({ paymentRequest: 'lnbc10u1pabcdef' }));
+    expect(res.status).toBe(404);
+    expect(lightning.payInvoice).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed payment request before touching the node', async () => {
+    const id = await freshPayout(1000);
+    jest.spyOn(lightning, 'payInvoice').mockResolvedValue({ paymentHash: 'd'.repeat(64) });
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${id}/complete`)
+      .send({ paymentRequest: 'not-a-bolt11' }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_payment_request');
+    expect(lightning.payInvoice).not.toHaveBeenCalled();
+  });
+
+  it('leaves the payout requestable again when the send fails', async () => {
+    const id = await freshPayout(1000);
+    jest.spyOn(lightning, 'decodePaymentRequest').mockResolvedValue({ num_satoshis: '1000' });
+    jest.spyOn(lightning, 'payInvoice').mockRejectedValue(new Error('no route to destination'));
+
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${id}/complete`)
+      .send({ paymentRequest: 'lnbc10u1pabcdef' }));
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('send_failed');
+    // 申請は requested のまま。送金していないのに paid にすると、残高だけが減って
+    // プロバイダが受け取れなくなる。
+    const listed = (await asAdmin(request(app).get('/api/v1/payments/admin/payouts'))).body.payouts;
+    expect(listed.some((p) => p.id === id)).toBe(true);
+  });
+
+  it('will not accept both a txid and a payment request', async () => {
+    const id = await freshPayout(1000);
+    const res = await asAdmin(request(app).post(`/api/v1/payments/admin/payouts/${id}/complete`)
+      .send({ txid: 'deadbeef', paymentRequest: 'lnbc10u1pabcdef' }));
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('rejecting a payout returns the funds', () => {
   it('restores the available balance', async () => {
     const balance = (await asProvider(request(app).get('/api/v1/payments/earnings'))).body.balance;

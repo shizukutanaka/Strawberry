@@ -153,10 +153,20 @@ lint が常に失敗しており、品質ゲートとして機能していなか
 
 ### 既知の重大ギャップ（要対応・資金フロー）
 
-- ~~**エスクロー action の未配線（money-movement gap）**~~ → **解決済み（2026-08 時点で確認）**:
-  `action-executor.executeActions()` は `src/payments/escrow-service.js:35` から呼ばれており、
-  本番経路に結線されている。上記の「テストからしか呼ばれない」という記述は古い。
-  残る前提は LND/CLN 実アダプタの実装（現状は MockLnAdapter）。
+- **エスクロー action の未配線（money-movement gap）** → **未解決**（2026-09 に再確認）。
+  2026-08 の「解決済み」という記述は**誤り**だった。`executeActions()` が
+  `escrow-service.js:35` から呼ばれているのは事実だが、その `runActions()` は
+  `if (!lnAdapter) return null;` で即座に何もせず返る。そして本番の呼び出し側は
+  `marketplace/default.js:11` も `routes/order/index.js` の 4 箇所もすべて
+  `createEscrowService()` を**引数なし**で呼んでいる。つまり本番で実行されるのは
+  actions の「計算」までで、資金は 1 sat も動かない。「呼ばれている」と
+  「実行されている」を取り違えた記述だった。
+  実際の資金移動は収益台帳（`src/payments/payout-ledger.js`）が担っており、
+  エスクロー FSM は現状 hold invoice 化のための設計上の座席である。
+  結線する場合に台帳の payout 行を書き忘れないよう、
+  `tests/payments/no-unledgered-money.test.js` が
+  「本番の createEscrowService に lnAdapter を渡していないこと」を固定している
+  （渡した瞬間に落ちて、台帳との整合を決めるまで進めない）。
 - ~~**JSON 層のクロスプロセス lost-update**~~ → **解決済み（2026-08）**:
   `src/db/json/fileLock.js` を追加し、`createJsonRepository` の変更系
   （create/update/updateIf/delete）の `load → 変更 → write` 全体をクロスプロセス・ロックで

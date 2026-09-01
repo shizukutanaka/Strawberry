@@ -84,18 +84,21 @@ function safeReconcile(deps = {}) {
   try {
     const report = require('./reconciliation').reconcile(deps);
     const inv = report.invariants;
-    const healthy = inv.conservationHolds && inv.noUncreditedTerminalOrders && inv.noOrphanCredits;
+    const healthy = inv.conservationHolds && inv.noUncreditedTerminalOrders
+      && inv.noOrphanCredits && inv.noUnbackedPayouts;
     if (!healthy) {
       appendAuditLog('ledger_reconciliation_mismatch', {
         conservationHolds: inv.conservationHolds,
         uncreditedTerminal: report.uncreditedTerminal.length,
         orphanCredits: report.orphanCredits.length,
+        unbackedPayouts: report.unbackedPayouts.length,
         discrepancies: report.discrepancies.length,
         outstandingLiabilitySats: report.totals.outstandingLiabilitySats,
       });
       logger.error(
         `earnings-sweeper: LEDGER MISMATCH — discrepancies=${report.discrepancies.length} `
-        + `uncreditedTerminal=${report.uncreditedTerminal.length} orphanCredits=${report.orphanCredits.length}. `
+        + `uncreditedTerminal=${report.uncreditedTerminal.length} orphanCredits=${report.orphanCredits.length} `
+        + `unbackedPayouts=${report.unbackedPayouts.length}. `
         + 'Inspect GET /api/v1/payments/admin/reconciliation.'
       );
     }

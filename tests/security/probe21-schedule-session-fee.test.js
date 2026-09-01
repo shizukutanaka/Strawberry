@@ -90,7 +90,7 @@ describe('DELETE /me: sessionsRevokedAt invalidates sibling tokens', () => {
 describe('BTC_FEE_RATE validation at module load', () => {
   it('valid default FEE_RATE (0.015) passes validation', () => {
     // Module already loaded with default — if it threw, this test file would error
-    const { FEE_RATE } = require('../../src/api/utils/btc-payment');
+    const { FEE_RATE } = require('../../src/payments/fee-rate');
     expect(FEE_RATE).toBe(0.015);
     expect(Number.isFinite(FEE_RATE)).toBe(true);
     expect(FEE_RATE).toBeGreaterThanOrEqual(0);

@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
 const { withLock } = require('../../utils/async-lock');
-const { logger } = require('../../utils/logger');
 const ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
 
 // 並行 add/remove で list 全体を read-modify-write しているため、
@@ -68,28 +67,14 @@ async function removeProfitAddress(address) {
   });
 }
 
-// 利益分配先をランダム/ラウンドロビンで選択（攻撃耐性向上）
-let lastIdx = 0;
-function selectProfitAddress() {
-  const arr = getProfitAddresses();
-  if (arr.length === 0) throw new Error('No profit addresses registered');
-  // 出口での気づき: 過去に検証なしで保存された不正アドレスを送金直前に検知し警告する。
-  const valid = arr.filter(isValidBtcAddress);
-  if (valid.length === 0) {
-    throw new Error('No valid profit addresses registered');
-  }
-  if (valid.length !== arr.length) {
-    logger.warn(`profit-addresses: ${arr.length - valid.length} stored address(es) are invalid and will be skipped`);
-  }
-  // ラウンドロビン選択（有効アドレスのみ）
-  lastIdx = (lastIdx + 1) % valid.length;
-  return valid[lastIdx];
-}
+// かつてここに selectProfitAddress()（ラウンドロビンで送金先を選ぶ）があったが、
+// 唯一の呼び出し元だった btc-payment.getOperatorWallet ごと削除した（2026-09）。
+// 送金経路が無くなった以上、送金先を「選ぶ」処理も要らない。アドレスの登録・削除・
+// 一覧（/api/profit-addresses）は運営が受取先を管理するために残す。
 
 module.exports = {
   getProfitAddresses,
   addProfitAddress,
   removeProfitAddress,
-  selectProfitAddress,
   isValidBtcAddress
 };

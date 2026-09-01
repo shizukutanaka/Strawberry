@@ -92,6 +92,32 @@ Strawberry（P2P GPU マーケットプレイス＋BTC Lightning 決済）を **
 - (中期) **submarine swap**（Boltz）で貸し手の on-chain 出金を非カストディアルに。
 - (中期) **BOLT12 offers** で再利用可能な受取（運営/貸し手のアドレス露出を低減、profit-addresses と統合）。
 
+### 実装状況（2026-09）
+
+上の「現状」欄は調査時点の記述で、**その後この節が指す 2 つのファイルは削除された**。
+`src/api/utils/btc-payment.js` の二段直接送金と、それが使っていた
+`src/api/utils/lightning-api.js`（OpenNode/LNbits の薄いラッパ）である。
+
+改善点の (短期)「二段直接送金 → 条件付き解放のエスクローへ」は、**エスクロー化ではなく
+経路の削除**という形で解決した。要件を疑った結果、この経路は残す価値が無かった:
+
+- 「オンチェーン BTC 決済」を名乗っていたが、`sendBTC` は Lightning API を呼ぶだけだった
+- UI からは一度も呼ばれていなかった（`public/js/api.js` が呼ぶのは Lightning 経路のみ）
+- 支払い時点で——GPU 起動前に——プロバイダへ全額を送っており、`settlement-calculator` の
+  従量按分・SLA ペナルティ・係争返金・Spot 中断按分をすべて迂回していた
+- その送金は台帳に行を書かないため、注文完了時に `payout-ledger` が**もう一度**同額を計上し、
+  プロバイダは送金と台帳残高の両方を受け取れた。3 つの不変条件はいずれも healthy を返した
+  （記録どうしの突き合わせでは、記録の外で動いた金は原理的に見えない）
+
+残る決済経路は Lightning（`lightning-service.js` の LND gRPC）＋収益台帳の 1 本で、
+出金は運営が送金して txid を記録する手動運用のまま（カストディアル）。
+hold invoice エスクロー（中期）と非カストディアル化（submarine swap）は**未実装**であり、
+`src/payments/escrow-state-machine.js` は状態遷移を純関数として持つだけで LND 実機に
+繋がっていない。この節の (中期) 項目は依然として有効な改善案である。
+
+「台帳を通らない送金経路を再び作らない」ことは
+`tests/payments/no-unledgered-money.test.js` が機械的に見張る。
+
 ---
 
 ## 3. GPU アテステーション・ハードウェア真正性（TEE / Confidential Computing）

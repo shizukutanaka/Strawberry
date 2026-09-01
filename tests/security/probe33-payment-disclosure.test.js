@@ -2,7 +2,7 @@
 // Probe 33 regression tests:
 // 1. settle() CAS uses && not || (no re-settlement on SETTLED escrow with missing settlement)
 // 2. POST /register no longer leaks apiKey (uses sanitizeUser())
-// 3. btc-onchain.js has explicit authenticateJWT middleware
+// 3. (removed 2026-09 — the btc-onchain route it guarded no longer exists)
 // 4. GET /orders does not expose review.reviewerId to counterparties
 // 5. settle() idempotent: second call blocked when settlement already written
 
@@ -104,22 +104,10 @@ describe('POST /register: no apiKey in response', () => {
   });
 });
 
-// ─── 3. btc-onchain: explicit authenticateJWT ────────────────────────────────
-describe('btc-onchain.js: route-level auth guard', () => {
-  it('POST /payment/btc without token returns 401', async () => {
-    const res = await request(app)
-      .post('/api/v1/payment/btc')
-      .send({ orderId: 'fake-order-id', borrowerWallet: 'bc1qfakeaddress' });
-    expect([401, 403]).toContain(res.statusCode);
-  });
-
-  it('btc-onchain.js source has explicit authenticateJWT on POST route', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/btc-onchain.js'), 'utf-8'
-    );
-    expect(src).toMatch(/router\.post\(['"]\/['"]\s*,\s*authenticateJWT/);
-  });
-});
+// ─── 3. (削除) btc-onchain のルート認証ガード ───────────────────────────
+// POST /payment/btc ごと削除したためこの検査は不要になった（2026-09）。
+// 「ルートが復活していないこと」の恒久ガードは
+// tests/payments/no-unledgered-money.test.js が、台帳を通らない送金経路全般として持つ。
 
 // ─── 4. GET /orders: reviewerId stripped ────────────────────────────────────
 describe('GET /orders: review.reviewerId is not exposed', () => {

@@ -65,7 +65,7 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … ✅ だが **真正性検証なし** ❌（カテゴリ3）
-2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は `POST /marketplace/quote`・`openOrderEscrow` に配線済**（`feature-pricer`）。注文の実課金経路（`order/index.js`）はまだフラットのまま。
+2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格（`feature-pricer`）は助言用であって課金経路ではない**。`POST /marketplace/quote` から取れるが UI からは呼ばれておらず（`public/` に出現ゼロ）、`openOrderEscrow` も見積額を注文の `totalPrice` で上書きする（`routes/marketplace.js:118`）。したがって feature-pricer は現時点で**値段を一つも決めていない**。注文の実課金経路（`order/index.js`）はフラットのまま。
    なお feature-pricer は `vramGB/memBandwidthGBs/benchmarkScore` 語彙、出品レコードは `memoryGB/performance.teraflops` 語彙で噛み合っておらず、実レコードを渡すと全特徴量 0 で見積が価格フロアに張り付いていた。`perf-score.toPricingFeatures()` で橋渡し済（2026-08）。
 3. 性能比較: ✅ **正規化性能スコア実装済**（`src/gpu/perf-score.js`、Vast.ai DLPerf 相当）。演算・帯域・VRAM の加重幾何平均で参照GPU(RTX 4090 級)=100 の機種横断指数を算出し、`GET /gpus`・`/gpus/:id` の `performanceScore` と `?sort=perf|value`（価格対性能 = DLPerf/$ 相当）で公開。自己申告での順位買いを防ぐため、参照表と矛盾する申告は表を採用せず（`vram_mismatch`）、申告 TFLOPS は消費電力由来の物理上限でクランプし、未検証の未知型番は参照GPU 超えを認めない。根拠が無い場合はスコアを推測せず null（未算出）。
 4. マッチング: 借り手が一覧から選び、貸し手が承認する。✅ **総合順位付けを実装**（`GET /gpus?sort=recommended`。価格・レピュテーション・稼働実績・アテステーションを統合した効用スコアで実在の出品を並べる。計算は `src/marketplace/auction-engine.js`）。
@@ -73,8 +73,19 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 5. 決済: Lightning／銀行振込は運営がいったん預かり、**収益台帳**（`src/payments/payout-ledger.js`）で
    貸し手の取り分と借り手への返金を計上し、出金申請 → 運営が送金 → txid 記録という流れ ✅。
    帳簿は 3 つの不変条件で自動突き合わせ（`src/payments/reconciliation.js`）。
-   なお**オンチェーン BTC 経路（`payment/btc-onchain.js`）は従来どおり直接二段送金**で、
-   台帳を通らない 🟡。
+   決済経路は Lightning 1 本に統合済（2026-09）。かつて併存した `POST /payment/btc`
+   （btc-onchain）は**削除した**。理由は 3 つで、いずれも「オンチェーン BTC 決済」という
+   要件自体が成立していなかったことに帰着する:
+   (a) オンチェーンではなかった（`sendBTC` は Lightning API を呼ぶだけ）、
+   (b) 支払い時点で——GPU 起動前に——プロバイダへ全額を送っており、従量按分・SLA ペナルティ・
+   係争返金・Spot 中断按分をすべて迂回していた（借り手が返金裁定を得ても原資が無い）、
+   (c) その送金は台帳に行を書かないため、注文完了時に収益台帳が**もう一度**同額を計上し、
+   プロバイダは送金と台帳残高の両方を受け取れた。しかも突き合わせは支払記録と台帳しか
+   見ないので healthy を返し続けた（帳簿は合っていた。合っていなかったのは現金である）。
+   加えて手数料が上乗せ式（借り手に totalPrice×1.015 を請求）で Lightning 経路の控除式と
+   逆であり、**同じ注文が経路によって値段の違うものになっていた**。
+   現在は「金が動くなら必ず台帳の行になる／台帳の行には必ず実送金の証跡がある」の両方向を
+   検査している（`tests/payments/no-unledgered-money.test.js`、不変条件 `noUnbackedPayouts`）✅。
 6. 稼働・アクセス受け渡し: ✅ **実装済（2026-08）**。従来は `virtual-gpu-manager` が
    マーケットプレイス GPU を「割り当てる」ことになっていたが、サーバは他人のマシンに権限が
    無いため `endpoint: null` しか返せず、**支払っても借りられなかった**（要件の誤り）。

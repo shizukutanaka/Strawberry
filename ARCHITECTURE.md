@@ -47,6 +47,10 @@ src/api/server.js
  │                                      借り手への返金分を payout-ledger へ書く
  └─ /api/v1 (routes/index.js)  ※ /system/info 以外は JWT 必須
       ├─ /gpus /orders /payments /users  → JSON リポジトリで動作
+      │    ※ 決済経路は Lightning 1 本（2026-09 に `POST /payment/btc` を削除）。
+      │      金の出口は「台帳の payout 行 → 運営が送金 → txid 記録」だけで、
+      │      外部送金の呼び出し元はコード中に 1 つも無い
+      │      （`tests/payments/no-unledgered-money.test.js` が機械的に保証）
       └─ コアサービス: src/core/services.js 経由のガード付きシングルトン
            ├─ virtual-gpu-manager.js (dockerode/k8s)   … ロード可（要 Docker/k8s 実機）
            ├─ gpu-detector-extended.js                  … ロード可
@@ -83,7 +87,8 @@ src/api/server.js
 - **重大セキュリティ修正**:
   - ハードコード秘密鍵フォールバック廃止 → `config.requireSecret()` で本番 fail-fast / 開発は一時鍵。
   - `routes/profit-addresses.js`（運営受取アドレス）に `jwtAuth + admin` を必須化。
-  - `btc-payment.sendBTC` の `dummy-txid` 成功偽装を廃止し、失敗は例外伝播。
+  - `btc-payment.sendBTC` の `dummy-txid` 成功偽装を廃止し、失敗は例外伝播（その `sendBTC`
+    ごと 2026-09 に削除。下記「決済経路の一本化」参照）。
   - `virtual-gpu-manager` のシェル実行を識別子サニタイズでインジェクション対策。
   - `.env.example` に必須 env を明記。
 

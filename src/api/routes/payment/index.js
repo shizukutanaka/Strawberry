@@ -432,11 +432,16 @@ router.get('/history',
   })
 );
 
-// オンチェーンBTC決済（運営手数料控除）。
-// 旧 routes/payment.js がディレクトリ解決を遮蔽（payment.js が payment/index.js より
-// 優先）し、本ファイルの Lightning 決済API全体が未マウントになっていたため、
-// /btc 配下のサブルートとして取り込んだ。グローバルJWTゲートの保護下にある。
-router.use('/btc', require('./btc-onchain'));
+// 旧 `POST /payment/btc`（btc-onchain）は削除した（2026-09）。理由は 3 つで、いずれも
+// 「オンチェーン BTC 決済」という要件自体が成立していなかったことに帰着する。
+//   1. オンチェーンではなかった。sendBTC は Lightning API を呼ぶだけだった
+//   2. 支払い時点でプロバイダへ全額を送っていた。GPU が起動する前である。従量按分・
+//      SLA ペナルティ・係争返金・Spot 中断按分をすべて迂回し、借り手が返金裁定を
+//      得ても運営の手元に原資が無かった
+//   3. その送金は台帳に行を書かないため、収益台帳へ**二重に**計上されていた
+//      （プロバイダは送金と台帳残高の両方を受け取れた）。しかも突き合わせは
+//      支払記録と台帳しか見ないので healthy を返し続けた
+// 決済は Lightning 経路（POST /payments/order/:id）に一本化した。
 
 // 管理者向け：承認待ちの手動決済（銀行振込等）一覧。
 // GET /payments/history は req.user.id のみに絞られるため（本人の決済履歴専用）、
@@ -637,7 +642,8 @@ router.post('/admin/payouts/:id/reject',
 );
 
 // 運営: 帳簿の突き合わせ。「今いくら預かっていて、いくら払う義務があるか」と、
-// 保存則・取りこぼしゼロの 2 つの不変条件を返す（src/payments/reconciliation.js）。
+// 4 つの不変条件を返す（src/payments/reconciliation.js）: 保存則・取りこぼしゼロ・
+// 出所のない計上ゼロ・裏付けのない出金ゼロ。
 // カストディアル運用では他人の金を預かるため、これを機械的に確認できることが前提。
 router.get('/admin/reconciliation',
   authenticateJWT,
@@ -646,13 +652,15 @@ router.get('/admin/reconciliation',
     const report = require('../../../payments/reconciliation').reconcile();
     const healthy = report.invariants.conservationHolds
       && report.invariants.noUncreditedTerminalOrders
-      && report.invariants.noOrphanCredits;
+      && report.invariants.noOrphanCredits
+      && report.invariants.noUnbackedPayouts;
     if (!healthy) {
       // 帳簿の不一致は運用者が必ず見るべき事象なので監査ログにも残す。
       appendAuditLog('ledger_reconciliation_mismatch', {
         discrepancies: report.discrepancies.length,
         uncreditedTerminal: report.uncreditedTerminal.length,
         orphanCredits: report.orphanCredits.length,
+        unbackedPayouts: report.unbackedPayouts.length,
       }, req.user.id);
     }
     res.json({ healthy, ...report });

@@ -1,6 +1,6 @@
 // tests/security/probe38-payment-review-privacy.test.js
 // Probe 38 regression tests:
-// 38a-1: BTC on-chain payment rejects active orders (double-charge prevention)
+// 38a-1: (removed 2026-09 — the btc-onchain route it guarded no longer exists)
 // 38a-2: Manual payment approval checks order status (no orphaned paid records)
 // 38b-1: renter-profile recentReviews does not include orderId
 // 38b-3: /me/activity review_received does not expose reviewedBy
@@ -18,34 +18,9 @@ afterAll(() => {
   });
 });
 
-// ─── 38a-1: BTC on-chain status gate ─────────────────────────────────────────
-describe('BTC on-chain: active orders are rejected', () => {
-  it('btc-onchain.js: ALLOWED_BTC_PAYMENT_STATUSES excludes active', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/btc-onchain.js'), 'utf-8'
-    );
-    // Must NOT allow active
-    expect(src).not.toMatch(/ALLOWED_BTC_PAYMENT_STATUSES.*active/);
-    // Must still allow pending and matched
-    expect(src).toMatch(/ALLOWED_BTC_PAYMENT_STATUSES.*pending/);
-    expect(src).toMatch(/ALLOWED_BTC_PAYMENT_STATUSES.*matched/);
-  });
-
-  it('POST /payment/btc returns 409 for an active order', async () => {
-    // We need an active order to test; simulate by checking source-level guard
-    // (integration test for active orders requires full Lightning setup).
-    // Verify the guard constant doesn't include 'active'.
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/btc-onchain.js'), 'utf-8'
-    );
-    const match = src.match(/new Set\(\[([^\]]+)\]\)/);
-    expect(match).not.toBeNull();
-    const allowedStatuses = match[1];
-    expect(allowedStatuses).not.toContain("'active'");
-    expect(allowedStatuses).toContain("'pending'");
-    expect(allowedStatuses).toContain("'matched'");
-  });
-});
+// ─── 38a-1: (削除) BTC on-chain の注文状態ゲート ─────────────────────────
+// POST /payment/btc ごと削除したためこの検査は不要になった（2026-09）。二重課金の
+// 心配自体が、決済経路を Lightning 1 本にしたことで消えている。
 
 // ─── 38a-2: Manual payment approval order-status guard ───────────────────────
 describe('Manual payment approval: order status guard', () => {

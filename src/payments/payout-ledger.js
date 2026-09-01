@@ -35,7 +35,7 @@
 //    非カストディアル化には貸し手ごとの LN 接続が要り、別の作業になる。
 const LedgerRepository = require('../db/json/LedgerRepository');
 const { computeSettlement } = require('./settlement-calculator');
-const { FEE_RATE } = require('../api/utils/btc-payment');
+const { FEE_RATE } = require('./fee-rate');
 
 // 出金の最低額。少額出金は LN 手数料・運用手間に対して割に合わない。
 const MIN_PAYOUT_SATS = (() => {

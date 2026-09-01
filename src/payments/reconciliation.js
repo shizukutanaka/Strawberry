@@ -23,6 +23,13 @@
 //     （＝受け取っていない金を払う約束）を素通りさせる。実データに対して動かして
 //     初めて気づいた: 支払いレコードが 2 件しか無いのに台帳の計上が 125 件あり、
 //     それでも healthy=true が返っていた。両方向を見ないと監査にならない。
+//  4. 裏付けのない出金ゼロ: status='paid' の出金仕訳はすべて txid を持つこと。
+//     1〜3 はすべて**記録どうし**の突き合わせで、記録の外で動いた金は見えない。
+//     実際、オンチェーン BTC 経路（削除済み）は台帳に行を書かずにプロバイダへ送金しており、
+//     二重払いが起きていても 1〜3 はすべて healthy を返し続けた。
+//     送金経路を削除して「金が動くなら必ず台帳の行になる」を成立させたので、その逆向き
+//     ——「台帳の行には必ず実送金の証跡がある」——をここで見張る。completePayout() は
+//     txid を必須にしているが、台帳ファイルを直接触られた場合はそれを通らない。
 //
 // 読み取り専用。ここで自動修復はしない（帳簿の不一致を黙って書き換えるのは、
 // 検出できる問題を検出できない問題に変えるだけ）。
@@ -37,7 +44,8 @@ function round(v) {
  * 帳簿を突き合わせる。
  * @returns {{
  *   totals: object, invariants: object,
- *   discrepancies: object[], uncreditedTerminal: object[]
+ *   discrepancies: object[], uncreditedTerminal: object[],
+ *   orphanCredits: object[], unbackedPayouts: object[]
  * }}
  */
 function reconcile(deps = {}) {
@@ -47,8 +55,14 @@ function reconcile(deps = {}) {
 
   // 1. 借り手から実際に受け取った額（注文ごと）
   const paidByOrder = new Map();
+  // 注文に紐づかない入金（管理者発行の汎用インボイス `POST /payments/invoice`）。
+  // 台帳は注文単位で計上するため、これらは構造上どの不変条件にも掛からない。
+  // 掛からないものを黙って `continue` で捨てると「見えていない金」になるので、
+  // 不整合としては扱わないが**必ず金額として報告する**。
+  let unattributedPaid = 0;
   for (const p of PaymentRepo.getAll() || []) {
-    if (p.status !== 'paid' || !p.orderId) continue;
+    if (p.status !== 'paid') continue;
+    if (!p.orderId) { unattributedPaid += round(p.amount); continue; }
     paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + round(p.amount));
   }
 
@@ -57,6 +71,7 @@ function reconcile(deps = {}) {
   const creditsByOrder = new Map();
   let totalEarned = 0, totalRefunded = 0, totalFees = 0;
   let payoutRequested = 0, payoutPaid = 0;
+  const unbackedPayouts = [];
   for (const r of ledgerRows) {
     const amt = round(r.amountSats);
     if (r.kind === 'earning' || r.kind === 'refund' || r.kind === 'adjustment') {
@@ -74,7 +89,17 @@ function reconcile(deps = {}) {
       }
     } else if (r.kind === 'payout') {
       if (r.status === 'requested') payoutRequested += amt;
-      else if (r.status === 'paid') payoutPaid += amt;
+      else if (r.status === 'paid') {
+        payoutPaid += amt;
+        // 「送った」と記録されているのに送金の証跡が無い出金。requestPayout →
+        // completePayout の経路では起きえないので、起きていれば台帳が直接書き換えられている。
+        if (!r.txid || typeof r.txid !== 'string' || r.txid.length < 4) {
+          unbackedPayouts.push({
+            payoutId: r.id, userId: r.userId || null, amountSats: amt,
+            paidAt: r.paidAt || null, txid: r.txid || null,
+          });
+        }
+      }
     }
   }
   // 注文に紐づく手数料は earning の breakdown から数え直す（上のループの totalFees は
@@ -137,17 +162,21 @@ function reconcile(deps = {}) {
       payoutRequestedSats: payoutRequested, // 送金待ち（申請中）
       payoutPaidSats: payoutPaid,          // 送金済み
       outstandingLiabilitySats: outstandingLiability, // 未払いの債務（預かり中）
+      unbackedPayoutSats: unbackedPayouts.reduce((a, p) => a + p.amountSats, 0), // 証跡の無い送金済み額
+      unattributedPaidSats: unattributedPaid, // 注文に紐づかない入金（管理者発行インボイス）
     },
     invariants: {
       conservationHolds: discrepancies.length === 0,
       noUncreditedTerminalOrders: uncreditedTerminal.length === 0,
       noOrphanCredits: orphanCredits.length === 0,
+      noUnbackedPayouts: unbackedPayouts.length === 0,
       paidOrders: paidByOrder.size,
       creditedOrders: creditsByOrder.size,
     },
     discrepancies,
     uncreditedTerminal,
     orphanCredits,
+    unbackedPayouts,
   };
 }
 

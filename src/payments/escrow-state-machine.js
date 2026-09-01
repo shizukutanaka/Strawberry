@@ -1,7 +1,7 @@
 // src/payments/escrow-state-machine.js
 // Lightning hold-invoice エスクロー状態機械（docs/SPECIFICATION.md F2 / カテゴリ2）。
-// 現状の btc-payment.sendBTC は前払い保証なしの二段直接送金で、未提供/未払いリスクと
-// 部分決済(資金滞留)を生む。本 FSM は hold invoice（受取側が preimage を保持し納品証明まで
+// かつて存在した btc-payment.sendBTC は前払い保証なしの二段直接送金で、未提供/未払いリスクと
+// 部分決済(資金滞留)を生んだ（その経路は 2026-09 に削除した）。本 FSM は hold invoice（受取側が preimage を保持し納品証明まで
 // 確定保留）のライフサイクルを純粋な状態遷移として表現する。LND/CLN 実機なしでテスト可能。
 //
 // 返す actions は「副作用の意図」。実配線時に LND gRPC 等へマッピングする:

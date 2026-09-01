@@ -9,10 +9,15 @@
 //   - 「P2Pノード運用・スケールアウト」章（そんな構成は存在しない）
 // 人が読み比べて直すやり方は、次に何かを消したときにまた漏れる。
 //
-// ここで検査するのは 2 点だけ。どちらも「書いてあるものが在るか」という機械的な事実:
+// ここで検査するのは 3 点だけ。どれも「書いてあるものが在るか」という機械的な事実:
 //   1. 本文中の `src/...` `scripts/...` などのファイルパスが実在すること
 //   2. 本文中の `/api/v1/...` パスがルータに登録されていること
+//   3. 本文中の `npm run ...` が package.json の scripts に在ること
 // 「書いていないものが在る」（未文書化 API）はここでは扱わない。
+//
+// 3 は 2026-09 に追加した。README が `npm run start:prometheus` `npm run monitor:nodes`
+// `npm run report:monthly` の 3 つを運用手順として書いていたが、package.json には
+// 1 つも無かった。手順どおりに叩いた人は「動かない」としか分からない。
 const fs = require('fs');
 const path = require('path');
 const { app } = require('../../src/api/server');
@@ -101,6 +106,27 @@ describe('documented API paths are actually registered', () => {
           .replace(/\/$/, '');
         if (!p || p.endsWith('*') || p.includes('...')) continue;
         if (!matches(p)) missing.push(`${file}: ${p}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('documented npm scripts exist', () => {
+  it('references no `npm run` target that package.json does not define', () => {
+    const scripts = Object.keys(JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8')
+    ).scripts || {});
+    const REMOVED_MARKER = /削除|廃止|撤去|removed|deleted|存在しない/i;
+    const missing = [];
+    for (const { file, text } of readDocs()) {
+      for (const line of text.split('\n')) {
+        for (const m of line.matchAll(/npm run ([a-zA-Z0-9:_-]+)/g)) {
+          const name = m[1];
+          if (scripts.includes(name)) continue;
+          if (REMOVED_MARKER.test(line)) continue;
+          missing.push(`${file}: npm run ${name}`);
+        }
       }
     }
     expect(missing).toEqual([]);

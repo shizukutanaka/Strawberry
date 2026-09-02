@@ -1,47 +1,11 @@
 // tests/security/probe21-schedule-session-fee.test.js
 // Probe 21 regression tests:
-// 1. GET /gpus/:id/schedule no longer exposes status field in blockedSlots
+// 1. (removed 2026-09 — GET /gpus/:id/schedule no longer exists)
 // 2. POST /:id/start rejects orders with future scheduledStartAt
 // 3. DELETE /me sets sessionsRevokedAt — sibling tokens become invalid immediately
 // 4. BTC_FEE_RATE validated at module load (NaN / out-of-range → throw)
 
 const request = require('supertest');
-
-describe('GET /gpus/:id/schedule: status field removed from blockedSlots', () => {
-  const { app } = require('../../src/api/server');
-  const GpuRepository = require('../../src/db/json/GpuRepository');
-  const OrderRepository = require('../../src/db/json/OrderRepository');
-
-  it('blockedSlots have no status field', async () => {
-    const gpu = GpuRepository.create({
-      name: 'Sched Test GPU', vendor: 'NVIDIA', model: 'RTX-SCH', memoryGB: 8,
-      pricePerHour: 100, providerId: 'sched-prov-test',
-    });
-    OrderRepository.create({
-      gpuId: gpu.id, _userId: 'sched-user-test', providerId: 'sched-prov-test',
-      durationMinutes: 60, status: 'active',
-      pricePerHour: 100, totalPrice: 100, totalPriceJPY: 5000000,
-      scheduledStartAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      createdAt: new Date().toISOString(),
-    });
-
-    const res = await request(app).get(`/api/v1/gpus/${gpu.id}/schedule`);
-    expect(res.statusCode).toBe(200);
-    const slots = res.body.blockedSlots;
-    expect(Array.isArray(slots)).toBe(true);
-    expect(slots.length).toBeGreaterThan(0);
-    // status must NOT be present in any slot
-    slots.forEach(slot => {
-      expect(slot).not.toHaveProperty('status');
-      expect(slot).toHaveProperty('from');
-      expect(slot).toHaveProperty('to');
-      expect(slot).toHaveProperty('type', 'order');
-    });
-
-    // Clean up
-    GpuRepository.delete(gpu.id);
-  });
-});
 
 describe('DELETE /me: sessionsRevokedAt invalidates sibling tokens', () => {
   const { app } = require('../../src/api/server');

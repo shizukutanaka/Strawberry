@@ -1,6 +1,6 @@
 // tests/security/probe27-reputation-notify.test.js
 // Probe 27 regression tests:
-// 1. POST /marketplace/rank: user-supplied opts are ignored (algorithm manipulation prevented)
+// 1. (removed 2026-09 — POST /marketplace/rank no longer exists)
 // 3. GET /notification-settings/:userId: lineToken is masked as '***' not returned in plaintext
 
 const request = require('supertest');
@@ -31,47 +31,6 @@ beforeAll(async () => {
 });
 
 // ─── 1. /rank: opts stripped ─────────────────────────────────────────────────
-describe('POST /marketplace/rank: user-supplied opts are ignored', () => {
-  it('returns a ranked list without error when providerIds is valid', async () => {
-    const res = await request(app)
-      .post('/api/v1/marketplace/rank')
-      .set('Authorization', `Bearer ${userTok}`)
-      .send({ providerIds: [] });
-    expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.body.ranked)).toBe(true);
-  });
-
-  it('marketplace.js source: /rank does not pass user opts to rankCandidates', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/marketplace.js'), 'utf-8'
-    );
-    // The old vulnerable code: rankCandidates(providerIds, opts && ...)
-    // Must NOT pass user-supplied opts into the ranking/auction functions
-    expect(src).not.toMatch(/rankCandidates\(providerIds,\s*opts/);
-    // Must use empty opts literal
-    expect(src).toMatch(/rankCandidates\(providerIds,\s*\{\}/);
-    // /auction は削除済み。復活させるなら同じ「opts を渡さない」規律が要る。
-    expect(src).not.toMatch(/selectProvider\(/);
-  });
-
-  it('returns 400 when providerIds is missing', async () => {
-    const res = await request(app)
-      .post('/api/v1/marketplace/rank')
-      .set('Authorization', `Bearer ${userTok}`)
-      .send({ opts: { slashPenaltyPerEvent: 0, priorMean: 1 } });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('returns 400 when providerIds exceeds batch limit', async () => {
-    const tooMany = Array.from({ length: 201 }, (_, i) => `prov-${i}`);
-    const res = await request(app)
-      .post('/api/v1/marketplace/rank')
-      .set('Authorization', `Bearer ${userTok}`)
-      .send({ providerIds: tooMany });
-    expect(res.statusCode).toBe(400);
-  });
-});
-
 // POST /marketplace/auction の検査は、エンドポイント自体を削除したため除去した。
 // この製品には入札という概念が無く（入札を保存する場所も、貸し手が要件を見る画面も
 // 無い）、旧エンドポイントは入札内容を呼び出し側が捏造できた。効用スコアの計算は

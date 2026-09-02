@@ -1,6 +1,6 @@
 // tests/services/renter-eligibility.test.js
-// Unit tests for the single source of truth that both POST /orders and
-// GET /gpus/:id/eligibility use to decide whether a renter may book a GPU.
+// Unit tests for the single source of truth that POST /orders uses to decide
+// whether a renter may book a GPU.
 
 const { computeRenterRating, evaluateRenterEligibility } = require('../../src/services/renter-eligibility');
 

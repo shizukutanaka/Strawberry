@@ -80,15 +80,6 @@ describe('marketplace-service', () => {
     expect(reputationService.getStats('bad').slashCount).toBe(slashBefore + 1);
   });
 
-  it('ranks candidates by reputation', () => {
-    const { mkt, reputationService } = build();
-    for (let i = 0; i < 100; i++) reputationService.recordJobResult('strong', true);
-    reputationService.addStake('strong', 5_000_000);
-    reputationService.recordJobResult('weak', false);
-    const ranked = mkt.rankCandidates(['weak', 'strong']);
-    expect(ranked[0].id).toBe('strong');
-  });
-
   it('settleByUsage prorates the escrow by delivered usage', () => {
     const { mkt } = build();
     const { escrow, amountSats } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 120 });

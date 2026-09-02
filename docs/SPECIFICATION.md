@@ -122,7 +122,7 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - **GPU アテステーション**: 🟡 検証の枠組みは実装・配線済（`src/security/gpu-attestation-verifier.js`、出品時に `attestationReport` を任意提出 → 申告スペックとの突き合わせ 8 チェック → `attestation.passed/score` を保存し一覧・詳細・`sort=recommended` が参照）。ただし**実機の署名検証（nvtrust）は未対応**で、現在の検証器は Mock。したがって「検証済み」と称してよいのは*申告の内部整合性*までで、ハードウェアの真正性ではない。
 
 ### F3. レピュテーション/インセンティブ
-- ステーク/スラッシング/レピュテーション: ✅ `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）。**配線済**: 注文完了時の成否記録、ゼロ負荷監査の結果反映、係争の返金裁定での slash、`GET /gpus?sort=recommended` と `POST /marketplace/rank` での参照。
+- ステーク/スラッシング/レピュテーション: ✅ `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）。**配線済**: 注文完了時の成否記録、ゼロ負荷監査の結果反映、係争の返金裁定での slash、`GET /gpus?sort=recommended` での参照（`POST /marketplace/rank` は UI から呼ばれていなかったため 2026-09 に削除）。
 
 ### F4. 運用・可観測性
 - Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **OTel トレース**: ✅（`src/telemetry/instrumentation.js` を

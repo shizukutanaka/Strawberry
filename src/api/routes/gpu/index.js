@@ -28,7 +28,7 @@ const carbonIntensity = require('../../../gpu/carbon-intensity');
 const { applyListingDefaults } = require('../../../gpu/listing-defaults');
 // 価格×レピュテーション×稼働×アテステーションの統合スコア（sort=recommended）
 const { runAuction } = require('../../../marketplace/auction-engine');
-const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
+const { sanitizeObject } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
 // 価格ウォッチ（値下げアラート）
@@ -205,15 +205,10 @@ router.get('/', asyncHandler(async (req, res) => {
     }).map(o => o.gpuId)
   );
   // available: プロバイダが手動で false に設定している場合はそれを優先し、
-  // そうでなければ現在時刻に手動ブロック or 重複注文がない場合は true とする。
+  // そうでなければ現在時刻に重複注文がない場合は true とする。
   gpus = gpus.map(gpu => {
     if (gpu.available === false) return { ...gpu, available: false };
-    const manuallyBlocked = Array.isArray(gpu.manualBlocks) && gpu.manualBlocks.some(b => {
-      const bs = new Date(b.from).getTime();
-      const be = new Date(b.to).getTime();
-      return bs <= nowMs && be > nowMs;
-    });
-    return { ...gpu, available: !manuallyBlocked && !occupiedGpuIds.has(gpu.id) };
+    return { ...gpu, available: !occupiedGpuIds.has(gpu.id) };
   });
   // ?available=true で空き GPU のみに絞り込み
   if (req.query.available === 'true') {
@@ -393,7 +388,7 @@ router.get('/', asyncHandler(async (req, res) => {
     limit,
     offset,
     summary: { totalRegistered, totalAvailable, totalOccupied },
-    gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, ...gpu }) => {
+    gpus: pagedGpus.map(({ apiKey, providerId: _pid, ...gpu }) => {
       const r = reviewMap.get(gpu.id);
       const rel = relFor(_pid);
       // perfFor はページング前の全 GPU ではなくページ内のみ計算される（sort=perf/value 時は
@@ -461,15 +456,14 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // レスポンスを構築。
   // providerId: 公開エンドポイントで返すとプロバイダ身元列挙に使われる（リスト側と同じ扱い）。
   //   オーナー/管理者には返す（本人は自分の ID を知る必要がある）。
-  // manualBlocks: 予約空き状況の内部スケジュールデータ — 公開しない（リスト側と同じ扱い）。
   // apiKey: 常に除外。
-  const { apiKey, providerId, manualBlocks, ...gpuSafe } = gpu;
+  const { apiKey, providerId, ...gpuSafe } = gpu;
   const rel = providerUptime.getReliability(providerId);
   const response = {
     message: 'Fetched GPU detail',
     gpu: {
       ...gpuSafe,
-      ...(viewerIsOwnerOrAdmin ? { providerId, manualBlocks } : {}),
+      ...(viewerIsOwnerOrAdmin ? { providerId } : {}),
       details, usageStats, availability,
       rating: { average: ratingAverage, count: ratingCount },
       // 客観的な信頼性シグナル（集計値のみ — プロバイダー身元は露出しない）
@@ -555,49 +549,6 @@ router.get('/:id/market-rate', asyncHandler(async (req, res) => {
     minPricePerHour: sampleCount > 0 ? peers[0] : null,
     maxPricePerHour: sampleCount > 0 ? peers[sampleCount - 1] : null,
   });
-}));
-
-// GPU注文履歴取得（認証必須 — 所有者または管理者のみ）
-// プロバイダが自分のGPUの使用状況を把握するためのエンドポイント。
-// ?limit=N ?offset=N ?status=completed|cancelled|etc. でフィルタリング可能。
-router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
-  const gpuId = req.params.id;
-  const gpu = GpuRepository.getById(gpuId);
-  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
-  if (req.user.role !== 'admin' && gpu.providerId !== req.user.id) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const OrderRepository = require('../../../db/json/OrderRepository');
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
-  const statusFilter = req.query.status || null;
-
-  let orders = OrderRepository.getAll().filter(o => o.gpuId === gpuId);
-  if (statusFilter) orders = orders.filter(o => o.status === statusFilter);
-  orders = orders.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-
-  const total = orders.length;
-  // 借り手 userId を生で返すと、安価な GPU を撒餌に出品して借り手 UUID を量産収集する
-  // 大量列挙攻撃が成立する（renter-profile と組合せて prof作成可能）。
-  // プロバイダは自分の GPU の稼働実績（料金・期間・レビュー有無）だけ知れれば十分なので
-  // 借り手の内部 ID は返さない。
-  const page = orders.slice(offset, offset + limit).map(o => ({
-    orderId: o.id,
-    status: o.status,
-    durationMinutes: o.durationMinutes,
-    totalPrice: o.totalPrice || null,
-    createdAt: o.createdAt,
-    startedAt: o.startedAt || null,
-    stoppedAt: o.stoppedAt || null,
-    cancelledAt: o.cancelledAt || null,
-    hasReview: !!o.review,
-    reviewRating: o.review ? o.review.rating : null,
-  }));
-
-  res.json({ gpuId, total, limit, offset, orders: page });
 }));
 
 // GPU出品登録 (認証必須)
@@ -714,182 +665,6 @@ router.post('/',
   })
 );
 
-// GPU複製（認証必須 — 既存 GPU の仕様をコピーして新しい登録を作成する）
-// POST /gpus/:id/clone?name=カスタム名 — id と providerId は新たに生成される
-router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asyncHandler(async (req, res) => {
-  const sourceId = req.params.id;
-  const source = GpuRepository.getById(sourceId);
-  if (!source) return res.status(404).json({ error: 'GPU not found' });
-  if (req.user.role !== 'admin' && source.providerId !== req.user.id) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  // getAll() は呼ぶ度に gpus.json を同期読み込み+パースする（キャッシュなし）。
-  // 上限チェックと重複チェックで別々に呼ぶと 1 リクエストで 2 回のディスク I/O が
-  // 発生するため、1 回のロードを両方のチェックで再利用する。
-  const allGpusForClone = GpuRepository.getAll();
-  // GPU 上限チェック: clone も新規登録と同等の制限を受ける（clone での上限迂回を防ぐ）
-  if (req.user.role !== 'admin') {
-    const MAX_GPUS_CLONE = (() => {
-      const raw = process.env.MAX_GPUS_PER_PROVIDER;
-      const n = Number(raw);
-      return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
-    })();
-    const providerGpuCount = allGpusForClone.filter(g => g.providerId === req.user.id).length;
-    if (providerGpuCount >= MAX_GPUS_CLONE) {
-      return res.status(429).json({ error: `GPU registration limit reached (max ${MAX_GPUS_CLONE} per provider)` });
-    }
-  }
-  const {
-    id: _id, providerId: _p, createdAt: _c, updatedAt: _u, attestation: _a, manualBlocks: _b,
-    apiKey: _ak, available: _av, ...specFields  // available を除外 → クローンは常にオンライン
-  } = source;
-  // Sanitize and type-check: req.query.name may be an array (HTTP param pollution
-  // via ?name[]=foo&name[]=<xss>). Only accept string values; sanitize against XSS.
-  const rawName = (typeof req.body.name === 'string' ? req.body.name : null)
-    || (typeof req.query.name === 'string' ? req.query.name : null)
-    || `${source.name} (copy)`;
-  const targetName = sanitizeString(rawName).slice(0, 128);
-  // 重複スペック禁止: 単体 register / PUT は (name, model, vendor, memoryGB, providerId) で
-  // 一意性を強制している。clone はこれを skip していたためマーケット重複・検索順位操作・
-  // 分析データ汚染を起こせた。
-  const duplicate = allGpusForClone.find(g =>
-    g.providerId === req.user.id &&
-    g.name === targetName &&
-    g.model === source.model &&
-    g.vendor === source.vendor &&
-    g.memoryGB === source.memoryGB
-  );
-  if (duplicate) {
-    return res.status(409).json({ error: 'A GPU with this name and spec is already registered for this provider' });
-  }
-  // ソースは旧スキーマで登録されている可能性があるため、register スキーマを丸ごと
-  // 適用すると必須フィールド欠落で 400 が頻発する。stripUnknown + presence:'optional'
-  // で「未知フィールドは捨てる、ただし値が来たものはレンジ検証する」運用に落とす。
-  // 目的は legacy/out-of-band フィールドが新規 GPU レコードに混入するのを防ぐこと。
-  const { error: cloneValErr, value: validatedClone } = schemas.gpu.register
-    .fork(Object.keys(schemas.gpu.register.describe().keys || {}), (s) => s.optional())
-    .validate({ ...specFields, name: targetName }, { abortEarly: false, stripUnknown: true });
-  if (cloneValErr) {
-    return res.status(400).json({
-      error: 'Cloned spec failed validation: ' + cloneValErr.details.map(d => d.message).join('; '),
-    });
-  }
-  const cloned = GpuRepository.create({
-    ...validatedClone,
-    providerId: req.user.id,
-    available: true,  // ソースが offline でもクローンは online 状態で開始
-    attestation: { passed: false, score: 0, findings: ['cloned from ' + sourceId + '; re-attest to verify'], verifiedAt: null },
-  });
-  const { apiKey: _k, ...safe } = cloned;
-  res.status(201).json({ message: 'GPU cloned successfully', gpu: safe, clonedFrom: sourceId });
-}));
-
-// GPU一括登録 (認証必須、最大20台)
-// POST /gpus/bulk — 同一プロバイダが複数の GPU をまとめて登録する。
-// 各エントリに個別のバリデーションと重複チェックを行い、失敗したものはスキップして
-// 結果の配列で返す（部分成功を許容）。
-router.post('/bulk',
-  authenticateJWT,
-  checkRole(['provider', 'admin']),
-  asyncHandler(async (req, res) => {
-    const entries = req.body;
-    if (!Array.isArray(entries) || entries.length === 0) {
-      return res.status(400).json({ error: 'Request body must be a non-empty array of GPU objects' });
-    }
-    if (entries.length > 20) {
-      return res.status(400).json({ error: 'Maximum 20 GPUs per bulk registration request' });
-    }
-    // 提供者ごとの上限チェック（単体登録と同じガード — バルクで上限を迂回させない）
-    const MAX_GPUS_BULK = (() => {
-      const raw = process.env.MAX_GPUS_PER_PROVIDER;
-      const n = Number(raw);
-      return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
-    })();
-    // getAll() は呼ぶ度に gpus.json を同期読み込み+パースする（キャッシュなし）。
-    // 旧実装はループ内で毎エントリ getAll() を再呼び出しし、20件バッチで最大21回
-    // 同じファイルを読み直していた。バッチ内の重複は below の batchKeys（name|model|
-    // vendor|memoryGB — 既存重複チェックと同一の一致条件）で完全にカバーされるため、
-    // 既存データに対する重複チェックはループ開始前の1回のスナップショットで十分。
-    const allGpusSnapshot = GpuRepository.getAll();
-    if (req.user.role !== 'admin') {
-      const currentCount = allGpusSnapshot.filter(g => g.providerId === req.user.id).length;
-      if (currentCount + entries.length > MAX_GPUS_BULK) {
-        return res.status(429).json({
-          error: `Would exceed GPU registration limit. Current: ${currentCount}, limit: ${MAX_GPUS_BULK}, requested: ${entries.length}`,
-        });
-      }
-    }
-    const { schemas: { gpu: gpuSchemas } } = require('../../../utils/validator');
-    const results = [];
-    const batchKeys = new Set();
-    for (const entry of entries) {
-      const { error: valErr, value } = gpuSchemas.register.validate(entry, { abortEarly: false, stripUnknown: true });
-      if (valErr) {
-        results.push({ success: false, id: entry.id || null, error: valErr.details.map(d => d.message).join('; ') });
-        continue;
-      }
-      const batchSubmitted = sanitizeObject(value, [
-        'name', 'vendor', 'model', 'apiType', 'driverVersion', 'os', 'arch',
-        'memoryGB', 'clockMHz', 'powerWatt', 'pricePerHour', 'availability',
-        'features', 'capabilities', 'location', 'performance', 'minRenterRating',
-      ]);
-      // 単体登録と同じ導出を通す（一括登録だけ必須項目が多い、という食い違いを作らない）
-      const { gpu: gpuInfo, derivedFields: batchDerived } = applyListingDefaults(batchSubmitted);
-      if (batchDerived.length) gpuInfo.derivedFields = batchDerived;
-      gpuInfo.providerId = req.user.id;
-      const dedupKey = `${gpuInfo.name}|${gpuInfo.model}|${gpuInfo.vendor}|${gpuInfo.memoryGB}`;
-      if (batchKeys.has(dedupKey)) {
-        results.push({ success: false, id: entry.id || null, error: 'Duplicate GPU spec within this batch' });
-        continue;
-      }
-      const duplicate = allGpusSnapshot.find(g =>
-        g.name === gpuInfo.name && g.model === gpuInfo.model &&
-        g.vendor === gpuInfo.vendor && g.memoryGB === gpuInfo.memoryGB &&
-        g.providerId === req.user.id
-      );
-      if (duplicate) {
-        results.push({ success: false, id: entry.id || null, error: 'Duplicate GPU spec already registered' });
-        continue;
-      }
-      batchKeys.add(dedupKey);
-      gpuInfo.capabilities = gpuInfo.capabilities || {};
-      if (gpuInfo.apiType === 'CUDA') gpuInfo.capabilities.cuda = true;
-      if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
-      if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
-      if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
-      // バルクでも単体登録と同等にアテステーションを処理する。
-      // 旧実装は単に { passed:false } を埋めて recordAttestation を呼ばないため、
-      // 単体登録で attestation 失敗の slashCount を負っているプロバイダがバルクに
-      // 切り替えることでレピュテーション罰則を回避できる reputation laundering 経路だった。
-      if (value.attestationReport) {
-        try {
-          const attResult = await _attestationVerifier.verify(gpuInfo, value.attestationReport);
-          gpuInfo.attestation = {
-            passed: attResult.passed,
-            score: attResult.score,
-            findings: attResult.findings,
-            verifiedAt: new Date().toISOString(),
-          };
-          try { createReputationService().recordAttestation(req.user.id, attResult.passed); } catch (_) {}
-        } catch (attErr) {
-          gpuInfo.attestation = {
-            passed: false, score: 0,
-            findings: ['verifier error: ' + attErr.message],
-            verifiedAt: new Date().toISOString(),
-          };
-        }
-      } else {
-        gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
-      }
-      const registered = GpuRepository.create(gpuInfo);
-      const { apiKey: _k, ...safe } = registered;
-      results.push({ success: true, gpu: safe });
-    }
-    const successCount = results.filter(r => r.success).length;
-    res.status(successCount > 0 ? 201 : 400).json({ registered: successCount, total: entries.length, results });
-  })
-);
-
 // GPU情報更新 (認証必須)
 router.put('/:id',
   authenticateJWT,
@@ -1003,219 +778,6 @@ router.delete('/:id',
   })
 );
 
-// 注文コスト事前見積もり（認証不要、注文作成なし）
-// GET /gpus/:id/estimate?durationMinutes=60[&scheduledStartAt=ISO]
-// 借り手が実際に注文を作成する前に料金を確認できる。
-router.get('/:id/estimate', asyncHandler(async (req, res) => {
-  const gpuId = req.params.id;
-  const gpu = GpuRepository.getById(gpuId);
-  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
-  if (!gpu.pricePerHour || gpu.pricePerHour <= 0) {
-    return res.status(400).json({ error: 'GPU does not have a valid price configured' });
-  }
-  const durationRaw = parseInt(req.query.durationMinutes, 10);
-  if (!Number.isInteger(durationRaw) || durationRaw <= 0 || durationRaw % 5 !== 0 || durationRaw > 43200) {
-    return res.status(400).json({ error: 'durationMinutes must be a positive integer, a multiple of 5, and at most 43200 (30 days)' });
-  }
-  const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
-  const rateInfo = await fetchRateInfo();
-  const pricing = computeOrderPricing({ gpuId, durationMinutes: durationRaw, pricePerHour: gpu.pricePerHour }, rateInfo);
-
-  // 空き状況チェック（見積もり時点の参考情報 — 確定は注文作成時に行う）
-  const OrderRepository = require('../../../db/json/OrderRepository');
-  const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
-  let scheduledStart = Date.now();
-  if (req.query.scheduledStartAt) {
-    scheduledStart = Date.parse(req.query.scheduledStartAt);
-    if (!Number.isFinite(scheduledStart)) return res.status(400).json({ error: 'Invalid scheduledStartAt date' });
-  }
-  const scheduledEnd = scheduledStart + durationRaw * 60 * 1000;
-  const conflicting = OrderRepository.getAll().find(o => {
-    if (o.gpuId !== gpuId || !BLOCKING.has(o.status)) return false;
-    const s = new Date(o.scheduledStartAt || o.createdAt).getTime();
-    const e = s + (o.durationMinutes || 0) * 60 * 1000;
-    return scheduledStart < e && scheduledEnd > s;
-  });
-
-  res.json({
-    gpuId,
-    gpuName: gpu.name,
-    durationMinutes: durationRaw,
-    ...pricing,
-    exchangeRateTimestamp: rateInfo.timestamp,
-    availableAtRequestedTime: !conflicting,
-    minRenterRating: gpu.minRenterRating || null,
-  });
-}));
-
-// 借り手資格事前チェック（認証必須）
-// GET /gpus/:id/eligibility
-// 現在のユーザーがこの GPU を注文できる資格を持つか事前に確認できる。
-// rejectUnratedRenters / minRenterRating に引っかかる借り手は注文作成前に
-// この API で理由を確認し、不要な 422 を避けられる。
-router.get('/:id/eligibility', authenticateJWT, asyncHandler(async (req, res) => {
-  const gpuId = req.params.id;
-  const gpu = GpuRepository.getById(gpuId);
-  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
-
-  // 資格判定は renter-eligibility に集約（POST /orders と同一ロジックを共有）。
-  const OrderRepository = require('../../../db/json/OrderRepository');
-  const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
-  const renterRating = computeRenterRating(OrderRepository.getAll(), req.user.id);
-  const verdict = evaluateRenterEligibility(gpu, req.user.id, renterRating);
-
-  return res.json({
-    eligible: verdict.eligible,
-    reason: verdict.reason,
-    message: verdict.message,
-    requirements: {
-      minRenterRating: gpu.minRenterRating || null,
-      rejectUnratedRenters: gpu.rejectUnratedRenters === true,
-    },
-    renterRating: gpu.providerId === req.user.id ? null : renterRating,
-  });
-}));
-
-// GPU 手動ブロック登録（メンテナンス・個人利用等）
-// POST /gpus/:id/block — 認証必須（GPU オーナーまたは管理者）
-router.post('/:id/block',
-  authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
-  asyncHandler(async (req, res) => {
-  const gpuId = req.params.id;
-  const gpu = GpuRepository.getById(gpuId);
-  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
-  if (req.user.role !== 'admin' && gpu.providerId !== req.user.id) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const { from, to, reason } = req.body;
-  if (!from || !to) return res.status(400).json({ error: '"from" and "to" are required' });
-  const fromMs = new Date(from).getTime();
-  const toMs = new Date(to).getTime();
-  if (isNaN(fromMs)) return res.status(400).json({ error: 'Invalid "from" date' });
-  if (isNaN(toMs)) return res.status(400).json({ error: 'Invalid "to" date' });
-  if (fromMs >= toMs) return res.status(400).json({ error: '"from" must be before "to"' });
-  // 最大ブロック期間: 90日。無期限ブロックはプロバイダによる GPU 実質廃棄に相当し、
-  // マーケットプレイスのサプライを恒久的に枯渇させる（ゾンビ GPU 問題）。
-  const MAX_BLOCK_DURATION_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
-  if (toMs - fromMs > MAX_BLOCK_DURATION_MS) {
-    return res.status(400).json({ error: 'Block duration cannot exceed 90 days' });
-  }
-  if (reason !== undefined && (typeof reason !== 'string' || reason.length > 200)) {
-    return res.status(400).json({ error: '"reason" must be a string (max 200 chars)' });
-  }
-  const sanitizedReason = reason
-    ? reason.replace(/[<>"'&]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 200) || null
-    : null;
-  const { v4: uuidv4 } = require('uuid');
-  const block = {
-    id: uuidv4(),
-    from: new Date(fromMs).toISOString(),
-    to: new Date(toMs).toISOString(),
-    reason: sanitizedReason,
-    createdAt: new Date().toISOString(),
-  };
-
-  // TOCTOU防止: 並行 add が上限チェックを同時に通過し cap を超過する（100→101+）のと
-  // 後着の write が先着 write の追加ブロックを上書き消去するのを防ぐ。
-  // ロック内で GPU を再取得し最新の manualBlocks 配列に対して上限を評価する。
-  const MAX_BLOCKS_PER_GPU = 100;
-  return withLock(`gpu:${gpuId}:blocks`, async () => {
-    const freshGpu = GpuRepository.getById(gpuId);
-    const existing = Array.isArray(freshGpu && freshGpu.manualBlocks) ? freshGpu.manualBlocks : [];
-    if (existing.length >= MAX_BLOCKS_PER_GPU) {
-      return res.status(429).json({ error: `Cannot add more than ${MAX_BLOCKS_PER_GPU} manual blocks per GPU. Remove old blocks first.` });
-    }
-    GpuRepository.update(gpuId, { manualBlocks: [...existing, block] });
-    return res.status(201).json({ block });
-  });
-}));
-
-// GPU 手動ブロック削除
-// DELETE /gpus/:id/block/:blockId — 認証必須（GPU オーナーまたは管理者）
-router.delete('/:id/block/:blockId',
-  authenticateJWT,
-  // id は実際の DB ルックアップキーなので UUID で厳格に検証する。
-  // blockId は manualBlocks の .find() 文字列比較にしか使われず（注入面なし）、
-  // 存在しない blockId は 404 Not Found として返すのが正しい意味論。よって UUID 厳格化
-  // ではなく長さ上限付きの不透明文字列として受け入れ、ハンドラに 404 判定を委ねる。
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required(), blockId: Joi.string().max(128).required() }).unknown(true), 'params'),
-  asyncHandler(async (req, res) => {
-  const gpuId = req.params.id;
-  const gpu = GpuRepository.getById(gpuId);
-  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
-  if (req.user.role !== 'admin' && gpu.providerId !== req.user.id) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const blockId = req.params.blockId;
-  // TOCTOU防止: 並行 add+delete が互いの変更を上書き消去するのを防ぐ。add と同じキーでシリアライズ。
-  return withLock(`gpu:${gpuId}:blocks`, async () => {
-    const freshGpu = GpuRepository.getById(gpuId);
-    const existing = Array.isArray(freshGpu && freshGpu.manualBlocks) ? freshGpu.manualBlocks : [];
-    const idx = existing.findIndex(b => b.id === blockId);
-    if (idx === -1) return res.status(404).json({ error: 'Block not found' });
-    GpuRepository.update(gpuId, { manualBlocks: existing.filter(b => b.id !== blockId) });
-    return res.status(200).json({ message: 'Block removed' });
-  });
-}));
-
-// GPU の予約カレンダー（空き時間帯の照会）
-// GET /gpus/:id/schedule?from=ISO&to=ISO
-// 認証不要（マーケットプレイスブラウジングと同等）
-router.get('/:id/schedule', asyncHandler(async (req, res) => {
-  const gpuId = req.params.id;
-  const gpu = GpuRepository.getById(gpuId);
-  if (!gpu) return res.status(404).json({ error: 'GPU not found' });
-
-  const nowMs = Date.now();
-  const defaultTo = new Date(nowMs + 7 * 24 * 60 * 60 * 1000);
-
-  const from = req.query.from ? new Date(req.query.from) : new Date(nowMs);
-  const to = req.query.to ? new Date(req.query.to) : defaultTo;
-
-  if (isNaN(from.getTime())) return res.status(400).json({ error: 'Invalid "from" date' });
-  if (isNaN(to.getTime())) return res.status(400).json({ error: 'Invalid "to" date' });
-  if (from >= to) return res.status(400).json({ error: '"from" must be before "to"' });
-  // 最大照会ウィンドウ: 180日。過度に広いウィンドウは大量スロットを返すレスポンス DoS になる。
-  const MAX_SCHEDULE_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
-  if (to - from > MAX_SCHEDULE_WINDOW_MS) {
-    return res.status(400).json({ error: 'Schedule query window cannot exceed 180 days' });
-  }
-
-  const OrderRepository = require('../../../db/json/OrderRepository');
-  const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
-
-  const blockedSlots = OrderRepository.getAll()
-    .filter(o => o.gpuId === gpuId && BLOCKING.has(o.status))
-    .map(o => {
-      const slotStart = new Date(o.scheduledStartAt || o.createdAt);
-      const slotEnd = new Date(slotStart.getTime() + (o.durationMinutes || 0) * 60 * 1000);
-      // orderId・status は非公開: orderId は注文 ID 列挙防止、status は
-      // active/matched/pending を返すと稼働状況の競合情報調査に使われる
-      // （認証不要エンドポイントのため競合他社によるプロバイダ稼働モニタリングが成立する）。
-      // スロットの占有期間のみで予約重複チェックには十分。
-      return { from: slotStart.toISOString(), to: slotEnd.toISOString(), type: 'order' };
-    })
-    .filter(slot => new Date(slot.from) < to && new Date(slot.to) > from)
-    .sort((a, b) => a.from.localeCompare(b.from));
-
-  // reason フィールドは非公開: プロバイダの業務上のメモが漏洩しないよう除去する。
-  const manualBlocks = (Array.isArray(gpu.manualBlocks) ? gpu.manualBlocks : [])
-    .filter(b => new Date(b.from) < to && new Date(b.to) > from)
-    .map(({ reason: _r, ...b }) => ({ ...b, type: 'manual' }))
-    .sort((a, b) => a.from.localeCompare(b.from));
-
-  res.json({
-    gpuId,
-    from: from.toISOString(),
-    to: to.toISOString(),
-    blockedSlots,
-    manualBlocks,
-  });
-}));
-
 // システムが検出したGPUの一覧を取得 (管理者のみ)
 // 旧実装は認証必須のみで一般ユーザーがホストの物理 GPU 在庫を列挙できた
 // （ドライバ・ファームウェア・PCI ID 等のサーバー側偵察情報の漏洩）。
@@ -1256,24 +818,6 @@ router.get('/system/amd',
   })
 );
 
-// GPU使用状況の取得 (オーナー/管理者のみ)
-// 旧実装は無認証で誰でも借り手のライブテレメトリ（CPU/メモリ/利用率/温度）を
-// ポーリングでき、稼働パターンの de-anonymize やサイドチャネル収集が可能だった。
-router.get('/:id/usage',
-  authenticateJWT,
-  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
-  asyncHandler(async (req, res) => {
-    if (!requireService(vgpuManager, res)) return;
-    const gpuId = req.params.id;
-    logger.info(`Fetching usage stats for GPU: ${gpuId}`);
-    const usageStats = await vgpuManager.getGPUUsageStats(gpuId);
-    if (!usageStats) {
-      return res.status(404).json({ error: 'GPU usage stats not found' });
-    }
-    res.json({ message: 'Fetched GPU usage stats', gpuId, usageStats });
-  })
-);
-
 // ベンチマークのエンドポイント（GET/POST /gpus/:id/benchmark）は削除した。
 //
 // サーバは**プロバイダのマシンでコードを実行する権限を持たない**。他人の GPU で
@@ -1306,7 +850,7 @@ router.post('/:id/watch',
       return res.status(400).json({ error: '"targetPrice" must be a positive number' });
     }
     // 1ユーザーあたりのウォッチ上限。無制限だと watches.json を無限に膨張させる
-    // リソース枯渇（DoS）経路になるため、manualBlocks と同様に上限を設ける。
+    // リソース枯渇（DoS）経路になるため、上限を設ける。
     // ロックはユーザー単位（gpu 単位ではない）にして、別 GPU への並行登録が
     // 上限チェックを同時通過して cap を超過する TOCTOU を防ぐ。
     const MAX_WATCHES_PER_USER = 200;

@@ -48,10 +48,6 @@ function createMarketplaceService({
   }
 
   /** 候補プロバイダをレピュテーション順に並べる（マッチング）。 */
-  function rankCandidates(providerIds, opts = {}) {
-    return reputationService.rank(providerIds, opts);
-  }
-
   // selectProvider（逆オークション）は削除した。唯一の呼び出し口だった
   // POST /marketplace/auction が入札内容を呼び出し側から受け取っており、
   // この製品には入札を保存する場所も貸し手が要件を見る画面も無いため、
@@ -119,7 +115,7 @@ function createMarketplaceService({
     return escrowService.get(escrowId);
   }
 
-  return { quoteGpu, rankCandidates, openOrderEscrow, recordPaid, verifyAndSettle, settleByUsage, resolveDispute, getEscrow };
+  return { quoteGpu, openOrderEscrow, recordPaid, verifyAndSettle, settleByUsage, resolveDispute, getEscrow };
 }
 
 module.exports = { createMarketplaceService };

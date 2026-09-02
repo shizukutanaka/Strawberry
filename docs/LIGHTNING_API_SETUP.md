@@ -62,11 +62,15 @@ LND に繋がらない本番環境では決済 API が 503 を返すのが正し
 | エンドポイント | 用途 |
 |---|---|
 | `POST /api/v1/payments/order/:orderId` | 注文の支払い（インボイス発行 / 手動決済の申請） |
-| `GET /api/v1/payments/:id` | 支払い状態の確認 |
-| `POST /api/v1/payments/invoice` | 汎用インボイス発行（**admin 限定**。注文に紐づかないため台帳の注文単位の突き合わせには載らず、`reconciliation` の `unattributedPaidSats` に金額としてのみ現れる） |
+| `GET /api/v1/payments/:id/status` | 支払い状態の確認 |
 | `GET /api/v1/payments/admin/reconciliation` | 帳簿の突き合わせ（4 つの不変条件） |
 
 入金の確定は `src/core/invoice-poller.js` が LND へ問い合わせて行う。
+
+注文に紐づかない汎用インボイス発行（旧 `POST /api/v1/payments/invoice`、admin 限定）は
+2026-09 に削除した。以前の版はこの経路の入金が `unattributedPaidSats` に現れると書いて
+いたが、実際にはこのルートは `PaymentRepository` に行を書かず、支払われても**どの記録
+にも残らない**入金を作っていた。台帳が見ている決済は注文経由の 1 本だけである。
 
 ---
 

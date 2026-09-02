@@ -9,7 +9,7 @@
 //    callers use — only declared 2 parameters, so callers passing 3
 //    (paymentRequest, amount, maxFeePercent) had maxFeePercent silently
 //    dropped, and `amount` (a SATS value) landed in the `maxFee` slot and
-//    got double-converted as if it were USD. schemas.payment.payout (then .pay) defines
+//    got double-converted as if it were USD. The payout route's contract defines
 //    maxFeePercent as a 0-10 percentage (default 1), never a USD amount —
 //    the whole USD-conversion path was wrong for this call regardless of
 //    the dead convertUSDToSats() being removed.
@@ -56,7 +56,7 @@ describe('LightningService.sendPayment: fee limit computed as a percentage of in
     expect(capturedFeeLimit).toEqual({ fixed: 20 });
   });
 
-  it('defaults to 1% when maxFeePercent is omitted (matches schemas.payment.payout default)', async () => {
+  it('defaults to 1% when maxFeePercent is omitted (the payout route default)', async () => {
     const svc = makeMockService();
     let capturedFeeLimit = null;
     const originalSendPaymentSync = svc.lnd.sendPaymentSync;

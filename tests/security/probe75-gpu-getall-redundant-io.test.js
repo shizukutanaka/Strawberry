@@ -33,46 +33,11 @@ describe('gpu/index.js: single-registration handler calls getAll() once, not twi
   it('POST /gpus register handler snapshots allGpus once and reuses it', () => {
     const idx = src.indexOf("router.post('/',");
     expect(idx).toBeGreaterThan(-1);
-    // Scope to the register handler body (up to the next route definition: clone)
-    const nextRouteIdx = src.indexOf("router.post('/:id/clone'", idx);
+    // Scope to the register handler body (up to the next route definition)
+    const nextRouteIdx = src.indexOf("router.put('/:id',", idx);
     const block = src.slice(idx, nextRouteIdx > -1 ? nextRouteIdx : idx + 3000);
     const getAllCalls = countOccurrences(block, /GpuRepository\.getAll\(\)/g);
     expect(getAllCalls).toBe(1);
     expect(block).toMatch(/const allGpus = GpuRepository\.getAll\(\)/);
-  });
-});
-
-describe('gpu/index.js: clone handler calls getAll() once, not twice', () => {
-  it('POST /gpus/:id/clone snapshots allGpus once and reuses it for quota + duplicate checks', () => {
-    const idx = src.indexOf("router.post('/:id/clone'");
-    expect(idx).toBeGreaterThan(-1);
-    const nextRouteIdx = src.indexOf("router.post('/bulk',", idx);
-    const block = src.slice(idx, nextRouteIdx > -1 ? nextRouteIdx : idx + 3000);
-    const getAllCalls = countOccurrences(block, /GpuRepository\.getAll\(\)/g);
-    expect(getAllCalls).toBe(1);
-    expect(block).toMatch(/const allGpusForClone = GpuRepository\.getAll\(\)/);
-  });
-});
-
-describe('gpu/index.js: bulk handler calls getAll() once total, not once per entry', () => {
-  it('POST /gpus/bulk snapshots allGpusSnapshot once before the entry loop', () => {
-    const idx = src.indexOf("router.post('/bulk'");
-    expect(idx).toBeGreaterThan(-1);
-    const nextRouteIdx = src.indexOf("router.put('/:id'", idx);
-    const block = src.slice(idx, nextRouteIdx > -1 ? nextRouteIdx : idx + 4000);
-    // Exactly one getAll() call in the whole /bulk handler, regardless of batch size
-    const getAllCalls = countOccurrences(block, /GpuRepository\.getAll\(\)/g);
-    expect(getAllCalls).toBe(1);
-    expect(block).toMatch(/const allGpusSnapshot = GpuRepository\.getAll\(\)/);
-    // The per-entry duplicate check must read from the snapshot, not call getAll() again
-    expect(block).toMatch(/allGpusSnapshot\.find\(/);
-  });
-
-  it('the per-entry duplicate check does not call GpuRepository.getAll() inside the for loop', () => {
-    const bulkIdx = src.indexOf("router.post('/bulk'");
-    const forLoopIdx = src.indexOf('for (const entry of entries)', bulkIdx);
-    const loopEndIdx = src.indexOf('const successCount', forLoopIdx);
-    const loopBody = src.slice(forLoopIdx, loopEndIdx);
-    expect(loopBody).not.toMatch(/GpuRepository\.getAll\(\)/);
   });
 });

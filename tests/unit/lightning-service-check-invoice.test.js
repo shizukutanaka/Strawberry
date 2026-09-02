@@ -14,9 +14,8 @@
 // mode or with a real LND connection. Every invoice would eventually just expire
 // and be marked 'failed', regardless of whether it was actually paid.
 //
-// GET /payments/invoice/:id (src/api/routes/payment/index.js) also calls
-// lightning.checkInvoice(invoiceId) directly and would have thrown a 500 for
-// every request.
+// (GET /payments/invoice/:id, which also called checkInvoice directly, was
+// removed in 2026-09; the poller is now the only caller.)
 //
 // Fix: added checkInvoice(paymentHash), wrapping LND's real lookupInvoice gRPC
 // method and normalizing the response to { settled, amountPaid, value,

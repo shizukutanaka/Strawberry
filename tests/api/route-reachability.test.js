@@ -86,7 +86,7 @@ async function freshTokens() {
 describe('every registered route', () => {
   it('is discoverable from the Express router (sanity check on the probe itself)', () => {
     // 収集が壊れて 0 件になると「全部 green」に見えてしまうので下限を置く。
-    expect(collectRoutes().length).toBeGreaterThan(100);
+    expect(collectRoutes().length).toBeGreaterThan(80);
   });
 
   it('never returns 5xx for an authenticated request', async () => {

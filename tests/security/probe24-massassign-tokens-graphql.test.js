@@ -4,7 +4,7 @@
 //    via PUT — only description, notes, status are in MUTABLE_BY_ADMIN.
 // 2. POST /notification-settings/:userId: lineToken rejects values with CRLF or wrong format.
 // 3. GraphQL introspection is now opt-in (GRAPHQL_INTROSPECTION=true), not opt-out.
-// 4. PUT /me/settings now has authLimiter applied.
+// 4. (removed 2026-09 — PUT /users/me/settings no longer exists)
 // 5. createJsonRepository rejects fileName with path separators or non-.json extension.
 // 6. anomaly-detector reportAnomaly uses withLock for anomaly-history.json writes.
 

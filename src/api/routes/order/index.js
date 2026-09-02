@@ -919,23 +919,7 @@ router.post('/',
     if (gpu.available === false) {
       throw new APIError(ErrorTypes.CONFLICT, 'GPU is not available for booking', 409);
     }
-    // 手動ブロック期間との重複チェック（プロバイダが整備/メンテのため予約を止めた時間帯）。
-    // double-booking チェックはオーダーステータス基準なのでこちらも必要。
-    const reqStart = new Date(orderData.scheduledStartAt || Date.now()).getTime();
-    const reqEnd = reqStart + durationMinutes * 60 * 1000;
-    if (Array.isArray(gpu.manualBlocks)) {
-      const blocked = gpu.manualBlocks.find(b => {
-        const bs = new Date(b.from).getTime();
-        const be = new Date(b.to).getTime();
-        return Number.isFinite(bs) && Number.isFinite(be) && reqStart < be && reqEnd > bs;
-      });
-      if (blocked) {
-        throw new APIError(ErrorTypes.CONFLICT,
-          `GPU is manually blocked during the requested period (blocked until ${blocked.to})`, 409);
-      }
-    }
-    // 借り手レーティング資格チェック: ルールは renter-eligibility に集約（注文作成と
-    // GET /gpus/:id/eligibility 事前チェックで同一ロジックを共有し、ドリフトを防ぐ）。
+    // 借り手レーティング資格チェック: ルールは renter-eligibility に集約。
     //
     // 新規（レビュー実績ゼロ）の借り手の扱いには設計上のトレードオフがある:
     //   - 厳格: 新規=評価0 とみなし floor>0 の GPU を一律拒否 → Sybil（捨てアカウントで

@@ -70,7 +70,7 @@ describe('invoice-poller: cross-method paid guard prevents double-pay', () => {
 
 // ─── 41b-3: minRenterRating floor (known-below-floor blocked; unrated opt-in) ──
 // The eligibility rule now lives in a single source of truth: renter-eligibility.js,
-// shared by POST /orders and GET /gpus/:id/eligibility. These tests exercise the
+// used by POST /orders. These tests exercise the
 // module's behavior directly (more robust than source-pattern matching).
 describe('order creation: minRenterRating floor policy', () => {
   const { computeRenterRating, evaluateRenterEligibility } = require('../../src/services/renter-eligibility');

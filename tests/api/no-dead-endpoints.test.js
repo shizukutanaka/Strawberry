@@ -90,7 +90,6 @@ describe('every registered endpoint can actually respond', () => {
     const failures = [];
     for (const { method, path: raw } of routes) {
       const path = raw
-        .replace(':id/block/:blockId', `${gpuId}/block/${UUID}`)
         .replace(':root', 'a'.repeat(64))
         .replace(':userId', 'me')
         .replace(/:id/, raw.includes('/orders/') ? orderId : raw.includes('/gpus/') ? gpuId : UUID)

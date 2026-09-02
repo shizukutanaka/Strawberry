@@ -54,29 +54,6 @@ router.post('/quote', (req, res) => {
   }
 });
 
-// マッチング/オークション入力の上限。各 providerId/bid あたり reputation 全件ロードが
-// 走る O(N×M) のため、未制限だと一度の 1MB ボディで 5 万 ID を渡してイベントループを
-// 数秒間ブロックできる IO 増幅 DoS が成立する。100 件で打ち切る。
-const MAX_MARKETPLACE_BATCH = 100;
-
-// プロバイダ群をレピュテーション順に並べる（マッチング補助）
-// opts は呼び出し元から受け付けない: 攻撃者が slashPenaltyPerEvent=0 等を指定して
-// スラッシュ済みプロバイダを上位に誘導したり競合を下位へ押し込むのを防ぐ。
-router.post('/rank', (req, res) => {
-  const { providerIds } = req.body || {};
-  if (!Array.isArray(providerIds)) {
-    return res.status(400).json({ error: 'providerIds array is required' });
-  }
-  if (providerIds.length > MAX_MARKETPLACE_BATCH) {
-    return res.status(400).json({ error: `providerIds may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
-  }
-  try {
-    return res.json({ ranked: marketplace.rankCandidates(providerIds, {}) });
-  } catch (e) {
-    return res.status(400).json({ error: clientError(e) });
-  }
-});
-
 // 逆オークションのエンドポイント（POST /marketplace/auction）は削除した。
 //
 // この製品には**入札という概念が存在しない**: GPU は固定価格で出品され、入札を
@@ -187,70 +164,6 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
   } catch (e) {
     const status = e.status || 500;
     return res.status(status).json({ error: status < 500 ? e.message : internalError(e) });
-  }
-});
-
-// パブリック市場統計（認証不要 — マーケットブラウジング用）
-// GET /marketplace/stats — GPU 供給・需要・価格帯の概要
-router.get('/stats', (req, res) => {
-  try {
-    const GpuRepository = require('../../db/json/GpuRepository');
-    const OrderRepository = require('../../db/json/OrderRepository');
-
-    const allGpus = GpuRepository.getAll();
-    const allOrders = OrderRepository.getAll();
-    const nowMs = Date.now();
-    const BLOCKING = new Set(['pending', 'matched', 'active', 'preempting']);
-
-    const occupiedGpuIds = new Set(
-      allOrders.filter(o => {
-        if (!BLOCKING.has(o.status)) return false;
-        const s = new Date(o.scheduledStartAt || o.createdAt).getTime();
-        const e = s + (o.durationMinutes || 0) * 60 * 1000;
-        return s <= nowMs && e > nowMs;
-      }).map(o => o.gpuId)
-    );
-
-    const availableGpus = allGpus.filter(g => g.available !== false && !occupiedGpuIds.has(g.id));
-    const prices = availableGpus.map(g => g.pricePerHour).filter(p => typeof p === 'number' && p > 0);
-    const avgPrice = prices.length ? prices.reduce((s, p) => s + p, 0) / prices.length : null;
-    const minPrice = prices.length ? Math.min(...prices) : null;
-    const maxPrice = prices.length ? Math.max(...prices) : null;
-
-    // GPU別完了注文数・収益の集計（トップGPU）
-    const gpuStats = {};
-    for (const o of allOrders) {
-      if (o.status !== 'completed' || !o.gpuId) continue;
-      if (!gpuStats[o.gpuId]) gpuStats[o.gpuId] = { completedOrders: 0, totalSats: 0 };
-      gpuStats[o.gpuId].completedOrders++;
-      gpuStats[o.gpuId].totalSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
-    }
-    const topGpus = Object.entries(gpuStats)
-      .map(([gpuId, s]) => {
-        const gpu = GpuRepository.getById(gpuId);
-        // 累積収益は非公開財務情報 — 未認証レスポンスから除外する
-        return { gpuId, gpuName: gpu ? gpu.name : null, vendor: gpu ? gpu.vendor : null, completedOrders: s.completedOrders };
-      })
-      .sort((a, b) => b.completedOrders - a.completedOrders)
-      .slice(0, 10);
-
-    // 販売者別のベンダー分布
-    const vendorCounts = {};
-    for (const g of allGpus) {
-      if (g.vendor) vendorCounts[g.vendor] = (vendorCounts[g.vendor] || 0) + 1;
-    }
-
-    res.json({
-      totalGpus: allGpus.length,
-      availableGpus: availableGpus.length,
-      occupiedGpus: allGpus.filter(g => occupiedGpuIds.has(g.id)).length,
-      pricing: { avgPricePerHour: avgPrice ? Math.round(avgPrice * 10000) / 10000 : null, minPricePerHour: minPrice, maxPricePerHour: maxPrice },
-      vendorDistribution: vendorCounts,
-      topGpusByCompletedOrders: topGpus,
-      pendingOrders: allOrders.filter(o => o.status === 'pending').length,
-    });
-  } catch (e) {
-    res.status(500).json({ error: isProd ? 'Internal server error' : e.message });
   }
 });
 

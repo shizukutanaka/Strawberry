@@ -211,25 +211,6 @@ const schemas = {
     })
   },
   
-  // 決済関連
-  payment: {
-    // インボイス作成用スキーマ
-    createInvoice: Joi.object({
-      amount: Joi.number().min(1).required(),
-      description: Joi.string().required(),
-      expiry: Joi.number().min(60).max(86400).default(3600)
-    }),
-
-    // 出金の送金実行スキーマ。POST /payments/admin/payouts/:id/complete で
-    // { paymentRequest } を渡したときに使う。金額はインボイス自体と出金申請の額で
-    // 決まるため、呼び出し側から amount は受け取らない（受け取ると申請額と食い違った
-    // 送金ができてしまい、台帳と現金がずれる）。
-    payout: Joi.object({
-      paymentRequest: Joi.string().required(),
-      maxFeePercent: Joi.number().min(0).max(10).default(1)
-    })
-  },
-  
   // ユーザー関連
   user: {
     // ユーザー登録用スキーマ

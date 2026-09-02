@@ -19,8 +19,7 @@
 //   - createInvoice({value, memo, expiry}) producing "NaN" in the payment
 //     request (probe: paymentRequest must not contain "NaN" and must encode
 //     the real amount).
-//   - checkInvoice() not existing at all (probe: GET /payments/invoice/:id
-//     must not 500).
+//   - checkInvoice() not existing at all (the poller calls it every cycle).
 //   - the invoice poller never transitioning a settled payment to 'paid'
 //     (probe: after simulating settlement and running one poll cycle, the
 //     PaymentRepository record and the order status must both reflect it).
@@ -96,13 +95,6 @@ describe('Lightning payment E2E smoke: order -> accept -> pay -> settle -> poll 
     expect(invoiceId.length).toBeGreaterThan(0);
   });
 
-  it('GET /payments/invoice/:id does not 500 and reports unsettled before payment', async () => {
-    const res = await request(app).get(`/api/v1/payments/invoice/${invoiceId}`)
-      .set('Authorization', `Bearer ${renter.token}`);
-    expect(res.statusCode).toBe(200);
-    expect(res.body.status).toBe('pending');
-  });
-
   it('simulating settlement + running one poll cycle marks the payment paid and advances the order', async () => {
     // Simulate what a real LND settlement event would do: mark the tracked
     // mock invoice paid. This is the only way to exercise a genuine
@@ -118,13 +110,6 @@ describe('Lightning payment E2E smoke: order -> accept -> pay -> settle -> poll 
     const payment = PaymentRepository.getById(paymentId);
     expect(payment.status).toBe('paid');
     expect(payment.amountPaid).toBe(100000);
-  });
-
-  it('GET /payments/invoice/:id now reports settled after the poll cycle', async () => {
-    const res = await request(app).get(`/api/v1/payments/invoice/${invoiceId}`)
-      .set('Authorization', `Bearer ${renter.token}`);
-    expect(res.statusCode).toBe(200);
-    expect(res.body.status).toBe('paid');
   });
 
   it('order/:id/start succeeds end-to-end (GPU access delivery lazy-registration fix)', async () => {

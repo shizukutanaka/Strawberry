@@ -2,8 +2,8 @@
 // Probe 45 regression tests:
 // 45a-1: GET /gpus/:id must NOT expose providerId to unauthenticated / renter callers
 //        (the list endpoint already stripped it; detail endpoint did not)
-// 45a-2: manualBlocks also stripped from public GPU detail (consistent with list endpoint)
-// 45a-3: owner/admin still receives providerId and manualBlocks in detail response
+// 45a-2/45a-3: (2026-09 — manualBlocks は手動ブロック機能ごと削除されたため対象外。
+//              providerId の owner/admin 限定返却は 45a-1 と下の source check が見る)
 // 45a-4: apiKey always stripped regardless of caller role
 
 const { _app } = require('../../src/api/server');
@@ -24,13 +24,6 @@ describe('GET /gpus/:id: providerId/manualBlocks hidden from public', () => {
     );
     // providerId must be destructured separately (not included in ...gpuSafe spread)
     expect(src).toMatch(/const\s*\{[^}]*providerId[^}]*\}\s*=\s*gpu/);
-  });
-
-  it('gpu/index.js: detail endpoint destructures manualBlocks out of gpuSafe', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
-    );
-    expect(src).toMatch(/const\s*\{[^}]*manualBlocks[^}]*\}\s*=\s*gpu/);
   });
 
   it('gpu/index.js: apiKey destructured out of gpu before response is built', () => {
@@ -67,37 +60,3 @@ describe('GET /gpus/:id: providerId/manualBlocks hidden from public', () => {
 });
 
 // ─── Logic simulation ────────────────────────────────────────────────────
-describe('GPU detail response: field visibility by caller role', () => {
-  it('public caller: gpuSafe excludes providerId and manualBlocks', () => {
-    const gpu = {
-      id: 'g1', name: 'RTX 4090', providerId: 'provider-secret', apiKey: 'key-secret',
-      manualBlocks: [{ start: '2026-01-01', end: '2026-01-07' }], memoryGB: 24
-    };
-    const viewerIsOwnerOrAdmin = false;
-    const { apiKey, providerId, manualBlocks, ...gpuSafe } = gpu;
-    const responseGpu = {
-      ...gpuSafe,
-      ...(viewerIsOwnerOrAdmin ? { providerId, manualBlocks } : {}),
-    };
-    expect(responseGpu).not.toHaveProperty('providerId');
-    expect(responseGpu).not.toHaveProperty('manualBlocks');
-    expect(responseGpu).not.toHaveProperty('apiKey');
-    expect(responseGpu.name).toBe('RTX 4090');
-  });
-
-  it('owner caller: gpuSafe includes providerId and manualBlocks', () => {
-    const gpu = {
-      id: 'g1', name: 'RTX 4090', providerId: 'provider-123', apiKey: 'key-secret',
-      manualBlocks: [{ start: '2026-01-01', end: '2026-01-07' }], memoryGB: 24
-    };
-    const viewerIsOwnerOrAdmin = true;
-    const { apiKey, providerId, manualBlocks, ...gpuSafe } = gpu;
-    const responseGpu = {
-      ...gpuSafe,
-      ...(viewerIsOwnerOrAdmin ? { providerId, manualBlocks } : {}),
-    };
-    expect(responseGpu).toHaveProperty('providerId', 'provider-123');
-    expect(responseGpu).toHaveProperty('manualBlocks');
-    expect(responseGpu).not.toHaveProperty('apiKey');
-  });
-});

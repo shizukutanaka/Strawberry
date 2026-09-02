@@ -3,7 +3,7 @@
 // 38a-1: (removed 2026-09 — the btc-onchain route it guarded no longer exists)
 // 38a-2: Manual payment approval checks order status (no orphaned paid records)
 // 38b-1: renter-profile recentReviews does not include orderId
-// 38b-3: /me/activity review_received does not expose reviewedBy
+// 38b-3: (removed 2026-09 — GET /users/me/activity no longer exists)
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
@@ -72,50 +72,6 @@ describe('renter-profile: orderId stripped from recentReviews', () => {
     const reviews = res.body.recentReviews || [];
     for (const r of reviews) {
       expect(r).not.toHaveProperty('orderId');
-    }
-  });
-});
-
-// ─── 38b-3: /me/activity does not expose reviewedBy ─────────────────────────
-describe('/me/activity: reviewedBy removed from review_received events', () => {
-  it('user/index.js: review_received events do not include reviewedBy', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    // Find the review_received push blocks and ensure they don't include reviewedBy
-    const reviewReceivedBlocks = [];
-    let idx = 0;
-    while (true) {
-      const found = src.indexOf("type: 'review_received'", idx);
-      if (found === -1) break;
-      reviewReceivedBlocks.push(src.slice(found, found + 300));
-      idx = found + 1;
-    }
-    expect(reviewReceivedBlocks.length).toBeGreaterThan(0);
-    for (const block of reviewReceivedBlocks) {
-      expect(block).not.toMatch(/reviewedBy/);
-    }
-  });
-
-  it('GET /users/me/activity returns review_received without reviewedBy field', async () => {
-    const name = `p38act${uniq}`.slice(0, 20);
-    const email = `${name}@example.com`;
-    await request(app).post('/api/v1/users/register')
-      .send({ username: name, email, password: 'Test1234!' });
-    const loginRes = await request(app).post('/api/v1/users/login')
-      .send({ email, password: 'Test1234!' });
-    const token = loginRes.body.token;
-    if (!token) return;
-
-    const res = await request(app)
-      .get('/api/v1/users/me/activity?type=review_received')
-      .set('Authorization', `Bearer ${token}`);
-    expect(res.statusCode).toBe(200);
-    const events = res.body.events || [];
-    for (const e of events) {
-      if (e.type === 'review_received') {
-        expect(e).not.toHaveProperty('reviewedBy');
-      }
     }
   });
 });

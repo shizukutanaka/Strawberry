@@ -80,14 +80,6 @@ describe('marketplace API', () => {
     });
   });
 
-  it('POST /rank returns a ranked list and validates input', async () => {
-    const ok = await auth(request(app).post('/api/v1/marketplace/rank')).send({ providerIds: ['a', 'b'] });
-    expect(ok.statusCode).toBe(200);
-    expect(Array.isArray(ok.body.ranked)).toBe(true);
-
-    const bad = await auth(request(app).post('/api/v1/marketplace/rank')).send({ providerIds: 'nope' });
-    expect(bad.statusCode).toBe(400);
-  });
 });
 
 afterAll((done) => {

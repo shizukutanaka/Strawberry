@@ -29,7 +29,7 @@ const PUBLIC_JS = path.join(ROOT, 'public/js');
 
 // 2026-09 時点の実数。**上げてはいけない。** 新しいエンドポイントを足すなら、
 // 同じ変更の中で UI から呼ぶか、admin 配下に置くか、足さないかを選ぶ。
-const BASELINE = 37;
+const BASELINE = 35;
 
 function collectRoutes() {
   const out = [];

@@ -1,5 +1,5 @@
 // public/js/api.js — fetch wrapper + typed endpoint helpers.
-import { getToken, clearSession } from './auth.js';
+import { getToken, getRefreshToken, getUser, setSession, clearSession } from './auth.js';
 
 export class ApiError extends Error {
   constructor(message, status, type) {
@@ -10,7 +10,32 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, auth = true, query } = {}) {
+// One refresh in flight at a time. The server's refresh token is single-use
+// with reuse detection: two parallel refreshes with the same token would make
+// the second one look like theft and revoke *every* session of the user.
+// So every 401 that lands while a refresh is running waits for that one.
+let refreshInFlight = null;
+function refreshSession() {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) return false;
+      const res = await fetch('/api/v1/users/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data || !data.token) return false;
+      setSession(data.token, getUser(), data.refreshToken);
+      return true;
+    })().catch(() => false).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function request(path, { method = 'GET', body, auth = true, query, _retried = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (auth) {
     const token = getToken();
@@ -41,6 +66,12 @@ async function request(path, { method = 'GET', body, auth = true, query } = {}) 
   }
 
   if (res.status === 401 && auth) {
+    // Expired (or otherwise rejected) access token: try the refresh token
+    // once, then replay the original request. Only if that fails is the
+    // session really over.
+    if (!_retried && await refreshSession()) {
+      return request(path, { method, body, auth, query, _retried: true });
+    }
     clearSession();
     const next = encodeURIComponent(location.hash.slice(1) || '/market');
     if (!location.hash.startsWith('#/login')) {
@@ -65,6 +96,10 @@ export const api = {
   login: (email, password) =>
     request('/api/v1/users/login', { method: 'POST', auth: false, body: { email, password } }),
   me: () => request('/api/v1/users/me'),
+  logout: (refreshToken) => request('/api/v1/users/logout', {
+    method: 'POST',
+    body: refreshToken ? { refreshToken } : {},
+  }),
 
   // --- gpus ---
   listGpus: (filters) => request('/api/v1/gpus', { query: filters, auth: false }),

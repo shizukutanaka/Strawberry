@@ -1,7 +1,7 @@
 // public/js/app.js — entry point: theme, nav, route table, router start.
 import { route, setNotFound, start, navigate } from './router.js';
 import { el, clear } from './ui.js';
-import { getUser, isAuthenticated, clearSession } from './auth.js';
+import { getUser, isAuthenticated, logout } from './auth.js';
 import * as loginPage from './pages/login.js';
 import * as registerPage from './pages/register.js';
 import * as notFoundPage from './pages/not-found.js';
@@ -69,7 +69,7 @@ function renderNav() {
     authActions.appendChild(el('span', { class: 'muted', style: 'margin-right:8px' }, user ? user.username : ''));
     authActions.appendChild(el('button', {
       class: 'btn btn-ghost btn-sm',
-      onClick: () => { clearSession(); navigate('#/login'); },
+      onClick: async () => { await logout(); navigate('#/login'); },
     }, 'ログアウト'));
   } else {
     authActions.appendChild(el('a', { href: '#/login', class: 'btn btn-ghost btn-sm' }, 'ログイン'));

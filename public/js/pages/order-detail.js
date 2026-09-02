@@ -628,8 +628,10 @@ export async function render(container, params) {
     const audit = order.utilizationAudit;
     if (!audit || audit.verdict === 'no_data' || audit.verdict === 'insufficient') return;
     if (audit.verdict === 'active') {
+      // 「プラットフォームが測った」とは言わない。値は提供者・借り手が申告したもので、
+      // ブラウザは GPU 利用率を測れない（送っているのはエージェントかスクリプト）。
       body.appendChild(el('div', { class: 'banner banner-success' },
-        'GPU 利用率の記録から、実際に計算処理が行われたことを確認しました。'));
+        '提供者・借り手から申告された GPU 利用率は「稼働していた」で一致しています。'));
       return;
     }
     if (audit.verdict === 'zero_load') {

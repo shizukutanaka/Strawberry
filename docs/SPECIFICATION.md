@@ -112,11 +112,19 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - **計算検証 Proof-of-Compute**: 🟡→一部✅ `src/verification/work-verifier.js`（純関数）＋
   `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋
   `src/db/json/VerificationRepository.js`（永続化）。
-  **ゼロ負荷検出は実レンタルへ結線済（2026-08）**: `src/verification/utilization-collector.js` が
+  **ゼロ負荷検出は🟡 受け口だけが結線済**: `src/verification/utilization-collector.js` が
   ハートビートの任意フィールド `utilizationPct` を提供者・借り手の**両方**から集め、終了時に
   食い違いを判定して `order.utilizationAudit` に保存する（両者が遊休で一致=zero_load、
   食い違い=disputed、断定しない）。資金は自動で動かさず、レピュテーション反映・監査ログ・
   UI 開示・係争の材料に留める。
+  **ただし製品の中にこのサンプルを送る者がいない。** ブラウザは GPU 利用率を測れないので、
+  `public/js` のハートビートは `utilizationPct` を送らない（送れない）。したがって
+  出荷状態では判定は常に `no_data` で、ゼロ負荷検出は**一度も発火しない**。
+  この受け口を使えるのは、プロバイダー／借り手のホストで動くエージェントか、
+  `POST /orders/:id/heartbeat` を自分で叩くスクリプトだけである。
+  2026-08 に「結線済」と書いたのは誤りで、結線したのは*受け口*であって*供給*ではなかった
+  （この経路は元々 `detectZeroLoad()` が「部品はあっても稼働していない」状態を直すために
+  書かれたものだった。同じ形を一段上で繰り返していた）。
   **未**: 再実行監査（別プロバイダへの同一ジョブ再投入）と ZK/TEE 系の検証パイプライン。
 - **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
 - **GPU アテステーション**: 🟡 検証の枠組みは実装・配線済（`src/security/gpu-attestation-verifier.js`、出品時に `attestationReport` を任意提出 → 申告スペックとの突き合わせ 8 チェック → `attestation.passed/score/trustLevel` を保存）。**実機の署名検証（nvtrust）は未対応**で、レポートはプロバイダー自身が同じリクエストで送るものである（署名は長さ、証明書チェーンは非空しか見ていない）。したがって「検証済み」と称してよいのは*申告の内部整合性*までで、ハードウェアの真正性ではない。
@@ -218,6 +226,6 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - `src/marketplace/access-delivery.js` — GPU アクセスの受け渡し（credential の AES-256-GCM 封緘、endpoint スキーム検証、要約と開封の分離, 17テスト＋E2E 2）
 - `src/db/json/fileLock.js` — JSON データファイルのクロスプロセス排他（open(O_EXCL) 方式、同期待機、stale 奪取、再入対応。子プロセス実起動の回帰テスト付き, 15テスト）
 - `src/gpu/carbon-intensity.js` — 申告所在地に基づく系統カーボン強度・排出量推定（サブリージョン対応、実データ差込口、不明は推測しない, 19テスト）
-- `src/verification/utilization-collector.js` — ゼロ負荷課金の検出（両者申告の突き合わせ、リングバッファ、断定しない判定, 15テスト）
+- `src/verification/utilization-collector.js` — ゼロ負荷課金の検出（両者申告の突き合わせ、リングバッファ、断定しない判定, 15テスト）。**供給元はエージェント／スクリプトのみ**（ブラウザは GPU 利用率を測れない）
 - `src/marketplace/spot-tier.js` — Spot（中断許容）ティアのポリシー（割引・猶予窓・最低課金を効かせない中断精算・中断率の導出, 18テスト）
 - `src/gpu/perf-score.js` — 機種横断の正規化性能スコア／価格対性能（DLPerf 風。参照表照合・電力由来の TFLOPS 上限クランプ・未検証型番の上限・算出不能は null、feature-pricer への特徴量変換つき, 27テスト）

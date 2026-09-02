@@ -132,3 +132,27 @@ describe('documented npm scripts exist', () => {
     expect(missing).toEqual([]);
   });
 });
+
+// ── 「受け口はあるが供給が無い」機能を文書と一致させる ─────────────────────────
+// ゼロ負荷検出は、ハートビートの任意フィールド utilizationPct を提供者・借り手の
+// 両方から集めて突き合わせる設計になっている。しかし**製品の中に送る者がいない**:
+// ブラウザは GPU 利用率を測れないので public/js のハートビートは送らない（送れない）。
+// 仕様書はその事実を書いている。この 2 つがずれたら落とす:
+//   - 供給が付いたのに仕様書が「発火しない」と書いたまま → 記述が古い
+//   - 供給が無いのに仕様書が「結線済」に戻った → 誇張が復活した
+describe('the zero-load check is documented exactly as wired', () => {
+  const heartbeatClient = fs.readFileSync(path.join(ROOT, 'public/js/api.js'), 'utf-8');
+  const spec = fs.readFileSync(path.join(ROOT, 'docs/SPECIFICATION.md'), 'utf-8');
+  const uiSendsUtilization = /heartbeat:[^\n]*utilizationPct/.test(heartbeatClient);
+  const specSaysNoProducer = spec.includes('製品の中にこのサンプルを送る者がいない');
+
+  it('says there is no producer exactly when there is none', () => {
+    expect(specSaysNoProducer).toBe(!uiSendsUtilization);
+  });
+
+  it('does not call the check "結線済" while nothing supplies it', () => {
+    if (uiSendsUtilization) return; // 供給が付いたなら「結線済」は正しい
+    expect(spec).not.toMatch(/ゼロ負荷検出は実レンタルへ結線済/);
+  });
+});
+

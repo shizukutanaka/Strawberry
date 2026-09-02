@@ -189,38 +189,76 @@ function expireStaleDisputedOrders() {
   return resolved;
 }
 
-const DEFAULT_ACTIVE_TIMEOUT_HOURS = 48;
+// 予約終了後の猶予。借り手が /stop を押し忘れても、この時間までは待つ。
+const DEFAULT_ACTIVE_GRACE_HOURS = 48;
 
 /**
- * active 状態のまま一定時間経過した注文を cancelled に遷移させる。
- * 悪意ある借り手が /stop を呼ばずに GPU を人質に取ることを防ぐ。
+ * 予約時間が終わってもなお active な注文を後始末する。
+ *
+ * ── 起点は「開始から 48 時間」だった ──────────────────────────────────────
+ * 旧実装は startedAt からの経過だけを見ていた。注文の予約時間（durationMinutes）は
+ * 最大 30 日まで取れるので、**7 日間の正当なレンタルが 48 時間目に強制キャンセルされた**。
+ * 期限は予約の長さに従うべきで、固定値であってよい理由が無い。ここでは
+ * 「予約終了 + 猶予」を期限とし、ORDER_ACTIVE_TIMEOUT_HOURS はその猶予として解釈する。
+ *
+ * ── そして、キャンセルは無料だった ───────────────────────────────────────
+ * 旧実装は稼働実績を一切書かずに cancelled にしていた。payout-ledger の
+ * deliveredRatioOf は「測定値があれば按分する」形になっているが、この経路は測定値を
+ * 書かないので必ず `unmeasured_abnormal_termination` に落ち、**実提供割合 0 = 借り手へ
+ * 全額返金・プロバイダの取り分ゼロ**になっていた。つまり借り手は
+ * 「借りる → 接続情報を受け取る → GPU を使う → /stop を押さない → 48 時間待つ」だけで
+ * 代金を全額取り戻せた。帳簿は保存則を満たすので突き合わせも healthy を返す
+ * （返した相手が違うだけで、金額は合っている）。
+ *
+ * 証拠に基づいて按分する。**プロバイダが接続情報を渡していたか**が唯一の一次証跡である
+ * （ハートビートも利用率サンプルもプロセス内 Map で、再起動で消えるため証拠にならない）:
+ *   - 渡していた … 予約時間は丸ごと経過している。借り手は接続手段を持ったまま放置した。
+ *     全量提供として扱う（ratio 1）。押し忘れが全額返金に化けない。
+ *   - 渡していない … プロバイダは何も渡していない。全額返金（ratio 0）。
+ * 借り手が「渡されたが動かなかった」と主張する道は従来どおり係争（/dispute）である。
+ *
  * GPU の実際の解放（vgpuManager.releaseGPU）は呼び出し側が担当する。
  * @returns {{ id: string, gpuId: string }[]} タイムアウトした注文の配列
  */
 function expireStaleActiveOrders() {
   const raw = process.env.ORDER_ACTIVE_TIMEOUT_HOURS;
-  const n = raw !== undefined && raw !== '' ? Number(raw) : DEFAULT_ACTIVE_TIMEOUT_HOURS;
-  const timeoutMs = (Number.isFinite(n) && n > 0 ? n : DEFAULT_ACTIVE_TIMEOUT_HOURS) * 60 * 60 * 1000;
-  const cutoff = Date.now() - timeoutMs;
+  const n = raw !== undefined && raw !== '' ? Number(raw) : DEFAULT_ACTIVE_GRACE_HOURS;
+  const graceMs = (Number.isFinite(n) && n > 0 ? n : DEFAULT_ACTIVE_GRACE_HOURS) * 60 * 60 * 1000;
+  const nowMs = Date.now();
   const expired = [];
   for (const order of OrderRepository.getAll()) {
     if (order.status !== 'active') continue;
     const startMs = Date.parse(order.startedAt || order.updatedAt || order.createdAt);
-    if (!Number.isFinite(startMs) || startMs > cutoff) continue;
+    if (!Number.isFinite(startMs)) continue;
+    // 予約終了時刻: scheduledEndAt があればそれ、無ければ開始 + 予約時間。
+    // durationMinutes が読めない注文は開始時刻を予約終了とみなす（従来と同じ挙動に倒す）。
+    const bookedMs = Math.max(0, Number(order.durationMinutes) || 0) * 60 * 1000;
+    const scheduledEndMs = Date.parse(order.scheduledEndAt);
+    const bookedEndMs = Number.isFinite(scheduledEndMs)
+      ? Math.max(scheduledEndMs, startMs)
+      : startMs + bookedMs;
+    if (bookedEndMs + graceMs > nowMs) continue;
+    // 接続情報を渡していたか。終端書き込みで消える前に読む必要がある。
+    const providerDelivered = Boolean(order.accessDelivery);
     const now = new Date().toISOString();
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'active', {
       status: 'cancelled',
       cancelReason: 'active_timeout',
+      // 実提供割合を**必ず**書く。書かないと按分の分岐が測定値なしに落ち、
+      // 全額返金になる（それがこの経路の欠陥だった）。
+      deliveredRatio: providerDelivered ? 1 : 0,
       cancelledAt: now,
       updatedAt: now,
     });
     if (!result.ok) continue;
     expired.push({ id: order.id, gpuId: order.gpuId });
     try { require('../verification/utilization-collector').clear(order.id); } catch (_) {}
-    logger.info(`Order auto-expired (active timeout): ${order.id}`);
+    logger.info(`Order auto-expired (active timeout): ${order.id} (deliveredRatio=${providerDelivered ? 1 : 0})`);
     try {
       const { notifyUser } = require('./user-notify');
-      const msg = `【Strawberry】GPU 利用時間が上限を超えたため注文が自動キャンセルされました\n注文: #${order.id}`;
+      const msg = providerDelivered
+        ? `【Strawberry】予約時間の終了後も停止操作が無かったため、注文を自動終了しました（提供済みとして精算されます）\n注文: #${order.id}`
+        : `【Strawberry】予約時間が終了しましたが接続情報が提供されなかったため、注文を自動キャンセルしました（全額返金対象）\n注文: #${order.id}`;
       if (order.userId)     notifyUser(order.userId,     'order_active_timeout', msg, {});
       if (order.providerId) notifyUser(order.providerId, 'order_active_timeout', msg, {});
     } catch (_) {}

@@ -65,7 +65,7 @@ class OrderUsageSession {
 // メモリリーク防止: /stop 以外の終端経路（delete/reject/dispute-resolve）や、
 // オーダーが削除済みの孤児セッションをここで一括回収する。これがないと、
 // 明示的 /stop を経ずに終了したオーダーのセッションが永久に Map に残る。
-const TERMINAL_SESSION_STATUSES = new Set(['completed', 'cancelled']);
+const { TERMINAL_ORDER_STATUSES: TERMINAL_SESSION_STATUSES } = require('../../../orders/order-status');
 function _deleteHeartbeatsForOrder(orderId) {
   // heartbeatTimestamps のキーは `${orderId}:${userId}` 形式。
   // 該当オーダーの全ハートビートエントリを除去（メモリリーク防止）。
@@ -224,7 +224,7 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 // 状態遷移の妥当性チェック（未 import だと PUT /:id の status 変更で ReferenceError → 500）
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
-const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders } = require('../../../utils/order-expiry');
+const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders, purgeTerminalOrderCredentials } = require('../../../utils/order-expiry');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active', 'preempting']);
 
@@ -296,6 +296,8 @@ router.get('/',
         // 猶予切れの spot 中断も同じスイープで確定させる。preempting のまま放置すると
         // GPU が blocking 集合に入ったままロックされ続ける。
         const preempted = finalizePreemptedOrders();
+        // 修正前に終端へ落ちた注文が残している接続情報を掃除する（1 回落ちればもう出ない）。
+        purgeTerminalOrderCredentials();
         if (vgpuManager && (timedOutActive.length > 0 || preempted.length > 0)) {
           for (const { id: oid, gpuId } of [...timedOutActive, ...preempted]) {
             try { await vgpuManager.releaseGPU(gpuId, oid); } catch (_) {}
@@ -2050,11 +2052,9 @@ router.post('/:id/stop',
       // Reputation and escrow settlement only run when this write succeeds,
       // preventing double-increment if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
+      // 接続情報の破棄はここでは書かない。OrderRepository が終端状態への書き込みで
+      // 必ず落とす（この経路だけ手で消していた頃、他の 5 経路は消し忘れていた）。
       const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
-      // レンタル終了時に接続情報を破棄する。終わった注文の SSH 鍵を保持し続ける理由は無く、
-      // 保持期間が長いほど data/orders.json 流出時の被害が広がる（保存は暗号化済みだが、
-      // そもそも持たないのが一番安全）。
-      if (order.accessDelivery) updateData.accessDelivery = null;
       // 判定できたときだけ記録する（no_data を保存すると「検証した結果シロ」と読めてしまう）
       if (utilizationAudit.verdict !== 'no_data') updateData.utilizationAudit = utilizationAudit;
       if (isPreempting) {

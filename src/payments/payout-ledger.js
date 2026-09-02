@@ -55,7 +55,8 @@ const PAYOUT_STATUSES = Object.freeze(['requested', 'paid', 'rejected']);
 // **係争で借り手が勝っても 1 sat も返らず、運営が全額持ったままだった**
 // （実サーバで確認: 60,000 sats を払った注文が refund 裁定を受け、
 // 掃き出しは credited=0、借り手の残高は 0 のまま）。
-const CREDITABLE_ORDER_STATUSES = Object.freeze(new Set(['completed', 'cancelled']));
+// 「金を計上してよい」＝「注文が終わっている」。定義は src/orders/order-status.js に一本化。
+const { TERMINAL_ORDER_STATUSES: CREDITABLE_ORDER_STATUSES } = require('../orders/order-status');
 
 // キャンセルのうち「実際に稼働していた」もの。ここだけ実提供量で按分し、
 // それ以外のキャンセルは提供ゼロ＝全額返金として扱う。

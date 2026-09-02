@@ -36,7 +36,18 @@ function stripDangerousKeys(obj) {
   return cleaned;
 }
 
-function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
+/**
+ * @param {string} fileName data/ 直下の .json ファイル名（リテラル固定）
+ * @param {object} opts
+ * @param {object} [opts.finders] 単一フィールド検索の定義
+ * @param {function} [opts.onAccess] 監査フック
+ * @param {function} [opts.beforeWrite] 永続化する直前の行を受け取り、書き込む行を返す。
+ *   **保存してよい形を 1 箇所で強制する**ための穴。呼び出し側の 8 経路に同じ後始末を
+ *   書いて回ると、9 本目を足した人が必ず忘れる（実際に忘れられていた: 注文の終端遷移
+ *   のうち 5 本が接続情報を消していなかった）。create / createUnique / update /
+ *   updateIf の**すべて**で、マージ後の行に対して呼ばれる。
+ */
+function createJsonRepository(fileName, { finders = {}, onAccess, beforeWrite } = {}) {
   // fileName はリテラル文字列のみを期待する（呼び出し側は全てコード内定数）。
   // path.resolve の仕様上 fileName が絶対パスであれば data/ プレフィックスを無効化できる
   // ため、将来の開発者が誤って変数を渡した場合のパストラバーサルを事前に排除する。
@@ -57,6 +68,9 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
   // （ARCHITECTURE.md「JSON 層のクロスプロセス lost-update」）。
   // 読み取り系にロックは掛けない: 書き込みが rename で差し替わるため torn read は起きない。
   const mutate = (fn) => withFileLock(filePath, fn);
+
+  // 書き込み直前の正規化。beforeWrite が無いリポジトリでは素通り。
+  const normalize = (row) => (typeof beforeWrite === 'function' ? beforeWrite(row) : row);
 
   const audit = (action, detail) => {
     if (!onAccess) return;
@@ -109,7 +123,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       const row = mutate(() => {
         const rows = load();
         const safeRec = stripDangerousKeys(rec);
-        const created = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
+        const created = normalize({ ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() });
         rows.push(created);
         atomicWriteJSON(filePath, rows);
         return created;
@@ -129,7 +143,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         const existing = rows.find(predicate);
         if (existing) return { ok: false, reason: 'exists', existing };
         const safeRec = stripDangerousKeys(rec);
-        const created = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
+        const created = normalize({ ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() });
         rows.push(created);
         atomicWriteJSON(filePath, rows);
         return { ok: true, row: created };
@@ -142,7 +156,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         const rows = load();
         const idx = rows.findIndex((r) => r.id === id);
         if (idx === -1) return null;
-        rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+        rows[idx] = normalize({ ...rows[idx], ...stripDangerousKeys(updates) });
         atomicWriteJSON(filePath, rows);
         return rows[idx];
       });
@@ -162,7 +176,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         const idx = rows.findIndex((r) => r.id === id);
         if (idx === -1) return { ok: false, reason: 'not_found' };
         if (!predicate(rows[idx])) return { ok: false, reason: 'condition_failed', current: rows[idx] };
-        rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+        rows[idx] = normalize({ ...rows[idx], ...stripDangerousKeys(updates) });
         atomicWriteJSON(filePath, rows);
         return { ok: true, row: rows[idx] };
       });

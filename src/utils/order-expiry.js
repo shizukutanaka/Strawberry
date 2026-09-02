@@ -4,6 +4,7 @@
 // disputed: 管理者が裁定しない場合の自動解決（既定 7 日 → 返金）
 // タイムアウトは env 変数で上書き可能。呼出し毎に解決してテスト・運用での動的変更を許容。
 const OrderRepository = require('../db/json/OrderRepository');
+const { isTerminalOrderStatus } = require('../orders/order-status');
 const { logger } = require('./logger');
 
 const DEFAULT_TIMEOUT_MINUTES = 30;
@@ -256,8 +257,7 @@ function finalizePreemptedOrders() {
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'preempting', {
       status: 'completed',
       terminationReason: 'preempted',
-      // 終了した注文の接続情報は保持しない（/stop 経路と同じ扱い）
-      accessDelivery: null,
+      // 接続情報の破棄は OrderRepository が終端状態への書き込みで一律に行う。
       preemptedAt: now,
       stoppedAt: now,
       completedAt: now,
@@ -305,4 +305,30 @@ function finalizePreemptedOrders() {
   return finalized;
 }
 
-module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders, resolveTimeoutMinutes };
+/**
+ * 終端状態なのに接続情報を保持している注文を掃除する。
+ *
+ * OrderRepository が「終端状態の行は accessDelivery を持たない」を書き込み時に強制する
+ * ようになったが、それは**次に書かれるとき**に効く。既に終端へ落ちた注文は二度と書かれない
+ * ので、修正前に残った認証情報はそのままファイルに残る。台帳の掃き出しジョブと同じ
+ * 「観測して埋める」形で拾う（フックを増やすのではなく、状態を後から観測する）。
+ * @returns {number} 掃除した件数
+ */
+function purgeTerminalOrderCredentials() {
+  let purged = 0;
+  for (const order of OrderRepository.getAll()) {
+    if (!order.accessDelivery || !isTerminalOrderStatus(order.status)) continue;
+    // updateIf: 掃除の最中に注文が終端でなくなることは無いが、条件つき書き込みで統一する。
+    // 書き込み自体が beforeWrite を通るので、ここで null を書く必要はない（updatedAt だけ触る）。
+    const result = OrderRepository.updateIf(order.id, (o) => isTerminalOrderStatus(o.status), {
+      updatedAt: new Date().toISOString(),
+    });
+    if (result.ok) {
+      purged += 1;
+      logger.info(`order-expiry: purged stale access credential from terminal order ${order.id}`);
+    }
+  }
+  return purged;
+}
+
+module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders, purgeTerminalOrderCredentials, resolveTimeoutMinutes };

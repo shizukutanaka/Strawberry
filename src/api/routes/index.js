@@ -318,7 +318,7 @@ router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res
 // 期限切れ注文の手動スイープ（管理者のみ）— インシデント対応・テストで使用。
 // POST /admin/expire-orders { types?: ['pending','matched','disputed'] }
 router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders } = require('../../utils/order-expiry');
+  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, finalizePreemptedOrders, purgeTerminalOrderCredentials } = require('../../utils/order-expiry');
   const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed', 'active', 'preempting'];
   const VALID = new Set(['pending', 'matched', 'disputed', 'active', 'preempting']);
   const invalid = types.filter(t => !VALID.has(t));
@@ -331,6 +331,9 @@ router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (
   if (types.includes('disputed'))  result.disputedResolved = expireStaleDisputedOrders();
   if (types.includes('active'))    result.activeExpired    = expireStaleActiveOrders().length;
   if (types.includes('preempting')) result.preemptedFinalized = finalizePreemptedOrders().length;
+  // 終端注文に残った接続情報の掃除は種類指定によらず毎回走らせる（安全側の後始末で、
+  // 何も残っていなければ 0 件で終わる）。
+  result.credentialsPurged = purgeTerminalOrderCredentials();
   res.json({ message: 'Order expiry sweep completed', ...result });
 }));
 

@@ -243,14 +243,8 @@ const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_
 
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
-// スラッシュ/係争解決/レビュー後にレピュテーションキャッシュを無効化する
-let _invalidateRepCache = null;
-function invalidateRepCache(userId) {
-  if (!_invalidateRepCache) {
-    try { _invalidateRepCache = require('../user/index').invalidateReputationCache; } catch (_) { _invalidateRepCache = () => {}; }
-  }
-  if (userId && typeof _invalidateRepCache === 'function') _invalidateRepCache(userId);
-}
+// スラッシュ/係争解決/レビュー後に信頼度サマリのキャッシュを無効化する
+const { renterSummary, invalidate: invalidateRepCache } = require('../../../reputation/trust-summary');
 
 // 注文作成のユーザー別レートリミット（IP ベースのグローバル制限を補完）。
 // 認証済みユーザーが在庫チェック・価格計算の重いパスを連打して DB を圧迫するのを防ぐ。
@@ -584,11 +578,9 @@ router.get('/:id',
       const order = req.resource;
       const rateInfo = await fetchRateInfo();
       // 借り手プロフィール（プロバイダが承認/拒否判断に使えるよう注文詳細に同梱）
-      const renterOrders = OrderRepository.getAll().filter(o => o.userId === order.userId && o.renterReview);
-      const renterReviewCount = renterOrders.length;
-      const renterRatingAverage = renterReviewCount > 0
-        ? Math.round((renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount) * 10) / 10
-        : null;
+      // 借り手の信頼度（貸し手が承認前に見る）。計算は trust-summary に一本化。
+      const renterProfile = renterSummary(order.userId)
+        || { ratingAverage: null, reviewCount: 0, completedOrders: 0, recentReviews: [] };
       // ステータス変遷タイムライン（既存タイムスタンプを時系列に整列）
       const timeline = [
         { status: 'pending',   at: order.createdAt || null },
@@ -603,7 +595,7 @@ router.get('/:id',
         order: {
           ...order,
           ...computeOrderPricing(order, rateInfo),
-          renterProfile: { ratingAverage: renterRatingAverage, reviewCount: renterReviewCount },
+          renterProfile,
           timeline,
           // `...order` の生スプレッドで封をした credential が流れないよう、必ず要約で上書きする。
           // 実際の受け取りは GET /:id/access（借り手のみ・支払い済み・稼働中）に限定する。

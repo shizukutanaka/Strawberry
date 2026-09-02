@@ -2,7 +2,7 @@
 // Probe 38 regression tests:
 // 38a-1: (removed 2026-09 — the btc-onchain route it guarded no longer exists)
 // 38a-2: Manual payment approval checks order status (no orphaned paid records)
-// 38b-1: renter-profile recentReviews does not include orderId
+// 38b-1: renter profile (trust-summary) recentReviews does not include orderId
 // 38b-3: (removed 2026-09 — GET /users/me/activity no longer exists)
 
 const request = require('supertest');
@@ -41,37 +41,40 @@ describe('Manual payment approval: order status guard', () => {
   });
 });
 
-// ─── 38b-1: renter-profile does not leak orderId ─────────────────────────────
-describe('renter-profile: orderId stripped from recentReviews', () => {
-  it('user/index.js: renter-profile map does not include orderId', () => {
+// ─── 38b-1: renter profile does not leak orderId ─────────────────────────────
+// 2026-09: GET /users/:id/renter-profile は削除。同じ集計は GET /orders/:id の
+// renterProfile に埋め込まれ、計算は src/reputation/trust-summary.js にある。
+describe('renterSummary: orderId stripped from recentReviews', () => {
+  it('trust-summary.js: recentReviews map does not include orderId', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/reputation/trust-summary.js'), 'utf-8'
     );
-    // The recentReviews map must not expose o.id
-    // Find the renter-profile map block
     const mapIdx = src.indexOf('.map(o => ({ rating: o.renterReview.rating');
     expect(mapIdx).toBeGreaterThan(-1);
-    // The map near renter-profile must not include orderId
     const mapBlock = src.slice(mapIdx, mapIdx + 200);
     expect(mapBlock).not.toMatch(/orderId.*o\.id/);
   });
 
-  it('GET /users/:id/renter-profile: recentReviews entries have no orderId', async () => {
-    // Register a test user
+  it('renterSummary: recentReviews entries have no orderId', async () => {
     const name = `p38rp${uniq}`.slice(0, 20);
     const email = `${name}@example.com`;
     await request(app).post('/api/v1/users/register')
       .send({ username: name, email, password: 'Test1234!' });
-    const loginRes = await request(app).post('/api/v1/users/login')
-      .send({ email, password: 'Test1234!' });
-    const userId = loginRes.body.user && loginRes.body.user.id;
-    if (!userId) return;
-
-    const res = await request(app).get(`/api/v1/users/${userId}/renter-profile`);
-    expect(res.statusCode).toBe(200);
-    const reviews = res.body.recentReviews || [];
-    for (const r of reviews) {
+    const UserRepository = require('../../src/db/json/UserRepository');
+    const OrderRepository = require('../../src/db/json/OrderRepository');
+    const userId = UserRepository.getByEmail(email).id;
+    const order = OrderRepository.create({
+      userId, providerId: 'p38-provider', gpuId: 'p38-gpu', status: 'completed', durationMinutes: 30,
+      renterReview: { rating: 4, comment: 'fine', reviewerId: 'p38-provider', reviewedAt: new Date().toISOString() },
+    });
+    const { renterSummary } = require('../../src/reputation/trust-summary');
+    const profile = renterSummary(userId);
+    expect(profile.reviewCount).toBe(1);
+    expect(profile.recentReviews.length).toBe(1);
+    for (const r of profile.recentReviews) {
       expect(r).not.toHaveProperty('orderId');
+      expect(JSON.stringify(r)).not.toContain(order.id);
     }
   });
 });
+

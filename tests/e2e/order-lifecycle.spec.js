@@ -30,6 +30,11 @@ test.describe('order lifecycle', () => {
     await page.evaluate(() => localStorage.clear());
     await loginUI(page, provider.email, provider.password);
     await page.goto(`/#/orders/${orderId}`);
+    // Before accepting, the provider sees the renter's track record (a brand-new
+    // renter: no rating yet, zero completed orders). This is the accept-gate
+    // information that used to sit behind an endpoint no screen called.
+    await expect(page.locator('.renter-trust')).toContainText('まだ評価なし');
+    await expect(page.locator('.renter-trust')).toContainText('取引完了 0 件');
     await page.click('button:has-text("承認する")');
     await expect(page.locator('.badge-matched')).toBeVisible({ timeout: 5000 });
 
@@ -80,6 +85,27 @@ test.describe('order lifecycle', () => {
     expect(finalOrder.order.status).toBe('completed');
     expect(finalOrder.order.review.rating).toBe(5);
     expect(finalOrder.order.totalPrice).toBe(1200); // 60min @ 1200 sats/hr, price-locked at creation
+
+    // The review is mutual: the provider rates the renter from the same page.
+    // (POST /orders/:id/renter-review existed; no screen offered it.)
+    await page.evaluate(() => localStorage.clear());
+    await loginUI(page, provider.email, provider.password);
+    await page.goto(`/#/orders/${orderId}`);
+    await page.waitForSelector('.renter-rating-input button', { timeout: 5000 });
+    const renterStars = await page.$$('.renter-rating-input button');
+    await renterStars[3].click(); // 4 stars
+    await page.fill('textarea', 'Paid promptly, clear communication');
+    await page.click('button:has-text("借り手を評価")');
+    await expect(page.locator('.renter-review-done .stars')).toContainText('★★★★☆', { timeout: 5000 });
+    // A second form must not appear: one renter review per order.
+    await expect(page.locator('.renter-rating-input')).toHaveCount(0);
+    const afterRenterReview = await request.get(`${baseURL}/api/v1/orders/${orderId}`, {
+      headers: { Authorization: `Bearer ${provider.token}` },
+    }).then((r) => r.json());
+    expect(afterRenterReview.order.renterReview.rating).toBe(4);
+    // ...and it now feeds the renter's profile the next provider will see.
+    expect(afterRenterReview.order.renterProfile.reviewCount).toBe(1);
+    expect(afterRenterReview.order.renterProfile.ratingAverage).toBe(4);
     expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);
   });
 

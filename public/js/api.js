@@ -134,6 +134,8 @@ export const api = {
   stopOrder: (id) => request(`/api/v1/orders/${id}/stop`, { method: 'POST' }),
   heartbeat: (id, role) => request(`/api/v1/orders/${id}/heartbeat`, { method: 'POST', body: { role } }),
   reviewOrder: (id, rating, comment) => request(`/api/v1/orders/${id}/review`, { method: 'POST', body: { rating, comment } }),
+  // 貸し手→借り手の評価（完了注文、1 回きり）。借り手→貸し手の対称。
+  reviewRenter: (id, rating, comment) => request(`/api/v1/orders/${id}/renter-review`, { method: 'POST', body: { rating, comment } }),
   raiseDispute: (id, reason) => request(`/api/v1/orders/${id}/dispute`, { method: 'POST', body: { reason } }),
   resolveDispute: (id, decision, note) => request(`/api/v1/orders/${id}/dispute/resolve`, { method: 'POST', body: { decision, note } }),
 

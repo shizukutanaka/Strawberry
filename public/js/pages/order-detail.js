@@ -65,6 +65,15 @@ export async function render(container, params) {
         el('div', {}, el('div', { class: 'muted', style: 'font-size:0.8rem' }, '合計金額'),
           el('div', {}, price.sats, price.jpy ? el('div', { class: 'muted', style: 'font-size:0.8rem' }, price.jpy) : null)),
         el('div', {}, el('div', { class: 'muted', style: 'font-size:0.8rem' }, '作成日時'), el('div', {}, fmtDate(order.createdAt))),
+        // 貸し手が承認前に見る借り手の実績。サーバは注文詳細に renterProfile を
+        // 埋め込んで返す（借り手の ID を画面に出さずに済む）。
+        (isProvider || isAdmin) && order.renterProfile
+          ? el('div', { class: 'renter-trust' },
+              el('div', { class: 'muted', style: 'font-size:0.8rem' }, '借り手の評価'),
+              el('div', {}, order.renterProfile.ratingAverage != null
+                ? `★${order.renterProfile.ratingAverage}（${order.renterProfile.reviewCount}件）・取引完了 ${order.renterProfile.completedOrders} 件`
+                : `まだ評価なし・取引完了 ${order.renterProfile.completedOrders} 件`))
+          : null,
       ),
     );
 
@@ -76,7 +85,7 @@ export async function render(container, params) {
     else if (order.status === 'matched') renderMatched(body, order, paymentInfo, isRenter, isProvider, isAdmin, rateInfo);
     else if (order.status === 'active') renderActive(body, order, isRenter, isProvider, isAdmin);
     else if (order.status === 'preempting') renderPreempting(body, order, isRenter);
-    else if (order.status === 'completed') renderCompleted(body, order, isRenter);
+    else if (order.status === 'completed') renderCompleted(body, order, isRenter, isProvider);
     else if (order.status === 'cancelled') body.appendChild(el('div', { class: 'banner banner-warning' }, 'この注文はキャンセルされました。'));
     else if (order.status === 'disputed') renderDisputed(body, order, isRenter, isProvider, isAdmin);
   }
@@ -636,7 +645,7 @@ export async function render(container, params) {
     }
   }
 
-  function renderCompleted(body, order, isRenter) {
+  function renderCompleted(body, order, isRenter, isProvider) {
     renderUtilizationAudit(body, order);
     // SLA 違反による自動終了は、通常完了と区別して理由と返金を明示する（正直なUI原則）。
     if (order.slaBreach) {
@@ -647,17 +656,37 @@ export async function render(container, params) {
           : `ハートビート途絶により自動終了しました。稼働信頼性スコアに影響します。${pct != null ? `（実提供 ${pct}%）` : ''}`,
       ));
     }
+    // 借り手→貸し手のレビュー（投稿済みなら表示、借り手本人で未投稿なら入力）
     if (order.review) {
       body.appendChild(el('div', { class: 'stack' },
         el('p', {}, el('span', { class: 'stars' }, '★'.repeat(order.review.rating) + '☆'.repeat(5 - order.review.rating))),
         order.review.comment ? el('p', {}, order.review.comment) : null,
       ));
-      return;
+    } else if (isRenter) {
+      body.appendChild(reviewForm('利用はいかがでしたか？', 'レビューを送信', 'rating-input',
+        (rating, comment) => api.reviewOrder(order.id, rating, comment)));
     }
-    if (!isRenter) {
+    // 貸し手→借り手のレビュー。片方向だと「難あり借り手」の記録が残らず、次の
+    // 貸し手が承認時に何も知れない。API は以前からあったが画面が無かった。
+    if (isProvider) {
+      if (order.renterReview) {
+        body.appendChild(el('div', { class: 'stack renter-review-done' },
+          el('p', { class: 'muted', style: 'margin:0' }, '借り手への評価'),
+          el('p', {}, el('span', { class: 'stars' }, '★'.repeat(order.renterReview.rating) + '☆'.repeat(5 - order.renterReview.rating))),
+          order.renterReview.comment ? el('p', {}, order.renterReview.comment) : null,
+        ));
+      } else {
+        body.appendChild(reviewForm('借り手はどうでしたか？（支払い・連絡・利用マナー）', '借り手を評価', 'rating-input renter-rating-input',
+          (rating, comment) => api.reviewRenter(order.id, rating, comment)));
+      }
+    }
+    if (!order.review && !isRenter && !isProvider) {
       body.appendChild(el('p', { class: 'muted' }, '注文が完了しました。'));
-      return;
     }
+  }
+
+  // ★ 5 段階 + コメントの入力。借り手→貸し手と貸し手→借り手で同じ形を使う。
+  function reviewForm(prompt, submitLabel, inputClass, submit) {
     let selectedRating = 0;
     const stars = [1, 2, 3, 4, 5].map((n) =>
       el('button', {
@@ -675,7 +704,7 @@ export async function render(container, params) {
         if (selectedRating < 1) { toast('評価を選択してください', 'error'); return; }
         submitBtn.disabled = true;
         try {
-          await api.reviewOrder(order.id, selectedRating, commentInput.value.trim());
+          await submit(selectedRating, commentInput.value.trim());
           toast('レビューを送信しました', 'success');
           await load();
         } catch (err) {
@@ -683,13 +712,13 @@ export async function render(container, params) {
           submitBtn.disabled = false;
         }
       },
-    }, 'レビューを送信');
-    body.appendChild(el('div', { class: 'stack' },
-      el('p', {}, '利用はいかがでしたか？'),
-      el('div', { class: 'rating-input' }, ...stars),
+    }, submitLabel);
+    return el('div', { class: 'stack' },
+      el('p', {}, prompt),
+      el('div', { class: inputClass }, ...stars),
       commentInput,
       submitBtn,
-    ));
+    );
   }
 
   await load();

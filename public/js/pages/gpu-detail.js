@@ -23,6 +23,27 @@ function specRow(label, value, { derived = false, unit = '' } = {}) {
   );
 }
 
+// 出品者の信頼度。誰から借りるかは何を借りるかと同じくらい重い判断なのに、
+// 以前はレビューの平均★しか見えず、完了/拒否の実績・評判スコアは API の奥に
+// 眠っていた（/users/:id/reputation は UI から到達できなかった）。
+function trustCard(rep) {
+  if (!rep) return null;
+  const rating = rep.ratingAverage != null
+    ? `★${rep.ratingAverage}（${rep.reviewCount}件）`
+    : 'レビューなし';
+  return el('div', { class: 'card stack trust-card' },
+    el('div', { class: 'chips' },
+      el('span', { class: 'chip' }, `評判 ${rep.tier}`),
+      el('span', { class: 'chip' }, `スコア ${Math.round(rep.score)}`),
+    ),
+    specRow('借り手からの評価', rating),
+    specRow('取引完了', `${rep.completedOrders} 件`),
+    specRow('注文を拒否', `${rep.rejectedOrders} 件`),
+    rep.stats && rep.stats.slashCount ? specRow('ペナルティ（係争敗訴など）', `${rep.stats.slashCount} 回`) : null,
+    rep.memberSince ? specRow('出品者登録', fmtDate(rep.memberSince)) : null,
+  );
+}
+
 function reviewItem(r) {
   return el('div', { class: 'card', style: 'margin-bottom:8px' },
     el('div', { class: 'row-between' },
@@ -207,6 +228,8 @@ export async function render(container, params) {
             `相場（同機種 ${marketRate.sampleCount}件）: 中央値 ${fmtSats(marketRate.medianPricePerHour)}/時（${fmtSats(marketRate.minPricePerHour)}〜${fmtSats(marketRate.maxPricePerHour)}）`)
         : null,
       rentBtn,
+      gpu.providerReputation ? el('h3', {}, '出品者の信頼度') : null,
+      trustCard(gpu.providerReputation),
       el('h3', {}, '価格通知'),
       renderWatchSection(gpuId, gpu),
       perfCard ? el('h3', {}, '性能スコア') : null,

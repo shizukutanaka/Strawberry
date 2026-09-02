@@ -70,7 +70,7 @@
 | 15 | E2E 決済テスト（regtest LND） | 中 | ⏳ フォローアップ |
 | 16 | プロバイダによる注文拒否 | 中（GPU 貸し手が不適切な注文を断れなかった） | ✅ 実装済み（`POST /orders/:id/reject`、provider/admin 限定） |
 | 17 | レビュー・評価システム | 中（GPU の品質評価・貸し手の評判管理が不可能だった） | ✅ 実装済み（`POST /orders/:id/review`・`GET /gpus/:id/reviews`・GPU 詳細の rating 集計） |
-| 18 | プロバイダ・レピュテーション公開 + 取引完了の評判連動 | 中（評判算出基盤はあるが主要オーダーフローが評判を更新せず、閲覧手段も無かった） | ✅ 実装済み（`GET /users/:id/reputation`・オーダー完了→`recordJobResult` 接続） |
+| 18 | プロバイダ・レピュテーション公開 + 取引完了の評判連動 | 中（評判算出基盤はあるが主要オーダーフローが評判を更新せず、閲覧手段も無かった） | ✅ 実装済み（`GET /gpus/:id` の `providerReputation` に埋め込み・オーダー完了→`recordJobResult` 接続。独立ルート `GET /users/:id/reputation` は UI が到達できず 2026-09 に削除） |
 | 19a | 通知設定 CRUD の HTTP 公開 | 中（notification-settings モジュールは実装済みだがルートに未マウント、ユーザーが通知チャネルを設定不可） | ✅ 実装済み（`GET/POST /notification-settings/:userId`・JWT認証・自他分離） |
 | 19b | 注文キャンセル時のエスクロー返金 | 高（pending/matched 注文削除時にエスクローがあれば資金が宙ぶらりになっていた） | ✅ 実装済み（`DELETE /orders/:id` でエスクロー `CANCEL` イベントを発火、ベストエフォート） |
 | 19c | セルフサービス係争申請 | 中（係争解決は管理者のみで、当事者が申請する手段が無かった） | ✅ 実装済み（`POST /orders/:id/dispute`、active/matched 注文の当事者が申請、状態 `disputed` 追加） |
@@ -84,12 +84,12 @@
 | 24 | 係争ゲートを率ベース化し回復可能に（#23 自己批判の続き） | 中（#23 の絶対カウントは単調・永久バンで、#21 で批判したのと同じ片方向ペナルティの裏返しだった。正当な係争を多く起こす利用者も数件の棄却で永久締め出しされた） | ✅ 実装済み（認容係争で `vindicatedDisputeCount` 加算、ゲートを Bayesian 的な棄却率 `denied/(denied+vindicated)` + 最小サンプルに変更、正当な係争で回復可能） |
 | 25 | アカウント自己退会（GDPR/プライバシー） | 高（本人がアカウントを無効化する手段がなく、管理者 DELETE しか存在しなかった） | ✅ 実装済み（`DELETE /users/me` でソフト無効化・PII 匿名化・トークン失効・最後の管理者は保護、login/refresh も無効化を拒否） |
 | 26 | 注文当事者の決済/エスクロー可視化 | 中（支払状況は別 paymentId 経由、エスクローは管理者限定で、注文当事者が自分の注文の決済状態を確認できなかった） | ✅ 実装済み（`GET /orders/:id/payment`、owner/provider/admin が orderId 起点で payments+escrows を照会） |
-| 27 | 双方向レビュー（プロバイダ→借り手） | 中（レビューは借り手→プロバイダの片方向のみで、難あり借り手の評判が蓄積されなかった） | ✅ 実装済み（`POST /orders/:id/renter-review`、`GET /users/:id/reputation` に `renterRatingAverage`/`renterReviewCount` を追加） |
+| 27 | 双方向レビュー（プロバイダ→借り手） | 中（レビューは借り手→プロバイダの片方向のみで、難あり借り手の評判が蓄積されなかった） | ✅ 実装済み（`POST /orders/:id/renter-review`。注文詳細画面の完了後に貸し手が投稿。集計は `providerReputation.renterRatingAverage` / `renterReviewCount`） |
 | 28 | レディネスプローブ（実依存検証） | 中（`/health` は静的 ok のみで、データ層が壊れていても 200 を返し LB/k8s が不健全なノードへ流していた） | ✅ 実装済み（`GET /ready`、data ディレクトリ書込・リポジトリ読込を実検証し失敗時 503、オプショナルサービスは情報併記） |
 | 29 | 借り手レーティングフロアポリシー（双方向レビュー #27 を operative に） | 高（#27 で借り手レビューを実装したが「見えるだけで機能しない」シグナルだった。プロバイダが難ある借り手を事前に排除する手段がなかった） | ✅ 実装済み（GPU に `minRenterRating` 設定可能、レビュー実績のある借り手が floor を下回ると 422 で拒否、新規借り手は通過、注文作成時の通知にも借り手評価を同梱） |
 | 30 | プロバイダ収益の期間フィルタ | 中（`GET /orders/provider/earnings` が全期間合計のみで、月次・四半期レポートが不可だった） | ✅ 実装済み（`?from=ISO&to=ISO` で createdAt を範囲絞り込み、フィルタ条件をレスポンスに明記） |
 | 31 | 注文キャンセル時のプロバイダ通知 | 中（借り手がキャンセルしても GPU オーナーへ通知が届かず、枠が空いたことを知る手段がなかった） | ✅ 実装済み（`DELETE /orders/:id` のソフトキャンセル後に `notifyUser` でプロバイダへ通知） |
-| 32 | 借り手公開プロフィール | 中（借り手レビュー #27 は `GET /users/:id/reputation`（プロバイダ向け）に埋め込まれており、借り手調査のエンドポイントが存在しなかった） | ✅ 実装済み（`GET /users/:id/renter-profile`、認証不要、受領レビュー集計・直近5件・完了注文数、無効化ユーザーは 404）|
+| 32 | 借り手公開プロフィール | 中（借り手レビュー #27 は `GET /users/:id/reputation`（プロバイダ向け）に埋め込まれており、借り手調査のエンドポイントが存在しなかった） | ✅ 実装済み（`GET /orders/:id` の `renterProfile` に埋め込み: 受領レビュー集計・直近5件・完了注文数。独立ルート `GET /users/:id/renter-profile` は 2026-09 に削除）|
 | 33 | 管理者向け注文フィルタ（userId/providerId） | 中（管理者が `GET /orders` で全注文を取得できるが `?userId=X` や `?providerId=Y` の絞り込みがなく、サポート対応でユーザー別の注文を探せなかった） | ✅ 実装済み（管理者は `?userId=X&providerId=Y` で絞り込み可能、非管理者は自身の注文のみ返るため情報漏洩なし） |
 | 34 | 借り手への注文状態変化通知 | 中（matched/active への遷移時に借り手へ通知がなく、手動でポーリングするか注文詳細を確認するしかなかった） | ✅ 実装済み（`PUT /orders/:id` でステータスが matched/active に変わると `notifyUser` で借り手へ通知、`POST /orders/:id/start` も同様） |
 | 35 | 注文ステータス変遷タイムライン | 低（`GET /orders/:id` に各ステータスへの遷移タイムスタンプがバラバラに存在したが、時系列に整理された `timeline` フィールドがなかった） | ✅ 実装済み（`GET /orders/:id` に `timeline: [{status, at}]` を追加、既存の createdAt/matchedAt/startedAt/completedAt/cancelledAt/dispute.raisedAt を昇順整列） |
@@ -149,4 +149,4 @@
 
 - **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
 - **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。
-- **プロバイダ・レピュテーション公開 + 完了連動**: 既存の reputation-scorer（完了/失敗/監査/SLA/スラッシュ由来の score・tier）は算出基盤こそ整備されていたが、**主要オーダーフロー（注文→完了）が評判を更新せず**、かつ**閲覧する API も無かった**。(1) `POST /orders/:id/stop`（オーダー完了）で `recordJobResult(providerId, true)` を呼び評判を加算（ベストエフォート、失敗しても完了は妨げない）。(2) `GET /api/v1/users/:id/reputation`（公開）で score・tier・stats に加え、当該プロバイダ全 GPU のレビュー平均★・件数・完了/拒否件数・登録日を返す。renter がマーケットで貸し手の信頼性を比較できる。
+- **プロバイダ・レピュテーション公開 + 完了連動**: 既存の reputation-scorer（完了/失敗/監査/SLA/スラッシュ由来の score・tier）は算出基盤こそ整備されていたが、**主要オーダーフロー（注文→完了）が評判を更新せず**、かつ**閲覧する API も無かった**。(1) `POST /orders/:id/stop`（オーダー完了）で `recordJobResult(providerId, true)` を呼び評判を加算（ベストエフォート、失敗しても完了は妨げない）。(2) `GET /api/v1/gpus/:id` の `providerReputation`（公開）で score・tier・stats に加え、当該プロバイダ全 GPU のレビュー平均★・件数・完了/拒否件数・登録日を返し、GPU 詳細画面が「出品者の信頼度」として表示する（旧 `GET /users/:id/reputation` は 2026-09 に削除）。

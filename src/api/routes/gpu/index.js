@@ -29,6 +29,7 @@ const { applyListingDefaults } = require('../../../gpu/listing-defaults');
 // 価格×レピュテーション×稼働×アテステーションの統合スコア（sort=recommended）
 const { runAuction } = require('../../../marketplace/auction-engine');
 const { sanitizeObject } = require('../../../utils/sanitize');
+const { providerSummary } = require('../../../reputation/trust-summary');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
 // 価格ウォッチ（値下げアラート）
@@ -457,6 +458,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
   // providerId: 公開エンドポイントで返すとプロバイダ身元列挙に使われる（リスト側と同じ扱い）。
   //   オーナー/管理者には返す（本人は自分の ID を知る必要がある）。
   // apiKey: 常に除外。
+  // 出品者の信頼度。借り手が「この人から借りて大丈夫か」を判断する材料で、
+  // providerId を出さずに出す（ID を出すと出品者列挙に使われる）。
+  const { providerId: _rp, ...providerReputation } = providerSummary(gpu.providerId) || {};
   const { apiKey, providerId, ...gpuSafe } = gpu;
   const rel = providerUptime.getReliability(providerId);
   const response = {
@@ -464,6 +468,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
     gpu: {
       ...gpuSafe,
       ...(viewerIsOwnerOrAdmin ? { providerId } : {}),
+      providerReputation: Object.keys(providerReputation).length ? providerReputation : null,
       details, usageStats, availability,
       rating: { average: ratingAverage, count: ratingCount },
       // 客観的な信頼性シグナル（集計値のみ — プロバイダー身元は露出しない）

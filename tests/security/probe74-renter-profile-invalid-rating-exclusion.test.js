@@ -19,46 +19,35 @@
 //
 // Fix: renter-profile now filters with Number.isFinite() before averaging, matching
 // the reputation endpoint's approach. reviewCount now reflects only valid ratings.
+//
+// 2026-09: both routes were removed and the computation moved to
+// src/reputation/trust-summary.js (embedded into GET /gpus/:id and GET /orders/:id).
+// GET /orders/:id had *its own* inline copy of the buggy `|| 1` expression, which this
+// probe never covered — one computation in one place is the real fix.
 
 const src = require('fs').readFileSync(
-  require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+  require.resolve('../../src/reputation/trust-summary.js'), 'utf-8'
 );
 
-describe('renter-profile: invalid ratings excluded from average (source assertions)', () => {
+describe('trust-summary: invalid ratings excluded from average (source assertions)', () => {
   it('no longer uses the `Number(...) || 1` silent-fallback pattern for renter-profile ratingAverage', () => {
     // The old buggy expression treated invalid ratings as 1 instead of excluding them.
     expect(src).not.toMatch(/Math\.min\(5, Math\.max\(1, Number\(o\.renterReview\.rating\) \|\| 1\)\)/);
   });
 
-  it('uses Number.isFinite to validate renter-profile ratings before averaging', () => {
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
-    expect(idx).toBeGreaterThan(-1);
-    const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/Number\.isFinite\(r\)/);
+  it('uses Number.isFinite to validate ratings before averaging', () => {
+    expect(src).toMatch(/\.filter\(Number\.isFinite\)/);
   });
 
-  it('reviewCount is derived from the valid-ratings array, not raw renterOrders.length', () => {
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
-    const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/reviewCount\s*=\s*validRatings\.length/);
+  it('reviewCount is derived from the valid-ratings array, not the raw order count', () => {
+    expect(src).toMatch(/const reviewCount = valid\.length/);
   });
 });
 
-describe('renter-profile: ratingAverage computation correctness (unit-level via module logic)', () => {
-  // Simulate the fixed computation directly to verify the math, since the route
-  // handler pulls from OrderRepository (file-backed) and mocking that end-to-end
-  // is covered by existing integration tests (probe38/probe42).
-  function computeRatingAverage(renterOrders) {
-    const validRatings = renterOrders
-      .map(o => Number(o.renterReview.rating))
-      .filter(r => Number.isFinite(r))
-      .map(r => Math.min(5, Math.max(1, r)));
-    const reviewCount = validRatings.length;
-    const ratingAverage = reviewCount > 0
-      ? Math.round((validRatings.reduce((s, r) => s + r, 0) / reviewCount) * 10) / 10
-      : null;
-    return { ratingAverage, reviewCount };
-  }
+describe('trust-summary.averageRatings: computation correctness', () => {
+  // The real function, not a local re-implementation (a copy can only ever agree with itself).
+  const { averageRatings } = require('../../src/reputation/trust-summary');
+  const computeRatingAverage = (renterOrders) => averageRatings(renterOrders.map(o => o.renterReview.rating));
 
   it('excludes an undefined rating from both the average and the count', () => {
     // Number(undefined) === NaN, so this is genuinely excluded (unlike null, which

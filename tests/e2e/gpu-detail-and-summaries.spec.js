@@ -44,6 +44,16 @@ test.describe('GPU detail page', () => {
     await expect(page.locator('.spec-card')).toContainText('48 GB');
     await expect(page.locator('text=Solid performance')).toBeVisible();
     await expect(page.locator('.stars').first()).toContainText('★★★★☆');
+    // The provider's track record is on the page too, without exposing who
+    // the provider is (no providerId in the public response).
+    const trust = page.locator('.trust-card');
+    await expect(trust).toContainText(/取引完了\s*1 件/);
+    await expect(trust).toContainText('★4（1件）');
+    await expect(trust).toContainText('評判');
+    const publicGpu = await request.get(`${baseURL}/api/v1/gpus/${gpu.id}`).then((r) => r.json());
+    expect(publicGpu.gpu.providerReputation.completedOrders).toBe(1);
+    expect(publicGpu.gpu.providerReputation).not.toHaveProperty('providerId');
+    expect(publicGpu.gpu).not.toHaveProperty('providerId');
   });
 
   test('shows a self-reported badge with no attestation, and a verified badge with a matching one', async ({ page, request, baseURL }) => {

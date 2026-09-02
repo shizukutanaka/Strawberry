@@ -4,6 +4,14 @@
 // 結線し、現行の契約（/api/v1 プレフィクス＋保護リソースは認証必須）を検証する。
 const request = require('supertest');
 const { app } = require('../src/api/server');
+// 2026-09: GET /users/:id/reputation と /users/:id/renter-profile は削除した（製品は
+// ユーザー ID を画面に出さないので UI から到達し得なかった）。同じ集計は
+// GET /gpus/:id の providerReputation と GET /orders/:id の renterProfile に埋め込まれ、
+// 計算本体は trust-summary にある。ここでは評判の変化を直接その関数で観測する。
+const trustSummary = require('../src/reputation/trust-summary');
+const asRes = (data) => ({ statusCode: data ? 200 : 404, body: data || {} });
+const getReputation = (id) => asRes(trustSummary.providerSummary(id));
+const getRenterProfile = (id) => asRes(trustSummary.renterSummary(id));
 
 // 一意な英数字のみ（schema は username に alphanum を要求）。
 // register クラッシュバグ修正の回帰テストを兼ねる。
@@ -697,8 +705,8 @@ describe('API Integration', () => {
       expect(bad.statusCode).toBe(400);
     });
 
-    it('GET /users/:id/reputation returns provider trust profile (public, no auth)', async () => {
-      const res = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+    it('providerSummary returns the provider trust profile (embedded in GET /gpus/:id)', async () => {
+      const res = getReputation(providerId);
       expect(res.statusCode).toBe(200);
       expect(res.body.providerId).toBe(providerId);
       expect(res.body).toHaveProperty('score');
@@ -711,13 +719,13 @@ describe('API Integration', () => {
       expect(typeof res.body.rejectedOrders).toBe('number');
     });
 
-    it('GET /users/:id/reputation → 404 for unknown user', async () => {
-      const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/reputation');
+    it('providerSummary is null (404-equivalent) for an unknown user', async () => {
+      const res = getReputation('00000000-0000-4000-8000-000000000000');
       expect(res.statusCode).toBe(404);
     });
 
     it('completing an order records a provider job result in reputation', async () => {
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const before = getReputation(providerId);
       const beforeCompleted = before.body.stats.completedJobs;
 
       // pending → active → stop(completed) の主要フローを辿る
@@ -739,7 +747,7 @@ describe('API Integration', () => {
         .send({});
       expect(stop.statusCode).toBe(200);
 
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const after = getReputation(providerId);
       expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
     });
   });
@@ -1114,7 +1122,7 @@ describe('API Integration', () => {
     }
 
     it('refund verdict cancels the order and PENALIZES provider reputation', async () => {
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const before = getReputation(providerId);
       const beforeFailed = before.body.stats.failedJobs;
       const beforeSlash = before.body.stats.slashCount;
 
@@ -1130,14 +1138,14 @@ describe('API Integration', () => {
       expect(order.cancelReason).toBe('dispute_resolved_refund');
       expect(order.dispute.resolution.decision).toBe('refund');
 
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const after = getReputation(providerId);
       expect(after.body.stats.failedJobs).toBe(beforeFailed + 1);
       expect(after.body.stats.slashCount).toBe(beforeSlash + 1);
     });
 
     it('refund verdict actually LOWERS the provider score (reputation can decrease)', async () => {
       // Seed a clean baseline of successes, capture score, then refund-dispute and re-check
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const before = getReputation(providerId);
       const beforeScore = before.body.score;
 
       const orderId = await makeDisputedOrder();
@@ -1146,12 +1154,12 @@ describe('API Integration', () => {
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ decision: 'refund' });
 
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const after = getReputation(providerId);
       expect(after.body.score).toBeLessThan(beforeScore);
     });
 
     it('uphold verdict completes the order and CREDITS provider reputation', async () => {
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const before = getReputation(providerId);
       const beforeCompleted = before.body.stats.completedJobs;
 
       const orderId = await makeDisputedOrder();
@@ -1165,7 +1173,7 @@ describe('API Integration', () => {
       expect(order.status).toBe('completed');
       expect(order.dispute.resolution.decision).toBe('uphold');
 
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
+      const after = getReputation(providerId);
       expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
     });
 
@@ -1601,8 +1609,8 @@ describe('API Integration', () => {
       expect(dup.statusCode).toBe(409);
     });
 
-    it('GET /users/:id/reputation surfaces the renter rating aggregate', async () => {
-      const res = await request(app).get(`/api/v1/users/${renterId}/reputation`);
+    it('providerSummary surfaces the renter rating aggregate', async () => {
+      const res = getReputation(renterId);
       expect(res.statusCode).toBe(200);
       expect(res.body).toHaveProperty('renterRatingAverage');
       expect(res.body).toHaveProperty('renterReviewCount');
@@ -1719,8 +1727,8 @@ describe('API Integration', () => {
       OrderRepository.update(orderId, { status: 'cancelled' });
     });
 
-    it('GET /users/:id/renter-profile is public (no auth needed)', async () => {
-      const res = await request(app).get(`/api/v1/users/${lowRaterId}/renter-profile`);
+    it('renterSummary aggregates received renter reviews (embedded in GET /orders/:id)', async () => {
+      const res = getRenterProfile(lowRaterId);
       expect(res.statusCode).toBe(200);
       expect(res.body.userId).toBe(lowRaterId);
       expect(res.body.reviewCount).toBeGreaterThanOrEqual(2);
@@ -1728,8 +1736,8 @@ describe('API Integration', () => {
       expect(Array.isArray(res.body.recentReviews)).toBe(true);
     });
 
-    it('GET /users/:id/renter-profile for unknown user → 404', async () => {
-      const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/renter-profile');
+    it('renterSummary is null (404-equivalent) for an unknown user', async () => {
+      const res = getRenterProfile('00000000-0000-4000-8000-000000000000');
       expect(res.statusCode).toBe(404);
     });
   });

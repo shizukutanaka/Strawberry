@@ -2,7 +2,7 @@
 // Probe 42 regression tests:
 // 42a-1: dispute counts (deniedDisputeCount/vindicatedDisputeCount) hidden from sanitizeUser output
 // 42a-2: dispute counts removed from SENSITIVE_USER_FIELDS list
-// 42a-3: ratingAverage clamped to [1, 5] in renter-profile
+// 42a-3: ratingAverage clamped to [1, 5] in the renter trust summary
 // 42a-4: ratingAverage uses clamped values per review
 // 42b-1: notifier AXIOS_SAFE_CONFIG defined with timeout + size limits
 // 42b-2: all axios.post calls in notifier use AXIOS_SAFE_CONFIG (no unbounded calls)
@@ -50,29 +50,25 @@ describe('sanitizeUser: dispute counts hidden from API responses', () => {
   });
 });
 
-// ─── 42a-3/42a-4: ratingAverage clamped in renter-profile ────────────────
-describe('renter-profile: ratingAverage clamped to [1, 5]', () => {
-  it('user/index.js: each renter-profile review rating is clamped to [1,5] before averaging', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    // Probe74 fix: per-review clamping happens via validRatings.map(Math.min(5, Math.max(1, r))),
-    // applied only to Number.isFinite-validated ratings (invalid ratings excluded, not
-    // defaulted to 1). Averaging already-clamped [1,5] values can never leave [1,5], so an
-    // additional outer clamp on the final average is redundant and was removed.
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
-    expect(idx).toBeGreaterThan(-1);
-    const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/Math\.min\(5,\s*Math\.max\(1,\s*r\)\)/);
-    expect(block).toMatch(/Number\.isFinite\(r\)/);
+// ─── 42a-3/42a-4: ratingAverage clamped in the renter trust summary ──────
+// 2026-09: 計算は src/reputation/trust-summary.js に移した（renter-profile ルートは削除）。
+describe('renter rating: clamped to [1, 5], invalid values excluded', () => {
+  const { averageRatings } = require('../../src/reputation/trust-summary');
+
+  it('clamps out-of-range numeric ratings before averaging', () => {
+    expect(averageRatings([7, 0])).toEqual({ ratingAverage: 3, reviewCount: 2 });
   });
 
-  it('user/index.js: raw renterReview.rating not used directly in sum without clamping', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    // The old unclamped form should be gone
-    expect(src).not.toMatch(/reduce.*s \+ o\.renterReview\.rating/);
+  it('never averages raw values: a non-numeric rating is excluded rather than defaulted', () => {
+    expect(averageRatings([5, 'garbage'])).toEqual({ ratingAverage: 5, reviewCount: 1 });
+  });
+
+  it('no route or summary re-implements the sum: the old inline reduce is gone', () => {
+    const fs = require('fs');
+    for (const f of ['../../src/api/routes/user/index.js', '../../src/api/routes/order/index.js']) {
+      const src = fs.readFileSync(require.resolve(f), 'utf-8');
+      expect(src).not.toMatch(/reduce.*renterReview\.rating/);
+    }
   });
 });
 

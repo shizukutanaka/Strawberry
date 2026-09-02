@@ -96,6 +96,14 @@ export const api = {
   login: (email, password) =>
     request('/api/v1/users/login', { method: 'POST', auth: false, body: { email, password } }),
   me: () => request('/api/v1/users/me'),
+  changePassword: (currentPassword, newPassword) =>
+    request('/api/v1/users/me/password', { method: 'PUT', body: { currentPassword, newPassword } }),
+
+  // --- account: 通知先・ウォッチ一覧 ---
+  getNotificationSettings: (userId) => request(`/api/v1/notification-settings/${userId}`),
+  saveNotificationSettings: (userId, body) => request(`/api/v1/notification-settings/${userId}`, { method: 'POST', body }),
+  deleteNotificationSettings: (userId) => request(`/api/v1/notification-settings/${userId}`, { method: 'DELETE' }),
+  myWatches: () => request('/api/v1/users/me/watches'),
   logout: (refreshToken) => request('/api/v1/users/logout', {
     method: 'POST',
     body: refreshToken ? { refreshToken } : {},

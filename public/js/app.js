@@ -13,6 +13,7 @@ import * as orderDetailPage from './pages/order-detail.js';
 import * as adminPaymentsPage from './pages/admin-payments.js';
 import * as earningsPage from './pages/earnings.js';
 import * as gpuDetailPage from './pages/gpu-detail.js';
+import * as accountPage from './pages/account.js';
 
 // ---------- Theme ----------
 const THEME_KEY = 'strawberry.theme';
@@ -63,6 +64,7 @@ function renderNav() {
     if (user && user.role === 'admin') {
       nav.appendChild(link('#/admin/payments', '決済承認'));
     }
+    nav.appendChild(link('#/account', 'アカウント'));
   }
 
   if (isAuthenticated()) {
@@ -92,6 +94,7 @@ route('#/orders/:id', { render: orderDetailPage.render, auth: true });
 route('#/admin/payments', { render: adminPaymentsPage.render, auth: true, roles: ['admin'] });
 // 借り手も自分の残高（返金分）を見て出金申請する必要があるため role で絞らない
 route('#/earnings', { render: earningsPage.render, auth: true });
+route('#/account', { render: accountPage.render, auth: true });
 setNotFound(notFoundPage.render);
 
 start('#/market');

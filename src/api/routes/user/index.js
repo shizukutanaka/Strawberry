@@ -149,6 +149,10 @@ router.post('/login',
     // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。
     // jti は logout 時の失効に使用。type で両者を厳密分離。
     const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
+    // パスワード変更・全セッション失効の直後の再ログインが、同じ秒内で発行された
+    // トークンごと弾かれないよう、境界の秒を跨いでから発行する（最大 1 秒待つ）。
+    const { waitPastInvalidationBoundary } = require('../../utils/session-invalidation');
+    await waitPastInvalidationBoundary(user);
     const accessJti = uuidv4();
     const token = signAccessToken(user, accessJti);
     const refreshToken = signRefreshToken(user, accessJti);

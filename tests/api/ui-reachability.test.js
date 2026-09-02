@@ -22,8 +22,12 @@
 //   - インフラ系（/system/ /auth/ /node-info /channels /graphql /health）
 //   - /audit-anchors … 監査ログの Merkle ルートと OTS レシートを第三者に検証させる
 //     ための公開 API。画面ではなく `ots verify` から叩く前提
-// 残ったものが「一般ユーザー向けに見えるのに、製品からは到達しない」候補。
-// **今の数を上限として固定し、増えたら落とす**。減らしたら BASELINE も下げること。
+// 残ったものが「一般ユーザー向けに見えるのに、製品からは到達しない」もの。
+// 2026-09 に 37 本を一件ずつ問い詰め、16 本を削除・10 本を画面に配線・11 本を
+// admin/インフラとして再分類して **0 になった**。以後はゼロが不変条件。
+// 新しいエンドポイントを足すなら、同じ変更の中で UI から呼ぶか、admin ゲートを
+// 掛けるか、足さないかを選ぶ。BASELINE を上げる変更は「使われない機能を足した」
+// という宣言そのものなので、レビューで止める。
 const fs = require('fs');
 const path = require('path');
 const { app } = require('../../src/api/server');
@@ -31,9 +35,8 @@ const { app } = require('../../src/api/server');
 const ROOT = path.resolve(__dirname, '../..');
 const PUBLIC_JS = path.join(ROOT, 'public/js');
 
-// 2026-09 時点の実数。**上げてはいけない。** 新しいエンドポイントを足すなら、
-// 同じ変更の中で UI から呼ぶか、admin 配下に置くか、足さないかを選ぶ。
-const BASELINE = 5;
+// **上げてはいけない。**
+const BASELINE = 0;
 
 function collectRoutes() {
   const out = [];

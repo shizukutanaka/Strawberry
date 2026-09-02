@@ -133,7 +133,14 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
       payloadTemplate: Joi.string().max(4096).allow('').optional()
     })).max(20).optional()
   });
-  const { error, value } = schema.validate(req.body);
+  // GET は lineToken を '***' に伏せて返す。画面が読んだ値をそのまま送り返したとき、
+  // 伏せ字を保存したり（本物が消える）パターン検証で 400 にしたりせず、
+  // 「変更なし」として既存値を保つ。POST は設定全体を置き換えるので、これが無いと
+  // 設定画面から他の項目を直すたびに LINE トークンが失われる。
+  const body = { ...(req.body || {}) };
+  const keepLineToken = body.lineToken === '***';
+  if (keepLineToken) delete body.lineToken;
+  const { error, value } = schema.validate(body);
   if (error) return res.status(400).json({ error: error.message });
   // payloadTemplate はサーバー側で JSON.parse されてから webhook に送信される。
   // 不正な JSON を保存すると送信時に例外・通知ループ停止を引き起こすため、
@@ -151,6 +158,8 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
   }
   await withLock(SETTINGS_LOCK, async () => {
     const settings = loadSettings();
+    const existing = settings[userId] || {};
+    if (keepLineToken && existing.lineToken) value.lineToken = existing.lineToken;
     settings[userId] = value;
     atomicWriteJSON(SETTINGS_PATH, settings);
   });

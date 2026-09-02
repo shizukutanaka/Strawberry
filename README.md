@@ -140,7 +140,9 @@ GPU リソースの貸借を仲介するオープンソースのマーケット�
 - GPU アクセスの受け渡し（AES-256-GCM で暗号化、支払い済みの借り手のみ復号）
 - 正規化性能スコア（Vast.ai DLPerf 相当）と価格対性能ソート、出品時の参考価格
 - Spot（中断許容）ティア、SLA 違反の検出、係争と裁定
-- レピュテーション、レビュー、GPU 価格ウォッチ
+- 双方向レビュー（借り手→貸し手、貸し手→借り手）、出品者・借り手の信頼度表示、GPU 価格ウォッチ
+- アカウント設定（パスワード変更、通知先: メール / Discord / Slack / LINE / Telegram、ウォッチ一覧）
+- 短命アクセストークン + リフレッシュ（UI が自動更新）、サーバ側で失効するログアウト
 - 監査ログのハッシュ連鎖＋増分 Merkle アンカー、OpenTimestamps 提出（オプトイン）
 - 死活監視・自動復旧・外部通知（Slack / Sentry / LINE）、Prometheus メトリクス
 - REST / GraphQL / OpenAPI（`/openapi.json`・`/swagger.html`）
@@ -269,7 +271,7 @@ npm run coverage   # カバレッジ
 | テスト | 何を止めるか |
 |---|---|
 | `tests/api/no-dead-endpoints.test.js` | 登録されているのに決して成功しないエンドポイント |
-| `tests/api/ui-reachability.test.js` | 製品のどの画面からも呼ばれないエンドポイントが増えること |
+| `tests/api/ui-reachability.test.js` | 製品のどの画面からも呼ばれない一般向けエンドポイントが存在すること（0 が不変条件） |
 | `tests/docs/docs-match-code.test.js` | 実在しないファイル・API・npm script をドキュメントが指すこと |
 | `tests/payments/no-unledgered-money.test.js` | 台帳に行を書かずに資金が動く経路 |
 

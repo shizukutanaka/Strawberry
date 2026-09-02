@@ -11,7 +11,7 @@ const { gpuDetector, vgpuManager, requireService } = require('../../../core/serv
 // ファイルベースJSONストレージリポジトリ
 const GpuRepository = require('../../../db/json/GpuRepository');
 // GPU アテステーション（申告スペック vs デバイス計測の照合）
-const { createMockAttestationVerifier } = require('../../../security/gpu-attestation-verifier');
+const { createMockAttestationVerifier, TRUST_LEVELS } = require('../../../security/gpu-attestation-verifier');
 // 開発/テスト時は Mock、本番では実 nvtrust アダプタへ置き換え可能（DI）
 const _attestationVerifier = createMockAttestationVerifier();
 // プロバイダ・レピュテーション記録（アテステーション結果の反映）
@@ -333,6 +333,10 @@ router.get('/', asyncHandler(async (req, res) => {
       }
       return _repCache.get(pid);
     };
+    // 第三者検証まで到達したアテステーションだけを「順位に効く証拠」として扱う。
+    const attestationCounts = (att) => Boolean(
+      att && att.passed === true && att.trustLevel === TRUST_LEVELS.HARDWARE_ATTESTED,
+    );
     const bids = gpus.map((g) => {
       const rel = relFor(g.providerId);
       return {
@@ -342,8 +346,12 @@ router.get('/', asyncHandler(async (req, res) => {
         // 稼働率は未計測なら null。scoreBid の既定 100 に落ちるが、それは
         // 「まだ違反が観測されていない」の意味で妥当（違反があれば score が出る）。
         slaUptimePct: typeof rel.score === 'number' ? rel.score * 100 : undefined,
-        attestationScore: (g.attestation && g.attestation.score) || 0,
-        attestationPassed: !!(g.attestation && g.attestation.passed),
+        // 順位付けに効かせるのは**第三者検証があるときだけ**。プロバイダが自分で
+        // 書いたレポートでも score は 1.0 近くまで出るので、これを素通しにすると
+        // 総合順位の 10%（DEFAULT_WEIGHTS.attestation）を自作 JSON で買えてしまう。
+        // 全員が自分に無料で与えられる加点は、そもそも順位を分ける情報ではない。
+        attestationScore: attestationCounts(g.attestation) ? g.attestation.score : 0,
+        attestationPassed: attestationCounts(g.attestation),
       };
     });
     const { ranked } = runAuction(bids, {});
@@ -625,6 +633,9 @@ router.post('/',
         gpuInfo.attestation = {
           passed: attResult.passed,
           score: attResult.score,
+          // 証拠の強さ。表示側はこれを見ないと「検証済み」と言えない。
+          // 欠けている場合（旧データ）は self_reported として扱われる。
+          trustLevel: attResult.trustLevel || TRUST_LEVELS.SELF_REPORTED,
           findings: attResult.findings,
           verifiedAt: new Date().toISOString(),
         };
@@ -636,7 +647,7 @@ router.post('/',
         }
       } catch (attErr) {
         logger.warn(`[GPU登録] アテステーション検証エラー（スキップ）: ${attErr.message}`);
-        gpuInfo.attestation = { passed: false, score: 0, findings: ['verifier error: ' + attErr.message], verifiedAt: new Date().toISOString() };
+        gpuInfo.attestation = { passed: false, score: 0, trustLevel: TRUST_LEVELS.SELF_REPORTED, findings: ['verifier error: ' + attErr.message], verifiedAt: new Date().toISOString() };
       }
     } else {
       gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };

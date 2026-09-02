@@ -70,11 +70,21 @@ describe('computePerfScore — ranking sanity', () => {
     expect(r.findings).toEqual([]);
   });
 
-  it('upgrades confidence to attested when attestation passed', () => {
-    const r = perf.computePerfScore(gpu({ attestation: { passed: true } }));
+  it('upgrades confidence to attested only for a hardware-rooted attestation', () => {
+    const r = perf.computePerfScore(gpu({ attestation: { passed: true, trustLevel: 'hardware_attested' } }));
     expect(r.confidence).toBe('attested');
     // スコア値そのものは裏付けの有無で変えない（数値の意味が揺れないようにする）
     expect(r.score).toBe(perf.computePerfScore(gpu()).score);
+  });
+
+  it('does not upgrade confidence for a provider-supplied (self-reported) report', () => {
+    // プロバイダが自分で書いたレポートは「合格」しても第三者検証ではない。
+    // ここを passed だけで見ていたため、自作レポートで「実測検証済み」表示を買えた。
+    const r = perf.computePerfScore(gpu({ attestation: { passed: true, trustLevel: 'self_reported' } }));
+    expect(r.confidence).toBe('reference');
+    // trustLevel の無い旧データも同じ扱い（安全側）。
+    const legacy = perf.computePerfScore(gpu({ attestation: { passed: true } }));
+    expect(legacy.confidence).toBe('reference');
   });
 
   it('does not upgrade confidence when attestation failed', () => {
@@ -114,12 +124,22 @@ describe('computePerfScore — 詐称・順位買いへの耐性', () => {
     expect(r.findings.some((f) => f.startsWith('unverified_model_capped'))).toBe(true);
   });
 
-  it('lifts the unknown-model cap once attestation passes', () => {
+  it('lifts the unknown-model cap only for a hardware-rooted attestation', () => {
     const r = perf.computePerfScore(gpu({
-      model: 'Mystery X', powerWatt: 300, performance: { teraflops: 50000 }, attestation: { passed: true },
+      model: 'Mystery X', powerWatt: 300, performance: { teraflops: 50000 },
+      attestation: { passed: true, trustLevel: 'hardware_attested' },
     }));
     expect(r.score).toBeGreaterThan(100);
     expect(r.findings.some((f) => f.startsWith('unverified_model_capped'))).toBe(false);
+  });
+
+  it('keeps the unknown-model cap against a self-written report (rank-buying stays closed)', () => {
+    const r = perf.computePerfScore(gpu({
+      model: 'Mystery X', powerWatt: 300, performance: { teraflops: 50000 },
+      attestation: { passed: true, trustLevel: 'self_reported' },
+    }));
+    expect(r.score).toBeLessThanOrEqual(100);
+    expect(r.findings.some((f) => f.startsWith('unverified_model_capped'))).toBe(true);
   });
 
   it('leaves an honest below-reference declared GPU uncapped', () => {

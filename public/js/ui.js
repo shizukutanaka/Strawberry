@@ -102,17 +102,24 @@ export function reliabilityBadge(reliability) {
 
 // GPUスペック検証ティアバッジ。attestation = { passed, score, findings, verifiedAt } を受け取る。
 // 正直なUI原則: プロバイダー申告スペックは詐称され得る（vBIOS書き換え等）ため、
-// 「自己申告」「実測検証済み」「検証失敗」を常に区別して表示し、未検証を検証済みと
-// 混同させない。findings は検証失敗時のみツールチップで開示する。
+// 表示は attestation.trustLevel から決める。**passed だけで「検証済み」と言ってはいけない。**
+// レポートはプロバイダーが自分で送ってくるもので、署名の出所を確かめる仕組みは
+// まだ無い（src/security/gpu-attestation-verifier.js のヘッダ参照）。以前ここは
+// passed を「実測検証済み」「実機で確認済み」と表示していたため、
+// プロバイダーは自分で書いたレポートを添えるだけでそのバッジを買えた。
 export function attestationBadge(attestation) {
   if (!attestation || !attestation.verifiedAt) {
-    return el('span', { class: 'chip chip-attestation chip-attestation-self', title: 'プロバイダーの自己申告スペックです。実機検証は行われていません。' }, 'スペック: 自己申告');
+    return el('span', { class: 'chip chip-attestation chip-attestation-self', title: 'プロバイダーの自己申告スペックです。照合レポートの提出もありません。' }, 'スペック: 自己申告');
   }
   if (attestation.passed) {
-    return el('span', { class: 'chip chip-attestation chip-attestation-verified', title: `実機ベンチマークで申告スペックと一致を確認済み（スコア ${Math.round((attestation.score || 0) * 100)}%）` }, 'スペック: 実測検証済み');
+    // 旧データには trustLevel が無い。無い＝第三者検証ではない、と安全側に倒す。
+    if (attestation.trustLevel === 'hardware_attested') {
+      return el('span', { class: 'chip chip-attestation chip-attestation-verified', title: `ベンダーの信頼の根まで署名を検証済み（スコア ${Math.round((attestation.score || 0) * 100)}%）` }, 'スペック: 第三者検証済み');
+    }
+    return el('span', { class: 'chip chip-attestation chip-attestation-selfreport', title: `プロバイダー提出のレポートが申告スペックと一致し、期限内であることを確認しました（スコア ${Math.round((attestation.score || 0) * 100)}%）。レポート自体はプロバイダーが作るもので、第三者による実機検証ではありません。` }, 'スペック: 自己申告（照合済み）');
   }
   const findings = Array.isArray(attestation.findings) ? attestation.findings.join('; ') : '';
-  return el('span', { class: 'chip chip-attestation chip-attestation-failed', title: `実機検証で申告スペックとの不一致が検出されました: ${findings}` }, 'スペック: 検証失敗');
+  return el('span', { class: 'chip chip-attestation chip-attestation-failed', title: `提出レポートと申告スペックの不一致が検出されました: ${findings}` }, 'スペック: 申告に不一致');
 }
 
 // 正規化性能スコアのバッジ。performanceScore = { score, confidence, matchedModel, perfPerHourSat }。
@@ -122,7 +129,7 @@ export function attestationBadge(attestation) {
 //   - 根拠の強さ（実機検証済み / 型番既知 / 自己申告）を必ず区別し、算出できない場合は
 //     推測値を出さず「未算出」と表示する（reliability の「計測中」と同じ扱い）。
 const PERF_CONFIDENCE = {
-  attested: { label: '実測検証済み', cls: 'verified', hint: 'アテステーションで申告スペックが実機と一致することを確認済み' },
+  attested: { label: '第三者検証済み', cls: 'verified', hint: 'ベンダーの信頼の根まで検証されたアテステーションで、申告スペックが実機と一致することを確認済み' },
   reference: { label: '型番既知', cls: 'reference', hint: '型番が既知GPUの公開スペックと一致（実機検証は未実施）' },
   declared: { label: '自己申告', cls: 'declared', hint: 'プロバイダーの自己申告スペックのみに基づく推定値' },
 };

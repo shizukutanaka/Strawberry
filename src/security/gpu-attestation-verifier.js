@@ -1,9 +1,29 @@
 // src/security/gpu-attestation-verifier.js
 // GPU アテステーション検証層（docs/SPECIFICATION.md F2 §GPU アテステーション）。
-// Provider が申告した GPU スペック（claimed）と、デバイスが生成したアテステーション
-// レポート（report）を照合し、真正性スコアを返す純関数 + Mock ファクトリ。
+//
+// ── この層が実際にやっていること（誇張しないための注意書き）──────────────────
+// **ここに信頼の根は無い。** 照合するのは「プロバイダが申告したスペック（claimed）」と
+// 「プロバイダが同じリクエストで送ってきたレポート（report）」であり、レポートの出所を
+// 確かめる手段を我々は持っていない。署名は長さだけ、証明書チェーンは配列が空でないこと
+// だけを見ている（ベンダー root への検証は行わない）。つまりこの関数が合格を出しても、
+// 分かるのは **申告が自己整合していて新しいこと** だけである。
+//
+// この区別を落とすと製品が嘘をつく: 実際、UI は合格を「実測検証済み」と表示していて、
+// プロバイダは自分で書いたレポートを添えるだけでそのバッジを得られた。だから結果には
+// 必ず trustLevel を載せ、**表示側がこの値を見ないと「検証済み」と言えない**形にする。
+// 将来 nvtrust などで本物の検証を実装したら、その実装だけが 'hardware_attested' を返す。
+//
 // インタフェースは ln-adapter と同じ DI パターン（テストは Mock を注入）。
-// 将来の nvtrust/Confidential Computing 実装もこの interface に準拠する。
+
+/**
+ * 検証結果がどれだけ強いか。
+ * - self_reported     … プロバイダ提出のレポートと申告の突き合わせのみ。第三者検証なし
+ * - hardware_attested … ベンダーの信頼の根まで署名を検証した（未実装）
+ */
+const TRUST_LEVELS = Object.freeze({
+  SELF_REPORTED: 'self_reported',
+  HARDWARE_ATTESTED: 'hardware_attested',
+});
 
 // 各チェックの重み（合計=13）
 // - model_match (3): GPU の型番一致は最重要（金銭的詐称の主手段）
@@ -35,7 +55,9 @@ function scoreChecks(checks) {
  *   { model, vendor, memoryGB, driverVersion, firmwareIntegrity, certChain,
  *     timestamp, signature, measurements: { tempC, powerW, utilizationPct } }
  * @param {object} opts     上書きオプション（memoryTolerancePct, maxAgeSec, minScore）
- * @returns {Promise<{passed:boolean, score:number, findings:string[], checks:Array}>}
+ * @returns {Promise<{passed:boolean, score:number, trustLevel:string, findings:string[], checks:Array}>}
+ *   trustLevel は必ず 'self_reported'。この関数は署名の出所を検証しないので、
+ *   合格しても第三者検証にはならない（上のヘッダを参照）。
  */
 async function verifyAttestation(claimed, report, opts = {}) {
   const {
@@ -131,7 +153,9 @@ async function verifyAttestation(claimed, report, opts = {}) {
   const mandatoryPassed = modelMatch && memoryOk && firmwareOk && freshOk;
   const passed = mandatoryPassed && score >= minScore;
 
-  return { passed, score, findings, checks };
+  // ここで hardware_attested を返してはいけない。署名の出所を確かめていない以上、
+  // 「合格」の意味は「申告が自己整合している」までである。
+  return { passed, score, trustLevel: TRUST_LEVELS.SELF_REPORTED, findings, checks };
 }
 
 /**
@@ -176,4 +200,5 @@ function createMockAttestationVerifier(overrides = {}) {
   };
 }
 
-module.exports = { verifyAttestation, createMockAttestationVerifier, DEFAULTS, scoreChecks };
+module.exports = {
+  TRUST_LEVELS, verifyAttestation, createMockAttestationVerifier, DEFAULTS, scoreChecks };

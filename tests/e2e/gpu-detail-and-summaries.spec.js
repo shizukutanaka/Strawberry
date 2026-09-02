@@ -56,7 +56,11 @@ test.describe('GPU detail page', () => {
     expect(publicGpu.gpu).not.toHaveProperty('providerId');
   });
 
-  test('shows a self-reported badge with no attestation, and a verified badge with a matching one', async ({ page, request, baseURL }) => {
+  // 「レポートを添えた」ことと「第三者が検証した」ことを、UI が混同しないこと。
+  // レポートはプロバイダー自身が同じリクエストで送るもので、署名の出所は誰も確かめて
+  // いない。以前ここは緑の「実測検証済み」を出しており、下の手書きレポート
+  // （signature は単なる文字列）でそのバッジを買えていた。
+  test('separates "no report" from "self-written report" and never calls either one verified', async ({ page, request, baseURL }) => {
     const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'attprov', role: 'provider' });
     const selfReported = await apiCreateGpu(request, baseURL, provider.token, { name: `Unverified GPU ${uniqueId()}` });
     const verified = await apiCreateGpu(request, baseURL, provider.token, {
@@ -77,7 +81,11 @@ test.describe('GPU detail page', () => {
     await expect(page.locator('.spec-card')).toContainText('スペック: 自己申告');
 
     await page.goto(`/#/gpus/${verified.id}`);
-    await expect(page.locator('.spec-card')).toContainText('スペック: 実測検証済み');
+    await expect(page.locator('.spec-card')).toContainText('スペック: 自己申告（照合済み）');
+    await expect(page.locator('.spec-card')).not.toContainText('第三者検証済み');
+    // 色も主張の一部: 第三者検証の緑ではなく、注意色のチップで出す。
+    await expect(page.locator('.chip-attestation-selfreport')).toBeVisible();
+    await expect(page.locator('.chip-attestation-verified')).toHaveCount(0);
   });
 
   test('shows a market-rate line only when 2+ listings share the same model', async ({ page, request, baseURL }) => {

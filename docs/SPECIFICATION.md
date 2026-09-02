@@ -119,7 +119,8 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
   UI 開示・係争の材料に留める。
   **未**: 再実行監査（別プロバイダへの同一ジョブ再投入）と ZK/TEE 系の検証パイプライン。
 - **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
-- **GPU アテステーション**: 🟡 検証の枠組みは実装・配線済（`src/security/gpu-attestation-verifier.js`、出品時に `attestationReport` を任意提出 → 申告スペックとの突き合わせ 8 チェック → `attestation.passed/score` を保存し一覧・詳細・`sort=recommended` が参照）。ただし**実機の署名検証（nvtrust）は未対応**で、現在の検証器は Mock。したがって「検証済み」と称してよいのは*申告の内部整合性*までで、ハードウェアの真正性ではない。
+- **GPU アテステーション**: 🟡 検証の枠組みは実装・配線済（`src/security/gpu-attestation-verifier.js`、出品時に `attestationReport` を任意提出 → 申告スペックとの突き合わせ 8 チェック → `attestation.passed/score/trustLevel` を保存）。**実機の署名検証（nvtrust）は未対応**で、レポートはプロバイダー自身が同じリクエストで送るものである（署名は長さ、証明書チェーンは非空しか見ていない）。したがって「検証済み」と称してよいのは*申告の内部整合性*までで、ハードウェアの真正性ではない。
+  この規定は 2026-09 まで**文書だけが守っていた**: UI は `passed` を「実測検証済み」と緑で表示し、perf-score は confidence を `attested` に引き上げ、`sort=recommended` はアテステーション枠（総合の 10%）を満点で与えていた。プロバイダーは自分で書いた JSON を添えるだけでその 3 つを買えた。現在は結果に `trustLevel`（`self_reported` / `hardware_attested`）を持たせ、**3 つの利得すべてが `hardware_attested` を要求する**。現在の検証器は `hardware_attested` を返さない。
 
 ### F3. レピュテーション/インセンティブ
 - ステーク/スラッシング/レピュテーション: ✅ `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）。**配線済**: 注文完了時の成否記録、ゼロ負荷監査の結果反映、係争の返金裁定での slash、`GET /gpus?sort=recommended` での参照（`POST /marketplace/rank` は UI から呼ばれていなかったため 2026-09 に削除）。

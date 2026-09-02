@@ -144,9 +144,11 @@ main#app { max-width: 1080px; margin: 0 auto; padding: var(--space-5); min-heigh
 .chip-reliability-poor { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
 .chip-reliability-unrated { background: var(--color-surface-2); color: var(--color-text-muted); }
 
-/* GPUスペック検証ティアチップ（自己申告 / 実測検証済み / 検証失敗）。 */
+/* GPUスペック検証ティアチップ。**色も主張の一部**なので、自己申告の照合済みを
+   第三者検証と同じ緑にはしない（緑は信頼の根まで検証したときだけ）。 */
 .chip-attestation { font-weight: 600; }
 .chip-attestation-self { background: var(--color-surface-2); color: var(--color-text-muted); }
+.chip-attestation-selfreport { background: var(--color-warning-bg); color: var(--color-warning); border-color: transparent; }
 .chip-attestation-verified { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
 .chip-attestation-failed { background: var(--color-danger-bg); color: var(--color-danger); border-color: transparent; }
 

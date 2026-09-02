@@ -268,18 +268,25 @@ function computePerfScore(gpu = {}) {
     };
   }
 
-  // アテステーション合格＝申告スペックが実機レポートと照合済み。スコア値は変えず
-  // 「その数値がどれだけ裏付けられているか」だけを引き上げる（正直なUI原則）。
-  const attested = Boolean(gpu.attestation && gpu.attestation.passed === true);
+  // 裏付けの引き上げは**第三者検証がある場合だけ**。プロバイダが自分で書いたレポートは、
+  // 合格しても「申告が自己整合している」以上のことを意味しない（trustLevel を参照）。
+  // ここを passed だけで判定していたため、自作レポートで confidence が 'attested'
+  // （UI 表示「実測検証済み」）まで上がっていた。スコア値は裏付けの有無で変えない。
+  const attested = Boolean(
+    gpu.attestation
+    && gpu.attestation.passed === true
+    && gpu.attestation.trustLevel === 'hardware_attested',
+  );
   if (confidence === 'reference' && attested) {
     confidence = 'attested';
   }
 
   let scaled = score * 100;
   // 未知型番かつ未検証は参照GPU 超えを認めない（自己申告での順位買いを防ぐ）。
+  // 自作レポートで上限を外せてしまうと、この制限は制限にならない。
   if (confidence === 'declared' && !attested && scaled > UNKNOWN_MODEL_SCORE_CAP) {
     findings.push(
-      `unverified_model_capped: 参照表に無い型番の自己申告スコア ${Math.round(scaled)} を上限 ${UNKNOWN_MODEL_SCORE_CAP} に制限した（アテステーション提出で解除）`
+      `unverified_model_capped: 参照表に無い型番の自己申告スコア ${Math.round(scaled)} を上限 ${UNKNOWN_MODEL_SCORE_CAP} に制限した（第三者検証で解除）`
     );
     scaled = UNKNOWN_MODEL_SCORE_CAP;
   }

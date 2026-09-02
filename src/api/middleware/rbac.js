@@ -2,7 +2,7 @@
 const { APIError, ErrorTypes } = require('../../utils/error-handler');
 
 module.exports = function(requiredRole) {
-  return function(req, res, next) {
+  const middleware = function(req, res, next) {
     const user = req.user;
     if (!user || !user.role) {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, '認証情報がありません', 401));
@@ -23,4 +23,8 @@ module.exports = function(requiredRole) {
     }
     next();
   };
+  // security.js の checkRole と同じ印。ルート走査テストが admin 専用ルートを
+  // ゲートの実体から判定するために使う。
+  middleware.requiredRoles = Array.isArray(requiredRole) ? [...requiredRole] : [requiredRole];
+  return middleware;
 };

@@ -15,10 +15,14 @@
 //
 // ── 判定 ──────────────────────────────────────────────────────────────────
 // 対象外（正当に API 専用）:
-//   - `/admin` を含むパス … 運営が curl や管理ツールから叩く前提のもの
+//   - **admin ロールでしか通れないルート** … 運営が curl や管理ツールから叩く前提。
+//     パス名（/admin）ではなく、ルートに実際に掛かっている checkRole / rbac
+//     ミドルウェアの `requiredRoles` から判定する。/users/:id/role のように
+//     admin 専用なのに /admin を含まないパスが実在し、名前で見ると誤分類するため
 //   - インフラ系（/system/ /auth/ /node-info /channels /graphql /health）
+//   - /audit-anchors … 監査ログの Merkle ルートと OTS レシートを第三者に検証させる
+//     ための公開 API。画面ではなく `ots verify` から叩く前提
 // 残ったものが「一般ユーザー向けに見えるのに、製品からは到達しない」候補。
-// ゼロにはできない（プログラマティックな API 面として意図的に残すものもある）ので、
 // **今の数を上限として固定し、増えたら落とす**。減らしたら BASELINE も下げること。
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +33,7 @@ const PUBLIC_JS = path.join(ROOT, 'public/js');
 
 // 2026-09 時点の実数。**上げてはいけない。** 新しいエンドポイントを足すなら、
 // 同じ変更の中で UI から呼ぶか、admin 配下に置くか、足さないかを選ぶ。
-const BASELINE = 35;
+const BASELINE = 23;
 
 function collectRoutes() {
   const out = [];
@@ -37,7 +41,7 @@ function collectRoutes() {
     for (const layer of stack) {
       if (layer.route) {
         for (const m of Object.keys(layer.route.methods).filter((m) => m !== '_all')) {
-          out.push({ method: m.toUpperCase(), path: prefix + layer.route.path });
+          out.push({ method: m.toUpperCase(), path: prefix + layer.route.path, adminOnly: isAdminOnly(layer.route) });
         }
       } else if (layer.name === 'router' && layer.handle && layer.handle.stack) {
         let p = '';
@@ -51,6 +55,14 @@ function collectRoutes() {
     }
   })(app._router.stack, '');
   return out;
+}
+
+/** ルートのハンドラ列に「admin だけを通す」ゲートが含まれているか。 */
+function isAdminOnly(route) {
+  return (route.stack || []).some((h) => {
+    const roles = h.handle && h.handle.requiredRoles;
+    return Array.isArray(roles) && roles.length > 0 && roles.every((r) => r === 'admin');
+  });
 }
 
 function jsFilesUnder(dir, out = []) {
@@ -78,12 +90,13 @@ function normalize(p) {
   return p.replace(/\$\{[^}]*\}/g, ':x').replace(/:\w+/g, ':x').replace(/\/$/, '') || '/';
 }
 
-const API_ONLY = /\/admin|\/system\/|\/auth\/|\/node-info|\/channels|\/graphql|\/health/;
+const API_ONLY = /\/admin|\/system\/|\/auth\/|\/node-info|\/channels|\/graphql|\/health|\/audit-anchors/;
 
 function unreachableFromUi() {
   const ui = uiPaths();
   return collectRoutes()
     .filter((r) => r.path.startsWith('/api/v1'))
+    .filter((r) => !r.adminOnly)
     .filter((r) => !API_ONLY.test(r.path))
     .filter((r) => !ui.has(normalize(r.path)))
     .map((r) => `${r.method} ${r.path}`)
@@ -94,6 +107,19 @@ describe('endpoints the product itself never reaches', () => {
   it('finds both routes and UI call sites (guards against either walker finding none)', () => {
     expect(collectRoutes().length).toBeGreaterThan(50);
     expect(uiPaths().size).toBeGreaterThan(10);
+  });
+
+  it('recognises admin gates from the middleware itself, not from the path', () => {
+    const routes = collectRoutes();
+    // 名前に /admin を含まないが admin 専用: ミドルウェアの印で拾えていること
+    const roleChange = routes.find((r) => r.method === 'PUT' && r.path === '/api/v1/users/:id/role');
+    expect(roleChange && roleChange.adminOnly).toBe(true);
+    // 名前だけで判定していないことの裏: 誰でも呼べる公開ルートは admin 扱いにならない
+    const listGpus = routes.find((r) => r.method === 'GET' && r.path === '/api/v1/gpus/');
+    expect(listGpus && listGpus.adminOnly).toBe(false);
+    // provider|admin のような「admin を含むが admin 限定でない」ゲートも admin 扱いにしない
+    const createGpu = routes.find((r) => r.method === 'POST' && r.path === '/api/v1/gpus/');
+    expect(createGpu && createGpu.adminOnly).toBe(false);
   });
 
   it('does not grow the set of user-facing endpoints no screen calls', () => {

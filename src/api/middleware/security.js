@@ -167,7 +167,7 @@ const authenticateJWT = (req, res, next) => {
 
 // ロールベースアクセス制御ミドルウェア
 const checkRole = (roles) => {
-  return (req, res, next) => {
+  const middleware = (req, res, next) => {
     if (!req.user) {
       return next(new APIError(
         ErrorTypes.UNAUTHORIZED,
@@ -186,6 +186,11 @@ const checkRole = (roles) => {
     
     next();
   };
+  // 要求ロールをミドルウェア自身に刻む。ルート表を機械的に走査するテスト
+  // （tests/api/ui-reachability.test.js）が「このルートは admin 専用か」を
+  // パス名の推測ではなく、実際に掛かっているゲートから判定できるようにするため。
+  middleware.requiredRoles = Array.isArray(roles) ? [...roles] : [roles];
+  return middleware;
 };
 
 // APIキー認証ミドルウェア（マシン間通信用）

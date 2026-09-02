@@ -107,20 +107,69 @@ const SLA_PROVIDER_TIMEOUT_MS = Math.max(
   30000,
   Number(process.env.SLA_PROVIDER_HEARTBEAT_TIMEOUT_MS) || 5 * 60 * 1000,
 );
+// プロセス起動時刻。**運営のダウンタイムをプロバイダーの違反として数えないため**に要る。
+// 証跡（下記 providerHeartbeatAt）は再起動をまたいで残るので、サーバが 1 時間止まっていた
+// だけで、稼働中の全プロバイダーが「5 分以上応答なし」に見えてしまう。起動からは必ず
+// 猶予を取る。
+const PROCESS_STARTED_AT = Date.now();
+
 function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
   const OrderRepo = require('../../../db/json/OrderRepository');
   const breached = [];
-  for (const [orderId, session] of usageSessions) {
-    // 証拠主義: プロバイダーのハートビートが一度も無いセッションは対象外。
-    if (!session.lastLenderHeartbeat) continue;
-    if (nowMs - session.lastLenderHeartbeat <= SLA_PROVIDER_TIMEOUT_MS) continue;
 
+  // (1) 揮発セッションが持つ最新のプロバイダービートを注文へ書き戻す。
+  //     ここが無いと、判定材料がプロセス内 Map にしか無く、**再起動した瞬間に
+  //     「箱が落ちている注文」が永久に検出されなくなる**（借り手は全額払う）。
+  //     書き込みはこのスイープの周期（30 秒）に律速され、注文 1 件あたり高々 1 回。
+  for (const [orderId, session] of usageSessions) {
+    if (!session.lastLenderHeartbeat) continue;
     let order = null;
     try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
     if (!order || order.status !== 'active') continue;
+    const persisted = Date.parse(order.providerHeartbeatAt);
+    if (Number.isFinite(persisted) && persisted >= session.lastLenderHeartbeat) continue;
+    try {
+      OrderRepo.updateIf(orderId, (o) => o.status === 'active', {
+        providerHeartbeatAt: new Date(session.lastLenderHeartbeat).toISOString(),
+      });
+    } catch (_) { /* 証跡の書き込み失敗でスイープ自体は止めない */ }
+  }
 
-    const usageSeconds = typeof session.getUsageSeconds === 'function' ? session.getUsageSeconds() : 0;
+  // (2) 稼働中の注文を見て、プロバイダーの応答が途絶しているものを終了させる。
+  //     セッションではなく**注文**を回すのが要点。再起動でセッションが消えていても、
+  //     注文に残った証跡から判断できる。
+  for (const order of OrderRepo.getAll()) {
+    if (order.status !== 'active') continue;
+    const orderId = order.id;
+    const session = usageSessions.get(orderId);
+    const persistedBeat = Date.parse(order.providerHeartbeatAt);
+    const lastBeat = Math.max(
+      session && session.lastLenderHeartbeat ? session.lastLenderHeartbeat : 0,
+      Number.isFinite(persistedBeat) ? persistedBeat : 0,
+    );
+    // 証拠主義: プロバイダーのハートビートが一度も無い注文は対象外。落ちたのか
+    // エージェント未導入なのか判別できないため触らず、予約終了後の掃除に委ねる。
+    if (!lastBeat) continue;
+    // 空白をいつから数えるか。セッションが生きていれば、その証跡は**このプロセスが
+    // 自分で観測した**ものなので、そのまま起点にしてよい。セッションが無い（再起動後）
+    // 場合の証跡はプロセス停止中の空白を含み得るので、起動時刻を下限に取る。
+    // こうしないと、運営が 1 時間サーバを止めただけで稼働中の全プロバイダーが
+    // 「応答なし」として違反と判定され、責任の所在が逆転する。
+    const observedByThisProcess = Boolean(session && session.lastLenderHeartbeat);
+    const since = observedByThisProcess ? lastBeat : Math.max(lastBeat, PROCESS_STARTED_AT);
+    if (nowMs - since <= SLA_PROVIDER_TIMEOUT_MS) continue;
+
     const totalSeconds = (Number(order.durationMinutes) || 0) * 60;
+    // 実提供量: セッションが生きていれば実利用秒（両者が同時に応答していた時間）。
+    // 再起動でセッションが消えている場合は、開始から最後のビートまでを提供とみなす
+    // （0 と決めつけるより実態に近く、証跡に基づく）。
+    let usageSeconds;
+    if (session && typeof session.getUsageSeconds === 'function') {
+      usageSeconds = session.getUsageSeconds();
+    } else {
+      const startedMs = Date.parse(order.startedAt || order.updatedAt || order.createdAt);
+      usageSeconds = Number.isFinite(startedMs) ? Math.max(0, (lastBeat - startedMs) / 1000) : 0;
+    }
     const deliveredRatio = totalSeconds > 0
       ? Math.max(0, Math.min(1, usageSeconds / totalSeconds))
       : 0;

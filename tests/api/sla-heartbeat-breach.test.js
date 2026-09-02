@@ -121,4 +121,78 @@ describe('SLA heartbeat-breach sweep', () => {
     sessions.delete(order.id);
     cleanupProvider(providerId);
   });
+
+  // ── 証跡の耐久性 ─────────────────────────────────────────────────────────
+  // 問: この判定の材料はどこにあるのか。
+  // 答（修正前）: プロセス内の Map だけ。**サーバを再起動した瞬間、箱が落ちている
+  // 注文は永久に検出されなくなり**、借り手は死んだ GPU に全額払っていた。
+  // いまはスイープが最新のビートを注文へ書き戻し、判定はセッションではなく注文を回す。
+
+  it('persists the latest provider heartbeat onto the order so the evidence survives a restart', () => {
+    const providerId = `slapersist-${Date.now()}`;
+    const order = OrderRepository.create({
+      gpuId: 'g', userId: 'r', providerId,
+      status: 'active', durationMinutes: 60, pricePerHour: 1000, totalPrice: 1000,
+      startedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    });
+    const beatAt = Date.now() - 60 * 1000; // 1 分前（まだ違反ではない）
+    const session = new OrderUsageSession(order.id, providerId, 'r');
+    session.lastLenderHeartbeat = beatAt;
+    sessions.set(order.id, session);
+
+    sweep(Date.now());
+
+    const after = OrderRepository.getById(order.id);
+    expect(after.status).toBe('active'); // まだ切らない
+    expect(Date.parse(after.providerHeartbeatAt)).toBe(beatAt);
+
+    sessions.delete(order.id);
+    cleanupProvider(providerId);
+  });
+
+  it('detects a dead box from the persisted evidence alone (no in-memory session)', () => {
+    const providerId = `slarestart-${Date.now()}`;
+    const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const order = OrderRepository.create({
+      gpuId: 'g', userId: 'r', providerId,
+      status: 'active', durationMinutes: 120, pricePerHour: 1000, totalPrice: 1000,
+      startedAt,
+      // 再起動を模す: セッションは無く、証跡だけが注文に残っている。
+      providerHeartbeatAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+    });
+    expect(sessions.has(order.id)).toBe(false);
+
+    // プロセスが十分に上がっている状況（起動猶予を超えた時刻）で掃く。
+    const breached = sweep(Date.now() + 2 * 60 * 60 * 1000);
+
+    expect(breached.some((b) => b.id === order.id)).toBe(true);
+    const after = OrderRepository.getById(order.id);
+    expect(after.status).toBe('completed');
+    expect(after.slaBreach).toBe(true);
+    // 提供量は「開始から最後のビートまで」。0 と決めつけず、全量とも言わない。
+    // 開始 60 分前 → 最後のビート 30 分前 = 30 分 / 予約 120 分 = 0.25
+    expect(after.deliveredRatio).toBeCloseTo(0.25, 2);
+
+    cleanupProvider(providerId);
+  });
+
+  it("does not charge the operator's downtime to the provider (grace after process start)", () => {
+    const providerId = `sladowntime-${Date.now()}`;
+    const order = OrderRepository.create({
+      gpuId: 'g', userId: 'r', providerId,
+      status: 'active', durationMinutes: 120, pricePerHour: 1000, totalPrice: 1000,
+      startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      // サーバが 1 時間止まっていた、と読める古い証跡。
+      providerHeartbeatAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+
+    // 起動直後（= このプロセスは今上がったばかり）に掃いても違反にしない。
+    const breached = sweep(Date.now());
+
+    expect(breached.some((b) => b.id === order.id)).toBe(false);
+    expect(OrderRepository.getById(order.id).status).toBe('active');
+
+    cleanupProvider(providerId);
+  });
 });
+

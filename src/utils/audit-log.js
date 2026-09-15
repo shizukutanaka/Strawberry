@@ -181,7 +181,7 @@ function auditWriteHealth() {
 }
 
 /**
- * 監査ログの改ざん検証
+ * 監査ログの改ざん検証。ディスク上のファイルを丸ごと読み直して再計算する（O(n)）。
  * @returns {boolean}
  */
 function verifyAuditLogIntegrity() {
@@ -198,12 +198,57 @@ function verifyAuditLogIntegrity() {
   return prevHash === lastHash;
 }
 
+// ── 稼働中の改ざん検出 ──────────────────────────────────────────────────────
+// verifyAuditLogIntegrity() 自体は起動時（_getOrInitPrevHash の初回呼び出し）にしか
+// 実行されていなかった。appendAuditLog はそれ以降、プロセス内にキャッシュした
+// prevHash から次のハッシュを計算するだけで、ディスク上の実ファイルを見直さない。
+// つまり稼働中にログファイルへ直接書き込まれる改ざん（コンテナ内 RCE・ログボリューム
+// の sidecar・共有ボリューム経由）は、次にプロセスを再起動するまで検出されない。
+// verifyAuditLogIntegrity() を呼ぶ本番コードは実際どこにも無かった（テストのみ）。
+//
+// ここでは検出したことを記録・通知するだけに留める。自動修復・自動停止はしない:
+// 稼働中の検出は誤検知（ボリュームの一時的な読み取り不整合等）の可能性を排除できず、
+// それだけで製品を落とすのは検出しないより悪い自傷になり得る。人が判断できるよう、
+// 状態を残して外部へ知らせるところまでが役目（このコードベース全体で繰り返している
+// 「断定できない異常は記録・通知に留め、資金や可用性を自動で動かさない」という方針）。
+const _tamperState = { detected: false, detectedAt: null, alerted: false };
+
+/** 稼働中に一度でも改ざんが検出されたら true のまま残る（人が調査するまで消えない）。 */
+function auditIntegrityHealth() {
+  return { ..._tamperState };
+}
+
+/**
+ * verifyAuditLogIntegrity() を実行し、失敗したら検出状態を記録して外部へ通知する。
+ * 定期実行は src/security/audit-integrity-monitor.js が担う。
+ * @returns {boolean} true なら整合、false なら改ざん検出
+ */
+function checkIntegrity() {
+  const ok = verifyAuditLogIntegrity();
+  if (!ok && !_tamperState.detected) {
+    _tamperState.detected = true;
+    _tamperState.detectedAt = new Date().toISOString();
+    console.error('[audit-log] TAMPER DETECTED: hash chain does not match audit.log on disk.');
+    if (!_tamperState.alerted) {
+      _tamperState.alerted = true;
+      try {
+        require('./external-alerts').notifyAll('audit_log_tamper_detected', {
+          detectedAt: _tamperState.detectedAt,
+        }).catch(() => {});
+      } catch (_) { /* 通知経路が無くても検出自体は残す */ }
+    }
+  }
+  return ok;
+}
+
 module.exports = {
-  appendAuditLog, verifyAuditLogIntegrity, auditWriteHealth, quarantinePath,
+  appendAuditLog, verifyAuditLogIntegrity, checkIntegrity, auditIntegrityHealth,
+  auditWriteHealth, quarantinePath,
   _resetAuditHealthForTest: () => {
     Object.assign(_failureState, {
       failures: 0, droppedEntries: 0, firstFailureAt: null,
       lastFailureAt: null, lastReason: null, lastAction: null, alerted: false,
     });
+    Object.assign(_tamperState, { detected: false, detectedAt: null, alerted: false });
   },
 };

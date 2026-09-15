@@ -101,6 +101,15 @@ try {
   logger.warn(`anchor-scheduler: failed to start: ${e.message}`);
 }
 
+// 監査ログのハッシュチェーンを稼働中も検証する。以前は起動時（プロセス内キャッシュ
+// を作る最初の書き込み時）に一度だけ検証されており、稼働中の改ざんは次の再起動まで
+// 気づけなかった（src/security/audit-integrity-monitor.js のヘッダ参照）。
+try {
+  require('../security/audit-integrity-monitor').start();
+} catch (e) {
+  logger.warn(`audit-integrity-monitor: failed to start: ${e.message}`);
+}
+
 // 為替レートを起動直後に一度だけ取りに行く（fire-and-forget）。
 // これが無いと**最初の利用者**が外部 API の往復（実測 1.3〜1.6 秒、上流が全滅して
 // いれば冷却に入るまでその分）を丸ごと待つ。価格表示は全ページに出るので、
@@ -217,6 +226,21 @@ app.get('/ready', readyLimiter, (req, res) => {
     }
   } catch (e) {
     checks.auditLogWritable = `unknown: ${e.message}`;
+  }
+
+  // 3b) 監査ログのハッシュチェーンが改ざんされていないか（稼働中の定期検証の結果）。
+  //     一度検出したら人が調査するまで healthy に戻らない。
+  try {
+    const { auditIntegrityHealth } = require('../utils/audit-log');
+    const t = auditIntegrityHealth();
+    if (t.detected) {
+      ready = false;
+      checks.auditLogIntegrity = `tampered: detected at ${t.detectedAt}`;
+    } else {
+      checks.auditLogIntegrity = 'ok';
+    }
+  } catch (e) {
+    checks.auditLogIntegrity = `unknown: ${e.message}`;
   }
 
   // オプショナルサービス（情報のみ。readiness をブロックしない）

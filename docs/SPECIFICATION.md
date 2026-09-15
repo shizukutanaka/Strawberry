@@ -216,7 +216,9 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - `src/gpu/listing-defaults.js` — 出品の必須項目を 5 つに絞り、残りを機種から導出（vendor→apiType、既定 arch、参照表の TDP→powerWatt。未知機種は推測せず未設定のまま。導出項目は derivedFields に記録し UI が「推定」と区別, 11テスト＋API 10テスト）
 - `tests/api/route-reachability.test.js` — **登録済み全ルートの全数調査**。ルート表そのものを入力にして 5xx がゼロであることを検査する（人が経路を思い出して確認する方式は経路が増えるたびに漏れる）。認証が死んだまま緑にならないよう、通過本数の下限とカナリアで検査の実体を担保する（6テスト）
 - `tests/api/no-dead-endpoints.test.js` — 登録済み全ルートを機械的に列挙して実際に叩き、**決して成功しないエンドポイントがゼロ**であることを保証する（5xx と 503 を検出）。個別に気づいて潰す方式では次に増えたときに見逃すため、ルート表から機械的に確かめる
-- `src/utils/audit-log.js` — 監査ログ（ハッシュ連鎖＋書き込み失敗の可視化）。チェーン破損・ディスクフル・サイズ上限で**記録が静かに止まらない**: 失敗を状態として保持し `/ready` を 503 に落とし、外部チャネルへ 1 度通知し、繋げられなかったエントリは隔離ファイルへ退避する（7テスト）
+- `src/utils/audit-log.js` — 監査ログ（ハッシュ連鎖＋書き込み失敗の可視化）。チェーン破損・ディスクフル・サイズ上限で**記録が静かに止まらない**: 失敗を状態として保持し `/ready` を 503 に落とし、外部チャネルへ 1 度通知し、繋げられなかったエントリは隔離ファイルへ退避する（7テスト）。
+  **訂正（2026-09）**: `verifyAuditLogIntegrity()`（ハッシュチェーンの改ざん検証）は起動時（プロセス内 `prevHash` キャッシュを作る最初の書き込み）にしか実行されておらず、それ以降は本番コードのどこからも呼ばれていなかった（呼び出し元はテストのみ）。稼働中にログファイルへ直接書き込まれる改ざんは次の再起動まで検出されなかった。`src/security/audit-integrity-monitor.js` を追加し、同じ検証を定期実行するようにした（検出しても自動修復・強制停止はせず、状態を記録して外部へ通知するに留める、5テスト）。
+- `src/security/audit-integrity-monitor.js` — 監査ログのハッシュチェーンを稼働中も定期検証（既定 5 分間隔、`AUDIT_INTEGRITY_CHECK_INTERVAL_MS` で変更可）。検出は `auditIntegrityHealth()` として `/ready` にも反映される（6テスト）
 - `src/utils/exchange-rate.js` — 為替レート（stale-while-revalidate ＋ 全滅時の冷却期間 ＋ コールド取得の集約。上流障害を「全リクエストが遅い」に増幅させない, 15テスト）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）

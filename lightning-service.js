@@ -750,8 +750,31 @@ class LightningService extends EventEmitter {
         return pending;
     }
 
+    // **注意（2026-09 第7回点検で判明）**: SettleInvoice/CancelInvoice は LND の
+    // invoicesrpc（`invoices.proto`、lnrpc とは別サービス）が提供する RPC である。
+    // このファイルが読み込むのは proto/lightning.proto の lnrpc.Lightning のみ
+    // （connectToLND() 参照）で、invoicesrpc は一度も読み込まれていない。つまり
+    // `this.lnd`（lnrpc.Lightning のクライアント、本物・Mock どちらも）には
+    // settleInvoice/cancelInvoice というメソッド自体が存在しない。
+    // 何もせず呼ぶと「TypeError: this.lnd.settleInvoice is not a function」という、
+    // 原因の分からないエラーで落ちる。setupMockLND() のコメントと同じ方針
+    // （「失敗を確定させて503を返す方が、確信を持って嘘をつくよりはるかに良い」）で、
+    // ここでも「呼べば失敗するはず」の状態を「なぜ失敗するかが分かる」状態にする。
+    // hold invoice エスクローが未結線である理由の一つ（他に preimage/invoice を
+    // 生成する経路も無い。ARCHITECTURE.md の money-movement gap を参照）。
+    _requireInvoicesRpc(methodName) {
+        if (typeof this.lnd?.[methodName] !== 'function') {
+            throw new Error(
+                `${methodName} requires the LND invoicesrpc service, which this client does not load `
+                + '(only lnrpc.Lightning from proto/lightning.proto is loaded). Hold invoice support is '
+                + 'not wired for this reason — see ARCHITECTURE.md "エスクロー action の未配線".'
+            );
+        }
+    }
+
     async settleHoldInvoice(preimage) {
         // HODL請求書決済
+        this._requireInvoicesRpc('settleInvoice');
         try {
             await new Promise((resolve, reject) => {
                 this.lnd.settleInvoice({ preimage: preimage }, (error, response) => {
@@ -759,17 +782,17 @@ class LightningService extends EventEmitter {
                     else resolve(response);
                 });
             });
-            
+
             const paymentHash = crypto.createHash('sha256').update(preimage).digest('hex');
             const invoice = this.invoices.get(paymentHash);
-            
+
             if (invoice) {
                 invoice.status = 'settled';
                 invoice.settledAt = Date.now();
             }
-            
+
             logger.info(`Hold invoice settled: ${paymentHash.substring(0, 16)}...`);
-            
+
         } catch (error) {
             logger.error('Failed to settle hold invoice:', error);
             throw error;
@@ -778,6 +801,7 @@ class LightningService extends EventEmitter {
 
     async cancelHoldInvoice(paymentHash) {
         // HODL請求書キャンセル
+        this._requireInvoicesRpc('cancelInvoice');
         try {
             await new Promise((resolve, reject) => {
                 this.lnd.cancelInvoice({ payment_hash: paymentHash }, (error, response) => {
@@ -785,16 +809,16 @@ class LightningService extends EventEmitter {
                     else resolve(response);
                 });
             });
-            
+
             const invoice = this.invoices.get(paymentHash);
-            
+
             if (invoice) {
                 invoice.status = 'cancelled';
                 invoice.cancelledAt = Date.now();
             }
-            
+
             logger.info(`Hold invoice cancelled: ${paymentHash.substring(0, 16)}...`);
-            
+
         } catch (error) {
             logger.error('Failed to cancel hold invoice:', error);
         }

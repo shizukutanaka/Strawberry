@@ -304,6 +304,46 @@ ARCHITECTURE.md に詳細を追記した。今回のスコープには含めな�
 すべてを実装し尽くすことではなく、残っている境界のすべてに理由があり、
 その理由を自分で確かめてあることである。**
 
+### K. 「未完成」自体を一段深く掘る——見た目は完成していたコードがもう一つ壊れていた（第 7 回）
+
+Stop hook が「hold invoice エスクローは本当の未完成のままだ、②削除か③単純化を
+実行せよ」と指摘した。①を再訪した第 6 回の結論（preimage/invoice 生成が無い）を
+そのまま受け入れず、**②削除の前提として「本当にこれ以上分解できないほど掘ったか」**
+を確かめ直した。
+
+第 6 回は「`lightning-service.js` は `settleHoldInvoice`/`cancelHoldInvoice`/
+`payInvoice` を実装済み」と書いていた。**問い直した: その「実装済み」は検証済みか。**
+
+答えは否だった。`settleHoldInvoice()`/`cancelHoldInvoice()` は `this.lnd.settleInvoice(...)`
+/ `this.lnd.cancelInvoice(...)` を呼ぶ。だがこの 2 つの RPC は LND の **invoicesrpc**
+（`invoices.proto`、`lnrpc.Lightning` とは別サービス）が提供するもので、
+`connectToLND()` が `protoLoader.load()` で読み込むのは `proto/lightning.proto` の
+`lnrpc` パッケージだけだと確認した（grep で 1 箇所のみ、`.lnrpc` で終わることを確認）。
+Mock LND（`setupMockLND()`）にも `settleInvoice`/`cancelInvoice` という名のメソッドは
+無い。つまりこの 2 つは**本番でも Mock でも、呼べば必ず
+`TypeError: this.lnd.settleInvoice is not a function` で落ちる**——第 6 回で見つけた
+「preimage/invoice を生成する経路が無い」とは別の、もう一段下の欠落である。
+
+`tests/payments/escrow-service-ln-wiring.test.js` がこれを見逃していた理由も特定した:
+そのテストは `lightning-service.js` を一切使わず、`src/payments/ln-adapter.js` という
+**独立したテスト用の代役**（`settleHoldInvoice` 等を単に記録するだけの Mock）を注入して
+いる。だから「アダプタを渡せば正しく呼ばれる」ことは検証できていても、
+「**実物のアダプタが実際に動くか**」は一度も検証されていなかった。見た目が完成した
+コード（メソッドが存在し、それらしいロジックがある）が、実際に呼ばれる場面が
+一度も無いまま放置され、壊れていることに誰も——このレビュー自身も第 6 回までは
+——気づけなかった。
+
+②削除は実行しなかった。理由: このコードは現在無害（呼び出す経路がどこにも無いので、
+実行時に実害は出ない）で、`invoicesrpc` を正しく実装するには実機の LND に対して
+検証できる環境が要る（プロトコルレベルの gRPC サービス定義を推測で書くのは、
+金銭を扱うコードとして無責任）。代わりに実行したのは、このコードベース全体で
+繰り返してきた選択——**断定できないなら、少なくとも失敗の理由を分かる形にする**
+——である。`settleHoldInvoice`/`cancelHoldInvoice` は呼ばれた瞬間に
+「invoicesrpc が読み込まれていないため」と名指しして失敗するようにした
+（`_requireInvoicesRpc()`）。これは「④加速する」（同じ問題を次は人が思い出さなくても
+気づける）の実行にあたる: 将来 preimage/invoice 生成側を直した人が、次にこの欠落へ
+到達したとき、原因不明の TypeError ではなく理由を読める。
+
 ---
 
 ## 短所（今も残る境界線。3 件は検討済みの設計判断、1 件は本当の未完成）
@@ -314,9 +354,12 @@ ARCHITECTURE.md に詳細を追記した。今回のスコープには含めな�
    過大主張はない。実機 SDK が使える環境が無い限り変わらない。
 3. **hold invoice エスクローは未結線（本当の未完成）。** `escrow-state-machine` は
    純関数として完成しているが、本番で `lnAdapter` を渡していないだけでなく、
-   preimage・hold invoice 自体を生成する経路が無い（上記 J-3、第 6 回で判明）。
-   決済フローの再設計を要する。`tests/payments/no-unledgered-money.test.js` が
-   誤った早期結線を防いでいる。
+   preimage・hold invoice 自体を生成する経路が無く（上記 J-3、第 6 回）、
+   さらにその一段下——`settleHoldInvoice`/`cancelHoldInvoice` が呼ぶ LND の
+   invoicesrpc サービス自体がクライアントに読み込まれていない（上記 K、第 7 回）。
+   3 層すべてに実機 LND での検証を要する部分が含まれるため、決済フローの再設計と
+   合わせて意図的にスコープ外とした。壊れた 2 メソッドは、呼べば理由が分かる形に
+   直した。`tests/payments/no-unledgered-money.test.js` が誤った早期結線を防いでいる。
 4. **JSON データ層に複数レコードのトランザクションが無い。** 検討済み・技術選択の帰結
    （上記 J-4）。個別の危険箇所は単一ファイル原子性で閉じており、新たな未発見の
    欠陥は今回の点検では見つからなかった。
@@ -344,6 +387,8 @@ ARCHITECTURE.md に詳細を追記した。今回のスコープには含めな�
 | `quoteGpu` の `basis.quotable` | 根拠の無い型番に値段を付けて人に見せること |
 | `docs-match-code` の npm script 検査 | 実行できない手順をドキュメントに書くこと |
 | `src/security/audit-integrity-monitor.js` | 監査ログの改ざん検知が起動時の一回しか実行されないこと。5 分ごとに検証し、検出は `/ready` にも反映される |
+| `lightning-service.js` の `_requireInvoicesRpc()` | `settleHoldInvoice`/`cancelHoldInvoice` が理由不明の `TypeError` で落ちること。呼べば invoicesrpc 未読み込みだと名指しする |
+| `tests/unit/lightning-service-hold-invoice-gap.test.js` | 上のガードが外れて再び無言の TypeError に戻ること |
 
 既存の `no-dead-endpoints` は「叩けば応答するか」を、新しい `ui-reachability` は
 「そもそも誰かが叩くのか」を見る。応答するが誰も呼ばないエンドポイントは、
@@ -366,6 +411,7 @@ ARCHITECTURE.md に詳細を追記した。今回のスコープには含めな�
 | ④加速する | 「同じ問題を次は人が思い出さなくても止まるか」 | `no-unledgered-money`（送金メソッドをソースから導出）、`ui-reachability`（ルート表と UI の呼び出しを機械照合、`BASELINE = 0`）、`docs-match-code`（npm script 検査）、`notification-settings-roundtrip`、`session-invalidation-boundary` |
 | ⑤自動化する | 「人手の突き合わせに残っているものは何か」 | `reconciliation` に `noUnbackedPayouts` / `unattributedPaidSats` を追加し、毎サイクル走る sweeper から自動検査。admin 限定ルートの判定をパス名の目視からミドルウェアの `requiredRoles` 読み取りへ。終端注文に残った接続情報の掃除（`purgeTerminalOrderCredentials`）と、SLA 判定に使う証跡の書き戻しを既存スイープに載せた |
 | ①（再訪）要件を疑う | 「『未対処』のリストそのものは検討済みか」 | 第 6 回。残る 4 件のうち 3 件（手動送金・Mock 検証・JSON トランザクション）は「検討した結果これが正しい」という確定判断であり todo ではないと判定。1 件（hold invoice）は本当の未完成だが、以前より正確な理由（preimage/invoice 生成の不在）を確認した |
+| ①（再々訪）要件を疑う | 「『実装済み』という自分の記述は検証済みか」 | 第 7 回。`lightning-service.js` の `settleHoldInvoice`/`cancelHoldInvoice` を「実装済み」と書いていたが、実際は存在しない gRPC メソッドを呼んでおり必ず落ちると判明。②削除（invoicesrpc を実装する）は実機 LND 無しでは無責任と判断して見送り、④加速（呼べば理由が分かる形にする）を実行した |
 
 第一原理に戻した点: 「帳簿が合っている」は「現金が合っている」を含意しない
 （不変条件は読む範囲の外を守れない）。「登録されている」「テストが通る」は
@@ -389,6 +435,7 @@ ARCHITECTURE.md に詳細を追記した。今回のスコープには含めな�
 13. 主張「GPU 利用率の記録から、実際に計算が行われたことを確認しました」 → 問「その記録は誰が作るのか」 → 答「誰も。ブラウザは GPU 利用率を測れない」 → 問「では受け口を足したとき、なぜ『結線済』と書けたのか」 → 答「受け口と供給を混同していた」 → 仕様書を訂正し、文書と配線のずれを検査で縛る
 14. 主張「監査ログは HMAC ハッシュチェーンで tamper-evident」 → 問「誰がいつそれを見るのか」 → 答「起動時に一度だけ。`verifyAuditLogIntegrity()` はそれ以降テストからしか呼ばれていない」 → 問「では稼働中の改ざんは誰が気づくのか」 → 答「誰も。次の再起動まで」 → 定期実行するジョブを追加し、検出は記録・通知のみ（自動修復・強制停止はしない）
 15. 主張（この文書自身）「hold invoice エスクローは lnAdapter が渡されていないだけ」 → 問「渡せば動くのか」 → 答「動かない。preimage・hold invoice 自体を生成する経路がどこにも無い」 → 問「では『未対処』な理由をすべて検討したと言えるのか」 → 答「言えなかった。残る 3 件を検討し直したら、うち 2 件（手動送金・Mock 検証）は自動化・実装をすべきでない確定判断、1 件（JSON トランザクション）は技術選択の帰結だった」 → J
+16. 主張（この文書自身、第 6 回まで）「`lightning-service.js` は `settleHoldInvoice`/`cancelHoldInvoice` を実装済み」 → 問「その実装は検証したのか」 → 答「していなかった。既存テストは独立した Mock（`ln-adapter.js`）を注入しており、`lightning-service.js` の実物を一度も通していない」 → 実際に読んだら `this.lnd.settleInvoice` という存在しない gRPC メソッドを呼んでおり、本番でも Mock でも必ず `TypeError` で落ちると判明 → K
 
 答えは毎回コードで確かめ、確かめられなかったものは「未対処」に残した。
 
@@ -427,3 +474,8 @@ ARCHITECTURE.md に詳細を追記した。今回のスコープには含めな�
     やらないと決めた」は書いた本人にも区別が付きにくいが、読む人にはまったく違う情報
     になる。①要件を疑う、はコードだけでなく自分がこれまで書いた「未対処」リストにも
     向けるべき問いだった。
+11. **「実装済み」と書いた自分の言葉も、コードと同じ疑いの対象にする。** 独立した
+    Mock を注入するテストは「配線が正しいか」は検証できても「実物が動くか」は
+    検証できない。第 6 回はコードを読んで「実装済み」と結論したが、実際に
+    実行させてはいなかった——テストを書いた本人でさえ、この区別を見落とし得る。
+    掘り下げは一度で終わりにせず、「これ以上分解できないか」を毎回自分に問い直す。

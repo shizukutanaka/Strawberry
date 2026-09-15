@@ -171,15 +171,30 @@ lint が常に失敗しており、品質ゲートとして機能していなか
   `invoice: null` で開設するのみ。つまり `reveal_preimage`（`adapter.settleHoldInvoice(ctx.preimage)`）
   と `cancel_invoice`（`adapter.cancelHoldInvoice(ctx.preimageHash)`）は、今 `lnAdapter` を
   渡しても常に `undefined` を渡して失敗する。`lightning-service.js` は
-  `settleHoldInvoice`/`cancelHoldInvoice`/`payInvoice` を実装済みだが、**その手前の
-  「LND の `AddHoldInvoice`（`invoicesrpc`）で実際に hold invoice を作り、preimage を
-  ローカルに秘匿する」という起点そのものが実装されていない**。したがって残る作業は
-  「アダプタを繋ぐ」ではなく「借り手の支払いフローを hold invoice ベースへ作り直す」
-  （invoice 生成・invoice-poller の ACCEPTED 状態対応・プロバイダの payout 用invoice の
-  事前収集を含む）という、決済フロー本体の再設計に近い。これは意図的に今回のスコープ外とし、
-  台帳（payout-ledger）1 本の経路を安全に保つことを優先した——btc-onchain 削除（2026-09）と
-  同じ判断基準（②削除するか③単純化するかを選ぶ際、"稼働していない並行経路を増やさない"）
-  である。結線する場合に台帳の payout 行を書き忘れないよう、
+  `settleHoldInvoice`/`cancelHoldInvoice`/`payInvoice` というメソッドこそ持つが、
+  **`payInvoice` 以外の2つは前段でさらに壊れていた**（次項の第7回点検で判明）。
+  したがって残る作業は「アダプタを繋ぐ」ではなく「借り手の支払いフローを hold invoice
+  ベースへ作り直す」（invoice 生成・invoice-poller の ACCEPTED 状態対応・プロバイダの
+  payout 用invoice の事前収集を含む）という、決済フロー本体の再設計に近い。これは
+  意図的に今回のスコープ外とし、台帳（payout-ledger）1 本の経路を安全に保つことを
+  優先した——btc-onchain 削除（2026-09）と同じ判断基準（②削除するか③単純化するかを
+  選ぶ際、"稼働していない並行経路を増やさない"）である。
+  **追記（第7回点検）**: 「`lightning-service.js` は実装済み」も不正確だった。
+  `settleHoldInvoice()`/`cancelHoldInvoice()` は `this.lnd.settleInvoice(...)` /
+  `this.lnd.cancelInvoice(...)` を呼ぶが、この2つの RPC は LND の **invoicesrpc**
+  （`invoices.proto`、`lnrpc.Lightning` とは別サービス）が提供するもので、
+  `connectToLND()` が読み込むのは `proto/lightning.proto` の `lnrpc` パッケージのみ
+  （`grpc.loadPackageDefinition(packageDefinition).lnrpc`、他のパッケージは一度も
+  読み込まれていない）。Mock LND（`setupMockLND()`）にも同名メソッドは無い。
+  つまりこの2メソッドは**本番でも Mock でも、呼べば必ず
+  `TypeError: this.lnd.settleInvoice is not a function` で落ちる**——preimage/invoice
+  生成の不在（前段の欠落）とは独立した、もう一段深いギャップである。実害は今のところ
+  無い（呼び出す経路自体が無い）が、見た目は完成しているコードが原因不明のまま壊れる
+  典型例だったため、`_requireInvoicesRpc()` で「invoicesrpc が読み込まれていない」と
+  名指しして失敗するよう修正した（`tests/unit/lightning-service-hold-invoice-gap.test.js`）。
+  invoicesrpc 自体の実装（proto 読み込み・専用クライアント）はここでも意図的にスコープ外
+  とした——実機の LND に対して検証できない状態で gRPC のサービス定義を書くのは、
+  金銭を扱うコードとして無責任である。結線する場合に台帳の payout 行を書き忘れないよう、
   `tests/payments/no-unledgered-money.test.js` が
   「本番の createEscrowService に lnAdapter を渡していないこと」を固定している
   （渡した瞬間に落ちて、台帳との整合を決めるまで進めない）。

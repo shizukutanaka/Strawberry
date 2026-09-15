@@ -155,9 +155,11 @@ GPU リソースの貸借を仲介するオープンソースのマーケット�
   実機 SDK が使える環境が無い限り変わりません
 - **hold invoice エスクローは未結線**です。状態機械は純関数として完成していますが、
   本番では LN アダプタが渡されていません。それだけでなく、hold invoice 自体（preimage・
-  provider 側の受取 invoice）を生成する経路がまだありません——決済フロー本体の再設計を
-  要するため、Lightning invoice → 台帳という現行の 1 本の経路を優先しています
-  （`ARCHITECTURE.md` 参照）
+  provider 側の受取 invoice）を生成する経路がまだ無く、さらにその一段下——
+  `settleHoldInvoice`/`cancelHoldInvoice` が呼ぶ LND の RPC（`invoicesrpc`）自体が
+  このクライアントに読み込まれていません。決済フロー本体の再設計と、実機 LND に対して
+  検証できる環境の両方を要するため、Lightning invoice → 台帳という現行の 1 本の経路を
+  優先しています（`ARCHITECTURE.md` 参照）
 - **P2P・分散 DB・スケールアウト・フェイルオーバーはありません**
 
 ### 意図的にそうしている設計（未実装ではなく決定）

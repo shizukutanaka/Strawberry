@@ -2,7 +2,7 @@
 // レピュテーション・サービス（docs/SPECIFICATION.md F3）。
 // ReputationRepository（永続化）と reputation-scorer（算出）を束ね、
 // ジョブ成否・検証監査・スラッシング・ステーク・SLA のイベントを記録し、スコアを返す。
-// escrow-service の slash_provider / work-verifier の監査結果から呼ばれる想定。
+// order/index.js の係争裁定（slash）/ work-verifier の監査結果から呼ばれる想定。
 // repository は DI 可能（既定 JSON、テストはインメモリ fake）。
 const { computeReputation, rankProviders } = require('./reputation-scorer');
 

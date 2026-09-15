@@ -153,51 +153,41 @@ lint が常に失敗しており、品質ゲートとして機能していなか
 
 ### 既知の重大ギャップ（要対応・資金フロー）
 
-- **エスクロー action の未配線（money-movement gap）** → **未解決**（2026-09 に再確認）。
-  2026-08 の「解決済み」という記述は**誤り**だった。`executeActions()` が
-  `escrow-service.js:35` から呼ばれているのは事実だが、その `runActions()` は
-  `if (!lnAdapter) return null;` で即座に何もせず返る。そして本番の呼び出し側は
-  `marketplace/default.js:11` も `routes/order/index.js` の 4 箇所もすべて
-  `createEscrowService()` を**引数なし**で呼んでいる。つまり本番で実行されるのは
-  actions の「計算」までで、資金は 1 sat も動かない。「呼ばれている」と
-  「実行されている」を取り違えた記述だった。
-  実際の資金移動は収益台帳（`src/payments/payout-ledger.js`）が担っており、
-  エスクロー FSM は現状 hold invoice 化のための設計上の座席である。
-  **追記（第6回点検）**: 「`lnAdapter` を渡していないから未配線」だけでは不十分な説明
-  だったので確かめ直した。`lnAdapter` を渡すだけでは動かない——それ以前に、
-  `escrow-service.js:create()` は `{orderId, amountSats, feeRate, deadlineAt, invoice}`
-  しか受け取らず、`preimage` / `preimageHash` / `providerInvoice` を生成・保存する経路が
-  コードベースのどこにも無い。`marketplace-service.js:openOrderEscrow()` も
-  `invoice: null` で開設するのみ。つまり `reveal_preimage`（`adapter.settleHoldInvoice(ctx.preimage)`）
-  と `cancel_invoice`（`adapter.cancelHoldInvoice(ctx.preimageHash)`）は、今 `lnAdapter` を
-  渡しても常に `undefined` を渡して失敗する。`lightning-service.js` は
-  `settleHoldInvoice`/`cancelHoldInvoice`/`payInvoice` というメソッドこそ持つが、
-  **`payInvoice` 以外の2つは前段でさらに壊れていた**（次項の第7回点検で判明）。
-  したがって残る作業は「アダプタを繋ぐ」ではなく「借り手の支払いフローを hold invoice
-  ベースへ作り直す」（invoice 生成・invoice-poller の ACCEPTED 状態対応・プロバイダの
-  payout 用invoice の事前収集を含む）という、決済フロー本体の再設計に近い。これは
-  意図的に今回のスコープ外とし、台帳（payout-ledger）1 本の経路を安全に保つことを
-  優先した——btc-onchain 削除（2026-09）と同じ判断基準（②削除するか③単純化するかを
-  選ぶ際、"稼働していない並行経路を増やさない"）である。
-  **追記（第7回点検）**: 「`lightning-service.js` は実装済み」も不正確だった。
-  `settleHoldInvoice()`/`cancelHoldInvoice()` は `this.lnd.settleInvoice(...)` /
-  `this.lnd.cancelInvoice(...)` を呼ぶが、この2つの RPC は LND の **invoicesrpc**
-  （`invoices.proto`、`lnrpc.Lightning` とは別サービス）が提供するもので、
-  `connectToLND()` が読み込むのは `proto/lightning.proto` の `lnrpc` パッケージのみ
-  （`grpc.loadPackageDefinition(packageDefinition).lnrpc`、他のパッケージは一度も
-  読み込まれていない）。Mock LND（`setupMockLND()`）にも同名メソッドは無い。
-  つまりこの2メソッドは**本番でも Mock でも、呼べば必ず
-  `TypeError: this.lnd.settleInvoice is not a function` で落ちる**——preimage/invoice
-  生成の不在（前段の欠落）とは独立した、もう一段深いギャップである。実害は今のところ
-  無い（呼び出す経路自体が無い）が、見た目は完成しているコードが原因不明のまま壊れる
-  典型例だったため、`_requireInvoicesRpc()` で「invoicesrpc が読み込まれていない」と
-  名指しして失敗するよう修正した（`tests/unit/lightning-service-hold-invoice-gap.test.js`）。
-  invoicesrpc 自体の実装（proto 読み込み・専用クライアント）はここでも意図的にスコープ外
-  とした——実機の LND に対して検証できない状態で gRPC のサービス定義を書くのは、
-  金銭を扱うコードとして無責任である。結線する場合に台帳の payout 行を書き忘れないよう、
-  `tests/payments/no-unledgered-money.test.js` が
-  「本番の createEscrowService に lnAdapter を渡していないこと」を固定している
-  （渡した瞬間に落ちて、台帳との整合を決めるまで進めない）。
+- **エスクロー機構の削除**（2026-09 第8回点検） → **解決済み（②削除）**。
+  第5〜7回点検までの経緯: 「hold-invoice エスクローの action が未配線」という
+  gap は、`lnAdapter` を渡していない（第5回）→ `lnAdapter` を渡しても
+  preimage/invoice を生成する経路自体が無い（第6回）→ 仮に生成できても
+  `lightning-service.js` の `settleHoldInvoice()`/`cancelHoldInvoice()` は LND の
+  invoicesrpc（`lnrpc.Lightning` とは別サービス、読み込まれていない）を要求して
+  おり呼べば必ず `TypeError` で落ちる（第7回）と、掘るたびに一段深い欠落が
+  見つかり続けた。
+  第7回では `_requireInvoicesRpc()` でエラーを明示するガードに留めたが、
+  「これは実装すべき要件なのか」を問い直さないまま直し続けることは
+  Musk のアルゴリズムの①（要件を疑う）を飛ばして④（高速化）に飛んでいる
+  ことに等しい。改めて要件を検討した結論:
+  hold-invoice/HTLC エスクローは「運営を信頼しなくても資金が守られる」ための
+  **トラストレス機構**である。しかしこの製品は借り手が運営の Lightning ノードへ
+  入金し、運営が `payout-ledger.js` で後払いする**custodial 設計**を全体として
+  一貫して採っている（本書・README.md 全体で繰り返し述べている本製品の
+  意図的な強み）。トラストレス機構を custodial 設計の上に足しても、
+  運営を信頼する前提そのものは変わらないため要件として成立しない。加えて
+  実注文でも一度も使われておらず（本番の呼び出し側は `createEscrowService()` を
+  lnAdapter 無しで生成しており action は実行されなかった）、
+  `payout-ledger.js` の `computeSettlement()` 呼び出しと機能が重複していた
+  （同じ注文に 2 つの独立した精算計算経路が存在するリスク）。
+  以上により、hold-invoice エスクロー/検証の合成層を**丸ごと削除**した:
+  `escrow-service.js` / `escrow-state-machine.js` / `action-executor.js` /
+  `ln-adapter.js` / `EscrowRepository.js` / `verification-service.js` /
+  `VerificationRepository.js`、`/marketplace/escrow/*` と
+  `/admin/escrow`・`/admin/verifications/*` ルート、`lightning-service.js` の
+  `settleHoldInvoice`/`cancelHoldInvoice`/`_requireInvoicesRpc`、
+  `order/index.js`・`order-expiry.js` の全エスクロー連携フック、
+  `payout-ledger.js` の escrow-settlement 優先分岐。
+  資金移動は最初から実処理を担っていた `payout-ledger.js`（収益台帳、
+  実支払い額＋実提供量から `settlementForOrder()` が精算内訳を計算）と
+  `earnings-sweeper.js`（完了注文の自動計上）の 1 本に一本化された。
+  `work-verifier.js` の純関数群（`detectZeroLoad()` 等）は
+  `utilization-collector.js` から引き続き使われているため削除していない。
 - ~~**JSON 層のクロスプロセス lost-update**~~ → **解決済み（2026-08）**:
   `src/db/json/fileLock.js` を追加し、`createJsonRepository` の変更系
   （create/update/updateIf/delete）の `load → 変更 → write` 全体をクロスプロセス・ロックで

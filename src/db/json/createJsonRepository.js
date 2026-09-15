@@ -1,5 +1,5 @@
 // src/db/json/createJsonRepository.js
-// 7つのJSONリポジトリ（Gpu/Order/Payment/User/Escrow/Reputation/Verification）の
+// 複数のJSONリポジトリ（Gpu/Order/Payment/User/Reputation/Ledger 等）の
 // 重複していた load/save/CRUD 実装を一本化するファクトリ。
 // すべての書き込みは atomicWriteJSON（temp+rename）経由で行う。
 //
@@ -97,7 +97,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess, beforeWrite } 
       // 旧実装はパース失敗時にサイレントで [] を返していた。これは致命的:
       // 後続の create/update が「空配列 + 1 行」で既存ファイルを atomicWrite し、
       // 一時的・回復可能な破損を「不可逆なデータ全消失」へ変換してしまう
-      // （escrows.json / payments.json で資金記録が消える）。
+      // （ledger.json / payments.json で資金記録が消える）。
       // fail-closed: 破損ファイルは温存（rename しない＝次回 load が [] を返して
       // 上書きするのを防ぐ）し、明示的に throw して運用者に検知させる。
       throw new Error(

@@ -29,7 +29,7 @@ export async function render(container, params) {
       order = (await api.getOrder(orderId)).order;
       [gpu, paymentInfo, rateInfo] = await Promise.all([
         api.getGpu(order.gpuId).then((r) => r.gpu).catch(() => null),
-        api.getOrderPayment(orderId).catch(() => ({ payments: [], escrows: [] })),
+        api.getOrderPayment(orderId).catch(() => ({ payments: [] })),
         // 円換算は表示上のおまけ。外部の為替 API が遅い／落ちているときに
       // ページ全体の描画を止めないよう、待ち時間に上限を設ける。
       getRateWithin(),

@@ -961,23 +961,13 @@ describe('API Integration', () => {
     });
   });
 
-  describe('GPU sort parameter + order soft-cancel + verification admin route', () => {
+  describe('GPU sort parameter + order soft-cancel', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
-    const UserRepository = require('../src/db/json/UserRepository');
 
-    let adminToken, renterToken, gpuId;
+    let renterToken, gpuId;
 
     beforeAll(async () => {
-      // Admin user — register as normal user then promote via repo (self-registration blocks admin role)
-      const adm = `adm${unique}`.slice(0, 28);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
-      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
-      UserRepository.update(admUser.id, { role: 'admin' });
-      adminToken = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
-
       // Renter
       const rn = `rn${unique}`.slice(0, 28);
       await request(app).post('/api/v1/users/register')
@@ -1052,25 +1042,9 @@ describe('API Integration', () => {
       expect(order.cancelReason).toBe('user_cancelled');
     });
 
-    it('GET /admin/verifications requires admin auth (401 without token, 403 for user)', async () => {
-      const noAuth = await request(app).get('/api/v1/admin/verifications');
-      expect(noAuth.statusCode).toBe(401);
-
-      const userRes = await request(app)
-        .get('/api/v1/admin/verifications')
-        .set('Authorization', `Bearer ${renterToken}`);
-      expect(userRes.statusCode).toBe(403);
-    });
-
-    it('GET /admin/verifications returns paginated records for admin', async () => {
-      const res = await request(app)
-        .get('/api/v1/admin/verifications')
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toHaveProperty('total');
-      expect(res.body).toHaveProperty('records');
-      expect(Array.isArray(res.body.records)).toBe(true);
-    });
+    // GET /admin/verifications のテストは削除した。ルートごと削除したため
+    // （2026-09 第8回点検: 検証ワークフローの入力元だった /marketplace/escrow/:id/verify
+    // が削除され、検証レコードを作る経路が無くなった。ARCHITECTURE.md「エスクロー機構の削除」節）。
   });
 
   describe('Dispute resolution + reputation failure feedback', () => {
@@ -1500,12 +1474,11 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Order payment/escrow visibility + provider→renter reviews', () => {
+  describe('Order payment visibility + provider→renter reviews', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
     const UserRepository = require('../src/db/json/UserRepository');
     const PaymentRepository = require('../src/db/json/PaymentRepository');
-    const EscrowRepository = require('../src/db/json/EscrowRepository');
 
     let renterToken, renterId, providerToken, providerId, otherToken, gpuId;
 
@@ -1543,10 +1516,9 @@ describe('API Integration', () => {
       return create.body.order.id;
     }
 
-    it('GET /orders/:id/payment returns payments + escrows for the order owner', async () => {
+    it('GET /orders/:id/payment returns payments for the order owner', async () => {
       const orderId = await makeOrder();
       PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 100, method: 'lightning', paidAt: new Date().toISOString() });
-      EscrowRepository.create({ orderId, amountSats: 100, feeRate: 0 });
 
       const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
         .set('Authorization', `Bearer ${renterToken}`);
@@ -1555,8 +1527,6 @@ describe('API Integration', () => {
       expect(Array.isArray(res.body.payments)).toBe(true);
       expect(res.body.payments.length).toBeGreaterThanOrEqual(1);
       expect(res.body.payments[0].status).toBe('paid');
-      expect(Array.isArray(res.body.escrows)).toBe(true);
-      expect(res.body.escrows.length).toBeGreaterThanOrEqual(1);
       OrderRepository.update(orderId, { status: 'cancelled' });
     });
 
@@ -1983,56 +1953,6 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Admin escrow query (#39)', () => {
-    const EscrowRepository = require('../src/db/json/EscrowRepository');
-    const UserRepository = require('../src/db/json/UserRepository');
-
-    let adminToken, escrowOrderId;
-
-    beforeAll(async () => {
-      const adm = `esadm${unique}`.slice(0, 28);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
-      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
-      UserRepository.update(admUser.id, { role: 'admin' });
-      adminToken = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
-      // Use unique orderId per run to avoid accumulation from previous test runs sharing data/escrows.json
-      escrowOrderId = `esc-${unique}-1`;
-      EscrowRepository.create({ orderId: escrowOrderId, amountSats: 500, feeRate: 0, state: 'HELD' });
-      EscrowRepository.create({ orderId: `esc-${unique}-2`, amountSats: 1000, feeRate: 1, state: 'SETTLED' });
-    });
-
-    it('GET /admin/escrow returns all escrows for admin', async () => {
-      const res = await request(app).get('/api/v1/admin/escrow')
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toHaveProperty('total');
-      expect(res.body).toHaveProperty('escrows');
-      expect(res.body.total).toBeGreaterThanOrEqual(2);
-    });
-
-    it('GET /admin/escrow?state=HELD filters by state', async () => {
-      const res = await request(app).get('/api/v1/admin/escrow?state=HELD')
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.escrows.every(e => e.state === 'HELD')).toBe(true);
-    });
-
-    it('GET /admin/escrow?orderId=X filters by orderId', async () => {
-      const res = await request(app).get(`/api/v1/admin/escrow?orderId=${escrowOrderId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.escrows.length).toBe(1);
-      expect(res.body.escrows[0].orderId).toBe(escrowOrderId);
-    });
-
-    it('GET /admin/escrow requires admin (401 without auth, 403 for non-admin)', async () => {
-      const noAuth = await request(app).get('/api/v1/admin/escrow');
-      expect(noAuth.statusCode).toBe(401);
-    });
-  });
-
   describe('GPU available toggle via PUT (#40)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const UserRepository = require('../src/db/json/UserRepository');
@@ -2115,10 +2035,9 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Escrow auto-release on order completion (#61)', () => {
+  describe('Order completion via /stop (#61)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
-    const EscrowRepository = require('../src/db/json/EscrowRepository');
     const UserRepository = require('../src/db/json/UserRepository');
 
     let renterToken, renterId, gpuId, providerId;
@@ -2131,32 +2050,10 @@ describe('API Integration', () => {
         .send({ email: `${r}@example.com`, password: 'Test1234!' })).body.token;
       renterId = UserRepository.getByEmail(`${r}@example.com`)?.id;
       providerId = `esc-prov-${unique}`;
-      gpuId = GpuRepository.create({ name: 'Escrow GPU', vendor: 'NVIDIA', model: 'RTX-ESC', memoryGB: 8, pricePerHour: 0.5, providerId }).id;
+      gpuId = GpuRepository.create({ name: 'Stop-flow GPU', vendor: 'NVIDIA', model: 'RTX-ESC', memoryGB: 8, pricePerHour: 0.5, providerId }).id;
     });
 
-    it('HELD escrow transitions to SETTLED when order completes via /stop', async () => {
-      const order = OrderRepository.create({
-        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
-        createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
-      });
-      // Inject a HELD escrow and a paid payment record for this order
-      const escrow = EscrowRepository.create({
-        orderId: order.id, amountSats: 1000, feeRate: 0.02, state: 'HELD',
-        history: [], createdAt: new Date().toISOString(),
-      });
-      const PaymentRepository = require('../src/db/json/PaymentRepository');
-      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1000, method: 'lightning', paidAt: new Date().toISOString() });
-
-      const res = await request(app)
-        .post(`/api/v1/orders/${order.id}/stop`)
-        .set('Authorization', `Bearer ${renterToken}`);
-      expect(res.statusCode).toBe(200);
-
-      const updatedEscrow = EscrowRepository.getById(escrow.id);
-      expect(updatedEscrow.state).toBe('SETTLED');
-    });
-
-    it('order without escrow still completes successfully', async () => {
+    it('order completes successfully via /stop', async () => {
       const order = OrderRepository.create({
         gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
         createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
@@ -2870,7 +2767,7 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Escrow cleanup on order reject (#72)', () => {
+  describe('Order reject flow (#72)', () => {
     let providerToken, renterToken, gpuId, orderId;
     const u72p = `rej72p${unique}`.slice(0, 28);
     const u72r = `rej72r${unique}`.slice(0, 28);

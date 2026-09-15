@@ -4,7 +4,7 @@
 // atomicWrite（temp+rename）は**書き込み自体**を原子的にし、読み手が中途半端なファイルを
 // 見ること（torn read）を防ぐ。しかし `load() → 変更 → write()` の**系列**は保護しないため、
 // 2 プロセスが同時に別レコードを更新すると後勝ちで一方が消える。これは orders/payments/
-// escrows で起きれば資金記録の消失になる（ARCHITECTURE.md「既知の重大ギャップ」）。
+// ledger で起きれば資金記録の消失になる（ARCHITECTURE.md「既知の重大ギャップ」）。
 // ここではロック結線の回帰ガードとして、実リポジトリ API を子プロセスから叩く。
 const fs = require('fs');
 const path = require('path');

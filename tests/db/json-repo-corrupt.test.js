@@ -1,7 +1,7 @@
 // tests/db/json-repo-corrupt.test.js
 // Regression: a corrupt/unparseable JSON data file must fail closed (throw),
 // NOT silently return [] — otherwise the next create/update would atomicWrite
-// an empty array over recoverable data (irreversible loss for escrows/payments).
+// an empty array over recoverable data (irreversible loss for ledger/payments).
 const fs = require('fs');
 const path = require('path');
 const { createJsonRepository } = require('../../src/db/json/createJsonRepository');

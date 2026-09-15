@@ -2,8 +2,9 @@
 // ゼロ負荷課金の検出が「実レンタルフロー」で動くこと（研究ドキュメント §1）。
 //
 // 着手前は work-verifier.detectZeroLoad() は実装済みでも、入力 utilSamples は admin が
-// /escrow/:id/verify のボディで手渡す経路しか無く、実際のレンタルからは一度も呼ばれて
-// いなかった。ここではハートビート経由で集めた値が終了時に判定へ流れることを確認する。
+// 旧 /escrow/:id/verify（2026-09 削除）のボディで手渡す経路しか無く、実際のレンタル
+// からは一度も呼ばれていなかった。ここではハートビート経由で集めた値が終了時に判定へ
+// 流れることを確認する。
 const request = require('supertest');
 const { app } = require('../../src/api/server');
 const UserRepository = require('../../src/db/json/UserRepository');

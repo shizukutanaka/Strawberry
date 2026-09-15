@@ -1,14 +1,8 @@
 // src/marketplace/default.js
-// 既定の marketplace-service シングルトン（JSON リポジトリ配線）。
-// HTTP ルート等から `require('../../marketplace/default')` で利用する。
-// 各サブサービスは repo を省略＝既定の JSON リポジトリを使用（読み込みは遅延）。
-const { createEscrowService } = require('../payments/escrow-service');
-const { createVerificationService } = require('../verification/verification-service');
-const { createReputationService } = require('../reputation/reputation-service');
+// 既定の marketplace-service シングルトン。
+// 現時点では quoteGpu（特徴量ベース価格見積り）のみを公開する。
+// エスクロー/検証/レピュテーション連動サービスの配線は削除した
+// （経緯: src/marketplace/marketplace-service.js 冒頭コメント参照）。
 const { createMarketplaceService } = require('./marketplace-service');
 
-const reputationService = createReputationService();
-const escrowService = createEscrowService();
-const verificationService = createVerificationService({ reputationService });
-
-module.exports = createMarketplaceService({ escrowService, verificationService, reputationService });
+module.exports = createMarketplaceService();

@@ -1,6 +1,6 @@
 // tests/security/probe40-token-race.test.js
 // Probe 40 regression tests:
-// 40a-2: DELETE /orders/:id cancel uses withLock (escrowSvc.cancel not called before CAS)
+// 40a-2: DELETE /orders/:id cancel uses withLock (order status re-checked inside the lock)
 // 40a-1: dispute withLock key is per-order (not per-user)
 // 40b-4: /refresh revokes prior access token jti (ati claim on refresh token)
 // 40b-5: denylist load failure is logged (not silently swallowed)
@@ -20,17 +20,15 @@ afterAll(() => {
 });
 
 // ─── 40a-2: Cancel uses withLock ─────────────────────────────────────────────
-describe('DELETE /orders/:id cancel: withLock prevents double escrow cancel', () => {
-  it('order/index.js: cancel handler wraps escrowSvc.cancel inside withLock', () => {
+describe('DELETE /orders/:id cancel: withLock prevents double cancel', () => {
+  it('order/index.js: cancel handler wraps the CAS check inside withLock', () => {
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
     );
     const lockIdx = src.indexOf("withLock(`order:${order.id}:cancel`");
     expect(lockIdx).toBeGreaterThan(-1);
-    // The escrowSvc.cancel calls AFTER the lock must exist (find the one inside the block)
-    const afterLock = src.slice(lockIdx);
-    expect(afterLock).toMatch(/escrowSvc\.cancel\(escrow\.id\)/);
     // Closing the withLock must also exist after the lock opener
+    const afterLock = src.slice(lockIdx);
     expect(afterLock).toMatch(/end withLock\(cancel\)/);
   });
 

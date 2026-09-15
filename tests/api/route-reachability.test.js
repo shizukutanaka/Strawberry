@@ -159,26 +159,6 @@ describe('GET /gpus/system/detected', () => {
   });
 });
 
-describe('escrow endpoints map failures to the right status', () => {
-  // 全ルート走査で見つかった 2 件目の欠陥。存在しない ID を渡しただけで 500 を
-  // 返しており、クライアントは自分の誤りとサーバ障害を区別できず、監視側は
-  // 通常の 404 相当をエラー率に数えていた。実 ID しか使わない通し確認では
-  // 決して踏まない類の穴で、全数調査だから見つかった。
-  it('returns 404, not 500, for an escrow that does not exist', async () => {
-    const { adminTok } = await freshTokens();
-    for (const path of [
-      `/api/v1/marketplace/escrow/${UUID}/pay`,
-    ]) {
-      const res = await request(app).post(path).set('Authorization', `Bearer ${adminTok}`).send({});
-      expect(res.status).toBe(404);
-      expect(String(res.body.error)).toMatch(/not found/i);
-    }
-  });
-
-  it('still returns 404 (not 500) when reading a missing escrow', async () => {
-    const { adminTok } = await freshTokens();
-    const res = await request(app).get(`/api/v1/marketplace/escrow/${UUID}`)
-      .set('Authorization', `Bearer ${adminTok}`);
-    expect(res.status).toBe(404);
-  });
-});
+// escrow endpoints map failures to the right status（旧テスト）は削除した。
+// /marketplace/escrow/* ルートごと削除したため（2026-09 第8回点検、
+// ARCHITECTURE.md「エスクロー機構の削除」節）。

@@ -1,94 +1,29 @@
 // tests/marketplace/marketplace-service.test.js
+//
+// hold-invoice エスクロー連動のテスト（open/pay/verify/resolve/settleByUsage）は
+// 削除した。理由: escrow-service.js / verification-service.js ごと削除したため
+// （2026-09 第8回点検: hold-invoice/HTLC エスクローはトラストレス機構であり、
+// 運営を信頼させる custodial 設計の本製品には要件として噛み合わず、実注文でも
+// 一度も使われていなかった。ARCHITECTURE.md「エスクロー機構の削除」節を参照）。
+// 残るドメインフローは特徴量ベースの価格見積り（quoteGpu）のみ。
 const { createMarketplaceService } = require('../../src/marketplace/marketplace-service');
-const { createEscrowService } = require('../../src/payments/escrow-service');
-const { createVerificationService } = require('../../src/verification/verification-service');
-const { createReputationService } = require('../../src/reputation/reputation-service');
-const { STATES } = require('../../src/payments/escrow-state-machine');
-
-// 汎用インメモリ repo（id 採番 + keyField 検索）
-function memRepo(keyField) {
-  const rows = new Map();
-  let n = 0;
-  return {
-    create: (rec) => { const id = `${keyField}-${++n}`; const row = { ...rec, id }; rows.set(id, row); return row; },
-    getById: (id) => rows.get(id) || null,
-    update: (id, u) => { const c = rows.get(id); if (!c) return null; const x = { ...c, ...u }; rows.set(id, x); return x; },
-    [keyField === 'job' ? 'getByJobId' : keyField === 'prov' ? 'getByProviderId' : 'getByOrderId']:
-      (val) => [...rows.values()].find((r) => r[keyField === 'job' ? 'jobId' : keyField === 'prov' ? 'providerId' : 'orderId'] === val) || null,
-  };
-}
-
-function build() {
-  const escrowService = createEscrowService({ repository: memRepo('e') });
-  const verificationService = createVerificationService({ repository: memRepo('job') });
-  const reputationService = createReputationService({ repository: memRepo('prov') });
-  const mkt = createMarketplaceService({ escrowService, verificationService, reputationService });
-  return { mkt, reputationService };
-}
 
 const GPU = { vramGB: 80, memBandwidthGBs: 3350, benchmarkScore: 300, generation: 'hopper' };
 
 describe('marketplace-service', () => {
-  it('requires all sub-services', () => {
-    expect(() => createMarketplaceService({})).toThrow(/required/);
-  });
-
-  it('quotes price and scales escrow amount by duration', () => {
-    const { mkt } = build();
+  it('quotes a price with a confidence basis', () => {
+    const mkt = createMarketplaceService();
     const q = mkt.quoteGpu(GPU, { utilization: 0.5 });
     expect(q.pricePerHour).toBeGreaterThan(0);
-
-    const { amountSats, escrow } = mkt.openOrderEscrow({
-      orderId: 'o1', providerId: 'p1', gpu: GPU, durationMinutes: 120, market: { utilization: 0.5 },
-    });
-    expect(amountSats).toBe(Math.round(q.pricePerHour * 2));
-    expect(escrow.state).toBe(STATES.PENDING);
+    expect(q.basis).toBeDefined();
+    expect(typeof q.basis.confidence).toBe('string');
   });
 
-  it('happy path: open -> pay -> verify(honest) -> SETTLED + reputation credit', () => {
-    const { mkt, reputationService } = build();
-    const { escrow } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 60 });
-    mkt.recordPaid(escrow.id);
-
-    const res = mkt.verifyAndSettle({
-      jobId: 'job1', escrowId: escrow.id, providerId: 'p1',
-      primaryOutput: [1, 2, 3], utilSamples: [80, 90, 85], auditRate: 0,
-    });
-    expect(res.event).toBe('DELIVER_OK');
-    expect(res.escrow.state).toBe(STATES.SETTLED);
-    expect(res.actions).toContain('reveal_preimage');
-    expect(reputationService.getStats('p1').completedJobs).toBe(1);
-  });
-
-  it('fraud path: zero-load -> DISPUTED -> refund slashes provider', () => {
-    const { mkt, reputationService } = build();
-    const { escrow } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'bad', gpu: GPU, durationMinutes: 60 });
-    mkt.recordPaid(escrow.id);
-
-    const res = mkt.verifyAndSettle({
-      jobId: 'job2', escrowId: escrow.id, providerId: 'bad',
-      primaryOutput: [1], utilSamples: [0, 0, 0, 1], auditRate: 0,
-    });
-    expect(res.event).toBe('DELIVER_FAIL');
-    expect(res.escrow.state).toBe(STATES.DISPUTED);
-    expect(reputationService.getStats('bad').failedJobs).toBe(1);
-
-    const slashBefore = reputationService.getStats('bad').slashCount;
-    const refund = mkt.resolveDispute(escrow.id, 'refund', 'bad');
-    expect(refund.escrow.state).toBe(STATES.CANCELED);
-    expect(refund.actions).toContain('refund_renter');
-    expect(reputationService.getStats('bad').slashCount).toBe(slashBefore + 1);
-  });
-
-  it('settleByUsage prorates the escrow by delivered usage', () => {
-    const { mkt } = build();
-    const { escrow, amountSats } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 120 });
-    mkt.recordPaid(escrow.id);
-    // delivered only 25% of the reserved time
-    const { settlement } = mkt.settleByUsage(escrow.id, { deliveredRatio: 0.25, slaUptimePct: 100 });
-    expect(settlement.chargedSats).toBe(Math.round(amountSats * 0.25));
-    expect(settlement.renterRefundSats).toBe(amountSats - settlement.chargedSats);
-    expect(settlement.providerPayoutSats + settlement.operatorFeeSats).toBe(settlement.chargedSats);
+  it('marks an unrecognized GPU as not quotable', () => {
+    const mkt = createMarketplaceService();
+    const q = mkt.quoteGpu({ vramGB: 8 }, {});
+    expect(q.basis.confidence).toBe('unknown');
+    expect(q.basis.quotable).toBe(false);
   });
 
   // selectProvider の検査は削除した（機能ごと削除したため）。ただしそこで見ていた

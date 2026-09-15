@@ -194,20 +194,6 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
       try { Promise.resolve(vgpuManager.releaseGPU(order.gpuId, orderId)).catch(() => {}); } catch (_) {}
     }
 
-    // エスクロー按分精算（プロバイダー起因 → 最低料金床なし）。best-effort。
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const { createEscrowService } = require('../../../payments/escrow-service');
-      const escrowSvc = createEscrowService();
-      const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
-      for (const escrow of escrows) {
-        escrowSvc.settle(escrow.id, { deliveredRatio, slaUptimePct: Math.round(deliveredRatio * 100) }, { minChargeRatio: 0 });
-        escrowSvc.apply(escrow.id, 'DELIVER_OK');
-      }
-    } catch (e) {
-      logger.warn(`[sla-sweep] escrow settle failed for order ${orderId}: ${e.message}`);
-    }
-
     // プロバイダー信頼性の減点: 稼働スコアへ SLA 違反、ジョブ成否へ失敗を記録。
     if (order.providerId) {
       try { providerUptime.recordSlaBreach(order.providerId, nowMs); } catch (_) {}
@@ -670,7 +656,6 @@ router.get('/:id/payment',
   asyncHandler(async (req, res) => {
     const order = req.resource;
     const PaymentRepository = require('../../../db/json/PaymentRepository');
-    const EscrowRepository = require('../../../db/json/EscrowRepository');
 
     const payments = (PaymentRepository.getByOrderId(order.id) || []).map(p => ({
       id: p.id,
@@ -680,13 +665,6 @@ router.get('/:id/payment',
       paidAt: p.paidAt || null,
       invoiceExpiresAt: p.invoiceExpiresAt || null,
     }));
-    const escrows = (EscrowRepository.getByOrderId(order.id) || []).map(e => ({
-      id: e.id,
-      state: e.state,
-      amountSats: e.amountSats,
-      feeRate: e.feeRate,
-      createdAt: e.createdAt || null,
-    }));
 
     res.json({
       orderId: order.id,
@@ -694,7 +672,6 @@ router.get('/:id/payment',
       totalPrice: typeof order.totalPrice === 'number' ? order.totalPrice : null,
       totalPriceJPY: typeof order.totalPriceJPY === 'number' ? order.totalPriceJPY : null,
       payments,
-      escrows,
     });
   })
 );
@@ -736,8 +713,7 @@ router.put('/:id',
           400);
       }
       // 'completed' への直接遷移は POST /:id/stop のみが正規ルート。
-      // admin PUT で active→completed させると escrow 精算・GPU 解放・評価記録が実行されず、
-      // 資金が HELD のまま永久にロックされる（エスクロー不整合）。
+      // admin PUT で active→completed させると GPU 解放・評価記録が実行されない。
       // admin は /stop を使うか、係争解決経由で completed に誘導すること。
       if (sanitized.status === 'completed') {
         throw new APIError(ErrorTypes.VALIDATION,
@@ -759,28 +735,6 @@ router.put('/:id',
     const updateData = req.user.role === 'admin'
       ? Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_ADMIN.has(k)))
       : Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_OWNER.has(k)));
-    // admin が PUT で status を 'cancelled' にする場合、エスクローを先にキャンセルする。
-    // これが無いと HELD 資金が永久にロックされ借り手は返金を受けられない（escrow 不整合）。
-    // HELD エスクローのキャンセル失敗は致命的: 注文更新を中断してエラーを返す。
-    if (updateData.status === 'cancelled') {
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id) || [];
-        if (escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
-          for (const escrow of escrows) {
-            if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
-            // HELD escrow cancel failure must not be silently swallowed — propagate it.
-            escrowSvc.cancel(escrow.id);
-          }
-        }
-      } catch (e) {
-        throw new APIError(ErrorTypes.INTERNAL,
-          `Cannot cancel order: escrow cancellation failed (${e.message}). Retry or resolve escrow manually.`,
-          502);
-      }
-    }
     // オーダーを更新（update() は内部で merge するため delta のみ渡す。
     // 旧コードの { ...order, ...sanitized } は getById〜update 間の並行書き込みを上書きする
     // stale-spread anti-pattern だった）
@@ -833,49 +787,17 @@ router.delete('/:id',
     const order = req.resource;
     // DELETE (soft-cancel) is the renter's self-cancel path. allowOwnerOrAdmin also
     // admits providers via order.providerId, but providers must use POST /:id/reject.
-    // Allowing providers here lets them forge a 'user_cancelled' reason, forfeiting
-    // the renter's escrow deposit and breaking dispute resolution.
+    // Allowing providers here lets them forge a 'user_cancelled' reason,
+    // bypassing the reject/dispute flow the renter is entitled to.
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can cancel an order via DELETE. Providers must use POST /:id/reject.', 403);
     }
     logger.info(`Deleting order: ${order.id}`);
-    // 注文単位の mutex: 並行するキャンセルリクエストが escrowSvc.cancel() を
-    // 二重呼出しする前に updateIf CAS が実行されるよう直列化する。
     return withLock(`order:${order.id}:cancel`, async () => {
     // 状態チェック（ロック内で再読み込みして最新状態を確認）
     const freshOrder = OrderRepository.getById(order.id);
     if (!freshOrder || !['pending', 'matched'].includes(freshOrder.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
-    }
-    // エスクローが存在する場合は返金キャンセルを試みる。
-    // HELD エスクロー（入金済）のキャンセル失敗は致命的: 注文をキャンセル状態にすると
-    // 資金が HELD のまま永久にロックされるため、失敗時は注文キャンセルを中断してエラーを返す。
-    // PENDING エスクローは未入金なので失敗しても資金喪失はなく、ベストエフォートで扱う。
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const escrows = EscrowRepository.getByOrderId(order.id);
-      if (Array.isArray(escrows) && escrows.length > 0) {
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
-        for (const escrow of escrows) {
-          if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
-          if (escrow.state === 'HELD') {
-            // HELD escrow cancel failure must block the delete — do NOT swallow.
-            escrowSvc.cancel(escrow.id);
-          } else {
-            // PENDING/DISPUTED: best-effort cancel; failure is logged but non-blocking.
-            try { escrowSvc.cancel(escrow.id); } catch (e) {
-              logger.warn(`Non-critical escrow cancel failed for ${escrow.id} (${escrow.state}): ${e.message}`);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      if (e.name === 'APIError') throw e;
-      // Escrow lookup failure or HELD cancel failure — block the order cancellation.
-      throw new APIError(ErrorTypes.INTERNAL,
-        `Cannot cancel order: escrow operation failed (${e.message}). Retry or contact support.`,
-        502);
     }
     // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。
     // updateIf で CAS を使う: 並行する /accept が pending→matched へ遷移させた後に
@@ -1089,7 +1011,7 @@ router.post('/',
     orderData.tier = priced.tier;
     if (priced.tier === spotTier.TIERS.SPOT) {
       // 合意時点の割引条件を注文に固定する。出品側が後から spotDiscountPct を変えても
-      // 既存注文の精算額が動かないようにする（escrow の price-lock と同じ考え方）。
+      // 既存注文の精算額が動かないようにする。
       orderData.spotDiscountPct = priced.discountPct;
       orderData.listPricePerHour = priced.listPricePerHour;
       orderData.spotNoticeSeconds = spotTier.resolveSpotConfig(gpu).noticeSeconds;
@@ -1217,24 +1139,6 @@ router.post('/:id/reject',
     if (!rejectResult.ok) {
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before reject could complete; please retry', 409);
     }
-    // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const escrows = EscrowRepository.getByOrderId(order.id);
-      if (Array.isArray(escrows) && escrows.length > 0) {
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
-        for (const escrow of escrows) {
-          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
-            try { escrowSvc.cancel(escrow.id); } catch (e) {
-              logger.warn(`Escrow cancel failed on reject (id=${escrow.id}): ${e.message}`);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      logger.warn(`Escrow lookup on order reject failed (order=${order.id}): ${e.message}`);
-    }
     // 借り手（レンター）へ通知
     const { notifyUser } = require('../../../utils/user-notify');
     const gpuName = gpu ? gpu.name : order.gpuId;
@@ -1307,7 +1211,7 @@ router.post('/:id/accept',
 
 // 係争申請（active/matched 注文の当事者〈借り手 or プロバイダ〉が管理者介入を要求）
 // POST /orders/:id/dispute { reason: string }
-// 管理者は別途 POST /api/v1/marketplace/escrow/:id/resolve で決済する。
+// 管理者は別途 POST /orders/:id/dispute/resolve で裁定する。
 router.post('/:id/dispute',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
@@ -1417,9 +1321,9 @@ router.post('/:id/dispute/resolve',
     // を防ぐため、order 単位の mutex で全フローを直列化する。CAS だけだと CAS 前の副作用
     // （raiser の getById+update、reputation の getById+update）が並行に走り得る。
     // ロックキーを `order:${orderId}` に統一: /start・/stop と同一 mutex を共有することで、
-    // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が escrow 精算を
-    // 並行実行し GPU が二重解放・二重精算されるリスクを排除する（旧: dispute-resolve
-    // キーが /start・/stop と別 namespace で完全な排他になっていなかった）。
+    // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が並行実行され
+    // GPU が二重解放されるリスクを排除する（旧: dispute-resolve キーが /start・/stop と
+    // 別 namespace で完全な排他になっていなかった）。
     return withLock(`order:${orderId}`, async () => {
     const order = OrderRepository.getById(orderId);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -1438,7 +1342,7 @@ router.post('/:id/dispute/resolve',
     const gpu = GpuRepository.getById(order.gpuId);
     const gpuName = gpu ? gpu.name : order.gpuId;
 
-    // TOCTOU防止: 二重裁定による reputation/escrow 副作用の二重実行を防ぐ。
+    // TOCTOU防止: 二重裁定による reputation 副作用の二重実行を防ぐ。
     // updateIf が null を返した場合は別の管理者リクエストが先に状態遷移済みなので 409 を返す。
     if (decision === 'refund') {
       // 注文を終端へ（cancelled）。dispute オブジェクトに裁定結果を併記。
@@ -1450,22 +1354,6 @@ router.post('/:id/dispute/resolve',
       });
       if (!resolveRefundResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
-      }
-      // エスクロー返金（存在すれば、ベストエフォート）
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id);
-        if (Array.isArray(escrows) && escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
-          for (const e of escrows) {
-            if (!['CANCELED', 'SETTLED'].includes(e.state)) {
-              try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
-            }
-          }
-        }
-      } catch (e) {
-        logger.warn(`Escrow refund on dispute resolve failed (order=${order.id}): ${e.message}`);
       }
       // レピュテーション減点（実フローでの失敗反映）— ベストエフォート
       if (order.providerId) {
@@ -1503,37 +1391,6 @@ router.post('/:id/dispute/resolve',
       });
       if (!resolveUpholdResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
-      }
-      // エスクロー精算（uphold = 仕事は有効 → HELD 資金をプロバイダへ解放）。
-      // refund 側が escrowSvc.cancel で返金するのと対称に、uphold 側でも明示的に
-      // SETTLED へ遷移させないと HELD のまま資金が永久ロックされ、プロバイダは
-      // 正当に裁定勝ちしても入金されない（resolveUphold が status だけ completed に
-      // して escrow を放置していた漏れの修正）。escrow の現状態に応じて正しい
-      // イベント（HELD→DELIVER_OK / DISPUTED→RESOLVE_SETTLE）を選ぶ。
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id);
-        if (Array.isArray(escrows) && escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
-          for (const e of escrows) {
-            if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
-            const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'
-              : e.state === 'HELD' ? 'DELIVER_OK'
-              : null;
-            if (!event) continue; // PENDING 等、まだ入金されていないものは精算対象外
-            try {
-              // 全量納品・SLA 満たしたものとして精算内訳を記録してから SETTLED へ遷移。
-              escrowSvc.settle(e.id, { deliveredRatio: 1, slaUptimePct: 100 });
-              escrowSvc.apply(e.id, event);
-              logger.info(`Escrow ${e.id} settled (dispute uphold) for order ${order.id}`);
-            } catch (err) {
-              logger.warn(`Escrow settle on dispute uphold failed for ${e.id}: ${err.message}`);
-            }
-          }
-        }
-      } catch (e) {
-        logger.warn(`Escrow settlement on dispute uphold failed (order=${order.id}): ${e.message}`);
       }
       if (order.providerId) {
         try {
@@ -2025,8 +1882,8 @@ router.post('/:id/stop',
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
 
-    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU,
-    // double-recording reputation, and double-settling escrow for the same order.
+    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU
+    // and double-recording reputation for the same order.
     return withLock(`order:${orderId}`, async () => {
       const order = OrderRepository.getById(orderId);
       if (!order) {
@@ -2098,8 +1955,8 @@ router.post('/:id/stop',
       _deleteHeartbeatsForOrder(orderId);
 
       // Atomic compare-and-swap: only write completed if still active.
-      // Reputation and escrow settlement only run when this write succeeds,
-      // preventing double-increment if a second concurrent stop somehow slipped through.
+      // Reputation is only recorded when this write succeeds, preventing
+      // double-increment if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
       // 接続情報の破棄はここでは書かない。OrderRepository が終端状態への書き込みで
       // 必ず落とす（この経路だけ手で消していた頃、他の 5 経路は消し忘れていた）。
@@ -2151,47 +2008,6 @@ router.post('/:id/stop',
           lender: utilizationAudit.lender, renter: utilizationAudit.renter,
         }, req.user.id);
         logger.warn(`Utilization audit for order ${orderId}: ${utilizationAudit.verdict}`);
-      }
-
-      // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
-      // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
-        const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
-        // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
-        // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。
-        // settlement-calculator 側の minChargeRatio が下限を担うため、ここでは
-        // measured 値が無いときは 0 を渡し、計算器のポリシーで最低料金が適用される。
-        // Fallback delivered ratio: when vgpuManager is absent (no usageStats),
-        // use wall-clock elapsed time rather than 0. Without this a renter could
-        // call /start then /stop immediately, receive measured=0, and pay near
-        // nothing if the minChargeRatio floor is below 1.0.
-        const elapsedSeconds = order.startedAt
-          ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
-          : 0;
-        // 中断終了は最低課金を効かせない厳密な従量按分にする。最低課金（既定 10%）は
-        // *借り手都合*の即時解約を想定した floor であり、プロバイダ都合の中断に適用すると
-        // 「受注 → 即中断 → 最低課金だけ回収」のゼロワーク課金が成立してしまう。
-        const spotTier = require('../../../marketplace/spot-tier');
-        for (const escrow of escrows) {
-          if (isPreempting) {
-            const s = spotTier.preemptionSettlement(order, Date.now());
-            escrowSvc.settle(escrow.id, s.usage, s.opts);
-          } else {
-            const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
-              ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
-              : order.durationMinutes
-                ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
-                : 0;
-            escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
-          }
-          escrowSvc.apply(escrow.id, 'DELIVER_OK');
-          logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}${isPreempting ? ' [preempted]' : ''}`);
-        }
-      } catch (e) {
-        logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
       }
 
       // 借り手へ完了通知（支払い確認と利用時間サマリを含む）

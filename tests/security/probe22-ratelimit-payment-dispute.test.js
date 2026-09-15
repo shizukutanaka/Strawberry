@@ -4,30 +4,20 @@
 //    boolean-ish strings ('true','yes') are rejected so XFF spoofing can't bypass authLimiter.
 // 2. POST /payments/order/:id rejects orders not in a payable state (pending|matched),
 //    preventing Lightning invoices for cancelled/completed/disputed orders (funds with no refund path).
-// 3. POST /orders/:id/dispute/resolve { decision:'uphold' } settles HELD escrow to the provider
-//    (was leaving funds locked in HELD forever while only flipping order status to completed).
+// 3. (removed 2026-09 — escrow-service.js was deleted along with the hold-invoice
+//    escrow subsystem; POST /orders/:id/dispute/resolve { decision:'uphold' } no longer
+//    touches any escrow state. See ARCHITECTURE.md「エスクロー機構の削除」節.)
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
 const OrderRepository = require('../../src/db/json/OrderRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 const UserRepository = require('../../src/db/json/UserRepository');
-const EscrowRepository = require('../../src/db/json/EscrowRepository');
-const { createEscrowService } = require('../../src/payments/escrow-service');
 
 const uniq = `p22${Date.now().toString(36)}`;
-let adminTok, userTok, userId;
+let userTok, userId;
 
 beforeAll(async () => {
-  const admName = `p22adm${uniq}`.slice(0, 20);
-  const admEmail = `${admName}@example.com`;
-  await request(app).post('/api/v1/users/register')
-    .send({ username: admName, email: admEmail, password: 'Test1234!' });
-  const admUser = UserRepository.getByEmail(admEmail);
-  UserRepository.update(admUser.id, { role: 'admin' });
-  adminTok = (await request(app).post('/api/v1/users/login')
-    .send({ email: admEmail, password: 'Test1234!' })).body.token;
-
   const usrName = `p22usr${uniq}`.slice(0, 20);
   const usrEmail = `${usrName}@example.com`;
   await request(app).post('/api/v1/users/register')
@@ -98,41 +88,6 @@ describe('POST /payments/order/:id: only payable order states accept payment', (
     const res = await request(app).post(`/api/v1/payments/order/${order.id}`)
       .set('Authorization', `Bearer ${userTok}`).send({ paymentMethod: 'lightning' });
     expect(res.statusCode).toBe(400);
-    OrderRepository.delete(order.id);
-    GpuRepository.delete(gpu.id);
-  });
-});
-
-describe('POST /orders/:id/dispute/resolve uphold: HELD escrow is settled to provider', () => {
-  it('moves a HELD escrow to SETTLED on uphold (funds released, not locked)', async () => {
-    const gpu = GpuRepository.create({
-      name: 'P22 Dispute GPU', vendor: 'NVIDIA', model: 'RTX-P22D', memoryGB: 8,
-      pricePerHour: 100, providerId: 'p22-dprov',
-    });
-    const order = OrderRepository.create({
-      gpuId: gpu.id, userId, providerId: 'p22-dprov',
-      durationMinutes: 60, status: 'disputed',
-      pricePerHour: 100, totalPrice: 100, totalPriceJPY: 5000000,
-      dispute: { raisedBy: userId, reason: 'test dispute', raisedAt: new Date().toISOString() },
-      createdAt: new Date().toISOString(),
-    });
-
-    // Create an escrow and bring it to HELD.
-    const svc = createEscrowService();
-    const escrow = svc.create({ orderId: order.id, amountSats: 100000, feeRate: 0.015 });
-    svc.markPaid(escrow.id); // PENDING -> HELD
-    expect(EscrowRepository.getById(escrow.id).state).toBe('HELD');
-
-    const res = await request(app).post(`/api/v1/orders/${order.id}/dispute/resolve`)
-      .set('Authorization', `Bearer ${adminTok}`)
-      .send({ decision: 'uphold', note: 'work valid' });
-    expect(res.statusCode).toBe(200);
-
-    // Order is completed AND escrow is now SETTLED (provider paid out).
-    expect(OrderRepository.getById(order.id).status).toBe('completed');
-    expect(EscrowRepository.getById(escrow.id).state).toBe('SETTLED');
-
-    EscrowRepository.delete(escrow.id);
     OrderRepository.delete(order.id);
     GpuRepository.delete(gpu.id);
   });

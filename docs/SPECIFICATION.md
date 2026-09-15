@@ -106,12 +106,15 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 7. 課金ティア: ✅ **Spot（中断許容）ティア実装済**（`src/marketplace/spot-tier.js`。出品側の
    オプトイン + 割引、猶予窓つき中断 `POST /orders/:id/preempt`、最低課金を効かせない従量按分
    での精算、注文履歴から導出する中断率の開示。Vast.ai interruptible / Bamboo arXiv:2204.12013）
-8. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
+8. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`src/payments/payout-ledger.js` の `settlementForOrder()` から呼ばれる）
 
 ### F2. 信頼基盤（最優先トリオ）
-- **計算検証 Proof-of-Compute**: 🟡→一部✅ `src/verification/work-verifier.js`（純関数）＋
-  `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋
-  `src/db/json/VerificationRepository.js`（永続化）。
+- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数、`detectZeroLoad()` 等）。
+  **訂正（2026-09 第8回点検）**: `verification-service.js`（監査要否/consensus/verdict 確定の合成層）
+  と永続化用の `VerificationRepository.js` は削除した。唯一の呼び出し元だった
+  `POST /marketplace/escrow/:id/verify` を、hold-invoice エスクローごと削除したため
+  （下記「Lightning エスクロー」参照）。work-verifier.js 自体の純関数は
+  `utilization-collector.js` からハートビート経由で引き続き使われている。
   **ゼロ負荷検出は🟡 受け口だけが結線済**: `src/verification/utilization-collector.js` が
   ハートビートの任意フィールド `utilizationPct` を提供者・借り手の**両方**から集め、終了時に
   食い違いを判定して `order.utilizationAudit` に保存する（両者が遊休で一致=zero_load、
@@ -126,7 +129,19 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
   （この経路は元々 `detectZeroLoad()` が「部品はあっても稼働していない」状態を直すために
   書かれたものだった。同じ形を一段上で繰り返していた）。
   **未**: 再実行監査（別プロバイダへの同一ジョブ再投入）と ZK/TEE 系の検証パイプライン。
-- **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
+- **Lightning エスクロー**: ⛔削除（2026-09 第8回点検）。`escrow-state-machine.js`（FSM）＋
+  `escrow-service.js`（オーケストレーション）＋ `EscrowRepository.js`（永続化）＋
+  `action-executor.js`／`ln-adapter.js`（LN 操作変換層）＋ `/marketplace/escrow/*` ルートを
+  丸ごと削除した。理由: hold-invoice/HTLC エスクローは「運営を信頼しなくても資金が
+  守られる」ためのトラストレス機構だが、この製品は借り手が運営の Lightning ノードへ
+  入金し運営が `payout-ledger.js` で後払いする**custodial 設計**を一貫して採っている
+  （§本書全体、README.md 参照）。トラストレス機構を custodial 設計に足しても要件として
+  成立せず、現に本番の呼び出し側は `createEscrowService()` を lnAdapter 無しで生成して
+  おり action は一度も実行されなかった。さらに `settleHoldInvoice`/`cancelHoldInvoice`
+  は LND の invoicesrpc（別 gRPC サービス、読み込まれていない）を要求しており、
+  呼べば必ず失敗する状態だった。実注文でも一度も使われていなかった。
+  資金移動は `src/payments/payout-ledger.js`（収益台帳）＋
+  `src/payments/earnings-sweeper.js`（完了注文の自動計上）が担う。
 - **GPU アテステーション**: 🟡 検証の枠組みは実装・配線済（`src/security/gpu-attestation-verifier.js`、出品時に `attestationReport` を任意提出 → 申告スペックとの突き合わせ 8 チェック → `attestation.passed/score/trustLevel` を保存）。**実機の署名検証（nvtrust）は未対応**で、レポートはプロバイダー自身が同じリクエストで送るものである（署名は長さ、証明書チェーンは非空しか見ていない）。したがって「検証済み」と称してよいのは*申告の内部整合性*までで、ハードウェアの真正性ではない。
   この規定は 2026-09 まで**文書だけが守っていた**: UI は `passed` を「実測検証済み」と緑で表示し、perf-score は confidence を `attested` に引き上げ、`sort=recommended` はアテステーション枠（総合の 10%）を満点で与えていた。プロバイダーは自分で書いた JSON を添えるだけでその 3 つを買えた。現在は結果に `trustLevel`（`self_reported` / `hardware_attested`）を持たせ、**3 つの利得すべてが `hardware_attested` を要求する**。現在の検証器は `hardware_attested` を返さない。
 
@@ -170,28 +185,20 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 
 ## 6. 不足部分の実装計画（優先順）
 
-1. **エスクロー状態機械**（✅実装済）— hold invoice の held→settle/cancel/dispute を純 FSM 化＋永続化サービス。`work-verifier` の検証結果で解放判断。
-2. **ドメイン層＋HTTP 配線は実装済**: `src/marketplace/marketplace-service.js` が全フローを合成し、
-   `src/api/routes/marketplace.js`（`/api/v1/marketplace/*`）が HTTP で公開
-   （quote/rank ＝ JWT、escrow open/pay/verify/resolve ＝ admin）。supertest で
-   open→pay→verify→SETTLED を検証済。
-   **actions→LN 操作の変換層も実装済**（`src/payments/action-executor.js` ＋
-   `src/payments/ln-adapter.js` の MockLnAdapter）。
+1. **エスクロー状態機械**（⛔削除、2026-09 第8回点検）— hold-invoice/HTLC エスクローは
+   custodial 設計の本製品には要件として成立せず（上記「Lightning エスクロー」参照）、
+   FSM ごと削除した。
+2. **ドメイン層＋HTTP 配線**: `src/marketplace/marketplace-service.js` が特徴量ベース
+   価格見積り（`quoteGpu`）を合成し、`src/api/routes/marketplace.js`
+   （`/api/v1/marketplace/*`）が `POST /quote` として HTTP で公開する。
+   escrow open/pay/verify/resolve のルートは削除した（上記参照）。
 
-   **ただし 2026-08 のコード確認で、この経路はプロバイダに金を届けていなかった**:
-   - 本番の呼び出し側（`marketplace/default.js`・`order/index.js`・`order-expiry.js`）は
-     すべて `createEscrowService()` を **lnAdapter 無し**で生成しており、actions は実行されない。
-   - 仮に実行されても `payout_provider` が使う `escrow.providerInvoice` は
-     **コード中のどこからも書き込まれていない**（送金先が存在しない）。
-   - 通常の決済経路（`POST /payments/order/:id`）はそもそもエスクローを開かない。
-     借り手が invoice を払うと sats は運営ノードに着金し、**その先の処理が無い**。
-
-   → hold invoice の preimage 公開は「運営が受け取る」ことしか意味せず、プロバイダへの
-   支払いは**別建ての送金**になる（FSM の 1 遷移では完結しない）。そこで
-   `src/payments/payout-ledger.js`（収益台帳）＋ `src/payments/earnings-sweeper.js`
-   （完了注文の自動計上）＋ 出金 API を追加した。**残るは実 LND/CLN アダプタ実装と
-   送金の自動実行**（現状は運営が送金して txid を記録する運用）。
-3. **永続化エンティティは全て実装済**（Escrow / Provider reputation / Verification record）。将来 Prisma へ移行。
+   資金経路は `src/payments/payout-ledger.js`（収益台帳、`settlementForOrder()` が
+   実支払い額と実提供量から精算内訳を計算）＋ `src/payments/earnings-sweeper.js`
+   （完了注文の自動計上）＋ 出金 API。**残るは実 LND/CLN での自動送金**
+   （現状は運営が送金して txid を記録する運用）。
+3. **永続化エンティティ**（Provider reputation / Ledger）。将来 Prisma へ移行。
+   Escrow / Verification record は削除した（上記参照）。
 4. GPU アテステーション（nvtrust）、OTel トレース、カーボン配置。
    監査ログ Merkle アンカリングは `merkle-anchor.js` 実装済（残るは OTS への実提出と audit.js 結線）。
 
@@ -199,17 +206,16 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 
 ## 付録: 実装済みの再利用可能モジュール（純関数・テスト済）
 
-- `src/verification/work-verifier.js` — Proof-of-Compute 土台（13テスト）
-- `src/verification/verification-service.js` ＋ `src/db/json/VerificationRepository.js` — 検証の永続化/verdict 確定（8テスト）
+- `src/verification/work-verifier.js` — Proof-of-Compute 土台（13テスト）。旧 `verification-service.js`
+  ＋ `VerificationRepository.js`（合成層・永続化）は削除済（2026-09 第8回点検。唯一の呼び出し元
+  だった旧 `/marketplace/escrow/:id/verify` をエスクローごと削除したため）
 - `src/reputation/reputation-scorer.js` — stake加重レピュテーション（10テスト）
 - `src/reputation/reputation-service.js` ＋ `src/db/json/ReputationRepository.js` — レピュテーション永続化/イベント記録（8テスト）
 - `src/pricing/feature-pricer.js` — 特徴量ベース価格（7テスト）
-- `src/payments/escrow-state-machine.js` — エスクロー FSM（12テスト）
-- `src/payments/escrow-service.js` ＋ `src/db/json/EscrowRepository.js` — エスクロー永続化/オーケストレーション（9テスト）
 - `src/payments/settlement-calculator.js` — 従量・SLA 連動の精算分割（payout/refund/fee、最低課金/SLA ペナルティ、整数 sats 保存則, 12テスト）
-- `src/marketplace/marketplace-service.js` — 全サービスを束ねるドメイン合成層（6テスト, 正常系/不正系/オークション統合）
+- `src/marketplace/marketplace-service.js` — 特徴量ベース価格見積り（`quoteGpu`）。旧 escrow/verification
+  連動フロー（open/pay/verify/resolve/settleByUsage）は削除済（ARCHITECTURE.md「エスクロー機構の削除」参照）
 - `src/marketplace/auction-engine.js` — 出品の総合順位付け（価格×レピュ×SLA×アテステーション、price-ratio 正規化, 13テスト）。**逆オークションの API は削除済み**: この製品に入札を保存する場所も貸し手が要件を見る画面も無く、旧 `POST /marketplace/auction` は入札内容を呼び出し側が捏造できた。計算は `GET /gpus?sort=recommended` が実データに対して使う（6テスト＋E2E 1）
-- `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
 - `src/payments/payout-ledger.js` ＋ `src/db/json/LedgerRepository.js` — 収益台帳・出金（orderId 冪等の計上、申請中の残高予約、txid 必須の送金記録、**支払い済みキャンセル注文の返金**（係争返金裁定・マッチ期限切れ・借り手キャンセル・プロバイダ拒否は全額返金、active_timeout は接続情報の受け渡し実績で 全量/全額返金 を決める）, 43テスト＋API 22テスト）
 - `src/payments/earnings-sweeper.js` — 完了注文の収益自動計上（完了経路ごとのフックではなく状態観測。冪等なので過去分も拾う）
 - `src/payments/reconciliation.js` — 帳簿の突き合わせ（保存則・取りこぼしゼロ・出所のない計上ゼロの 3 不変条件と、運営が預かっている債務額, 14テスト＋API 3テスト）

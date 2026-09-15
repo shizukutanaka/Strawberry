@@ -8,7 +8,7 @@
 // 無いため安全だが、PM2 クラスタ・別ワーカー・CLI ツールを同時に動かすと:
 //     P1: load() → [rows A,B]        P2: load() → [rows A,B]
 //     P1: A を更新 → write([A',B])    P2: B を更新 → write([A,B'])
-//   最後に書いた方が勝ち、もう一方の更新は**消える**。orders/payments/escrows で起きれば
+//   最後に書いた方が勝ち、もう一方の更新は**消える**。orders/payments/ledger で起きれば
 //   資金記録の消失になる。
 //
 // 技術的背景:

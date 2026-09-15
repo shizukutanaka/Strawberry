@@ -2,7 +2,7 @@
 //
 // Behavioral coverage for src/db/json/atomicWrite.js, which had no dedicated test
 // file despite being the durability primitive underlying every JSON repository
-// write (including escrows.json / payments.json where a lost write means a
+// write (including ledger.json / payments.json where a lost write means a
 // stranded or double-processed payment). Only indirect coverage existed via
 // probe53-prototype-pollution.
 //

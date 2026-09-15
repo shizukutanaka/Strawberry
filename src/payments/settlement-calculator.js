@@ -1,10 +1,10 @@
 // src/payments/settlement-calculator.js
 // 従量・SLA 連動の決済精算計算（docs/SPECIFICATION.md F1.4 / F3）。
-// エスクローの確定額は現状「全額 payout か全額 refund」の二択だが、Akash/Golem や
-// 一般的なクラウド従量課金は「実際に提供された使用量（heartbeat で計測される
-// accumulatedSeconds）」に応じて按分精算する。本モジュールはエスクロー総額を
+// 単純に「全額 payout か全額 refund」の二択ではなく、Akash/Golem や
+// 一般的なクラウド従量課金のように「実際に提供された使用量（heartbeat で計測される
+// accumulatedSeconds）」に応じて按分精算する。本モジュールは注文の支払い総額を
 // プロバイダ payout / 借り手 refund / 運営 fee に分割する純関数。
-// FSM(escrow-state-machine) が「状態」を、本計算が「金額」を決める分担。
+// payout-ledger.js の settlementForOrder() から呼ばれる（唯一の呼び出し口）。
 //
 // 整数 sats で計算し、payout + fee + refund === total を厳密に保証する（端数は fee に寄せる）。
 

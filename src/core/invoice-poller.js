@@ -121,8 +121,8 @@ async function pollOnce() {
           // Use updateIf so a concurrent cancel/reject/expire wins definitively:
           // a plain getById+update race would let the poller resurrect a cancelled
           // order back to 'matched', corrupting cancelReason/cancelledAt metadata
-          // and re-locking the GPU even though the user-cancel path already issued
-          // an escrow refund.
+          // and re-locking the GPU even though the user-cancel path already
+          // finalized the cancellation.
           if (payment.orderId) {
             const writeResult = OrderRepository.updateIf(
               payment.orderId,

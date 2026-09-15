@@ -102,21 +102,14 @@ describe('no code path moves funds outside the ledger', () => {
     expect(src.slice(idx)).toMatch(/payoutLedger\.completePayout\(/);
   });
 
-  it('injects no LN adapter into any production escrow service', () => {
-    // action-executor が送金し得るのは lnAdapter を渡された場合だけで、本番の
-    // createEscrowService() はどこも渡していない。ARCHITECTURE.md はかつてこれを
-    // 「money-movement gap 解決済み」と書いていたが、実行されるのは actions の**計算**まで
-    // で、送金は誰も行っていなかった。結線したくなったら、そのとき台帳の payout 行を
-    // どう書くかを決めるまでこの検査が止める。
-    const hits = [];
-    for (const file of jsFilesUnder(SRC)) {
-      const code = stripComments(fs.readFileSync(file, 'utf-8'));
-      // 定義側 `function createEscrowService({ repository, lnAdapter })` は呼び出しではない。
-      for (const m of code.matchAll(/(?<!function\s)createEscrowService\(([^)]*)\)/g)) {
-        if (/lnAdapter/.test(m[1])) hits.push(path.relative(ROOT, file));
-      }
-    }
-    expect(hits).toEqual([]);
+  it('escrow-service.js no longer exists (deleted along with hold-invoice escrow)', () => {
+    // このテストはかつて「本番の createEscrowService() に lnAdapter が注入されて
+    // いないこと」を検査していたが、escrow-service.js ごと削除したため意味を失った
+    // （2026-09 第8回点検: hold-invoice/HTLC エスクローはトラストレス機構であり、
+    // custodial 設計の本製品には要件として噛み合わず、実注文でも一度も使われて
+    // いなかった。ARCHITECTURE.md「エスクロー機構の削除」節を参照）。
+    // 再導入されていないことだけを恒久的に確認する。
+    expect(fs.existsSync(path.join(SRC, 'payments', 'escrow-service.js'))).toBe(false);
   });
 
   it('contains no outbound HTTP payment call site anywhere under src/', () => {
@@ -221,7 +214,6 @@ describe('crediting a completed order stays single-entry', () => {
     const deps = {
       LedgerRepository: Ledger,
       PaymentRepository: { getByOrderId: () => [{ status: 'paid', amount: 100000 }] },
-      EscrowRepository: { getByOrderId: () => [] },
     };
 
     const first = payoutLedger.creditOrder(order, deps);

@@ -37,14 +37,12 @@ function memLedger() {
 }
 
 const memPayments = (byOrder) => ({ getByOrderId: (id) => byOrder[id] || [] });
-const memEscrows = (byOrder) => ({ getByOrderId: (id) => byOrder[id] || [] });
 const memUsers = (byId) => ({ getById: (id) => byId[id] || null });
 
-function deps({ ledger, payments = {}, escrows = {}, users = {} }) {
+function deps({ ledger, payments = {}, users = {} }) {
   return {
     LedgerRepository: ledger,
     PaymentRepository: memPayments(payments),
-    EscrowRepository: memEscrows(escrows),
     UserRepository: memUsers(users),
   };
 }
@@ -106,29 +104,10 @@ describe('settlementForOrder', () => {
     expect(s.operatorFeeSats).toBeGreaterThan(0);
   });
 
-  it('prefers an existing SETTLED escrow settlement over recomputing', () => {
-    // 同じ注文に 2 つの異なる金額を持たせない。エスクローが既に計算していればそれが正。
-    const d = deps({
-      ledger: memLedger(),
-      payments: { o1: [{ status: 'paid', amount: 100000 }] },
-      escrows: { o1: [{ id: 'e1', state: 'SETTLED', settlement: {
-        providerPayoutSats: 777, renterRefundSats: 111, operatorFeeSats: 22, chargedSats: 799,
-        breakdown: { total: 910, deliveredRatio: 0.8 },
-      } }] },
-    });
-    const s = payoutLedger.settlementForOrder(ORDER, d);
-    expect(s.providerPayoutSats).toBe(777);
-    expect(s.source).toBe('escrow:e1');
-  });
-
-  it('ignores an escrow that has not settled yet', () => {
-    const d = deps({
-      ledger: memLedger(),
-      payments: { o1: [{ status: 'paid', amount: 100000 }] },
-      escrows: { o1: [{ id: 'e1', state: 'HELD', settlement: { providerPayoutSats: 1 } }] },
-    });
-    expect(payoutLedger.settlementForOrder(ORDER, d).source).toMatch(/^payments:/);
-  });
+  // 「既存の SETTLED escrow settlement を優先する」「HELD escrow は無視する」の
+  // 2 テストは削除した。エスクロー機構ごと削除し、settlementForOrder() は常に
+  // payments ベースの計算のみを行うようになったため（2026-09 第8回点検、
+  // ARCHITECTURE.md「エスクロー機構の削除」節）。
 
   it('applies no minimum-charge floor when the provider caused the termination', () => {
     // プロバイダ都合の中断に最低課金（既定10%）を効かせると、ゼロワーク課金が成立する。

@@ -8,17 +8,20 @@
 //      運営ノードに着金する。invoice-poller が payment を paid にして注文が進む。
 //      **その後、プロバイダへ送る処理はどこにも無い。** 注文が完了しても運営が
 //      全額を持ったまま終わる。
-//   2. エスクロー FSM（`POST /marketplace/escrow/*`）: DELIVER_OK で
-//      `payout_provider` という action を返すが、(a) 本番の呼び出し側は
+//   2. エスクロー FSM（旧 `POST /marketplace/escrow/*`、削除済み）: DELIVER_OK で
+//      `payout_provider` という action を返す設計だったが、(a) 本番の呼び出し側は
 //      `createEscrowService()` を lnAdapter 無しで生成しており action は実行されず、
 //      (b) 実行されたとしても `escrow.providerInvoice` はコード上のどこからも
-//      書き込まれていない（grep 済）ので送金先が無い。
+//      書き込まれていない（grep 済）ので送金先が無かった。加えて hold-invoice/HTLC
+//      エスクローはトラストレス機構であり、運営を信頼させる custodial 設計の本製品
+//      には要件として噛み合わず、実注文でも一度も使われていなかったため、
+//      FSM 自体を削除した（ARCHITECTURE.md「エスクロー機構の削除」節）。
 //
-// つまり「エスクローで払い出す」という要件は**実装されていないだけでなく、
-// そのままでは成立しない**。hold invoice の preimage を公開すると資金は運営に入る。
-// プロバイダへの支払いはそこから**別の送金**として出ていく必要があり、
-// FSM の 1 遷移で完結する話ではない。さらに hold invoice は HTLC の CLTV 上限に
-// 縛られ、数日を超えるレンタルを保持できない。
+// つまり「エスクローで払い出す」という要件は実装されていなかっただけでなく、
+// この製品の custodial 設計にはそもそも不要だった。hold invoice の preimage を
+// 公開すると資金は運営に入るだけで、プロバイダへの支払いはそこから**別の送金**
+// として出ていく必要があり、FSM の 1 遷移で完結する話ではない。さらに hold
+// invoice は HTLC の CLTV 上限に縛られ、数日を超えるレンタルを保持できない。
 //
 // ── 置き換えた設計（単純化）──────────────────────────────────────────────
 // 運営がいったん資金を預かる（既にそうなっている）ことを前提に、**台帳**を置く。
@@ -118,27 +121,10 @@ function paidSatsForOrder(orderId, deps) {
 }
 
 /**
- * 注文 1 件の精算内訳を求める。エスクローが既に settlement を計算していれば
- * それを正とする（同じ注文について 2 つの異なる金額を持たないため）。
+ * 注文 1 件の精算内訳を求める。
  * @returns {object|null} 支払い実績が無ければ null（＝計上しない）
  */
 function settlementForOrder(order, deps = {}) {
-  const EscrowRepo = deps.EscrowRepository || require('../db/json/EscrowRepository');
-  const escrows = EscrowRepo.getByOrderId ? (EscrowRepo.getByOrderId(order.id) || []) : [];
-  const settled = escrows.find((e) => e.settlement && e.state === 'SETTLED');
-  if (settled) {
-    const s = settled.settlement;
-    return {
-      totalSats: num(s.breakdown && s.breakdown.total, s.chargedSats + s.renterRefundSats),
-      providerPayoutSats: num(s.providerPayoutSats),
-      renterRefundSats: num(s.renterRefundSats),
-      operatorFeeSats: num(s.operatorFeeSats),
-      chargedSats: num(s.chargedSats),
-      source: `escrow:${settled.id}`,
-      deliveredRatio: num(s.breakdown && s.breakdown.deliveredRatio, 0),
-    };
-  }
-
   const totalSats = paidSatsForOrder(order.id, deps);
   if (totalSats <= 0) return null; // 借り手が払っていない注文は計上しない
 

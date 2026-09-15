@@ -2,7 +2,8 @@
 // order creator (renter) and admins. A GPU provider was previously admitted by
 // allowOwnerOrAdmin via order.providerId, letting them:
 //   - PUT: silently overwrite the renter's description/notes (evidence tampering)
-//   - DELETE: forge a 'user_cancelled' soft-cancel, forfeiting the renter's escrow
+//   - DELETE: forge a 'user_cancelled' soft-cancel, bypassing the reject flow the
+//     renter is entitled to
 // Providers have dedicated endpoints (/accept, /reject) for their legitimate actions.
 const request = require('supertest');
 const { app } = require('../../src/api/server');

@@ -1,10 +1,11 @@
 // tests/security/probe33-payment-disclosure.test.js
 // Probe 33 regression tests:
-// 1. settle() CAS uses && not || (no re-settlement on SETTLED escrow with missing settlement)
+// 1. (removed 2026-09 — escrow-service.js and its settle() CAS guard no longer exist;
+//    hold-invoice escrow was deleted, see ARCHITECTURE.md「エスクロー機構の削除」節)
 // 2. POST /register no longer leaks apiKey (uses sanitizeUser())
 // 3. (removed 2026-09 — the btc-onchain route it guarded no longer exists)
 // 4. GET /orders does not expose review.reviewerId to counterparties
-// 5. settle() idempotent: second call blocked when settlement already written
+// 5. (removed 2026-09 — escrow settle() idempotency no longer applicable, see 1)
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
@@ -49,44 +50,10 @@ afterAll(() => {
   });
 });
 
-// ─── 1. settle() CAS uses && not || ──────────────────────────────────────────
-describe('settle() CAS predicate uses && not ||', () => {
-  it('escrow-service.js: settle() CAS predicate is && not ||', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/payments/escrow-service.js'), 'utf-8'
-    );
-    // Must use && (not ||) so that SETTLED escrow with missing settlement is blocked
-    expect(src).toMatch(/\.includes\(e\.state\)\s*&&\s*!e\.settlement/);
-    // Must NOT use the vulnerable || version
-    expect(src).not.toMatch(/\.includes\(e\.state\)\s*\|\|\s*!e\.settlement/);
-  });
-
-  it('settle() is idempotent: second call with same escrow is blocked', () => {
-    const { createEscrowService } = require('../../src/payments/escrow-service');
-    const records = {};
-    const mockRepo = {
-      getById: (id) => records[id] || null,
-      create: (data) => { const rec = { ...data, id: `esc-${Date.now()}`, state: 'PENDING', history: [] }; records[rec.id] = rec; return rec; },
-      update: (id, data) => { records[id] = { ...records[id], ...data }; return records[id]; },
-      updateIf: (id, pred, data) => {
-        const rec = records[id];
-        if (!rec || !pred(rec)) return { ok: false, current: rec };
-        records[id] = { ...rec, ...data };
-        return { ok: true, row: records[id] };
-      },
-      getByOrderId: (orderId) => Object.values(records).filter(e => e.orderId === orderId),
-    };
-    const svc = createEscrowService({ repository: mockRepo });
-    const e = svc.create({ orderId: 'order-p33', amountSats: 1000 });
-    svc.apply(e.id, 'PAY'); // PENDING → HELD
-
-    // First settle: should succeed (HELD and no settlement)
-    expect(() => svc.settle(e.id, { deliveredRatio: 1, slaUptimePct: 100 })).not.toThrow();
-
-    // Second settle: should throw because settlement already written (even though still HELD)
-    expect(() => svc.settle(e.id, { deliveredRatio: 0.5, slaUptimePct: 50 })).toThrow(/concurrent/i);
-  });
-});
+// ─── 1. (削除) escrow-service.js の settle() CAS ガード ───────────────────
+// エスクロー機構ごと削除したためこの検査は不要になった（2026-09 第8回点検）。
+// 二重計上防止は payout-ledger.js の createUnique（orderId 単位）が担う。
+// tests/payments/no-unledgered-money.test.js 参照。
 
 // ─── 2. POST /register: apiKey not leaked ────────────────────────────────────
 describe('POST /register: no apiKey in response', () => {

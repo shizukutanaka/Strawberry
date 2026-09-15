@@ -346,23 +346,86 @@ Mock LND（`setupMockLND()`）にも `settleInvoice`/`cancelInvoice` という�
 
 ---
 
-## 短所（今も残る境界線。3 件は検討済みの設計判断、1 件は本当の未完成）
+### L. ④加速では終わらせない——要件そのものを疑い、②削除を実行する（第 8 回）
+
+Stop hook は第 7 回の「④加速（ガードで留める）」を明示的に拒否した:
+「hold invoice エスクローは依然として本当の未完成のままだ。完成には
+(1) ②削除の実行、(2) ③単純化の実行、(3) invoicesrpc を実機 LND 検証込みで
+実装するかのいずれかが要る」という指摘だった。第 5〜7 回は「どう直すか」を
+問い続け、「これは直すべき要件なのか」を一度も問い直していなかった。
+①要件を疑う、をコードではなく**要件そのもの**に向け直した。
+
+**問い: hold-invoice/HTLC エスクローは、この製品にとって何のための機構か。**
+答え: 「運営を信頼しなくても資金が守られる」ためのトラストレス機構である。
+HTLC は preimage を公開しない限り運営が資金を得られない構造にすることで、
+運営の善意に依存せずに「配達されたら払う」を保証する。
+
+**問い: この製品はどういう決済モデルか。** 答え: 全体を通して custodial である。
+借り手は運営の Lightning ノードへ直接入金し、資金はいったん運営が預かる。
+プロバイダへの払い出しは `payout-ledger.js` の台帳を経由し、運営が手動で
+実送金して txid を記録する（README.md「意図的にそうしている設計」、
+本書 J-1 で既に検討済みの確定判断）。GPU アクセスの受け渡しも運営が仲介し、
+係争の裁定も admin が行う。つまり本製品は**運営を信頼する前提の上に全体が
+組まれている**。
+
+**問い: トラストレス機構を custodial 設計の上に足すと何が起きるか。** 答え:
+何も変わらない。hold invoice の preimage を公開しても、資金は運営に入るだけで
+（本書 J-3・K で確認済み）、プロバイダへの支払いは結局、台帳を経由する
+別建ての送金になる。エスクローが守るはずの「運営を信頼しなくてよい」という
+性質は、決済フローの他のどの部分にも存在しない。**要件として矛盾している**:
+一部だけをトラストレスにしても、全体が custodial である以上、借り手も
+プロバイダも結局運営を信頼するしかない。
+
+**問い: 実害はどれだけあったか。** 答え: 二重の設計リスクがあった。
+(1) `payout-ledger.js` と `escrow-service.js` は独立に同じ
+`computeSettlement()` を呼んでおり、同じ注文に 2 つの異なる精算計算経路が
+存在した（`payout-ledger.js:settlementForOrder()` は SETTLED escrow があれば
+それを優先する分岐まで持っていた——「正」とすべき金額が 2 つ存在する状態）。
+(2) 実注文でこの経路が使われたことは一度も無い（本番の呼び出し側は
+`lnAdapter` 無しで `createEscrowService()` を生成しており、第 5 回で確認済み）。
+つまりこの機構は、直しても製品に新しい能力を何も追加しない一方、
+精算ロジックの二重化という実在のリスクだけを持ち続けていた。
+
+**結論・実行（②削除）**: 要件として成立しないと判定し、hold-invoice
+エスクロー/検証の合成層を丸ごと削除した。
+`src/payments/escrow-service.js`、`escrow-state-machine.js`、
+`action-executor.js`、`ln-adapter.js`、`src/db/json/EscrowRepository.js`、
+`src/verification/verification-service.js`、
+`src/db/json/VerificationRepository.js` を削除。`src/api/routes/marketplace.js`
+の `/escrow/*` 全ルートと `adminOnly`/`escrowErrorResponse` を削除し
+`POST /quote` のみ残した。`src/api/routes/index.js` の
+`/admin/escrow`・`/admin/verifications/*` を削除。`src/marketplace/marketplace-service.js`
+と `src/marketplace/default.js` を `quoteGpu` のみに縮小。
+`src/utils/order-expiry.js`・`src/api/routes/order/index.js` の全エスクロー
+連携フック（SLA スイープ、`GET /orders/:id/payment` の escrows フィールド、
+admin PUT cancel、DELETE、reject、係争裁定 refund/uphold、`/stop`
+自動解放）を削除。`lightning-service.js` の `settleHoldInvoice`/
+`cancelHoldInvoice`/`_requireInvoicesRpc`（第 7 回で追加したガードごと）を
+削除。`payout-ledger.js` の escrow-settlement 優先分岐を削除し、
+`settlementForOrder()` を支払い実績ベースの計算 1 本に単純化（③単純化も
+同時に実行）。`work-verifier.js` の純関数群は `utilization-collector.js` が
+引き続き使うため削除していない。
+
+これは「①要件を疑う→成立しないと結論する→②削除する」という手順を、
+コード実装の細部にではなく機構の存在理由そのものに適用した結果である。
+第 5〜7 回がやっていたのは「壊れた部品をどう直すか」で、実際に必要
+だったのは「この部品はそもそも要るのか」だった。
+
+---
+
+## 短所（今も残る境界線。3 件は検討済みの設計判断）
 
 1. **実送金は運営の手作業のまま。** 検討済み・意図的（上記 J-1）。自動承認してよい
    安全な部分集合が存在しないため、恒久的な設計とする。
 2. **アテステーション検証は Mock。** 検討済み・環境の制約（上記 J-2）。文書は正確で、
    過大主張はない。実機 SDK が使える環境が無い限り変わらない。
-3. **hold invoice エスクローは未結線（本当の未完成）。** `escrow-state-machine` は
-   純関数として完成しているが、本番で `lnAdapter` を渡していないだけでなく、
-   preimage・hold invoice 自体を生成する経路が無く（上記 J-3、第 6 回）、
-   さらにその一段下——`settleHoldInvoice`/`cancelHoldInvoice` が呼ぶ LND の
-   invoicesrpc サービス自体がクライアントに読み込まれていない（上記 K、第 7 回）。
-   3 層すべてに実機 LND での検証を要する部分が含まれるため、決済フローの再設計と
-   合わせて意図的にスコープ外とした。壊れた 2 メソッドは、呼べば理由が分かる形に
-   直した。`tests/payments/no-unledgered-money.test.js` が誤った早期結線を防いでいる。
-4. **JSON データ層に複数レコードのトランザクションが無い。** 検討済み・技術選択の帰結
+3. **JSON データ層に複数レコードのトランザクションが無い。** 検討済み・技術選択の帰結
    （上記 J-4）。個別の危険箇所は単一ファイル原子性で閉じており、新たな未発見の
    欠陥は今回の点検では見つからなかった。
+4. ~~hold invoice エスクローは未結線（本当の未完成）~~ → **削除した**（第 8 回、上記 L）。
+   trustless 機構を custodial 設計に足すのは要件として矛盾しており、精算ロジックの
+   二重化という実害だけを持つ死んだ経路だったため、状態機械・LN 連携層・検証合成層を
+   丸ごと削除し、資金移動を台帳 1 本に一本化した。
 5. ~~製品から到達しないエンドポイントが 37 本~~ → **0 本になった**（第 2 回）。
    以後は `tests/api/ui-reachability.test.js` の `BASELINE = 0` が不変条件。
 
@@ -387,8 +450,7 @@ Mock LND（`setupMockLND()`）にも `settleInvoice`/`cancelInvoice` という�
 | `quoteGpu` の `basis.quotable` | 根拠の無い型番に値段を付けて人に見せること |
 | `docs-match-code` の npm script 検査 | 実行できない手順をドキュメントに書くこと |
 | `src/security/audit-integrity-monitor.js` | 監査ログの改ざん検知が起動時の一回しか実行されないこと。5 分ごとに検証し、検出は `/ready` にも反映される |
-| `lightning-service.js` の `_requireInvoicesRpc()` | `settleHoldInvoice`/`cancelHoldInvoice` が理由不明の `TypeError` で落ちること。呼べば invoicesrpc 未読み込みだと名指しする |
-| `tests/unit/lightning-service-hold-invoice-gap.test.js` | 上のガードが外れて再び無言の TypeError に戻ること |
+| `tests/payments/no-unledgered-money.test.js`（第 8 回で更新） | `escrow-service.js` が再導入されること。ファイルの非存在を恒久的に確認する |
 
 既存の `no-dead-endpoints` は「叩けば応答するか」を、新しい `ui-reachability` は
 「そもそも誰かが叩くのか」を見る。応答するが誰も呼ばないエンドポイントは、
@@ -412,6 +474,7 @@ Mock LND（`setupMockLND()`）にも `settleInvoice`/`cancelInvoice` という�
 | ⑤自動化する | 「人手の突き合わせに残っているものは何か」 | `reconciliation` に `noUnbackedPayouts` / `unattributedPaidSats` を追加し、毎サイクル走る sweeper から自動検査。admin 限定ルートの判定をパス名の目視からミドルウェアの `requiredRoles` 読み取りへ。終端注文に残った接続情報の掃除（`purgeTerminalOrderCredentials`）と、SLA 判定に使う証跡の書き戻しを既存スイープに載せた |
 | ①（再訪）要件を疑う | 「『未対処』のリストそのものは検討済みか」 | 第 6 回。残る 4 件のうち 3 件（手動送金・Mock 検証・JSON トランザクション）は「検討した結果これが正しい」という確定判断であり todo ではないと判定。1 件（hold invoice）は本当の未完成だが、以前より正確な理由（preimage/invoice 生成の不在）を確認した |
 | ①（再々訪）要件を疑う | 「『実装済み』という自分の記述は検証済みか」 | 第 7 回。`lightning-service.js` の `settleHoldInvoice`/`cancelHoldInvoice` を「実装済み」と書いていたが、実際は存在しない gRPC メソッドを呼んでおり必ず落ちると判明。②削除（invoicesrpc を実装する）は実機 LND 無しでは無責任と判断して見送り、④加速（呼べば理由が分かる形にする）を実行した |
+| ①（四度目）要件そのものを疑う→②削除 | 「④加速で留めたが、そもそもこの機構自体が要件として成立するのか」 | 第 8 回。hold-invoice/HTLC エスクロー（トラストレス機構）は、運営を信頼する custodial 設計の本製品には要件として矛盾すると判定し、状態機械・LN 連携層・検証合成層・全ルート・全連携フックを丸ごと削除した。資金移動は最初から実処理を担っていた `payout-ledger.js` の 1 本に一本化した |
 
 第一原理に戻した点: 「帳簿が合っている」は「現金が合っている」を含意しない
 （不変条件は読む範囲の外を守れない）。「登録されている」「テストが通る」は
@@ -436,6 +499,7 @@ Mock LND（`setupMockLND()`）にも `settleInvoice`/`cancelInvoice` という�
 14. 主張「監査ログは HMAC ハッシュチェーンで tamper-evident」 → 問「誰がいつそれを見るのか」 → 答「起動時に一度だけ。`verifyAuditLogIntegrity()` はそれ以降テストからしか呼ばれていない」 → 問「では稼働中の改ざんは誰が気づくのか」 → 答「誰も。次の再起動まで」 → 定期実行するジョブを追加し、検出は記録・通知のみ（自動修復・強制停止はしない）
 15. 主張（この文書自身）「hold invoice エスクローは lnAdapter が渡されていないだけ」 → 問「渡せば動くのか」 → 答「動かない。preimage・hold invoice 自体を生成する経路がどこにも無い」 → 問「では『未対処』な理由をすべて検討したと言えるのか」 → 答「言えなかった。残る 3 件を検討し直したら、うち 2 件（手動送金・Mock 検証）は自動化・実装をすべきでない確定判断、1 件（JSON トランザクション）は技術選択の帰結だった」 → J
 16. 主張（この文書自身、第 6 回まで）「`lightning-service.js` は `settleHoldInvoice`/`cancelHoldInvoice` を実装済み」 → 問「その実装は検証したのか」 → 答「していなかった。既存テストは独立した Mock（`ln-adapter.js`）を注入しており、`lightning-service.js` の実物を一度も通していない」 → 実際に読んだら `this.lnd.settleInvoice` という存在しない gRPC メソッドを呼んでおり、本番でも Mock でも必ず `TypeError` で落ちると判明 → K
+17. 主張（Stop hook、第 7 回への反応）「④加速で留めたのは不十分。②削除か③単純化か、invoicesrpc の実装が要る」 → 問「では②削除すべきなのか。この機構は本当に要件なのか」 → 答「要件ではなかった。hold-invoice/HTLC エスクローはトラストレス機構だが、この製品は借り手が運営のノードへ直接入金し運営が台帳で後払いする custodial 設計を一貫して採っている。トラストレス機構を custodial 設計に足しても、運営を信頼する前提そのものは消えない」 → 問「削除して失うものは何か」 → 答「何も無い。実注文で一度も使われておらず、`payout-ledger.js` と精算計算が重複していただけだった」 → L（②削除を実行）
 
 答えは毎回コードで確かめ、確かめられなかったものは「未対処」に残した。
 
@@ -479,3 +543,10 @@ Mock LND（`setupMockLND()`）にも `settleInvoice`/`cancelInvoice` という�
     検証できない。第 6 回はコードを読んで「実装済み」と結論したが、実際に
     実行させてはいなかった——テストを書いた本人でさえ、この区別を見落とし得る。
     掘り下げは一度で終わりにせず、「これ以上分解できないか」を毎回自分に問い直す。
+12. **「直せば直るか」の前に「これは要件か」を問う。** 壊れた実装を掘り下げて原因を
+    特定し、ガードを足して④加速するのは、それ自体は正しい手順に見える。しかし
+    ①要件を疑う、を飛ばして④に進むと、**存在しなくてよい機能を直し続ける**
+    という別の形の無駄が生まれる。今回は、機構の目的（トラストレス性）と製品の
+    設計原則（custodial）を照らし合わせるだけで、3 回分の深掘り（第 5〜7 回）が
+    ①一問で②削除に置き換えられることが分かった。「直せるか」ではなく「直す価値が
+    あるか」を先に問う。

@@ -163,7 +163,23 @@ lint が常に失敗しており、品質ゲートとして機能していなか
   「実行されている」を取り違えた記述だった。
   実際の資金移動は収益台帳（`src/payments/payout-ledger.js`）が担っており、
   エスクロー FSM は現状 hold invoice 化のための設計上の座席である。
-  結線する場合に台帳の payout 行を書き忘れないよう、
+  **追記（第6回点検）**: 「`lnAdapter` を渡していないから未配線」だけでは不十分な説明
+  だったので確かめ直した。`lnAdapter` を渡すだけでは動かない——それ以前に、
+  `escrow-service.js:create()` は `{orderId, amountSats, feeRate, deadlineAt, invoice}`
+  しか受け取らず、`preimage` / `preimageHash` / `providerInvoice` を生成・保存する経路が
+  コードベースのどこにも無い。`marketplace-service.js:openOrderEscrow()` も
+  `invoice: null` で開設するのみ。つまり `reveal_preimage`（`adapter.settleHoldInvoice(ctx.preimage)`）
+  と `cancel_invoice`（`adapter.cancelHoldInvoice(ctx.preimageHash)`）は、今 `lnAdapter` を
+  渡しても常に `undefined` を渡して失敗する。`lightning-service.js` は
+  `settleHoldInvoice`/`cancelHoldInvoice`/`payInvoice` を実装済みだが、**その手前の
+  「LND の `AddHoldInvoice`（`invoicesrpc`）で実際に hold invoice を作り、preimage を
+  ローカルに秘匿する」という起点そのものが実装されていない**。したがって残る作業は
+  「アダプタを繋ぐ」ではなく「借り手の支払いフローを hold invoice ベースへ作り直す」
+  （invoice 生成・invoice-poller の ACCEPTED 状態対応・プロバイダの payout 用invoice の
+  事前収集を含む）という、決済フロー本体の再設計に近い。これは意図的に今回のスコープ外とし、
+  台帳（payout-ledger）1 本の経路を安全に保つことを優先した——btc-onchain 削除（2026-09）と
+  同じ判断基準（②削除するか③単純化するかを選ぶ際、"稼働していない並行経路を増やさない"）
+  である。結線する場合に台帳の payout 行を書き忘れないよう、
   `tests/payments/no-unledgered-money.test.js` が
   「本番の createEscrowService に lnAdapter を渡していないこと」を固定している
   （渡した瞬間に落ちて、台帳との整合を決めるまで進めない）。

@@ -357,6 +357,19 @@ write-only 判定を残データストアへ展開。結果はほぼ「何もし
 （機能を本当に消す）か権限外（.github）。残る未回答は利用者の有無・
 GPU配信の意図・外部API消費者・運用者 — コードは答えを持たない。
 
+### 第16ラウンド（ソクラテス式問答 — 「設定面もコードか？」）
+
+`.env.example` の全変数に消費者を要求:
+
+- **削除**: `SENTRY_DSN`（Sentry は第5ラウンドで除去済み — 消費者ゼロ）、
+  `ENCRYPTION_KEY`（消費者ゼロ — requireSecret は JWT_SECRET/SESSION_SECRET のみ。
+  SPECIFICATION.md の fail-fast 記述も stale だったので修正）
+- **生存**: 残り全変数（NODE_ENV/PORT/JWT_*/API_KEY/GOOGLE_*/MASTER_*/LND_*/
+  BTC_FEE_RATE/LOG_LEVEL/SLACK_WEBHOOK/DISCORD_WEBHOOK/LINE_TOKEN — 全て
+  src/scripts/tests に消費者あり）
+
+ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正確なため生存。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

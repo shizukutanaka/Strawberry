@@ -1044,6 +1044,13 @@ src/ 全ファイルの export 名を総当たり:
 - `src/api/utils/` 全8ファイルも同様に生存（第74ラウンド確認済み）。
 - package-lock root 依存と package.json は完全一致。削除ゼロのラウンド。
 
+### 第82ラウンド（ソクラテス式問答 — 「UI 表示マップに死んだ状態ラベルはないか？」）
+
+- `STATUS_LABELS` 全6状態（pending/matched/active/completed/cancelled/disputed）—
+  全て order/index.js で実際に書き込まれる状態。死ラベルなし。
+- `pages/` 全11ファイルが hash ルートに登録済み（not-found は catch-all）。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

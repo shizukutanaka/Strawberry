@@ -975,6 +975,15 @@ src/ 全ファイルの export 名を総当たり:
 - marketplace.js は escrow admin 面+stats のみ残存（既知の製品判断面）。
 - 削除ゼロのラウンド。
 
+### 第74ラウンド（ソクラテス式問答 — 「累積削除の連鎖で新たな孤児が生まれたか？」）
+
+- src 全ファイルの require グラフ再スキャン: 疑われた5件は全て偽陽性
+  （jest/playwright 設定＝ツール消費、routes/index.js・order/payment/user index＝
+  ディレクトリ require `./routes`/`./order` 経由で実消費）。
+- src/api/utils 全8ファイルに消費者あり（lightning-api は btc-payment.js の
+  同ディレクトリ require で消費 — パス省略形は grep で要確認）。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

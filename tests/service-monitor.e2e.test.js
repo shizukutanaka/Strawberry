@@ -25,7 +25,7 @@ describe('Service Monitor E2E', () => {
     monitor.setServices({ dummy: svc });
     // 監査記録を捕捉（ファイルI/Oを避ける）
     auditSpy = jest.spyOn(auditLog, 'appendAuditLog').mockImplementation(() => {});
-    // 外部通知を捕捉（Slack/Sentry/LINE への実送信を避ける）
+    // 外部通知を捕捉（Slack/LINE への実送信を避ける）
     jest.spyOn(monitor, 'notifyExternalAlert').mockResolvedValue(undefined);
   });
 

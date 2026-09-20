@@ -15,12 +15,11 @@ function setServices(refs) {
   services = refs;
 }
 
-// 外部通知hook（Slack/Sentry/LINE/他サービス拡張）
+// 外部通知hook（Slack/LINE/他サービス拡張）
 async function notifyExternalAlert(event, data) {
   // 各チャネルの通知モジュール require は、対応する env が設定されている場合のみ行う。
-  // 旧実装は env チェックより前に require していたため、未設定でも
-  // scripts/sentry-notify.js → @sentry/node（未導入）の解決に失敗し、アラートごとに
-  // 「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋もれる衛生問題）。
+  // 旧実装は env チェックより前に require していたため、未設定でも未導入依存の解決に失敗し、
+  // アラートごとに「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋もれる衛生問題）。
   // env ゲートにより、未設定チャネルでは require 自体を行わずノイズを出さない。
   // Slack通知（SLACK_WEBHOOK_URL 設定時のみ）
   if (process.env.SLACK_WEBHOOK_URL) {
@@ -30,16 +29,6 @@ async function notifyExternalAlert(event, data) {
       logger.info(`[ExternalAlert] Slack通知送信: ${event}`);
     } catch (e) {
       logger.warn(`[ExternalAlert] Slack通知モジュール呼び出し失敗:`, e);
-    }
-  }
-  // Sentry通知（SENTRY_DSN 設定時のみ）
-  if (process.env.SENTRY_DSN) {
-    try {
-      const { sendSentryNotification } = require('../../scripts/sentry-notify.js');
-      await sendSentryNotification(event, data);
-      logger.info(`[ExternalAlert] Sentry通知送信: ${event}`);
-    } catch (e) {
-      logger.warn(`[ExternalAlert] Sentry通知モジュール呼び出し失敗:`, e);
     }
   }
   // LINE通知（LINE_TOKEN 設定時のみ）

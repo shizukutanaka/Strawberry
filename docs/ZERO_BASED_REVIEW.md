@@ -187,6 +187,20 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
 - 検証: probe25/26/49・order-expiry・payment-btc-onchain×2・api.integration・
   marketplace-escrow — 8 スイート 296 テスト全パス。
 
+### 第5ラウンドの追加削除（実行不能スクリプト + 未結線の通知チャネル）
+
+- **依存未導入で永久に実行不能な scripts/* を削除**: `@octokit/rest` 要の
+  checklist-to-issues、`googleapis` 要の feedback-to-sheets / priority-to-sheets /
+  progress-report、`@notionhq/client` 要の notion-progress-report / priority-to-notion、
+  `chartjs-node-canvas` 要の kpi-trend-graph、`@slack/web-api` 要の slack-notify-graph、
+  `i18next` 要の sample（scripts/locales/ も孤立したため同時削除）、空スタブの
+  setup-production.sh、imagemin 未導入の optimize-images.js（CI では script 未登録で
+  既に失敗していた経路）。package.json の対応 npm script エントリも除去。
+- **Sentry 通知チャネル削除**: `@sentry/node` が依存に存在しないため
+  sentry-notify.js はロード不能 → service-monitor の Sentry 分岐・README の
+  SENTRY_DSN 記述・logger.js のコメントアウト stub・probe57 の対応アサーションを除去。
+- 検証: probe57 + service-monitor.e2e + scripts + api.integration 全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -105,7 +105,7 @@ Strawberryは、分散型GPUリソースの貸借を可能とするオープン�
 - Ed25519ピアIDおよび署名検証によるP2P信頼性担保
 - UUIDバリデーション、Joiスキーマによる厳格な入力検証
 - Lightning Network決済および現金換算API（多重API、Prometheus監視、監査証跡対応）
-- 死活監視、自動復旧、外部通知フック（Slack/Sentry等）
+- 死活監視、自動復旧、外部通知フック（Slack/LINE等）
 - 詳細な監査証跡、改ざん検知、Prometheusメトリクスの提供
 - CORSやHelmet等のセキュリティヘッダー実装
 - API／CLI／GraphQLインターフェース対応
@@ -207,7 +207,7 @@ sequenceDiagram
 ## 死活監視・監査証跡・障害通知
 
 - LightningService/P2PNetwork/VirtualGPUManager全サービスでisHealthy()による詳細死活監視
-- 異常時は自動再起動・監査証跡・Prometheusメトリクス・外部通知hook（Slack/Sentry等）
+- 異常時は自動再起動・監査証跡・Prometheusメトリクス・外部通知hook（Slack/LINE等）
 - 監査ログは改ざん検知付き・全操作を記録
 - 為替APIの障害も監査証跡・外部通知・メトリクス化
 
@@ -222,14 +222,14 @@ sequenceDiagram
   - キャッシュヒット率 = `exchange_rate_cache_hit_total / (exchange_rate_cache_hit_total + exchange_rate_cache_miss_total)`
   - 障害通知件数 = `exchange_rate_fetch_failure_total`
   - 取得遅延分布 = `exchange_rate_fetch_duration_seconds`
-- 異常値はSlack/Sentry等へ即時通知
+- 異常値はSlack/LINE等へ即時通知
 
 ### 障害発生時の自動復旧・通知フロー
 1. 死活監視が異常を検知（isHealthy()→false）
 2. 自動でサービス再起動を試行
 3. 監査証跡・Prometheusメトリクスに記録
-4. Slack（.envにSLACK_WEBHOOK_URL）・Sentry（.envにSENTRY_DSN）へ即時通知
-   - 両方設定時は両方通知
+4. Slack（.envにSLACK_WEBHOOK_URL）・LINE（.envにLINE_TOKEN）へ即時通知
+   - 複数設定時は全て通知
 5. 再起動失敗時も通知・監査証跡
 
 #### フロー図（Mermaid記法）
@@ -238,7 +238,6 @@ flowchart TD
   A[死活監視] -->|異常検知| B[自動復旧試行]
   B --> C[監査証跡/Prometheus記録]
   C --> D[Slack通知]
-  C --> E[Sentry通知]
   C --> F[LINE通知]
   D & E & F --> G[運用者/監視システムへ即時アラート]
   B -->|復旧失敗| H[再通知/監査証跡]
@@ -247,7 +246,6 @@ flowchart TD
 #### .env例
 ```
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-SENTRY_DSN=https://xxxx.ingest.sentry.io/...
 LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
@@ -256,7 +254,6 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 [死活監視]→異常→[自動復旧/監査証跡/Prometheus]
            ↓
       [Slack通知]（任意）
-      [Sentry通知]（任意）
       [LINE通知]（任意）
            ↓（複数同時可）
      [運用者/監視システムへ即時アラート]
@@ -265,12 +262,9 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 #### LINE通知運用ポイント
 - LINE_TOKENを設定するだけでLINEグループや個人に即時通知
 - 重大障害・復旧失敗・為替API障害等も全てLINEへ即時通知
-- Slack/Sentry/LINEどれか1つ～全て多重通知も可
+- Slack/LINEどれか1つ～全て多重通知も可
 
-#### Sentry通知運用ポイント
-- SENTRY_DSNを設定するだけで自動連携
-- 重大障害・復旧失敗・為替API障害等も全てSentryへ即時通知
-- Slack/Sentry/LINEどれか1つ～全て多重通知も可
+- Slack/LINEどれか1つ～全て多重通知も可
 
 ### 現金換算API運用ポイント
 - REST/GraphQL両方でrate/timestamp/isCacheを取得可能
@@ -331,7 +325,7 @@ flowchart LR
 
 ### 1. 障害監視・通知の全自動化
 - 死活監視・Prometheus・service-monitorで全サービス/ノードの異常を自動検知
-- Slack/Sentry/LINE通知hookで障害を即時アラート
+- Slack/LINE通知hookで障害を即時アラート
 - 監査証跡で全障害・復旧イベントを自動記録
 
 ### 2. 復旧・スケールアウト自動化
@@ -389,7 +383,6 @@ flowchart LR
 ### おすすめOSS/サービスでさらに自動化
 - pm2（Node.jsプロセスマネージャ、死活監視・自動再起動）
 - Grafana（Prometheusと連携した可視化・アラート）
-- Sentry（エラー監視・自動通知）
 - GitHub Actions（CI/CD自動化）
 - LINE Notify/Slack Webhook（多重障害通知）
 - ChatGPT/Claude等AI API（FAQ/README自動生成・障害要約）
@@ -418,7 +411,7 @@ flowchart LR
 - Q. 監査証跡が改ざんされていないか確認したい
   - A. 監査証跡はハッシュ値付きで記録し、定期的にAIやスクリプトで整合性チェック。
 - Q. 一人運用で障害にすぐ気付ける？
-  - A. Slack/LINE/Sentry等複数通知hookを併用し、スマホ・PC両方で即時アラートを受ける運用が推奨。
+  - A. Slack/LINE等複数通知hookを併用し、スマホ・PC両方で即時アラートを受ける運用が推奨。
 - Q. 自動化運用のセキュリティで気をつけることは？
   - A. シークレット管理・監査証跡保護・通知hookの権限制御・依存パッケージの脆弱性対応。
 
@@ -567,13 +560,13 @@ flowchart LR
 ### 🇬🇧 Example: English Quick Start & Troubleshooting
 - **Setup:**
   - `npm install && npm start`
-  - Set environment variables: `SLACK_WEBHOOK_URL`, `SENTRY_DSN`, `LINE_TOKEN` as needed
+  - Set environment variables: `SLACK_WEBHOOK_URL`, `LINE_TOKEN` as needed
 - **API Usage:**
   - `/api/exchange-rate` for real-time cash conversion
   - Check `timestamp` and `isCache` in all conversion API responses
 - **Monitoring:**
   - Scrape `/metrics` with Prometheus, visualize with Grafana
-  - All incidents are automatically notified to Slack/Sentry/LINE if configured
+  - All incidents are automatically notified to Slack/LINE if configured
 - **Troubleshooting:**
   - See audit logs for all failures/recoveries (tamper-evident)
   - Check Prometheus metrics for cache efficiency and failure counts
@@ -583,13 +576,13 @@ flowchart LR
 ### 🇯🇵 日本語: セットアップ・障害対応・運用FAQ例
 - **セットアップ:**
   - `npm install && npm start`
-  - 必要に応じてSLACK_WEBHOOK_URL/SENTRY_DSN/LINE_TOKENを設定
+  - 必要に応じてSLACK_WEBHOOK_URL/LINE_TOKENを設定
 - **API利用:**
   - `/api/exchange-rate`で現金換算APIを利用
   - 返却値の`timestamp`や`isCache`で取得時刻・キャッシュ状態を必ず確認
 - **監視:**
   - `/metrics`をPrometheusで監視し、Grafanaで可視化
-  - 障害発生時はSlack/Sentry/LINEに自動通知（設定時）
+  - 障害発生時はSlack/LINEに自動通知（設定時）
 - **障害対応:**
   - 監査証跡で全障害・復旧イベントを追跡
   - Prometheusでキャッシュ効率・障害回数も可視化
@@ -634,7 +627,7 @@ flowchart LR
 - 監査証跡・Prometheus・外部通知hookの全自動化により、運用負荷を最小化
 
 ### Q. 障害通知が来ない/通知先を増やしたい
-- .envのSLACK_WEBHOOK_URL, SENTRY_DSN, LINE_TOKENを再確認。複数同時通知も可
+- .envのSLACK_WEBHOOK_URL, LINE_TOKENを再確認。複数同時通知も可
 - scripts/line-notify.jsなどを参考に独自hookも容易に追加可能
 
 ### Q. 監査証跡はどこに記録される？

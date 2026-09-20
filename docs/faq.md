@@ -15,8 +15,6 @@
   - A: scripts/locales/ja/translation.json, en/translation.jsonに追記し、i18nextで利用できます。
 
 ## public/ 運用
-- **Q: 画像圧縮・バージョニングはどうやる？**
-  - A: `npm run optimize-images`で画像自動圧縮、ビルド時にハッシュ付きファイル名で出力推奨。
 - **Q: セキュリティヘッダーの設定方法は？**
   - A: express/helmetでCSP等を付与。
 

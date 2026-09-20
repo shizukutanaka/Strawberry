@@ -275,12 +275,6 @@ logger.reportError = async (error, context = {}) => {
         
         logger.error('Error reported:', errorReport);
         
-        // 本番環境では外部エラー追跡サービスに送信
-        if (process.env.NODE_ENV === 'production' && process.env.SENTRY_DSN) {
-            // Sentry統合例
-            // Sentry.captureException(error, { extra: context });
-        }
-        
     } catch (writeError) {
         logger.error('Failed to write error report:', writeError);
     }

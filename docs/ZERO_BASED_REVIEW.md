@@ -892,6 +892,15 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: tests/payments + lightning テスト — 53テスト全パス。
 
+### 第66ラウンド（ソクラテス式問答 — 「HTML が参照するアセット・ツール設定は実在するか？」）
+
+- index.html の参照3件（tokens.css/app.css/js/app.js）全て実在、favicon/manifest 等の
+  参照なし（最小構成で dead 参照ゼロ）。
+- jest.config（testPathIgnorePatterns→tests/e2e 実在）・playwright.config
+  （globalSetup→tests/e2e/globalSetup.js 実在、webServer→src/api/server.js 実在）—
+  設定の stale パターンなし。server.js 先頭 require 群も全て使用。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

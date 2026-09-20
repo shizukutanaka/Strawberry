@@ -370,6 +370,19 @@ GPU配信の意図・外部API消費者・運用者 — コードは答えを持
 
 ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正確なため生存。
 
+### 第17ラウンド（ソクラテス式問答 — 「テスト・設定・アセット層も負債か？」）
+
+- public/ 全ファイル（css/js/pages/swagger.html）に所有者あり — 孤児なし
+- jest.config / playwright.config に削除済み参照なし
+- tests/ に削除済みエンドポイントを叩く spec なし（auth/google・graphql の
+  言及は除去を説明するコメントのみ）
+- 全ミドルウェアがマウント済みか共有ヘルパー（ip-key.js は rate-limit.js と
+  security.js の共有キー生成 — 稼働中）
+- npm scripts の宛先ファイルは全て実在
+
+結論: 3連続で新規削除ゼロ級。問答は全層で「弁明可能」に収束 — これが
+ゼロベースレビューの終点。以降は製品判断のみ。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

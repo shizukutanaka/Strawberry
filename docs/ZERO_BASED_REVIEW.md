@@ -485,6 +485,18 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 
 検証: tests/gpu + basic + probe23b — 全パス。
 
+### 第25ラウンド（ソクラテス式問答 — 「消した機能の残骸がコードに残っていないか？」）
+
+- **削除**: lightning-service.js の SENTRY_DSN ガード4箇所 + `notifyExternal`
+  クロージャと呼出し8箇所 — 第5ラウンドで Sentry を除去した際に残った
+  空の if（中身はコメントアウトのみ）と、そのラッパー。全て no-op。
+- 孤児化ファイルの再スキャン: 新規孤児なし（連鎖削除が綺麗に効いている）
+- process.env 棚卸し: SLACK_WEBHOOK_URL 等の未文書化 ops ノブは
+  実消費者あり（scripts/service-monitor）で生存 — .env.example への
+  網羅は文書量の増大になるため対象外。
+
+検証: probe23b + basic — 全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

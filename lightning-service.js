@@ -170,10 +170,6 @@ class LightningService {
             };
             logger.error('LND接続失敗', errorDetail);
             appendAuditLog('lnd_connect_error', errorDetail);
-            // 外部通知hook（Slack/Sentry等）
-            if (notifyOnError && process.env.SENTRY_DSN) {
-                // Sentry.captureException(error, { extra: errorDetail });
-            }
             // 再試行
             if (attempt < maxRetries) {
                 const wait = backoff(attempt);
@@ -414,9 +410,6 @@ class LightningService {
             if (valErr) {
                 logger.error('Lightning node info validation error', valErr.details);
                 appendAuditLog('node_info_validation_error', { error: valErr.details, nodeInfo });
-                if (process.env.SENTRY_DSN) {
-                    // Sentry.captureMessage('Lightning node info validation error', { extra: { error: valErr.details, nodeInfo } });
-                }
                 throw new Error('Lightning node info validation error');
             }
             this.nodeInfo = nodeInfo;
@@ -629,9 +622,6 @@ class LightningService {
                 if (valErr) {
                     logger.warn('Lightning channel validation error', valErr.details);
                     appendAuditLog('channel_validation_error', { error: valErr.details, channelData });
-                    if (process.env.SENTRY_DSN) {
-                        // Sentry.captureMessage('Lightning channel validation error', { extra: { error: valErr.details, channelData } });
-                    }
                     invalidCount++;
                     return;
                 }
@@ -646,13 +636,6 @@ class LightningService {
     setupEventStreams() {
         // 監査証跡
         const { appendAuditLog } = require('./src/utils/audit-log');
-        // 外部通知hook（Slack/Sentry等）
-        const notifyExternal = (msg, detail={}) => {
-            if (process.env.SENTRY_DSN) {
-                // Sentry.captureMessage(msg, { extra: detail });
-            }
-            // Slack等もここで拡張可
-        };
 
         // イベントストリーム再接続ロジック
         const setupInvoiceStream = () => {
@@ -662,7 +645,6 @@ class LightningService {
             } catch (err) {
                 logger.error('Failed to subscribe to invoice stream', err);
                 appendAuditLog('invoice_stream_subscribe_error', { error: err.message });
-                notifyExternal('Invoice stream subscribe error', { error: err.message });
                 setTimeout(setupInvoiceStream, 5000);
                 return;
             }
@@ -680,20 +662,17 @@ class LightningService {
             invoiceStream.on('error', (error) => {
                 logger.error('Invoice stream error:', error);
                 appendAuditLog('invoice_stream_error', { error: error.message });
-                notifyExternal('Invoice stream error', { error: error.message });
                 // 自動再接続
                 setTimeout(setupInvoiceStream, 5000);
             });
             invoiceStream.on('end', () => {
                 logger.warn('Invoice stream ended, reconnecting...');
                 appendAuditLog('invoice_stream_end', {});
-                notifyExternal('Invoice stream ended');
                 setTimeout(setupInvoiceStream, 5000);
             });
             invoiceStream.on('close', () => {
                 logger.warn('Invoice stream closed, reconnecting...');
                 appendAuditLog('invoice_stream_close', {});
-                notifyExternal('Invoice stream closed');
                 setTimeout(setupInvoiceStream, 5000);
             });
         };
@@ -707,7 +686,6 @@ class LightningService {
             } catch (err) {
                 logger.error('Failed to subscribe to channel stream', err);
                 appendAuditLog('channel_stream_subscribe_error', { error: err.message });
-                notifyExternal('Channel stream subscribe error', { error: err.message });
                 setTimeout(setupChannelStream, 5000);
                 return;
             }
@@ -725,19 +703,16 @@ class LightningService {
             channelStream.on('error', (error) => {
                 logger.error('Channel stream error:', error);
                 appendAuditLog('channel_stream_error', { error: error.message });
-                notifyExternal('Channel stream error', { error: error.message });
                 setTimeout(setupChannelStream, 5000);
             });
             channelStream.on('end', () => {
                 logger.warn('Channel stream ended, reconnecting...');
                 appendAuditLog('channel_stream_end', {});
-                notifyExternal('Channel stream ended');
                 setTimeout(setupChannelStream, 5000);
             });
             channelStream.on('close', () => {
                 logger.warn('Channel stream closed, reconnecting...');
                 appendAuditLog('channel_stream_close', {});
-                notifyExternal('Channel stream closed');
                 setTimeout(setupChannelStream, 5000);
             });
         };

@@ -20,3 +20,11 @@ build/
 *.tmp
 test-results/
 playwright-report/
+
+# 生成物（scripts/ の出力 — 実行時に再生成される）
+docs/feedback-report.md
+docs/checklist-kpi-report.md
+docs/assignee-progress-report.md
+docs/feedback-log.json
+docs/feedback-priority.json
+improvement_checklist4.md

@@ -16,7 +16,7 @@ const { config } = require('../../../utils/config');
 const { resolveSecret, resolveRefreshSecret } = require('../../middleware/jwt-auth');
 const { withLock } = require('../../../utils/async-lock');
 
-const { sanitizeObject } = require('../../../utils/sanitize');
+const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 // レスポンスから機密フィールド(password/apiKey 等)を除去する共通ヘルパー。
 const { sanitizeUser } = require('../../utils/sanitize-user');
 
@@ -25,6 +25,12 @@ const { invalidateUserCache } = require('../../middleware/cache');
 const { appendAuditLog } = require('../../../utils/audit-log');
 
 // ファイルベースJSONストレージリポジトリ
+const GpuRepository = require('../../../db/json/GpuRepository');
+const { isSessionInvalidated } = require('../../utils/session-invalidation');
+const { isRevoked, revoke } = require('../../middleware/token-denylist');
+const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
+const WatchRepository = require('../../../db/json/WatchRepository');
+const OrderRepository = require('../../../db/json/OrderRepository');
 const UserRepository = require('../../../db/json/UserRepository');
 // ピアID管理サブルート
 
@@ -148,7 +154,6 @@ router.post('/login',
     _resetLoginFailures(email);
     // アクセストークン（短命）+ リフレッシュトークン（長命）を発行。
     // jti は logout 時の失効に使用。type で両者を厳密分離。
-    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
     const accessJti = uuidv4();
     const token = signAccessToken(user, accessJti);
     const refreshToken = signRefreshToken(user, accessJti);
@@ -197,9 +202,6 @@ router.post('/refresh',
     // それぞれ revoke を呼び、どちらも新しいトークンペアを返す（single-use 破り）。
     // reuse-detection は次のアクセスで機能するが、攻撃者が先行して rotate した
     // 連鎖チェーンは生き残り得る。/register や /me/settings と同じパターン。
-    const { isRevoked, revoke } = require('../../middleware/token-denylist');
-    const { isSessionInvalidated } = require('../../utils/session-invalidation');
-    const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
     const lockKey = `refresh:${payload.jti}`; // jti is guaranteed non-null (checked above)
     return withLock(lockKey, async () => {
     // リフレッシュトークン再利用検知（盗難シグナル）:
@@ -244,7 +246,6 @@ router.post('/refresh',
 router.post('/logout',
   authenticateJWT,
   asyncHandler(async (req, res) => {
-    const { revoke } = require('../../middleware/token-denylist');
     const { refreshToken } = req.body || {};
     if (refreshToken && typeof refreshToken === 'string') {
       // リフレッシュトークンが提供されていれば jti を即時失効させる。
@@ -314,7 +315,6 @@ router.delete('/me',
     // 放置すると、レンターとしての注文はプロバイダのGPUを幽霊ユーザーで占有し続け、
     // プロバイダとしての注文はレンターの進行中レンタルを宙吊りにする。本人が先に
     // 解決（完了/キャンセル）する必要がある。終端状態 = completed / cancelled。
-    const OrderRepository = require('../../../db/json/OrderRepository');
     const NON_TERMINAL = new Set(['pending', 'matched', 'active', 'disputed']);
     const openOrders = OrderRepository.getAll().filter(o =>
       NON_TERMINAL.has(o.status) && (o.userId === user.id || o.providerId === user.id)
@@ -343,7 +343,6 @@ router.delete('/me',
     });
     // 現在のアクセストークンを失効（exp まで保持）。本人の能動的ロックアウト。
     try {
-      const { revoke } = require('../../middleware/token-denylist');
       if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     } catch (e) {
       logger.warn(`token revoke on self-deactivation failed (user=${user.id}): ${e.message}`);
@@ -353,7 +352,6 @@ router.delete('/me',
     // notifyPriceWatchers が値下げ毎に死んだアカウントへの通知を試み続け無駄が生じる。
     // GPU 削除時の孤児ウォッチ掃除（gpu/index.js DELETE /:id）と対称の後始末。
     try {
-      const WatchRepository = require('../../../db/json/WatchRepository');
       const userWatches = WatchRepository.getByUser(user.id) || [];
       for (const w of userWatches) {
         try { WatchRepository.delete(w.id); } catch (_) {}
@@ -411,7 +409,7 @@ router.put('/me',
     // 許可フィールドのみを抽出・検証（値の型も確認）
     // displayName/bio/location はフリーテキストのため HTML タグを除去してから保存する。
     // review comment と同じく sanitizeString を適用し、<script> 等の Stored XSS を防ぐ。
-    const { sanitizeString } = require('../../../utils/sanitize');
+    
     const HTML_TEXT_FIELDS = new Set(['displayName', 'bio', 'location']);
     const updateData = {};
     for (const [field, validate] of Object.entries(ALLOWED_PROFILE_FIELDS)) {
@@ -499,7 +497,6 @@ router.put('/me/password',
     // 現在のアクセストークンも即時失効（他セッションは passwordChangedAt で弾かれるが、
     // 本リクエストで使ったトークンは iat が同秒になる可能性があるため denylist でも対処）
     try {
-      const { revoke } = require('../../middleware/token-denylist');
       if (req.user.jti) revoke(req.user.jti, req.user.exp ? req.user.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
     } catch (_) { /* denylist 失敗は更新を妨げない */ }
     logger.info(`Password changed for user: ${req.user.id}`);
@@ -523,8 +520,6 @@ router.get('/me/activity',
       return res.status(400).json({ error: `Invalid type filter. Valid values: ${[...VALID_TYPES].join(', ')}` });
     }
 
-    const OrderRepository = require('../../../db/json/OrderRepository');
-    const GpuRepository = require('../../../db/json/GpuRepository');
     const allOrders = OrderRepository.getAll();
 
     const events = [];
@@ -683,7 +678,6 @@ router.delete('/:id',
     // 進行中の注文がある場合は削除不可（自己退会と同一ポリシー）。
     // 注文に参加中のユーザーをハード削除すると userId/providerId 参照が孤児化し、
     // 支払・係争・エスクロー処理が機能しなくなる。
-    const OrderRepository = require('../../../db/json/OrderRepository');
     const NON_TERMINAL = new Set(['pending', 'matched', 'active', 'disputed']);
     const openOrders = OrderRepository.getAll().filter(o =>
       NON_TERMINAL.has(o.status) && (o.userId === userId || o.providerId === userId)
@@ -697,7 +691,6 @@ router.delete('/:id',
     // GPU リストが残存するプロバイダは削除不可。
     // GPU を削除せずにユーザーをハード削除すると、孤立した GPU がマーケットプレイスに
     // 残って新規注文を受け付け続け、providerId が解決できない注文・エスクローが生まれる。
-    const GpuRepository = require('../../../db/json/GpuRepository');
     const providerGpus = GpuRepository.getAll().filter(g => g.providerId === userId);
     if (providerGpus.length > 0) {
       return res.status(409).json({
@@ -797,8 +790,6 @@ router.put('/:id/role',
 router.get('/me/watches',
   authenticateJWT,
   asyncHandler(async (req, res) => {
-    const WatchRepository = require('../../../db/json/WatchRepository');
-    const GpuRepository = require('../../../db/json/GpuRepository');
     const watches = WatchRepository.getByUser(req.user.id) || [];
     const enriched = watches.map(w => {
       const raw = GpuRepository.getById(w.gpuId);

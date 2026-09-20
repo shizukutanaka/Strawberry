@@ -919,6 +919,18 @@ src/ 全ファイルの export 名を総当たり:
 - 検証: api+security+payments+db — 90スイート 875テスト全パス
   （集約時に top-level require を誤削除する回帰を検出・即修正）。
 
+### 第69ラウンド（ソクラテス式問答 — 「他ルートファイルにも遅延 require の重複はあるか？」）
+
+- gpu/index.js（OrderRepository×8・uuid×2・order-pricing・renter-eligibility・
+  schemas 再require→既存 `schemas` 利用へ）、payment/index.js（UserRepository）、
+  btc-onchain.js（OrderRepository/UserRepository/EscrowRepository）、
+  user/index.js（OrderRepository/WatchRepository/GpuRepository/tokens×2/
+  token-denylist×4/session-invalidation/sanitizeString）を全て先頭へ集約 — 計30箇所超。
+- 残存遅延 require は意図的なもののみ（order L1515 のルート循環ガード等）。
+
+検証: api+security+payments — 88スイート 861テスト全パス（集約漏れによる
+未定義参照を検出して即修正済み）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -12,6 +12,7 @@ const { lightning, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const OrderRepository = require('../../../db/json/OrderRepository');
+const UserRepository = require('../../../db/json/UserRepository');
 // 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 // 並行リクエストによる二重請求書発行を防ぐためのミューテックス
@@ -436,7 +437,6 @@ router.get('/admin/pending',
   authenticateJWT,
   checkRole(['admin']),
   asyncHandler(async (req, res) => {
-    const UserRepository = require('../../../db/json/UserRepository');
     const all = PaymentRepository.getAll() || [];
     const pending = all.filter(p => p.status === 'pending' && p.method !== 'lightning');
     const sorted = [...pending].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));

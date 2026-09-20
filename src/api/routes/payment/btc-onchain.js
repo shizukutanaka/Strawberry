@@ -7,6 +7,9 @@ const { logger } = require('../../../utils/logger');
 const { withLock } = require('../../../utils/async-lock');
 const { authenticateJWT } = require('../../middleware/security');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
+const EscrowRepository = require('../../../db/json/EscrowRepository');
+const UserRepository = require('../../../db/json/UserRepository');
+const OrderRepository = require('../../../db/json/OrderRepository');
 
 /**
  * POST /payment
@@ -35,7 +38,6 @@ router.post('/', authenticateJWT, async (req, res) => {
       return res.status(400).json({ message: 'Invalid borrowerWallet format' });
     }
     // 注文の所有者確認（認証必須 — グローバル jwtAuth が保証するが防御的に確認）
-    const OrderRepository = require('../../../db/json/OrderRepository');
     const order = OrderRepository.getById(orderId);
     if (!order) return res.status(404).json({ message: 'Order not found' });
     if (!req.user || (req.user.role !== 'admin' && order.userId !== req.user.id)) {
@@ -76,7 +78,6 @@ router.post('/', authenticateJWT, async (req, res) => {
     // 旧実装は provider.payoutAddress 未設定時に bodyLenderWallet へフォールバックしており、
     // renter が lenderWallet フィールドで任意のウォレットを指定することで
     // provider の受取分(TX2)を第三者に横取りできた（クライアント制御の資金移送）。
-    const UserRepository = require('../../../db/json/UserRepository');
     const provider = order.providerId ? UserRepository.getById(order.providerId) : null;
     const lenderWallet = provider && provider.payoutAddress ? provider.payoutAddress : null;
     if (!lenderWallet) {
@@ -105,7 +106,6 @@ router.post('/', authenticateJWT, async (req, res) => {
     // ── エスクロー冪等性チェック ───────────────────────────────────────────────
     // tx1/tx2 の進捗を EscrowRepository に記録し、再送時に既済ステップを飛ばす。
     // PENDING: tx1 未送信  HELD: tx1 済み tx2 未送信  SETTLED: 完了
-    const EscrowRepository = require('../../../db/json/EscrowRepository');
     const existingEscrows = EscrowRepository.getByOrderId(orderId);
     // 完了・進行中の最新エスクロー（CANCELED は無視して再開可能にする）
     let escrow = existingEscrows.find(e => e.state !== 'CANCELED') || null;

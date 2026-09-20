@@ -23,6 +23,10 @@ const { appendAuditLog } = require('../../../utils/audit-log');
 // 価格ウォッチ（値下げアラート）
 const WatchRepository = require('../../../db/json/WatchRepository');
 const { notifyPriceWatchers, notifyWatchJustCreated } = require('../../../services/price-watch');
+const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
+const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+const { v4: uuidv4 } = require('uuid');
+const OrderRepository = require('../../../db/json/OrderRepository');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
 // TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
@@ -33,7 +37,6 @@ const GPU_RATING_TTL = process.env.NODE_ENV === 'test' ? 0 : 3 * 60 * 1000;
 function getGpuRating(gpuId) {
   const cached = _gpuRatingCache.get(gpuId);
   if (cached && Date.now() - cached.cachedAt < GPU_RATING_TTL) return cached;
-  const OrderRepository = require('../../../db/json/OrderRepository');
   const orders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && o.review);
   const count = orders.length;
   const avg = count > 0
@@ -150,7 +153,6 @@ router.get('/', asyncHandler(async (req, res) => {
   // 占有状況の注釈: 現時刻と時間帯が重複する BLOCKING 注文がある GPU は available=false。
   // 二重予約は注文作成時に 409 で拒否されるため、ここは閲覧時のヒント表示。
   // Single getAll() — derive both occupancy and ratings from one read to halve disk I/O.
-  const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
   const nowMs = Date.now();
   const allOrders = OrderRepository.getAll();
@@ -345,7 +347,6 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   const gpu = GpuRepository.getById(gpuId);
   if (!gpu) return res.status(404).json({ error: 'GPU not found' });
 
-  const OrderRepository = require('../../../db/json/OrderRepository');
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
@@ -414,7 +415,6 @@ router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const OrderRepository = require('../../../db/json/OrderRepository');
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
@@ -655,7 +655,7 @@ router.post('/bulk',
         });
       }
     }
-    const { schemas: { gpu: gpuSchemas } } = require('../../../utils/validator');
+    const gpuSchemas = schemas.gpu;
     const results = [];
     const batchKeys = new Set();
     for (const entry of entries) {
@@ -803,7 +803,6 @@ router.delete('/:id',
     // アクティブ・係争中の注文がある場合は削除を拒否（孤立注文・証拠隠滅を防ぐ）
     // 'disputed' を含めることでプロバイダが係争中に GPU を削除して管理者の裁定材料を
     // 消滅させる griefing パスを塞ぐ。
-    const OrderRepository = require('../../../db/json/OrderRepository');
     const BLOCKING = new Set(['pending', 'matched', 'active', 'disputed']);
     const activeOrders = OrderRepository.getAll().filter(o => o.gpuId === gpuId && BLOCKING.has(o.status));
     if (activeOrders.length > 0) {
@@ -849,12 +848,10 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
   if (!Number.isInteger(durationRaw) || durationRaw <= 0 || durationRaw % 5 !== 0 || durationRaw > 43200) {
     return res.status(400).json({ error: 'durationMinutes must be a positive integer, a multiple of 5, and at most 43200 (30 days)' });
   }
-  const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
   const rateInfo = await fetchRateInfo();
   const pricing = computeOrderPricing({ gpuId, durationMinutes: durationRaw, pricePerHour: gpu.pricePerHour }, rateInfo);
 
   // 空き状況チェック（見積もり時点の参考情報 — 確定は注文作成時に行う）
-  const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
   let scheduledStart = Date.now();
   if (req.query.scheduledStartAt) {
@@ -891,8 +888,6 @@ router.get('/:id/eligibility', authenticateJWT, asyncHandler(async (req, res) =>
   if (!gpu) return res.status(404).json({ error: 'GPU not found' });
 
   // 資格判定は renter-eligibility に集約（POST /orders と同一ロジックを共有）。
-  const OrderRepository = require('../../../db/json/OrderRepository');
-  const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
   const renterRating = computeRenterRating(OrderRepository.getAll(), req.user.id);
   const verdict = evaluateRenterEligibility(gpu, req.user.id, renterRating);
 
@@ -940,7 +935,6 @@ router.post('/:id/block',
   const sanitizedReason = reason
     ? reason.replace(/[<>"'&]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 200) || null
     : null;
-  const { v4: uuidv4 } = require('uuid');
   const block = {
     id: uuidv4(),
     from: new Date(fromMs).toISOString(),
@@ -1016,7 +1010,6 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'Schedule query window cannot exceed 180 days' });
   }
 
-  const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
 
   const blockedSlots = OrderRepository.getAll()
@@ -1082,7 +1075,6 @@ router.post('/:id/watch',
       if (userWatches.length >= MAX_WATCHES_PER_USER) {
         return res.status(429).json({ error: `Cannot watch more than ${MAX_WATCHES_PER_USER} GPUs. Remove an existing watch first.` });
       }
-      const { v4: uuidv4 } = require('uuid');
       watch = WatchRepository.create({
         id: uuidv4(),
         userId: req.user.id,

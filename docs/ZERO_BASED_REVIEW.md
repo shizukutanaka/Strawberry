@@ -901,6 +901,14 @@ src/ 全ファイルの export 名を総当たり:
   設定の stale パターンなし。server.js 先頭 require 群も全て使用。
 - 削除ゼロのラウンド。
 
+### 第67ラウンド（ソクラテス式問答 — 「コアサービスの起動経路は全て存在するか？」）
+
+- services.js safeLoad 3件（gpu-detector-extended→src/core/、virtual-gpu-manager・
+  lightning-service→ルート）全て実在モジュールを解決。
+- service-monitor（setServices/startMonitor + notifyExternalAlert は exchange-rate も
+  消費）・invoice-poller（server.js で起動）— 起動経路完結。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

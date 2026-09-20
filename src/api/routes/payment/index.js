@@ -8,7 +8,7 @@ const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { config } = require('../../../utils/config');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { lightning, p2pNetwork, requireService } = require('../../../core/services');
+const { lightning, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const OrderRepository = require('../../../db/json/OrderRepository');

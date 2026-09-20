@@ -14,7 +14,7 @@ const marketplaceRoutes = require('./marketplace');
 const authRoutes = require('./auth');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
-const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../core/services');
+const { gpuDetector, vgpuManager, lightning, requireService } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
 
@@ -31,10 +31,6 @@ const { cacheMiddleware, purgeCache } = require('../middleware/cache');
     if (vgpuManager && typeof vgpuManager.initialize === 'function') {
       logger.info('Initializing Virtual GPU Manager...');
       await vgpuManager.initialize(gpus);
-    }
-    if (p2pNetwork && typeof p2pNetwork.start === 'function') {
-      logger.info('Starting P2P Network...');
-      await p2pNetwork.start();
     }
     if (lightning && typeof lightning.initialize === 'function') {
       logger.info('Connecting to Lightning Network...');
@@ -256,54 +252,6 @@ router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
   };
   
   res.json(systemInfo);
-}));
-
-// 後方互換性のための古いエンドポイント（非推奨）
-// 将来的に削除予定
-// 注: 旧 GET /gpus はここより前に gpuRoutes（router.use('/gpus')）が必ず応答するため
-// 到達不能となっており削除済み。
-// セキュリティ: これらは生のインフラ・パススルー（P2P ブロードキャスト・任意インボイス送金）
-// であり、特に /payment は運営ノードから任意の BOLT11 を送金できてしまう。注文所有権等の
-// 検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
-router.post('/order', rbac('admin'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /order accessed, use /api/v1/orders instead');
-  if (!requireService(p2pNetwork, res)) return;
-  const order = req.body;
-  await p2pNetwork.broadcastOrder(order);
-  res.status(201).json({ message: 'Order created', order });
-}));
-
-router.post('/match', rbac('admin'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /match accessed, use /api/v1/orders/:id/match instead');
-  if (!requireService(p2pNetwork, res)) return;
-  const matchResult = await p2pNetwork.matchOrder(req.body);
-  res.json({ matched: !!matchResult, detail: matchResult });
-}));
-
-router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
-  if (!requireService(lightning, res)) return;
-  const { paymentRequest, amount, orderId } = req.body;
-  // BOLT11 最低限の形式チェック: lnbc/lntb/lnbcrt で始まる文字列のみ受け入れる
-  if (typeof paymentRequest !== 'string' || !/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(paymentRequest)) {
-    return res.status(400).json({ error: 'paymentRequest must be a valid BOLT11 invoice string' });
-  }
-  // 注文相関チェック: 任意送金によるノードドレインを防ぐため、orderId を必須とし
-  // 実在する注文の totalPrice を超える送金を拒否する（上限を注文額に束縛）。
-  if (!orderId || typeof orderId !== 'string') {
-    return res.status(400).json({ error: 'orderId is required — payment must correspond to a real order' });
-  }
-  const OrderRepository = require('../../db/json/OrderRepository');
-  const order = OrderRepository.getById(orderId);
-  if (!order) {
-    return res.status(404).json({ error: `Order ${orderId} not found` });
-  }
-  const orderMaxSats = order.totalPrice && order.totalPrice > 0 ? Math.ceil(order.totalPrice * 1.05) : 100000;
-  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > orderMaxSats)) {
-    return res.status(400).json({ error: `amount must be a positive number not exceeding the order total (${orderMaxSats} sats)` });
-  }
-  const result = await lightning.payInvoice(paymentRequest, amount);
-  res.json({ status: 'paid', result });
 }));
 
 // --- 共通エラーハンドリング ---

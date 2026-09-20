@@ -173,6 +173,20 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
   initialize の 6 メソッドのみ使用。残る ~34 メソッド（Docker/K8s/MIG/MPS パス等）は
   エンジン内部構造であり、仮想化機能の削除はプロダクト判断のため温存。
 
+### 第4ラウンドの追加削除（P2P スタブ層の除去 — 実行不能コードは負債）
+
+- **`p2p-network.js`（846行）削除**: libp2p が package.json の依存に存在せず
+  `safeLoad` が常に失敗 → 起動ごとに警告を出す永久デッドコード。「P2P」は製品名だが
+  実行できないコードは機能ではなく負債（必要なら git 履歴から復元可能）。
+- 連鎖削除（`p2pNetwork` が常に null で絶対に通らない枝）:
+  - `routes/index.js` の非推奨パススルー `POST /order` `POST /match` `POST /payment`
+    （admin 限定でも p2p 必須 → 常に 503 の死にエンドポイント）
+  - `POST /orders/:id/match`（同上。probe26 の /match ブロックも除去）
+  - gpu ルートの p2p フォールバック 4 箇所・order ルートの updateOrder 通知 3 箇所・
+    services.js の p2pNetwork ローダー・server.js の svcRefs/readiness 参照
+- 検証: probe25/26/49・order-expiry・payment-btc-onchain×2・api.integration・
+  marketplace-escrow — 8 スイート 296 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

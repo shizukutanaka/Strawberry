@@ -109,45 +109,6 @@ describe('escrowSvc.settle(): updateIf prevents double-settlement overwrite', ()
   });
 });
 
-// ─── 3. POST /orders/:id/match: double-booking guard under gpu lock ───────────
-describe('POST /orders/:id/match: GPU double-booking check via lock', () => {
-  it('order/index.js source: /match uses withLock(gpu:${gpuId}:book) with booking check', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    expect(src).toMatch(/withLock\(`gpu:\$\{matchedGpuId\}:book`/);
-    expect(src).toMatch(/gpu_double_booked/);
-  });
-
-  it('/match returns 404 when order does not exist', async () => {
-    const res = await request(app)
-      .post('/api/v1/orders/00000000-0000-4000-8000-000000000099/match')
-      .set('Authorization', `Bearer ${userTok}`);
-    expect(res.statusCode).toBe(404);
-  });
-
-  it('/match returns 400 when order is not in pending state', async () => {
-    const gpu = GpuRepository.create({
-      name: 'P26 Match GPU', vendor: 'NVIDIA', model: 'RTX-P26M', memoryGB: 8,
-      pricePerHour: 1, providerId: 'p26m-prov',
-    });
-    const order = OrderRepository.create({
-      gpuId: gpu.id, userId, providerId: 'p26m-prov',
-      durationMinutes: 60, status: 'active',  // not pending
-      pricePerHour: 1, totalPrice: 1, totalPriceJPY: 100,
-      createdAt: new Date().toISOString(),
-    });
-
-    const res = await request(app)
-      .post(`/api/v1/orders/${order.id}/match`)
-      .set('Authorization', `Bearer ${userTok}`);
-    expect(res.statusCode).toBe(400);
-
-    OrderRepository.delete(order.id);
-    GpuRepository.delete(gpu.id);
-  });
-});
-
 afterAll((done) => {
   const { server } = require('../../src/api/server');
   if (server && server.close) server.close(() => done());

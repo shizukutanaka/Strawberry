@@ -239,6 +239,25 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
 - **ソクラテス式の限界**: 「ユーザーは誰か」「GPU 配信の実装意図」はコードからは
   答えられない製品判断であり、前回の問い（§第6ラウンド末尾）に残置。
 
+### 第8ラウンド（ソクラテス式問答 続 — 「仕様書は消費者か？」）
+
+- **POST /marketplace/quote・/rank・/auction 削除**。
+  問い: 「誰が呼ぶか？」→ 実行時消費者ゼロ（注文フローは gpuId 明示指定で
+  このマッチング経路を通らない。SPA からの呼出もゼロ）。残存根拠は
+  SPECIFICATION §6-2 の記載のみだったが、**文書は消費者ではない**。
+  実行されない仕様は存在しないのと同じ → 削除。
+- 連鎖: marketplace-service の quoteGpu/rankCandidates/selectProvider 削除
+  （openOrderEscrow は pricer を直接呼ぶ）、auction-engine.js 削除、
+  reputation-service の孤立 rank() 削除、tests/api/marketplace.test.js・
+  auction-engine.test.js 削除、probe27・marketplace-service.test・
+  reputation-service.test の対応 describe 除去、SPECIFICATION.md 整合。
+- **保留（問答の結論が「削除で劣化」）**: GET /users/:id/reputation・
+  /renter-profile — SPA 消費者ゼロだが、order フローが記録する
+  レピュテーションの唯一の読み出し口。消すと収集が write-only 化し
+  データが永久に誰にも見えなくなる。真のギャップは「UI がこの面を
+  出していない」ことであり、削除ではなく UI 側の機能欠落と記録。
+- 検証: tests/marketplace + reputation + security + api — 全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

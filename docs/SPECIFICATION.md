@@ -38,8 +38,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | POST/PUT `/api/v1/gpus` | 出品登録/更新 | JWT+role | 🟡(アテステーション無し) |
 | GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
 | POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |
-| POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
-| POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
+| ~~POST `/api/v1/marketplace/quote`,`/rank`,`/auction`~~ | 実行時消費者ゼロのマッチング面 — 第8ラウンドで削除 | — | ❌ |
 | `/api/v1/marketplace/escrow/*` (open/pay/verify/resolve) | エスクロー駆動 | JWT+admin | 🟡(LN実機未) |
 | `/api/profit-addresses` | 運営受取先 | JWT+admin | ✅ |
 | GET `/metrics` | Prometheus | none | ✅ |
@@ -53,7 +52,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … ✅ だが **真正性検証なし** ❌（カテゴリ3）
 2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は未配線**（`feature-pricer` 実装済・未配線）
-3. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
+3. マッチング: 単純検索/ソート … ✅（SPA は GPU 一覧+gpuId 明示指定で実現。逆オークション面は実行時消費者ゼロのため削除）
 4. 決済: 直接二段送金 `btc-payment.sendBTC` … ❌ **エスクロー無し**（本書で実装）
 5. 稼働: `virtual-gpu-manager` で仮想GPU割当 … 🟡（native プラットフォームのみ。docker/k8s パスは依存未導入のため削除済み）
 6. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
@@ -86,7 +85,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 1. **エスクロー状態機械**（✅実装済）— hold invoice の held→settle/cancel/dispute を純 FSM 化＋永続化サービス。`work-verifier` の検証結果で解放判断。
 2. **ドメイン層＋HTTP 配線は実装済**: `src/marketplace/marketplace-service.js` が全フローを合成し、
    `src/api/routes/marketplace.js`（`/api/v1/marketplace/*`）が HTTP で公開
-   （quote/rank ＝ JWT、escrow open/pay/verify/resolve ＝ admin）。supertest で
+   （escrow open/pay/verify/resolve ＝ admin）。supertest で
    open→pay→verify→SETTLED を検証済。
    **actions→LN 操作の変換層も実装済**（`src/payments/action-executor.js` ＋
    `src/payments/ln-adapter.js` の MockLnAdapter）。**残るは実 LND/CLN アダプタ実装、
@@ -107,8 +106,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/payments/escrow-state-machine.js` — エスクロー FSM（12テスト）
 - `src/payments/escrow-service.js` ＋ `src/db/json/EscrowRepository.js` — エスクロー永続化/オーケストレーション（9テスト）
 - `src/payments/settlement-calculator.js` — 従量・SLA 連動の精算分割（payout/refund/fee、最低課金/SLA ペナルティ、整数 sats 保存則, 12テスト）
-- `src/marketplace/marketplace-service.js` — 全サービスを束ねるドメイン合成層（6テスト, 正常系/不正系/オークション統合）
-- `src/marketplace/auction-engine.js` — 逆オークション・マッチング（価格×レピュ×SLA×アテステーション、price-ratio 正規化、reserve/minReputation/requireAttestation フィルタ, 13テスト）
+- `src/marketplace/marketplace-service.js` — エスクロー/検証/レピュテーションを束ねるドメイン合成層
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）

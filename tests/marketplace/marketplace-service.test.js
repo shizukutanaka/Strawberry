@@ -33,18 +33,6 @@ describe('marketplace-service', () => {
     expect(() => createMarketplaceService({})).toThrow(/required/);
   });
 
-  it('quotes price and scales escrow amount by duration', () => {
-    const { mkt } = build();
-    const q = mkt.quoteGpu(GPU, { utilization: 0.5 });
-    expect(q.pricePerHour).toBeGreaterThan(0);
-
-    const { amountSats, escrow } = mkt.openOrderEscrow({
-      orderId: 'o1', providerId: 'p1', gpu: GPU, durationMinutes: 120, market: { utilization: 0.5 },
-    });
-    expect(amountSats).toBe(Math.round(q.pricePerHour * 2));
-    expect(escrow.state).toBe(STATES.PENDING);
-  });
-
   it('happy path: open -> pay -> verify(honest) -> SETTLED + reputation credit', () => {
     const { mkt, reputationService } = build();
     const { escrow } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 60 });
@@ -80,15 +68,6 @@ describe('marketplace-service', () => {
     expect(reputationService.getStats('bad').slashCount).toBe(slashBefore + 1);
   });
 
-  it('ranks candidates by reputation', () => {
-    const { mkt, reputationService } = build();
-    for (let i = 0; i < 100; i++) reputationService.recordJobResult('strong', true);
-    reputationService.addStake('strong', 5_000_000);
-    reputationService.recordJobResult('weak', false);
-    const ranked = mkt.rankCandidates(['weak', 'strong']);
-    expect(ranked[0].id).toBe('strong');
-  });
-
   it('settleByUsage prorates the escrow by delivered usage', () => {
     const { mkt } = build();
     const { escrow, amountSats } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 120 });
@@ -100,24 +79,5 @@ describe('marketplace-service', () => {
     expect(settlement.providerPayoutSats + settlement.operatorFeeSats).toBe(settlement.chargedSats);
   });
 
-  it('selectProvider runs a reverse auction, auto-filling reputation from the service', () => {
-    const { mkt, reputationService } = build();
-    // strong provider: many successes + stake; weak: a failure
-    for (let i = 0; i < 100; i++) reputationService.recordJobResult('strong', true);
-    reputationService.addStake('strong', 5_000_000);
-    reputationService.recordJobResult('weak', false);
 
-    // weak bids slightly cheaper but should lose under balanced weights
-    const { winner, ranked, rejected } = mkt.selectProvider([
-      { providerId: 'strong', pricePerHour: 160, slaUptimePct: 100 },
-      { providerId: 'weak', pricePerHour: 150, slaUptimePct: 95 },
-    ]);
-    expect(winner.providerId).toBe('strong');
-    expect(ranked).toHaveLength(2);
-    expect(rejected).toHaveLength(0);
-    // reputation was auto-filled (not provided in the bids)
-    expect(ranked.find((r) => r.providerId === 'strong').components.reputation).toBeGreaterThan(
-      ranked.find((r) => r.providerId === 'weak').components.reputation,
-    );
-  });
 });

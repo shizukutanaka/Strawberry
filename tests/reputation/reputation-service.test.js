@@ -85,14 +85,5 @@ describe('reputation-service', () => {
     expect(r.score).toBeLessThanOrEqual(1);
   });
 
-  it('rank orders known providers by score and throws on non-array', () => {
-    const s = svc();
-    for (let i = 0; i < 100; i++) s.recordJobResult('strong', true);
-    s.addStake('strong', 5_000_000);
-    s.recordJobResult('weak', false);
-    s.recordJobResult('weak', false);
-    const ranked = s.rank(['weak', 'strong']);
-    expect(ranked[0].id).toBe('strong');
-    expect(() => s.rank('nope')).toThrow();
-  });
+
 });

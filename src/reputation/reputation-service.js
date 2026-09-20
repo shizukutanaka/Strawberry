@@ -4,7 +4,7 @@
 // ジョブ成否・検証監査・スラッシング・ステーク・SLA のイベントを記録し、スコアを返す。
 // escrow-service の slash_provider / work-verifier の監査結果から呼ばれる想定。
 // repository は DI 可能（既定 JSON、テストはインメモリ fake）。
-const { computeReputation, rankProviders } = require('./reputation-scorer');
+const { computeReputation } = require('./reputation-scorer');
 
 function defaultStats() {
   return {
@@ -84,15 +84,6 @@ function createReputationService({ repository } = {}) {
       return computeReputation(stats, opts);
     },
 
-    /** プロバイダ群をスコア降順に並べる（マッチング/検索ランキング）。 */
-    rank: (providerIds, opts = {}) => {
-      if (!Array.isArray(providerIds)) throw new Error('providerIds must be an array');
-      const providers = providerIds.map((providerId) => {
-        const rec = repo.getByProviderId(providerId);
-        return { id: providerId, stats: rec ? { ...defaultStats(), ...rec.stats } : defaultStats() };
-      });
-      return rankProviders(providers, opts);
-    },
 
     getStats: (providerId) => {
       const rec = repo.getByProviderId(providerId);

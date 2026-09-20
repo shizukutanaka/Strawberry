@@ -7,7 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { logger } = require('./src/utils/logger');
 
-class LightningService extends EventEmitter {
+class LightningService {
     /**
      * サービス死活判定: gRPC接続状態・イベントストリーム・initializedを総合判定
      * @returns {Promise<boolean>}
@@ -35,7 +35,6 @@ class LightningService extends EventEmitter {
     }
 
     constructor() {
-        super();
         this.lnd = null;
         this.config = {
             host: process.env.LND_HOST || 'localhost:10009',
@@ -78,7 +77,6 @@ class LightningService extends EventEmitter {
             this.initialized = true;
             logger.info('✅ Lightning Network service initialized');
             
-            this.emit('initialized', this.nodeInfo);
             
         } catch (error) {
             logger.error('Failed to initialize Lightning service:', error);
@@ -495,7 +493,6 @@ class LightningService extends EventEmitter {
 
             logger.info(`Created invoice: ${invoiceData.paymentHash.substring(0, 16)}... for ${amountSats} sats`);
 
-            this.emit('invoice:created', invoiceData);
 
             return invoiceData;
 
@@ -585,7 +582,6 @@ class LightningService extends EventEmitter {
             
             logger.info(`Payment sent: ${paymentData.paymentHash.substring(0, 16)}... Amount: ${paymentData.amount} sats`);
             
-            this.emit('payment:sent', paymentData);
             
             return paymentData;
             
@@ -679,10 +675,6 @@ class LightningService extends EventEmitter {
                     invoiceData.amountPaid = parseInt(invoice.amt_paid_sat);
                     logger.info(`Invoice paid: ${paymentHash.substring(0, 16)}...`);
                     appendAuditLog('invoice_paid', { paymentHash, amount: invoiceData.amountPaid });
-                    this.emit('invoice:paid', invoiceData);
-                    this.emit(`payment:${paymentHash}`, {
-                        preimage: invoice.r_preimage.toString('hex')
-                    });
                 }
             });
             invoiceStream.on('error', (error) => {
@@ -723,11 +715,9 @@ class LightningService extends EventEmitter {
                 if (event.type === 'OPEN_CHANNEL') {
                     logger.info('Channel opened:', event.open_channel);
                     appendAuditLog('channel_opened', { channel: event.open_channel });
-                    this.emit('channel:opened', event.open_channel);
                 } else if (event.type === 'CLOSED_CHANNEL') {
                     logger.info('Channel closed:', event.closed_channel);
                     appendAuditLog('channel_closed', { channel: event.closed_channel });
-                    this.emit('channel:closed', event.closed_channel);
                 }
                 // チャネル情報更新
                 this.updateChannels();
@@ -883,7 +873,6 @@ class LightningService extends EventEmitter {
             for (const [hash, invoice] of this.invoices) {
                 if (invoice.status === 'pending' && invoice.expiresAt < now) {
                     invoice.status = 'expired';
-                    this.emit('invoice:expired', invoice);
                 }
             }
             // Map件数・期間クリーニング

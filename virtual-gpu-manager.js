@@ -1,5 +1,4 @@
 // src/core/virtual-gpu-manager.js - Virtual GPU Manager
-const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
 // docker/k8s プラットフォームは dockerode/@kubernetes/client-node が依存に存在せず
 // 全環境で実行不能のため削除済み。native（nvidia-smi 経由）のみをサポートする。
@@ -21,7 +20,7 @@ function sanitizeId(value) {
   return s;
 }
 
-class VirtualGPUManager extends EventEmitter {
+class VirtualGPUManager {
     /**
      * サービス死活判定: 初期化状態とプラットフォーム API の応答で判定する。
      * 仮想GPUの「在庫数」は死活状態に含めない（0 個は正常な初期状態）。
@@ -44,7 +43,6 @@ class VirtualGPUManager extends EventEmitter {
     }
 
     constructor() {
-        super();
         this.platform = this.detectPlatform();
         this.virtualGPUs = new Map();
         this.allocations = new Map();
@@ -76,7 +74,6 @@ class VirtualGPUManager extends EventEmitter {
             this.initialized = true;
             logger.info('✅ Virtual GPU Manager initialized');
             
-            this.emit('initialized');
             
         } catch (error) {
             logger.error('Failed to initialize Virtual GPU Manager:', error);
@@ -171,7 +168,6 @@ class VirtualGPUManager extends EventEmitter {
             vgpu.status = 'allocated';
             vgpu.allocationId = allocation.id;
 
-            this.emit('vgpu:allocated', { vgpuId, allocationId: allocation.id });
 
             return allocation;
         } catch (e) {
@@ -279,7 +275,6 @@ class VirtualGPUManager extends EventEmitter {
         vgpu.status = 'available';
         delete vgpu.allocationId;
         
-        this.emit('vgpu:released', { vgpuId: vgpu.id, allocationId });
         
         return allocation;
     }
@@ -302,7 +297,6 @@ class VirtualGPUManager extends EventEmitter {
         this.virtualGPUs.delete(vgpuId);
         await this.deleteVirtualGPUConfig(vgpuId);
         
-        this.emit('vgpu:destroyed', vgpuId);
         
         logger.info(`Virtual GPU destroyed: ${vgpuId}`);
     }

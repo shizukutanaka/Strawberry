@@ -473,6 +473,18 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 
 検証: 対象スイート全パス。
 
+### 第24ラウンド（ソクラテス式問答 — 「emit したイベントは誰が聴くか？」）
+
+- **削除**: `this.emit(...)` 11箇所（lightning-service 7: initialized/invoice:created/
+  invoice:paid/payment:sent/payment:hash/channel:opened/closed/invoice:expired、
+  vgpu-manager 4: initialized/vgpu:allocated/released/destroyed）— リスナーが
+  コード全体にゼロ（write-only イベント）。invoiceStream.on 等の残存リスナーは
+  LND gRPC ストリーム向けで別物。`extends EventEmitter` + `super()` も除去
+  （lightning-service は `new EventEmitter()` をストリーム用に使うため require のみ残す）
+- **gpuDetector 生存確認**: routes/index.js の起動時検出で実呼出しあり
+
+検証: tests/gpu + basic + probe23b — 全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

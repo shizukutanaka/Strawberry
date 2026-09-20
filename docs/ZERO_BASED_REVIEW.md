@@ -526,6 +526,16 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 
 検証: basic テストパス。
 
+### 第29ラウンド（ソクラテス式問答 — 「個別ファイルの残りは？」）
+
+- `api/utils/lightning-api.js` — btc-onchain 経路の LN 引出しアダプタ
+  （OpenNode/LNbits/BTCPay）。btc-payment.js とテストが消費 → 生存
+- `session-invalidation.js` — jwt-auth が消費するトークン無効化ポリシー → 生存
+- `src/utils/` 全16ファイル・ルート全ファイルの消費者を再確認 — 孤児なし
+
+結論: 第28・29ラウンド連続で削除対象なし級。監査可能な全層で
+「所有者・読み出し先・実行経路」が弁明可能 — 収束維持。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -147,8 +147,6 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
 
     // エスクロー按分精算（プロバイダー起因 → 最低料金床なし）。best-effort。
     try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const { createEscrowService } = require('../../../payments/escrow-service');
       const escrowSvc = createEscrowService({ lnAdapter: lightning });
       const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
       for (const escrow of escrows) {
@@ -212,6 +210,8 @@ const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
 const GpuRepository = require('../../../db/json/GpuRepository');
+const EscrowRepository = require('../../../db/json/EscrowRepository');
+const { createEscrowService } = require('../../../payments/escrow-service');
 const providerUptime = require('../../../reputation/provider-uptime');
 // 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
@@ -597,7 +597,6 @@ router.get('/:id/payment',
   asyncHandler(async (req, res) => {
     const order = req.resource;
     const PaymentRepository = require('../../../db/json/PaymentRepository');
-    const EscrowRepository = require('../../../db/json/EscrowRepository');
 
     const payments = (PaymentRepository.getByOrderId(order.id) || []).map(p => ({
       id: p.id,
@@ -691,11 +690,9 @@ router.put('/:id',
     // HELD エスクローのキャンセル失敗は致命的: 注文更新を中断してエラーを返す。
     if (updateData.status === 'cancelled') {
       try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id) || [];
+          const escrows = EscrowRepository.getByOrderId(order.id) || [];
         if (escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService({ lnAdapter: lightning });
+            const escrowSvc = createEscrowService({ lnAdapter: lightning });
           for (const escrow of escrows) {
             if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
             // HELD escrow cancel failure must not be silently swallowed — propagate it.
@@ -779,10 +776,8 @@ router.delete('/:id',
     // 資金が HELD のまま永久にロックされるため、失敗時は注文キャンセルを中断してエラーを返す。
     // PENDING エスクローは未入金なので失敗しても資金喪失はなく、ベストエフォートで扱う。
     try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
       const escrows = EscrowRepository.getByOrderId(order.id);
       if (Array.isArray(escrows) && escrows.length > 0) {
-        const { createEscrowService } = require('../../../payments/escrow-service');
         const escrowSvc = createEscrowService({ lnAdapter: lightning });
         for (const escrow of escrows) {
           if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
@@ -1138,10 +1133,8 @@ router.post('/:id/reject',
     }
     // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
     try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
       const escrows = EscrowRepository.getByOrderId(order.id);
       if (Array.isArray(escrows) && escrows.length > 0) {
-        const { createEscrowService } = require('../../../payments/escrow-service');
         const escrowSvc = createEscrowService({ lnAdapter: lightning });
         for (const escrow of escrows) {
           if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
@@ -1369,11 +1362,9 @@ router.post('/:id/dispute/resolve',
       }
       // エスクロー返金（存在すれば、ベストエフォート）
       try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id);
+          const escrows = EscrowRepository.getByOrderId(order.id);
         if (Array.isArray(escrows) && escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService({ lnAdapter: lightning });
+            const escrowSvc = createEscrowService({ lnAdapter: lightning });
           for (const e of escrows) {
             if (!['CANCELED', 'SETTLED'].includes(e.state)) {
               try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
@@ -1416,11 +1407,9 @@ router.post('/:id/dispute/resolve',
       // して escrow を放置していた漏れの修正）。escrow の現状態に応じて正しい
       // イベント（HELD→DELIVER_OK / DISPUTED→RESOLVE_SETTLE）を選ぶ。
       try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id);
+          const escrows = EscrowRepository.getByOrderId(order.id);
         if (Array.isArray(escrows) && escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService({ lnAdapter: lightning });
+            const escrowSvc = createEscrowService({ lnAdapter: lightning });
           for (const e of escrows) {
             if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
             const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'
@@ -1785,9 +1774,7 @@ router.post('/:id/stop',
       // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
       // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
       try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService({ lnAdapter: lightning });
+          const escrowSvc = createEscrowService({ lnAdapter: lightning });
         const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
         // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
         // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。

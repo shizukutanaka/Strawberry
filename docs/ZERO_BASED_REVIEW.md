@@ -575,6 +575,21 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 **116 スイート・1,048 テスト全パス**（1 skipped）。全削除の累積後も
 システム全体が健全 — 削除したのは本当に dead であったと実測で確証。
 
+### 第34ラウンド（ソクラテス式問答 — 「重複コードは統合できるか？」）
+
+重複スキャン（6行以上の重複ブロック）で発見: order/index.js の
+エスクロー処理ブロックは**外見は同じだが意味的に別物** —
+HELD キャンセル失敗を致命にする箇所（admin cancel / renter delete）と
+ベストエフォートの箇所（reject / dispute resolve）が混在し、
+settle（精算）と cancel（返金）の別操作もある。ロジックは統合不可。
+
+統合したのは boilerplate のみ: `require(EscrowRepository)` 8箇所・
+`require(escrow-service)` 7箇所の遅延 require をファイル先頭へ集約
+（循環なし: escrow-service は routes に依存しない）。−22/+9 行。
+
+検証: tests/api/order・tests/payments・api.integration — 10 スイート
+301 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

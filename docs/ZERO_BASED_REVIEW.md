@@ -515,6 +515,17 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
   削除済み機能の記述なし — research 系2文書（improvement/category-research）に
   時点スナップショットの記述のみ → deprecation banner で誘導
 
+### 第28ラウンド（ソクラテス式問答 — 「この npm 依存/スクリプトは実行可能か？」）
+
+- **削除**: `npm run dev`（nodemon が依存に存在せず実行不能 — 第12ラウンドの
+  lint と同種の死んだスクリプト）
+- 依存再スキャン: 全 dependencies + devDependencies（jest/supertest/
+  @playwright/test）に消費者確認 — 削除連鎖で孤児化した依存なし
+- src/services（price-watch・renter-eligibility）・src/api/utils 全ファイル
+  生存確認
+
+検証: basic テストパス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

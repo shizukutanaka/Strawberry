@@ -1,6 +1,6 @@
 // tests/payments/action-executor.test.js
 const { executeActions } = require('../../src/payments/action-executor');
-const { createMockLnAdapter } = require('../../src/payments/ln-adapter');
+const { createMockLnAdapter } = require('../helpers/mock-ln-adapter');
 const { transition, STATES } = require('../../src/payments/escrow-state-machine');
 
 const ctx = { preimage: 'pre-1', preimageHash: 'hash-1', providerInvoice: 'lnbc-prov', payoutSats: 985 };

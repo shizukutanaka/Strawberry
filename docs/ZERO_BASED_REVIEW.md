@@ -882,6 +882,16 @@ src/ 全ファイルの export 名を総当たり:
   消えた残存入力）。一覧に記録。
 - gpu.register/update スキーマは全フィールドが保存+応答で消費。
 
+### 第65ラウンド（ソクラテス式問答 — 「src/ にテスト専用コードが住んでいないか？」）
+
+- `src/payments/ln-adapter.js`（42行）は `createMockLnAdapter` のみを export — src 側の
+  消費者ゼロ（adapter は DI 経由で実体は lightning-service）。テスト2件のみが使う
+  **モックを src/ に同居させていた偽装プロダクションコード** → `tests/helpers/
+  mock-ln-adapter.js` へ git mv + import 修正2件。
+- PaymentRepository・gpu-failure-monitor も確認 — 両方 src/運用側に消費者あり。
+
+検証: tests/payments + lightning テスト — 53テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

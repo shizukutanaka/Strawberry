@@ -12,7 +12,7 @@
 // 正しい ctx（preimage/preimageHash/providerInvoice/payoutSats）で呼ばれること、
 // (c) LN 実行が失敗しても状態遷移自体は成功したままであること、を確認する。
 const { createEscrowService } = require('../../src/payments/escrow-service');
-const { createMockLnAdapter } = require('../../src/payments/ln-adapter');
+const { createMockLnAdapter } = require('../helpers/mock-ln-adapter');
 const { STATES } = require('../../src/payments/escrow-state-machine');
 
 function makeMemoryRepo() {

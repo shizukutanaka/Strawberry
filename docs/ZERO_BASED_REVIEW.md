@@ -1028,6 +1028,15 @@ src/ 全ファイルの export 名を総当たり:
   （resolveDispute→order-detail, approveManualPayment/pendingManualPayments→admin-payments）。
 - package.json `main: src/api/server.js` 実在。削除ゼロのラウンド。
 
+### 第80ラウンド（ソクラテス式問答 — 「リポジトリ層に配線なしのインスタンスはないか？」）
+
+- `src/db/json/` 全10ファイルに消費者確認: 8リポジトリ全て routes/services/reputation
+  から required（UptimeRepository→provider-uptime, VerificationRepository→verification-
+  service）。atomicWrite・createJsonRepository はファクトリ経由。
+- jest.config.testPathIgnorePatterns は e2e 除外のみで実整合。
+
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

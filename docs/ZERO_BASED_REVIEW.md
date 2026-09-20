@@ -992,6 +992,17 @@ src/ 全ファイルの export 名を総当たり:
 - user.register スキーマ4フィールド・process-guards（server.js で登録）は全消費者あり。
 - playwright test --list: 25 spec 全列挙、helpers 破損なし。
 
+### 第76ラウンド（ソクラテス式問答 — 「防御的な除去リストの各エントリは実フィールドか？」）
+
+- `SENSITIVE_USER_FIELDS` 全11エントリ突合: password・apiKey(レガシー)・
+  sessionsRevokedAt・passwordChangedAt・deniedDisputeCount・vindicatedDisputeCount は
+  実フィールド（dispute 解決・パスワード変更・退会で実際に書き込まれる）。
+  totpSecret/mfaSecret 等5件は「将来の機密フィールド追加への防御的列挙」—
+  マスター認証 TOTP は env 管理でユーザーレコードに secret を持たないことを確認。
+  セキュリティ防御層として価値密度充分 → 生存。
+- user.register スキーマ4フィールド・process-guards も消費者確認済み。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

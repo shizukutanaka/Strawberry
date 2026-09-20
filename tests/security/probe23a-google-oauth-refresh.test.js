@@ -1,37 +1,15 @@
 // tests/security/probe23a-google-oauth-refresh.test.js
 // Probe 23a regression tests:
-// 1. POST /auth/google rejects tokens where email_verified !== true
-//    (prevents unverified-email account creation / victim email pre-emption)
-// 2. POST /users/refresh is now protected by withLock, making single-use
-//    enforcement race-free (verify OWASP reuse-detection still works correctly)
+// POST /users/refresh is protected by withLock, making single-use
+// enforcement race-free (verify OWASP reuse-detection still works correctly).
+// (The POST /auth/google idToken endpoint was removed — google-auth-library
+// is not installed so it could never verify a token.)
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
 const UserRepository = require('../../src/db/json/UserRepository');
 
-// ─── 1. Google OAuth: email_verified guard ────────────────────────────────────
-describe('POST /auth/google: rejects unverified email', () => {
-  // We cannot call the real Google OAuth without live credentials.
-  // The guard sits in the route body immediately after getPayload(), before any
-  // user-repository interaction. We verify the behavior by mocking the library.
-  it('rejects non-200 idToken attempts with a 4xx/5xx (no account created)', async () => {
-    // Without GOOGLE_CLIENT_ID configured the endpoint returns 503 before
-    // reaching the email_verified check — that is the expected 503 path.
-    // The important invariant: no account or token is ever created.
-    const res = await request(app).post('/api/v1/auth/google').send({ idToken: 'fake' });
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
-    expect(res.body.token).toBeUndefined();
-  });
-
-  it('email_verified guard is present in source code', () => {
-    const fs = require('fs');
-    const src = fs.readFileSync(require.resolve('../../src/api/routes/auth/google.js'), 'utf-8');
-    expect(src).toMatch(/email_verified/);
-    expect(src).toMatch(/401/);
-  });
-});
-
-// ─── 2. Refresh token: withLock makes single-use race-proof ──────────────────
+// ─── Refresh token: withLock makes single-use race-proof ──────────────────
 describe('POST /users/refresh: single-use enforcement', () => {
   const uniq = `p23a${Date.now().toString(36)}`;
   const email = `${uniq}@example.com`;

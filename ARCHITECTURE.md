@@ -44,10 +44,9 @@ src/api/server.js
  └─ /api/v1 (routes/index.js)  ※ /system/info 以外は JWT 必須
       ├─ /gpus /orders /payments /users  → JSON リポジトリで動作
       └─ コアサービス: src/core/services.js 経由のガード付きシングルトン
-           ├─ virtual-gpu-manager.js (dockerode/k8s)   … ロード可（要 Docker/k8s 実機）
+           ├─ virtual-gpu-manager.js (native のみ)     … ロード可
            ├─ gpu-detector-extended.js                  … ロード可
-           ├─ lightning-service.js (gRPC)               … ロード可（要 LND。未接続時は mock）
-           └─ p2p-network.js (libp2p, **ESM**)          … 無効（libp2p が ESM 専用で require 不可）
+           └─ lightning-service.js (gRPC)               … ロード可（要 LND。未接続時は mock）
 ```
 
 ### コアサービスのガード方針（重要）
@@ -97,7 +96,7 @@ src/api/server.js
 
 ## フォローアップ（未対応・推奨順）
 
-1. `p2p-network` の有効化（libp2p ESM 対応 or 代替実装）。他3サービスは実機(Docker/k8s/LND)での結合検証。
+1. ~~`p2p-network` の有効化~~ → ファイル削除済み（libp2p 未導入で実行不能。必要なら git 履歴から復元）。LND 実機での結合検証は残課題。
 2. ~~データ層を一本化~~ → **方針決定済み（2026-09）**: 当面 JSON のみ。`prisma/` は削除済み。
    将来 DB 化するなら実ドメインのスキーマ設計から新規に行う。
 3. サービスの DI/シングルトン統一、孤立 `*-fixed.js` の削除。

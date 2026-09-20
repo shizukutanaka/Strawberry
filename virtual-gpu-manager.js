@@ -1,22 +1,8 @@
 // src/core/virtual-gpu-manager.js - Virtual GPU Manager
 const EventEmitter = require('events');
 const { v4: uuidv4 } = require('uuid');
-// dockerode / @kubernetes/client-node は optionalDependencies。
-// トップレベルで eager require すると、(a) 未インストール環境でモジュール読込自体が
-// 落ちてルート契約テストごと死ぬ、(b) client-node は 1000 以上のモデルファイルを
-// 同期 require するため、jest の並行実行下で読込中のファイルに対する ENOENT が
-// 発生し、スイートが「Test suite failed to run」になる（Windows で再現）。
-// 実際に docker/k8s プラットフォームを使うときだけ遅延ロードする。
-let _Docker;
-function getDocker() {
-  if (_Docker === undefined) _Docker = require('dockerode');
-  return _Docker;
-}
-let _k8s;
-function getK8s() {
-  if (_k8s === undefined) _k8s = require('@kubernetes/client-node');
-  return _k8s;
-}
+// docker/k8s プラットフォームは dockerode/@kubernetes/client-node が依存に存在せず
+// 全環境で実行不能のため削除済み。native（nvidia-smi 経由）のみをサポートする。
 const { logger } = require('./src/utils/logger');
 // child_process には .promises が存在しないため、util.promisify で exec を生成する
 // (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
@@ -44,8 +30,7 @@ class VirtualGPUManager extends EventEmitter {
     async isHealthy() {
         // 1. initializedフラグ
         if (!this.initialized) return false;
-        // 2. プラットフォームごとの追加チェック（例: Docker/k8sならAPI応答）
-        //
+        // 2. プラットフォーム別の追加チェックは不要（native のみ）
         // 注: 以前はここに「仮想GPUが1つ以上管理されているか
         // (this.virtualGPUs.size === 0 なら unhealthy)」という条件があったが、
         // これは誤り。仮想GPU が 0 個なのは「まだ誰にも貸し出していない」という
@@ -55,65 +40,29 @@ class VirtualGPUManager extends EventEmitter {
         //   [Monitor] VirtualGPUManager restarted successfully.
         // が監視周期（10秒）ごとに永久に繰り返され、毎回 GPU 検出コマンドと
         // 設定復元 I/O が走っていた（実機で確認）。在庫数は死活とは無関係。
-        if (this.platform === 'docker') {
-            try {
-                if (!this.docker) return false;
-                await this.docker.ping();
-            } catch (e) {
-                return false;
-            }
-        }
-        if (this.platform === 'kubernetes') {
-            try {
-                if (!this.k8sApi) return false;
-                await this.k8sApi.listPodForAllNamespaces();
-            } catch (e) {
-                return false;
-            }
-        }
         return true;
     }
 
     constructor() {
         super();
         this.platform = this.detectPlatform();
-        // docker クライアントは docker プラットフォーム時のみ生成（未インストール環境で
-        // コンストラクタが throw しないように）
-        this.docker = this.platform === 'docker' ? new (getDocker())() : null;
-        this.k8sApi = null;
         this.virtualGPUs = new Map();
-        this.containers = new Map();
         this.allocations = new Map();
         this.initialized = false;
     }
 
     detectPlatform() {
-        // 実行環境検出
-        if (process.env.KUBERNETES_SERVICE_HOST) {
-            return 'kubernetes';
-        } else if (process.env.DOCKER_HOST || fsSync.existsSync('/var/run/docker.sock')) {
-            return 'docker';
-        } else {
-            return 'native';
-        }
+        // docker/k8s プラットフォームは dockerode/@kubernetes/client-node が依存に
+        // 存在せず実行不能のため削除。native（nvidia-smi 経由）のみ。
+        return 'native';
     }
 
     async initialize(physicalGPUs) {
         try {
             logger.info(`Initializing Virtual GPU Manager on ${this.platform} platform...`);
             
-            // プラットフォーム別初期化
-            switch (this.platform) {
-                case 'kubernetes':
-                    await this.initializeKubernetes();
-                    break;
-                case 'docker':
-                    await this.initializeDocker();
-                    break;
-                case 'native':
-                    await this.initializeNative();
-                    break;
-            }
+            // プラットフォーム別初期化（native のみ）
+            await this.initializeNative();
             
             // 物理GPU情報を保存
             this.physicalGPUs = physicalGPUs;
@@ -135,53 +84,7 @@ class VirtualGPUManager extends EventEmitter {
         }
     }
 
-    async initializeKubernetes() {
-        try {
-            const k8s = getK8s();
-            const kc = new k8s.KubeConfig();
-            kc.loadFromDefault();
-            
-            this.k8sApi = kc.makeApiClient(k8s.CoreV1Api);
-            this.k8sAppsApi = kc.makeApiClient(k8s.AppsV1Api);
-            
-            // GPU Device Plugin確認
-            const devicePlugins = await this.k8sApi.listNamespacedPod('kube-system');
-            const gpuPlugin = devicePlugins.body.items.find(pod => 
-                pod.metadata.name.includes('nvidia-device-plugin')
-            );
-            
-            if (!gpuPlugin) {
-                logger.warn('NVIDIA device plugin not found in Kubernetes');
-            }
-            
-            logger.info('Kubernetes API initialized');
-            
-        } catch (error) {
-            logger.error('Failed to initialize Kubernetes:', error);
-            throw error;
-        }
-    }
 
-    async initializeDocker() {
-        try {
-            // Docker情報取得
-            const info = await this.docker.info();
-            
-            // NVIDIA Dockerランタイム確認
-            if (!info.Runtimes || !info.Runtimes.nvidia) {
-                logger.warn('NVIDIA Docker runtime not found');
-            }
-            
-            logger.info('Docker initialized:', {
-                version: info.ServerVersion,
-                runtimes: Object.keys(info.Runtimes || {})
-            });
-            
-        } catch (error) {
-            logger.error('Failed to initialize Docker:', error);
-            throw error;
-        }
-    }
 
     async initializeNative() {
         // ネイティブGPU仮想化の初期化
@@ -212,34 +115,11 @@ class VirtualGPUManager extends EventEmitter {
 
     async checkVirtualizationSupport() {
         const support = {
-            docker: false,
-            kubernetes: false,
             vgpu: false,
             mig: false,
             srIov: false,
             gpu_passthrough: false
         };
-        
-        // Docker GPU サポート
-        if (this.platform === 'docker') {
-            try {
-                const containers = await this.docker.listContainers({
-                    all: true,
-                    filters: { label: ['com.nvidia.volume.version'] }
-                });
-                support.docker = true;
-            } catch {}
-        }
-        
-        // Kubernetes GPU サポート
-        if (this.platform === 'kubernetes') {
-            try {
-                const nodes = await this.k8sApi.listNode();
-                support.kubernetes = nodes.body.items.some(node => 
-                    node.status.capacity && node.status.capacity['nvidia.com/gpu']
-                );
-            } catch {}
-        }
         
         // NVIDIA vGPU サポート
         support.vgpu = this.vgpuSupported || false;
@@ -267,18 +147,7 @@ class VirtualGPUManager extends EventEmitter {
             
             let vgpu;
             
-            // プラットフォーム別の仮想GPU作成
-            switch (this.platform) {
-                case 'kubernetes':
-                    vgpu = await this.createK8sVirtualGPU(physicalGPU, config, vgpuId);
-                    break;
-                case 'docker':
-                    vgpu = await this.createDockerVirtualGPU(physicalGPU, config, vgpuId);
-                    break;
-                case 'native':
-                    vgpu = await this.createNativeVirtualGPU(physicalGPU, config, vgpuId);
-                    break;
-            }
+            vgpu = await this.createNativeVirtualGPU(physicalGPU, config, vgpuId);
             
             // 仮想GPU情報
             const virtualGPU = {
@@ -315,128 +184,7 @@ class VirtualGPUManager extends EventEmitter {
         }
     }
 
-    async createK8sVirtualGPU(physicalGPU, config, vgpuId) {
-        // Kubernetes Pod として仮想GPU作成
-        const podManifest = {
-            apiVersion: 'v1',
-            kind: 'Pod',
-            metadata: {
-                name: `strawberry-vgpu-${vgpuId}`,
-                namespace: 'strawberry-gpu',
-                labels: {
-                    app: 'strawberry',
-                    component: 'vgpu',
-                    vgpuId: vgpuId,
-                    physicalGPU: physicalGPU.id
-                }
-            },
-            spec: {
-                containers: [{
-                    name: 'gpu-worker',
-                    image: 'strawberry/gpu-worker:latest',
-                    resources: {
-                        limits: {
-                            'nvidia.com/gpu': this.calculateGPUFraction(physicalGPU, config),
-                            memory: `${config.memoryLimit || '8Gi'}`,
-                            cpu: `${config.cpuLimit || '4'}`
-                        }
-                    },
-                    env: [
-                        { name: 'VGPU_ID', value: vgpuId },
-                        { name: 'PHYSICAL_GPU_ID', value: physicalGPU.id },
-                        { name: 'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', value: String(config.computePercentage || 50) }
-                    ],
-                    volumeMounts: [{
-                        name: 'gpu-config',
-                        mountPath: '/etc/strawberry/gpu'
-                    }]
-                }],
-                volumes: [{
-                    name: 'gpu-config',
-                    configMap: {
-                        name: `vgpu-config-${vgpuId}`
-                    }
-                }],
-                nodeSelector: {
-                    'strawberry.network/gpu-node': 'true',
-                    'nvidia.com/gpu.product': physicalGPU.model.series
-                }
-            }
-        };
-        
-        // ConfigMap 作成
-        await this.k8sApi.createNamespacedConfigMap('strawberry-gpu', {
-            metadata: {
-                name: `vgpu-config-${vgpuId}`
-            },
-            data: {
-                'config.json': JSON.stringify(config),
-                'gpu.json': JSON.stringify(physicalGPU)
-            }
-        });
-        
-        // Pod 作成
-        const pod = await this.k8sApi.createNamespacedPod('strawberry-gpu', podManifest);
-        
-        return {
-            platform: 'kubernetes',
-            pod: pod.body.metadata.name,
-            namespace: pod.body.metadata.namespace
-        };
-    }
 
-    async createDockerVirtualGPU(physicalGPU, config, vgpuId) {
-        // Docker コンテナとして仮想GPU作成
-        const containerConfig = {
-            Image: 'strawberry/gpu-worker:latest',
-            name: `strawberry-vgpu-${vgpuId}`,
-            Env: [
-                `VGPU_ID=${vgpuId}`,
-                `PHYSICAL_GPU_ID=${physicalGPU.id}`,
-                `CUDA_VISIBLE_DEVICES=${this.getGPUIndex(physicalGPU.id)}`,
-                `CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${config.computePercentage || 50}`
-            ],
-            HostConfig: {
-                Runtime: 'nvidia',
-                Resources: {
-                    DeviceRequests: [{
-                        Count: -1,
-                        Capabilities: [['gpu']],
-                        Options: {
-                            'nvidia.com/gpu': String(this.getGPUIndex(physicalGPU.id))
-                        }
-                    }],
-                    Memory: config.memoryLimit || 8 * 1024 * 1024 * 1024,
-                    CpuShares: (config.cpuLimit || 4) * 1024
-                },
-                Mounts: [{
-                    Type: 'bind',
-                    Source: `/var/lib/strawberry/vgpu/${vgpuId}`,
-                    Target: '/data'
-                }]
-            },
-            Labels: {
-                'strawberry.vgpu': vgpuId,
-                'strawberry.physical_gpu': physicalGPU.id,
-                'strawberry.gpu_model': physicalGPU.name
-            }
-        };
-        
-        // データディレクトリ作成
-        await fs.mkdir(`/var/lib/strawberry/vgpu/${vgpuId}`, { recursive: true });
-        
-        // コンテナ作成・起動
-        const container = await this.docker.createContainer(containerConfig);
-        await container.start();
-        
-        this.containers.set(vgpuId, container);
-        
-        return {
-            platform: 'docker',
-            containerId: container.id,
-            containerName: containerConfig.name
-        };
-    }
 
     async createNativeVirtualGPU(physicalGPU, config, vgpuId) {
         // ネイティブ仮想GPU作成
@@ -564,29 +312,7 @@ nvidia-cuda-mps-control -d
                 accessInfo: await this.generateAccessInfo(vgpu)
             };
 
-            // プラットフォーム別のアクセス設定。
-            // marketplace GPU（allocateGPU の遅延登録で作られる。他プロバイダのマシン上に
-            // 実在し、このノードにはコンテナ/Pod の実体を持たない）は、このノードが
-            // docker/k8s を検出していても setupDockerAccess/setupK8sAccess を適用できない
-            // （this.containers に実体が無く 'Container not found' で throw する）。CI ランナー
-            // には /var/run/docker.sock が存在し platform='docker' と誤検出されるため、
-            // これを分岐しないと marketplace GPU の start が常に 500 になる。実体が無い以上
-            // 正直な native アクセス（endpoint:null, deliveryImplemented:false）を用いる。
-            if (vgpu.type === 'marketplace') {
-                allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
-            } else {
-                switch (this.platform) {
-                    case 'kubernetes':
-                        allocation.accessInfo = await this.setupK8sAccess(vgpu, allocation);
-                        break;
-                    case 'docker':
-                        allocation.accessInfo = await this.setupDockerAccess(vgpu, allocation);
-                        break;
-                    case 'native':
-                        allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
-                        break;
-                }
-            }
+            allocation.accessInfo = await this.setupNativeAccess(vgpu, allocation);
 
             this.allocations.set(allocation.id, allocation);
             vgpu.status = 'allocated';
@@ -692,24 +418,7 @@ nvidia-cuda-mps-control -d
             throw new Error('Virtual GPU not found');
         }
         
-        // プラットフォーム別のリリース処理。
-        // 割り当て時（allocateVirtualGPU）と対称に、marketplace GPU は native 解放を用いる
-        // （コンテナ/Pod の実体を持たないため docker/k8s 解放は無意味）。
-        if (vgpu.type === 'marketplace') {
-            await this.releaseNativeAccess(vgpu, allocation);
-        } else {
-            switch (this.platform) {
-                case 'kubernetes':
-                    await this.releaseK8sAccess(vgpu, allocation);
-                    break;
-                case 'docker':
-                    await this.releaseDockerAccess(vgpu, allocation);
-                    break;
-                case 'native':
-                    await this.releaseNativeAccess(vgpu, allocation);
-                    break;
-            }
-        }
+        await this.releaseNativeAccess(vgpu, allocation);
         
         // 状態更新
         allocation.status = 'released';
@@ -734,18 +443,7 @@ nvidia-cuda-mps-control -d
         
         logger.info(`Destroying virtual GPU ${vgpuId}`);
         
-        // プラットフォーム別の削除処理
-        switch (this.platform) {
-            case 'kubernetes':
-                await this.destroyK8sVirtualGPU(vgpu);
-                break;
-            case 'docker':
-                await this.destroyDockerVirtualGPU(vgpu);
-                break;
-            case 'native':
-                await this.destroyNativeVirtualGPU(vgpu);
-                break;
-        }
+        await this.destroyNativeVirtualGPU(vgpu);
         
         // レコード削除
         this.virtualGPUs.delete(vgpuId);
@@ -756,68 +454,7 @@ nvidia-cuda-mps-control -d
         logger.info(`Virtual GPU destroyed: ${vgpuId}`);
     }
 
-    async setupK8sAccess(vgpu, allocation) {
-        // Kubernetes Service作成
-        const service = await this.k8sApi.createNamespacedService('strawberry-gpu', {
-            metadata: {
-                name: `vgpu-access-${allocation.id}`,
-                labels: {
-                    app: 'strawberry',
-                    vgpuId: vgpu.id,
-                    allocationId: allocation.id
-                }
-            },
-            spec: {
-                type: 'LoadBalancer',
-                selector: {
-                    vgpuId: vgpu.id
-                },
-                ports: [{
-                    name: 'gpu-access',
-                    port: 8080,
-                    targetPort: 8080
-                }]
-            }
-        });
-        
-        // Service IP取得待機
-        let serviceIP;
-        for (let i = 0; i < 30; i++) {
-            const svc = await this.k8sApi.readNamespacedService(service.body.metadata.name, 'strawberry-gpu');
-            if (svc.body.status.loadBalancer.ingress && svc.body.status.loadBalancer.ingress[0]) {
-                serviceIP = svc.body.status.loadBalancer.ingress[0].ip;
-                break;
-            }
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-        
-        return {
-            type: 'kubernetes',
-            endpoint: `http://${serviceIP}:8080`,
-            credentials: {
-                token: this.generateAccessToken()
-            }
-        };
-    }
 
-    async setupDockerAccess(vgpu, allocation) {
-        const container = this.containers.get(vgpu.id);
-        if (!container) {
-            throw new Error('Container not found');
-        }
-        
-        // ポートマッピング取得
-        const info = await container.inspect();
-        const port = info.NetworkSettings.Ports['8080/tcp'][0].HostPort;
-        
-        return {
-            type: 'docker',
-            endpoint: `http://localhost:${port}`,
-            credentials: {
-                token: this.generateAccessToken()
-            }
-        };
-    }
 
     async setupNativeAccess(vgpu, allocation) {
         // ネイティブアクセス設定。
@@ -840,21 +477,7 @@ nvidia-cuda-mps-control -d
         };
     }
 
-    async releaseK8sAccess(vgpu, allocation) {
-        // Kubernetes Service削除
-        try {
-            await this.k8sApi.deleteNamespacedService(
-                `vgpu-access-${allocation.id}`,
-                'strawberry-gpu'
-            );
-        } catch (error) {
-            logger.error('Failed to delete K8s service:', error);
-        }
-    }
 
-    async releaseDockerAccess(vgpu, allocation) {
-        // Docker アクセス解放（特に処理なし）
-    }
 
     async releaseNativeAccess(vgpu, allocation) {
         // プロキシプロセス終了。setupNativeAccess で記録した allocation.proxyPid を
@@ -878,36 +501,7 @@ nvidia-cuda-mps-control -d
         }
     }
 
-    async destroyK8sVirtualGPU(vgpu) {
-        try {
-            // Pod削除
-            await this.k8sApi.deleteNamespacedPod(
-                `strawberry-vgpu-${vgpu.id}`,
-                'strawberry-gpu'
-            );
-            
-            // ConfigMap削除
-            await this.k8sApi.deleteNamespacedConfigMap(
-                `vgpu-config-${vgpu.id}`,
-                'strawberry-gpu'
-            );
-        } catch (error) {
-            logger.error('Failed to destroy K8s vGPU:', error);
-        }
-    }
 
-    async destroyDockerVirtualGPU(vgpu) {
-        const container = this.containers.get(vgpu.id);
-        if (container) {
-            try {
-                await container.stop();
-                await container.remove();
-                this.containers.delete(vgpu.id);
-            } catch (error) {
-                logger.error('Failed to destroy Docker vGPU:', error);
-            }
-        }
-    }
 
     async destroyNativeVirtualGPU(vgpu) {
         const platformData = vgpu.platformData;
@@ -941,8 +535,6 @@ nvidia-cuda-mps-control -d
             return 'mig';
         } else if (this.vgpuSupported) {
             return 'vgpu';
-        } else if (this.platform === 'kubernetes' || this.platform === 'docker') {
-            return 'container';
         } else {
             return 'mps';
         }
@@ -975,15 +567,6 @@ nvidia-cuda-mps-control -d
         return Math.floor(totalBandwidth * (percentage / 100));
     }
 
-    calculateGPUFraction(physicalGPU, config) {
-        // Kubernetes GPU分数計算
-        const percentage = config.computePercentage || 50;
-        
-        if (percentage >= 90) return '1';
-        if (percentage >= 40) return '0.5';
-        if (percentage >= 20) return '0.25';
-        return '0.1';
-    }
 
     selectMIGProfile(physicalGPU, config) {
         // MIGプロファイル選択
@@ -1091,60 +674,10 @@ nvidia-cuda-mps-control -d
             throw new Error('Virtual GPU not found');
         }
         
-        // プラットフォーム別の統計取得
-        switch (this.platform) {
-            case 'kubernetes':
-                return await this.getK8sVGPUStats(vgpu);
-            case 'docker':
-                return await this.getDockerVGPUStats(vgpu);
-            case 'native':
-                return await this.getNativeVGPUStats(vgpu);
-        }
+        return await this.getNativeVGPUStats(vgpu);
     }
 
-    async getK8sVGPUStats(vgpu) {
-        try {
-            const metrics = await this.k8sApi.readNamespacedPodMetrics(
-                `strawberry-vgpu-${vgpu.id}`,
-                'strawberry-gpu'
-            );
-            
-            return {
-                cpu: metrics.body.containers[0].usage.cpu,
-                memory: metrics.body.containers[0].usage.memory,
-                gpu: {
-                    utilization: 0, // Prometheusから取得
-                    memory: 0,
-                    temperature: 0
-                }
-            };
-        } catch (error) {
-            logger.error('Failed to get K8s vGPU stats:', error);
-            return null;
-        }
-    }
 
-    async getDockerVGPUStats(vgpu) {
-        const container = this.containers.get(vgpu.id);
-        if (!container) return null;
-        
-        try {
-            const stats = await container.stats({ stream: false });
-            
-            return {
-                cpu: stats.cpu_stats.cpu_usage.total_usage,
-                memory: stats.memory_stats.usage,
-                gpu: {
-                    utilization: 0, // nvidia-smiから取得
-                    memory: 0,
-                    temperature: 0
-                }
-            };
-        } catch (error) {
-            logger.error('Failed to get Docker vGPU stats:', error);
-            return null;
-        }
-    }
 
     async getNativeVGPUStats(vgpu) {
         // ネイティブvGPU統計取得

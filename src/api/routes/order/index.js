@@ -1092,20 +1092,6 @@ router.post('/',
         chatId: process.env.TELEGRAM_CHAT_ID
       }).catch(() => {});
     }
-    // Googleカレンダー連携（非同期で実行、失敗はログのみ。googleapis は optional）
-    try {
-      const { addEventToCalendar } = require('../../../utils/google-calendar');
-      const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
-      addEventToCalendar({
-        summary: `GPU予約 #${createdOrder.id}`,
-        description: `ユーザー: ${req.user.id}\nGPU: ${gpu.name}\n合計: ${totalPrice} sat (${totalPriceJPY}円)`,
-        start: { dateTime: startDate.toISOString() },
-        end: { dateTime: endDate.toISOString() },
-      }).catch(err => logger.error('Googleカレンダー登録失敗', { error: err.message }));
-    } catch (e) {
-      logger.error('Googleカレンダー連携モジュール読込失敗', { error: e.message });
-    }
     // オーダーイベントをログに記録
     logger.info(`Order created: ${createdOrder.id}`, {
       orderId: createdOrder.id,

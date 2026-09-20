@@ -27,7 +27,5 @@ router.get('/github/callback',
   }
 );
 
-// Google OAuth2 RESTful認証（POST /api/auth/google）
-router.use('/google', require('./auth/google'));
 
 module.exports = router;

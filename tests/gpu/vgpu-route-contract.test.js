@@ -30,8 +30,7 @@ describe('VirtualGPUManager route-compat API', () => {
 
   it('allocateGPU/releaseGPU round-trip on a stubbed available GPU', async () => {
     const mgr = Object.create(VirtualGPUManager.prototype);
-    mgr.platform = 'unknown'; // switch 文が no-op になりプラットフォーム I/O を回避
-    mgr.virtualGPUs = new Map([['gpu-1', { id: 'gpu-1', status: 'available' }]]);
+        mgr.virtualGPUs = new Map([['gpu-1', { id: 'gpu-1', status: 'available' }]]);
     mgr.allocations = new Map();
     mgr.generateAccessInfo = async () => ({});
     mgr.emit = () => {};
@@ -53,14 +52,13 @@ describe('VirtualGPUManager route-compat API', () => {
 
   it('allocateVirtualGPU rolls back status to available on setup failure', async () => {
     const mgr = Object.create(VirtualGPUManager.prototype);
-    mgr.platform = 'docker';
     mgr.virtualGPUs = new Map([['gpu-2', { id: 'gpu-2', status: 'available' }]]);
     mgr.allocations = new Map();
     mgr.generateAccessInfo = async () => ({});
-    mgr.setupDockerAccess = async () => { throw new Error('docker down'); };
+    mgr.setupNativeAccess = async () => { throw new Error('setup down'); };
     mgr.emit = () => {};
 
-    await expect(mgr.allocateVirtualGPU('gpu-2', 'rental-2')).rejects.toThrow('docker down');
+    await expect(mgr.allocateVirtualGPU('gpu-2', 'rental-2')).rejects.toThrow('setup down');
     // ロールバックされ、再確保可能であること（TOCTOU ガードが残留しない）
     expect(mgr.virtualGPUs.get('gpu-2').status).toBe('available');
   });

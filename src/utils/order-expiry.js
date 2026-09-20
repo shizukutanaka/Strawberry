@@ -227,4 +227,4 @@ function expireStaleActiveOrders() {
   return expired;
 }
 
-module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders, resolveTimeoutMinutes };
+module.exports = { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders };

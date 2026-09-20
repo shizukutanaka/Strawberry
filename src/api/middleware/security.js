@@ -188,63 +188,6 @@ const checkRole = (roles) => {
   };
 };
 
-// APIキー認証ミドルウェア（マシン間通信用）
-const authenticateAPIKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  
-  if (!apiKey) {
-    return next(new APIError(
-      ErrorTypes.UNAUTHORIZED,
-      'API key required',
-      401
-    ));
-  }
-  
-  // API_KEY 環境変数が設定され、かつ一致する場合のみ許可。
-  // ハードコードされた 'dev-api-key' バックドアは廃止。
-  const validApiKey = process.env.API_KEY;
-  // HMAC で固定長ダイジェストに正規化してから timingSafeEqual で比較する。
-  // 長さチェックを先行させると長さが違う時点でショートサーキットし、
-  // キー長を推測できるタイミングオラクルになるため、この方式で排除する。
-  const { createHmac, randomBytes, timingSafeEqual } = require('crypto');
-  if (validApiKey) {
-    const nonce = randomBytes(32);
-    const aHash = createHmac('sha256', nonce).update(apiKey).digest();
-    const bHash = createHmac('sha256', nonce).update(validApiKey).digest();
-    if (timingSafeEqual(aHash, bHash)) {
-      req.apiClient = { id: 'system', name: 'API Client', role: 'system' };
-      return next();
-    }
-  }
-
-  return next(new APIError(
-    ErrorTypes.UNAUTHORIZED,
-    'Invalid API key',
-    401
-  ));
-};
-
-// 任意のAPIキー検証ミドルウェア（machine間通信用の補助認証）。
-// x-api-key ヘッダが無ければ後続の認証(JWT等)に委ねる(continue)。
-// 提供された場合のみ検証し、不正なら 401。ハードコードされたキーは持たない。
-const { createHmac: _createHmac, randomBytes: _randomBytes, timingSafeEqual: _timingSafeEqual } = require('crypto');
-const apiKeyAuth = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  if (!apiKey) return next();
-  const validApiKey = process.env.API_KEY;
-  if (validApiKey) {
-    const nonce = _randomBytes(32);
-    const aHash = _createHmac('sha256', nonce).update(apiKey).digest();
-    const bHash = _createHmac('sha256', nonce).update(validApiKey).digest();
-    if (_timingSafeEqual(aHash, bHash)) {
-      req.apiClient = { id: 'system', name: 'API Client', role: 'system' };
-      return next();
-    }
-  }
-  return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid API key', 401));
-};
-
-// リソース所有者または管理者のみ許可
 const allowOwnerOrAdmin = (getResource) => async (req, res, next) => {
   try {
     const resource = await getResource(req);
@@ -276,7 +219,5 @@ module.exports = {
   apiLimiter,
   authenticateJWT,
   checkRole,
-  apiKeyAuth,
-  authenticateAPIKey,
   allowOwnerOrAdmin
 };

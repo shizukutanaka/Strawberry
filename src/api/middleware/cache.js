@@ -68,14 +68,5 @@ function invalidateUserCache(userId) {
   }
 }
 
-// 特定 URL パターンのキャッシュを削除（管理者・GPU 操作後の全ユーザーキャッシュ無効化）
-function invalidateByUrlPattern(pattern) {
-  for (const key of cache.keys()) {
-    if (key.includes(pattern)) {
-      cache.delete(key);
-    }
-  }
-}
-
-module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, invalidateByUrlPattern, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
+module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
 

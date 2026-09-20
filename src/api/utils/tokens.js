@@ -30,4 +30,4 @@ function signRefreshToken(user, ati) {
   return jwt.sign(payload, resolveRefreshSecret(), { expiresIn: refreshTTL() });
 }
 
-module.exports = { signAccessToken, signRefreshToken, accessTTL, refreshTTL };
+module.exports = { signAccessToken, signRefreshToken };

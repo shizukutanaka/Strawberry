@@ -45,4 +45,4 @@ async function executeActions(actions, ctx = {}, adapter) {
   return results;
 }
 
-module.exports = { executeActions, LN_ACTIONS, DOMAIN_ACTIONS };
+module.exports = { executeActions };

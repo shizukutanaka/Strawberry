@@ -57,4 +57,4 @@ function computeOrderPricing(order, rateInfo = null) {
   return pricing;
 }
 
-module.exports = { resolvePricePerHour, fetchRateInfo, computeOrderPricing };
+module.exports = { fetchRateInfo, computeOrderPricing };

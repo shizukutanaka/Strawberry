@@ -96,4 +96,4 @@ function computePrice(gpu = {}, market = {}, opts = {}) {
   };
 }
 
-module.exports = { computePrice, generationScore, GENERATION_SCORES, DEFAULTS };
+module.exports = { computePrice, generationScore, DEFAULTS };

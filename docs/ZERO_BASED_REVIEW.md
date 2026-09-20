@@ -398,6 +398,23 @@ ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正�
 
 検証: tests/api + tests/security — 83 スイート 577 テスト全パス。
 
+### 第19ラウンド（ソクラテス式問答 — 「export された機能は誰が呼ぶか？」）
+
+ファイル粒度→関数粒度へ掘り下げ: 全 module.exports の各 export 名に消費者を要求。
+
+- **削除（外部消費者ゼロ・内部使用ゼロ = 完全死）**: `authenticateAPIKey`・
+  `apiKeyAuth`（security.js の API キー認証2系 — JWT 認証に置き換わり誰も
+  マウントしていない）、`invalidateByUrlPattern`（cache.js）、`generateTOTP`
+  （totp.js — verifyTOTP のみ使用）、`GPU_STATES`・`isValidGPUTransition`・
+  `ORDER_STATES`（state-checker.js — isValidOrderTransition のみ生存。
+  GPU 状態遷移チェックは消費者ゼロ）
+- **export のみ削除（関数は内部使用で生存）**: tokens.js `accessTTL/refreshTTL`、
+  service-monitor `isServiceHealthy`、action-executor `LN_ACTIONS/DOMAIN_ACTIONS`、
+  feature-pricer `GENERATION_SCORES`、gpu-attestation `scoreChecks`、
+  order-expiry `resolveTimeoutMinutes`、order-pricing `resolvePricePerHour`、
+  notification-settings `_isSSRFUrl` — 公開 API 面を実態に揃える
+- 計 −103 行（12 ファイル）。検証: 32 スイート 150 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

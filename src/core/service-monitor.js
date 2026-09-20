@@ -131,7 +131,6 @@ module.exports = {
   startMonitor,
   stopMonitor,
   monitorServices,
-  isServiceHealthy,
   notifyExternalAlert,
   serviceRestartCounter,
   serviceDownCounter,

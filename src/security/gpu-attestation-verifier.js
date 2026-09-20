@@ -176,4 +176,4 @@ function createMockAttestationVerifier(overrides = {}) {
   };
 }
 
-module.exports = { verifyAttestation, createMockAttestationVerifier, DEFAULTS, scoreChecks };
+module.exports = { verifyAttestation, createMockAttestationVerifier, DEFAULTS };

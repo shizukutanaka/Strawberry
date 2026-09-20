@@ -123,37 +123,6 @@ const schemas = {
       rejectUnratedRenters: Joi.boolean().optional(),
       available: Joi.boolean().optional()
     }),
-
-    // GPU検索用スキーマ
-    search: Joi.object({
-      minMemoryGB: Joi.number().min(1),
-      minClockMHz: Joi.number().min(100),
-      maxPowerWatt: Joi.number().min(1),
-      maxPricePerHour: Joi.number().min(0),
-      vendors: Joi.array().items(Joi.string()),
-      features: Joi.object({
-        cudaSupport: Joi.boolean(),
-        openCLSupport: Joi.boolean(),
-        directXSupport: Joi.boolean(),
-        tensorCores: Joi.boolean(),
-        rayTracingCores: Joi.boolean()
-      }),
-      location: Joi.object({
-        country: Joi.string(),
-        maxDistance: Joi.number().min(0),
-        latitude: Joi.number().min(-90).max(90),
-        longitude: Joi.number().min(-180).max(180)
-      }),
-      availability: Joi.object({
-        minHours: Joi.number().min(1),
-        startTime: Joi.date().iso(),
-        endTime: Joi.date().iso()
-      }),
-      sort: Joi.string().valid('price', 'performance', 'availability', 'distance'),
-      sortDirection: Joi.string().valid('asc', 'desc'),
-      limit: Joi.number().min(1).max(100),
-      offset: Joi.number().min(0)
-    })
   },
   
   // オーダー関連

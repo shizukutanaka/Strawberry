@@ -631,6 +631,15 @@ validator.js の全スキーマを監査:
   toc マーカーなしの死んだ規約）を削除
 - `README_feedback.md` は対象スクリプト feedback-bot.js が稼働中で生存
 
+### 第39ラウンド（ソクラテス式問答 — 「スキーマのサブキーまで消費者がいるか？」）
+
+schemas.gpu のサブスキーマ監査: `register`・`update` は稼働中だが
+`search`（GPU検索クエリ検証用30行）はゼロ参照 — GPU 一覧ルートは
+req.query を直接パースしており、このスキーマを経由しない → 削除。
+order.create・payment.*・user.* は全て消費者あり。
+
+検証: tests/utils・tests/api/gpu — 37 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

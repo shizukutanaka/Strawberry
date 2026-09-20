@@ -649,6 +649,18 @@ order.create・payment.*・user.* は全て消費者あり。
 
 結論: リポジトリ・フロント API 層とも未使用メソッドなし。
 
+### 第41ラウンド（ソクラテス式問答 — 「インフラ定義ファイルの実体は？」）
+
+- `docker/Dockerfile.gpu-worker`（21B・コメントのみ）、
+  `docker/docker-compose.yml`（15B・コメントのみ）、
+  `kubernetes/deployment.yaml`・`service.yaml`（中身ゼロのスタブ）削除 —
+  「存在する」が「動く」ではない empty stubs
+- `optionalDependencies` の `@kubernetes/client-node`・`dockerode` 削除 —
+  第6ラウンドで k8s/docker コードパスを消した際の残り依存（参照ゼロ）
+- `Dockerfile.api`・`.dockerignore` は実体あり・生存
+
+検証: tests/gpu・api.integration — 257 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

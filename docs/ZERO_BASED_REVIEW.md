@@ -802,6 +802,15 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: tests/db・api.integration — 254 テスト全パス。
 
+### 第57ラウンド（ソクラテス式問答 — 「README の機能一覧と CSS セレクタは実態と一致するか？」）
+
+- README stale 記述6箇所を修正: 「APIキー＋JWT認可」（api-key 認証削除済み）、
+  「Ed25519ピアIDによるP2P信頼性」「ピアID＋署名検証」（P2P層削除済み）、
+  「API／CLI／GraphQL」（GraphQL・CLI 非存在）、「Google/GitHub OAuth ユーザー認証」
+  （OAuth ルート削除済み）、exchange-rate の GraphQL 言及3箇所
+- CSS 死セレクタ削除: `.icon-btn`（参照ゼロ）、`.text-center`（同）。badge-*/chip-*/toast-*/
+  docs-method-* は JS テンプレで動的構成のため生存
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

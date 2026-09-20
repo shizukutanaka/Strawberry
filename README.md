@@ -101,14 +101,13 @@ Strawberryは、分散型GPUリソースの貸借を可能とするオープン�
 
 ## 主な機能・品質／セキュリティ強化ポイント（2025年6月版）
 
-- Google OAuth認証、APIキー＋JWTによる認可、ロールベースアクセス制御
-- Ed25519ピアIDおよび署名検証によるP2P信頼性担保
+- JWT認証による認可、ロールベースアクセス制御、マスター3重認証（Google OAuth+TOTP+セッション）
 - UUIDバリデーション、Joiスキーマによる厳格な入力検証
 - Lightning Network決済および現金換算API（多重API、Prometheus監視、監査証跡対応）
 - 死活監視、自動復旧、外部通知フック（Slack/LINE等）
 - 詳細な監査証跡、改ざん検知、Prometheusメトリクスの提供
 - CORSやHelmet等のセキュリティヘッダー実装
-- API／CLI／GraphQLインターフェース対応
+- REST APIインターフェース
 
 ---
 
@@ -140,7 +139,7 @@ sequenceDiagram
   participant ExternalRateAPI
   participant AuditLog
   participant Notifier
-  Client->>API: /api/exchange-rate (or GraphQL)
+  Client->>API: /api/exchange-rate
   API->>Cache: キャッシュ確認
   alt キャッシュヒット
     Cache-->>API: レート/時刻返却
@@ -267,7 +266,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - Slack/LINEどれか1つ～全て多重通知も可
 
 ### 現金換算API運用ポイント
-- REST/GraphQL両方でrate/timestamp/isCacheを取得可能
+- RESTでrate/timestamp/isCacheを取得可能
 - キャッシュ効率や障害頻度もPrometheusで可視化
 - 障害時はデフォルトレート・監査証跡・外部通知hookで運用リスクを最小化
 - 監視・通知・自動復旧は全て自動化済み
@@ -643,7 +642,7 @@ flowchart LR
 - Prometheusでヒット率を監視し、運用方針に応じて最適化
 
 ### Q. 現金換算APIの注意点は？
-- REST/GraphQLどちらもrate/timestamp/isCacheを返却、クライアント側で取得時刻・キャッシュ状態を必ず確認
+- RESTでrate/timestamp/isCacheを返却、クライアント側で取得時刻・キャッシュ状態を必ず確認
 - 監査証跡・障害通知・Prometheus監視も全て自動化済み
 
 ### Q. 障害通知先をさらに増やしたい場合は？
@@ -659,9 +658,7 @@ flowchart LR
 
 ## 品質・セキュリティ強化ポイント（2025年6月最新／MVP構成）
 
-- **Google認証・OAuthアカウント認証**：Google（およびGitHub等）によるOAuth認証でユーザー識別・なりすまし防止
-- **ピアID（公開鍵）＋署名検証**：P2PノードはEd25519ピアIDで識別、すべての注文・支払い・GPUイベントは署名検証
-- **APIキー＋JWT認証＋ロール制御（中央API利用時）**：重要操作は多重認証＋権限チェック
+- **JWT認証＋ロール制御**：重要操作は認証＋権限チェック
 - **UUIDバリデーション・入力サニタイズ**：全リソースID/主要入力の厳格検証
 - **一貫したAPIレスポンス＆エラーハンドリング**：`{ message, ... }`形式で統一
 - **パスワード/APIキー等の情報漏洩防止**：レスポンス・ログに絶対含めない設計

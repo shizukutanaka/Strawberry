@@ -751,6 +751,15 @@ src/ 全ファイルの export 名を総当たり:
 - research 系文書の p2p-network 言及は時点スナップショット banner で
   既に免責済み（第27ラウンド）
 
+### 第52ラウンド（ソクラテス式問答 — 「運用文書は実態を記述しているか？」）
+
+- `docs/operations.md` 削除 — faq.md と同じ架空運用テンプレート:
+  「GitHub Actions 自動本番デプロイ」「Grafana/Loki」「PagerDuty」
+  「Chaos Mesh 障害訓練」「Slack #incident-report」「本ドキュメントへの
+  自動追記」— 全て実在しない仕組み。リンク元ゼロ
+- `docs/SECURITY_AUDIT.md` — ハッシュチェーン監査ログ・profit-addresses・
+  LN API 等、実装済み機能を記述 → 生存
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

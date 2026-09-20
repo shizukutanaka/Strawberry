@@ -842,6 +842,15 @@ src/ 全ファイルの export 名を総当たり:
   （+/channels+/history）。
 - 残行は削除済み注記付きで正確（reputation・marketplace 面・docker/k8s）。
 
+### 第61ラウンド（ソクラテス式問答 — 「セキュリティ許可リストに実ユーザーのいない緩和はないか？」）
+
+- CSP `connectSrc: 'wss://*'` を削除 → `["'self'"]`。SPA は fetch 同一オリジンのみで
+  WebSocket/EventSource を使わない — 削除済み P2P 層の許可残滓（過剰権限の
+  セキュリティ緩和を除去 — これは削減兼 hardening）。
+- helmet 各ディレクティブ・Permissions-Policy・CORS ロジックは全て弁明可能。
+
+検証: api.integration + security — 61スイート 731テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

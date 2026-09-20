@@ -1051,6 +1051,14 @@ src/ 全ファイルの export 名を総当たり:
 - `pages/` 全11ファイルが hash ルートに登録済み（not-found は catch-all）。
 - 削除ゼロのラウンド。
 
+### 第83ラウンド（ソクラテス式問答 — 「監査ログ機構と server.js ミドルウェアに死配線はないか？」）
+
+- `auditLogger` は routes/index.js の router.use で全 API にマウント済み（server.js
+  ではなくルータ側 — 404 後の notFound チェインを汚さない正しい位置）。
+- `verifyAuditLogIntegrity` は integrity テストが検証する運用制御（改ざん検知機構
+  自体が目的 = 監査ログと同じ理屈で生存判定）。
+- server.js の app.use 14段全て稼働中。削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

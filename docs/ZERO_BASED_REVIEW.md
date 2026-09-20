@@ -536,6 +536,17 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 結論: 第28・29ラウンド連続で削除対象なし級。監査可能な全層で
 「所有者・読み出し先・実行経路」が弁明可能 — 収束維持。
 
+### 第30ラウンド（ソクラテス式問答 — 「e2e は生きた UI を検証しているか？」）
+
+- tests/e2e 全 spec の参照セレクタ・ハッシュルート（#/market・#/orders・
+  #/my-gpus・#/earnings・#/admin/payments・#/gpus/new・#/login・#/register・
+  ハートビート・通知を設定・badge-*/stars/toasts/empty-state 等）が全て
+  public/ の実 UI に存在 — 死んだ e2e なし
+- playwright chromium-1194 インストール済みで実行可能
+- ルーター登録ページと spec 参照ルートが完全整合
+
+結論: e2e 層も全て生存する検証対象を持つ。全層収束維持。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

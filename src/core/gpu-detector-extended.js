@@ -242,72 +242,6 @@ class ExtendedGPUDetector {
         return gpus;
     }
 
-    async detectIntelGPUTools() {
-        const gpus = [];
-        
-        try {
-            // intel_gpu_top コマンドで情報取得
-            const { stdout } = await exec('timeout 1 intel_gpu_top -J -o -');
-            const data = JSON.parse(stdout);
-            
-            if (data.engines) {
-                const gpu = {
-                    uuid: `Intel-GPU-${data.card || '0'}`,
-                    vendor: 'Intel',
-                    name: data.name || 'Intel Graphics',
-                    model: this.parseIntelModelAdvanced(data.name),
-                    utilization: this.calculateIntelUtilization(data.engines),
-                    frequency: data.frequency || {},
-                    power: data.power || {},
-                    capabilities: {
-                        opencl: true,
-                        vulkan: true,
-                        levelZero: await this.checkLevelZero(),
-                        quickSync: true,
-                        avCodec: true
-                    }
-                };
-                
-                // Intel GPU メモリ情報取得
-                gpu.vram = await this.getIntelGPUMemory();
-                
-                gpus.push(gpu);
-            }
-        } catch (error) {
-            logger.debug('intel_gpu_top not available:', error.message);
-        }
-        
-        return gpus;
-    }
-
-    async detectIntelSysfs() {
-        const gpus = [];
-        
-        try {
-            const drmPath = '/sys/class/drm';
-            const entries = await fs.readdir(drmPath);
-            
-            for (const entry of entries) {
-                if (entry.includes('card') && !entry.includes('render')) {
-                    const devicePath = path.join(drmPath, entry, 'device');
-                    
-                    try {
-                        const vendor = await fs.readFile(path.join(devicePath, 'vendor'), 'utf8');
-                        if (vendor.trim() === '0x8086') { // Intel vendor ID
-                            const device = await fs.readFile(path.join(devicePath, 'device'), 'utf8');
-                            const gpu = await this.parseIntelGPUFromSysfs(devicePath, entry);
-                            if (gpu) gpus.push(gpu);
-                        }
-                    } catch {}
-                }
-            }
-        } catch (error) {
-            logger.debug('sysfs Intel GPU detection error:', error);
-        }
-        
-        return gpus;
-    }
-
     async detectIntelGPUsWindows() {
         return this.detectWindowsGPUsByVendor({
             match: (compat, name) =>
@@ -394,22 +328,6 @@ class ExtendedGPUDetector {
         return discrete.some(d => name.includes(d));
     }
 
-    calculateIntelUtilization(engines) {
-        if (!engines) return 0;
-        
-        let totalBusy = 0;
-        let count = 0;
-        
-        Object.values(engines).forEach(engine => {
-            if (engine.busy !== undefined) {
-                totalBusy += engine.busy;
-                count++;
-            }
-        });
-        
-        return count > 0 ? totalBusy / count : 0;
-    }
-
     async getAMDDriverVersion() {
         try {
             if (this.platform === 'linux') {
@@ -430,26 +348,6 @@ class ExtendedGPUDetector {
             return match ? match[1] : 'Unknown';
         } catch {
             return 'Unknown';
-        }
-    }
-
-    async checkLevelZero() {
-        try {
-            await exec('level-zero-info');
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    async getIntelGPUMemory() {
-        try {
-            // Intel GPU メモリ情報取得（実装は環境依存）
-            const { stdout } = await exec('clinfo | grep "Global memory size"');
-            const match = stdout.match(/(\d+)/);
-            return match ? parseInt(match[1]) / (1024 * 1024) : 0;
-        } catch {
-            return 0;
         }
     }
 
@@ -475,26 +373,6 @@ class ExtendedGPUDetector {
         return details;
     }
 
-    async getIntelGPUDetails(gpu) {
-        const details = {
-            euCount: 0,
-            sliceCount: 0,
-            subsliceCount: 0,
-            threadsPerEu: 0,
-            l3Cache: 0
-        };
-        
-        try {
-            // Level Zero経由で詳細情報取得
-            if (gpu.capabilities.levelZero) {
-                const { stdout } = await exec('level-zero-info');
-                // 詳細解析
-            }
-        } catch {}
-        
-        return details;
-    }
-
     async benchmarkAMDGPU(gpu) {
         const benchmark = {
             computeScore: 0,
@@ -507,25 +385,6 @@ class ExtendedGPUDetector {
             if (gpu.capabilities.rocm) {
                 // rocm-bandwidth-test
                 const { stdout } = await exec('rocm-bandwidth-test --quick');
-                // 結果解析
-            }
-        } catch {}
-        
-        return benchmark;
-    }
-
-    async benchmarkIntelGPU(gpu) {
-        const benchmark = {
-            computeScore: 0,
-            memoryBandwidth: 0,
-            quickSyncScore: 0
-        };
-        
-        try {
-            // 簡易ベンチマーク実行
-            if (gpu.capabilities.levelZero) {
-                // ze_peak benchmark
-                const { stdout } = await exec('ze_peak');
                 // 結果解析
             }
         } catch {}
@@ -553,23 +412,6 @@ class ExtendedGPUDetector {
                     temp => parseInt(temp) / 1000
                 ).catch(() => 0);
             }
-            
-            return gpu;
-        } catch {
-            return null;
-        }
-    }
-
-    async parseIntelGPUFromSysfs(devicePath, cardName) {
-        try {
-            const gpu = {
-                uuid: `Intel-${cardName}`,
-                vendor: 'Intel',
-                name: 'Intel Graphics',
-                busId: await fs.readFile(path.join(devicePath, 'uevent'), 'utf8').then(
-                    content => content.match(/PCI_SLOT_NAME=(.+)/)?.[1] || ''
-                )
-            };
             
             return gpu;
         } catch {

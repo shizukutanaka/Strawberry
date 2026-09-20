@@ -430,6 +430,18 @@ ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正�
 
 検証: tests/gpu + api.integration — 4 スイート 257 テスト全パス。
 
+### 第21ラウンド（ソクラテス式問答 — 到達性解析を残クラスへ展開）
+
+- **gpu-detector-extended.js**: Intel GPU 検出 subtree 8メソッド削除（−158行）。
+  detectIntelGPUTools/detectIntelSysfs は元々 detectIntelGPUsAdvanced（呼出し元ゼロ、
+  第20ラウンドで削除済み）配下で、残った子孫も到達不能。生存する検出経路は
+  detectAMDGPUsAdvanced/Windows + detectIntelGPUsWindows + queryWindowsVideoControllers。
+- lightning-service・escrow/verification/marketplace-service・db/json リポジトリ・
+  service-monitor 等の残クラスは到達性解析で全メソッド生存（dead 0）。
+- 偽陽性除外: sanitize.js は destructure 呼出し経由で使用中のため生存。
+
+検証: tests/gpu + basic — 全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -22,9 +22,7 @@ GraphQL エンドポイント（コンシューマーゼロ）、未配線の pr
   （ハートビート・停止）・レビュー・係争の申請/管理者裁定・管理者の決済承認まで、実際に
   画面から一通り操作できる（以前は `public/index.html` が1行の空スタブで、ブラウザで
   見える画面が存在しなかった）。`#/`始まりのハッシュルーティング（`public/js/router.js`）。
-  厳格CSP（`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。`/swagger.html`
-  も同様の理由で CDN+インライン版から同一オリジンの自前ビューア（`public/js/docs.js`）に
-  置換済み。未実装: GPU接続情報の実配信（`accessInfo.deliveryImplemented` が false の間は
+  厳格CSP（`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。未実装: GPU接続情報の実配信（`accessInfo.deliveryImplemented` が false の間は
   その旨を正直に表示するのみ）。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
   `prisma/` は未配線のまま 2026-09 に削除済み（将来 DB 移行する場合は
@@ -92,7 +90,7 @@ src/api/server.js
 
 実行: `npm install` → `npm test`。サーバ起動確認: `npm start`（`http://localhost:3000` で
 実際に動くマーケットプレイスUIが表示される。`/metrics` はPrometheusメトリクス、
-`/swagger.html` はAPIドキュメント）。
+API 参照は `docs/SPECIFICATION.md` を参照）。
 
 ## フォローアップ（未対応・推奨順）
 

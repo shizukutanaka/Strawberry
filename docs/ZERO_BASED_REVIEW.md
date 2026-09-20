@@ -819,6 +819,21 @@ src/ 全ファイルの export 名を総当たり:
   tests/helpers は存在せず監査対象なし
 - 削除ゼロのラウンド
 
+### 第59ラウンド（ソクラテス式問答 — 「生成される OpenAPI spec のパスは実在するか？」）
+
+- 判定: **偽の文書を削除**。`openapi-generator.js` が生成するパス
+  （`/idParam/idParam`、`/lightningNode/lightningNode`、`/gpu/update` 等）はスキーマ名からの
+  推測で、実ルート（`/api/v1/gpus` 等）と一切一致しない — 存在しない API を宣伝する
+  文書は「ない」より悪い（イーロン原則: 最善のパーツは存在しないパーツ）。
+  openapi-rbac テストも spec 自身のメタデータを検証するだけの自己参照テスト。
+- 削除: openapi-generator.js、server.js `/openapi.json` ルート、public/swagger.html、
+  public/js/docs.js、public/css/docs.css、openapi-rbac テスト、npm scripts
+  `openapi`/`openapi-gen`、依存 `joi-to-swagger`（lock 手術済み）。setup スクリプト修正。
+- README/ARCHITECTURE/PRODUCT_ANALYSIS の関連記述を修正。
+- API 参照は `docs/SPECIFICATION.md` が担う。
+
+検証: tests/api + tests/security + api.integration — 83スイート 814テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

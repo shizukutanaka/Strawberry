@@ -745,8 +745,6 @@ flowchart LR
 
 ## API仕様・Swagger UI
 
-- OpenAPI仕様書は `/openapi.json` で自動生成
-- Webブラウザで `/swagger.html` にアクセスするとAPIドキュメントが参照可能
 
 ---
 

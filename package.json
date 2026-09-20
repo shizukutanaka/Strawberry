@@ -8,8 +8,6 @@
     "test": "jest --forceExit",
     "test:e2e": "playwright test",
     "coverage": "jest --coverage --forceExit",
-    "openapi": "node src/api/openapi-generator.js",
-    "openapi-gen": "node src/api/openapi-generator.js",
     "prepare-data": "node scripts/prepare-data.js",
     "version-assets": "node scripts/version-assets.js",
     "update-references": "node scripts/update-references.js",
@@ -24,7 +22,7 @@
     "alert-overdue": "node scripts/alert-overdue.js",
     "alert-overdue-high": "node scripts/alert-overdue-high.js",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
-    "setup": "npm ci && npm run openapi-gen && npm test"
+    "setup": "npm ci && npm test"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.78.0",
@@ -41,7 +39,6 @@
     "express-session": "^1.18.0",
     "helmet": "^7.1.0",
     "joi": "^17.13.3",
-    "joi-to-swagger": "^6.2.0",
     "jsonwebtoken": "^9.0.2",
     "lru-cache": "^10.2.1",
     "morgan": "^1.10.0",

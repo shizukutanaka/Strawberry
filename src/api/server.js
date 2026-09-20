@@ -212,21 +212,6 @@ app.get('/ready', readyLimiter, (req, res) => {
   });
 });
 
-// /openapi.json — API 仕様の HTTP 公開（初回アクセス時に生成しキャッシュ）
-let openapiSpecCache = null;
-app.get('/openapi.json', apiLimiter, (req, res) => {
-  if (!openapiSpecCache) {
-    try {
-      const { generateOpenAPISpec } = require('./openapi-generator');
-      openapiSpecCache = generateOpenAPISpec();
-    } catch (e) {
-      logger.error('OpenAPI spec generation failed:', e);
-      return res.status(500).json({ error: 'Failed to generate OpenAPI spec' });
-    }
-  }
-  res.json(openapiSpecCache);
-});
-
 // リクエストID生成（ロギング用）
 app.use(requestId);
 

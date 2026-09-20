@@ -210,7 +210,7 @@ describe('API Integration', () => {
     });
   });
 
-  // 新規実装機能（health / openapi / logout / pagination / earnings / auto-expiry）
+  // 新規実装機能（health / logout / pagination / earnings / auto-expiry）
   describe('Product gap features', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const seedGpu = () => GpuRepository.create({
@@ -241,13 +241,6 @@ describe('API Integration', () => {
       expect(res.body.checks.dataDirWritable).toBe('ok');
       expect(res.body.checks.repositoriesReadable).toBe('ok');
       expect(res.body).toHaveProperty('optionalServices');
-    });
-
-    it('GET /openapi.json → 200 with an OpenAPI 3 document', async () => {
-      const res = await request(app).get('/openapi.json');
-      expect(res.statusCode).toBe(200);
-      expect(res.body.openapi).toMatch(/^3\./);
-      expect(res.body).toHaveProperty('paths');
     });
 
     it('POST /users/logout revokes the token (subsequent /users/me → 401)', async () => {

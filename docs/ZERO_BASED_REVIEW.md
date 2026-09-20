@@ -792,6 +792,16 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: tests/api/order・api.integration — 254 テスト全パス。
 
+### 第56ラウンド（ソクラテス式問答 — 「宣言的 finder に呼出し先はあるか？」）
+
+- 削除: `UserRepository.getByApiKey`（x-api-key 認証は第19ラウンドで除去済み）、
+  `getByGoogleId`（master-auth は email 経路を使用）、
+  `GpuRepository.getByOwner`（呼出しゼロ。しかも field:'ownerId' は実フィールド
+  `providerId` と不一致で呼んでも空配列しか返らない二重 dead）
+- 残り11 finder 全て呼出し元あり
+
+検証: tests/db・api.integration — 254 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

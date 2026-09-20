@@ -18,7 +18,5 @@ module.exports = createJsonRepository('users.json', {
   finders: {
     getByUsername: { field: 'username' },
     getByEmail: { field: 'email' },
-    getByApiKey: { field: 'apiKey' },
-    getByGoogleId: { field: 'googleId' },
   },
 });

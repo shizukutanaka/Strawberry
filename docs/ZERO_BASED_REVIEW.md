@@ -670,6 +670,15 @@ order.create・payment.*・user.* は全て消費者あり。
   を参照する stale workflow → **要対応だが私のトークンは workflow スコープ無しで
   push 不能。手動削除を推奨**（ci.yml の `optimize` ジョブも同様に dead）
 
+### 第43ラウンド（ソクラテス式問答 — 「ルートの重複定義・未マウントは？」）
+
+- 全ルートファイルの METHOD+path 重複スキャン: Express シャドウ
+  （先勝ちで後方が dead 化）なし
+- 未マウントルート監査: `payment/btc-onchain.js` は payment/index.js が
+  `/btc` にマウント（フラグは偽陽性）。全ルートファイルがマウント済み
+
+結論: ルーティング層クリーン。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

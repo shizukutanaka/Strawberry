@@ -130,6 +130,38 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
 5. セキュリティプローブ: 削除対象ファイルを source-scan していた it/describe ブロックのみ除去
    （probe20, 32, 34, 36, 37, 66）。稼働コードを検証する残ブロックは維持。
 
+## 9b. 第2ラウンド — マスク式アルゴリズム（要件に名前を付けよ）
+
+1st パスは「到達不能（静的に死んでいる）」コードの除去だった。
+2nd パスは要件監査: **各エンドポイント/スクリプトに所有者（利用者）がいるか？**
+消費者 = SPA (public/js/api.js が使用する ~35 エンドポイント) + テスト + スクリプト。
+
+### 要件監査の結果（所有者なし → 削除）
+
+| 対象 | 消費者 | 判断 |
+|---|---|---|
+| `src/cli.js` + `src/p2p-{node,order,gpu}.js` | ゼロ（`bin` 未登録、libp2p が依存に存在せず**実行不能**） | 削除 |
+| `scripts/{build,deploy}.sh` | ゼロ（コメントのみのスタブ） | 削除 |
+| `GET /gpus/system/{detected,amd}` `GET /gpus/:id/{usage,benchmark}` `POST /gpus/:id/benchmark` | ゼロ（SPA・テストどちらも呼ばない） | 削除 |
+| 決済 LN ウォレット系 6 エンドポイント (invoice/pay/node-info/channels/history/invoice/:id) | テスト有（lightning-payment-e2e-smoke 等）。API 製品面として温存 | 何もしない |
+| `marketplace.js` 9 エンドポイント（auction/escrow/rank/quote） | SPA 不使用だがテスト 5 本。order flow と並行する「API 製品」面 | 何もしない |
+| user extras (refresh/logout/me-*/reputation/renter-profile 等) | SPA 不使用だが probes/refresh-reuse 等が検証 | 何もしない |
+| `master-auth` `profit-addresses` `notification-settings` | 管理用 API。probe73/77/70/54 が検証 | 何もしない |
+| `docker/`, `kubernetes/` | CI ビルドなし・デプロイ担当なし | 意図的温存（デプロイ計画の記録として） |
+| `p2p-network.js` | libp2p 未依存で起動時に常に optional-disabled。製品ビジョンの stubs として温存（judgment call — コード衛生上は削除候補だが「P2P」は製品コア） | 何もしない |
+| `.github/workflows/cdn-cache-purge.yml` | Cloudflare シークレット未設定の可能性 | workflow スコープ不足で編集不可 → 要ユーザー削除 |
+
+### 実施（第2ラウンドのコミット）
+
+- `src/cli.js`, `src/p2p-{node,order,gpu}.js`, `scripts/{build,deploy}.sh` 削除
+- GPU ルートから消費者ゼロの 5 エンドポイント削除（system/detected・system/amd・
+  usage・benchmark GET/POST）。README の stale 参照（cli.js・p2p-notify・CLIコマンド例）も除去
+- 確認: `tests/gpu/*` + `api.integration` + `probe41/42` — 6 スイート 296 テスト全パス
+
+残課題: SPA が使用しないがテストが存在する API 面（marketplace/*・payment wallet 系）は
+「API プロダクトとして意図的」と判断 — ただし外部 API 利用者が実在しない現状では
+**要件の所有者がユーザー自身**という状態。もし API 公開を諦めるなら次の大きな削除候補。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

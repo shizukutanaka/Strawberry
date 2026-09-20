@@ -1021,6 +1021,13 @@ src/ 全ファイルの export 名を総当たり:
   →escrow admin ルート）は全リンク生存。
 - 削除ゼロのラウンド。
 
+### 第79ラウンド（ソクラテス式問答 — 「クライアント状態と契約に死面はないか？」）
+
+- localStorage 3キー（TOKEN_KEY・USER_KEY・THEME_KEY）— 全て書き込み+読み出しペア完結。
+- api.js 全22エンドポイントヘルパ — サーバールート実在・呼出し元ページ実在
+  （resolveDispute→order-detail, approveManualPayment/pendingManualPayments→admin-payments）。
+- package.json `main: src/api/server.js` 実在。削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -1037,6 +1037,13 @@ src/ 全ファイルの export 名を総当たり:
 
 - 削除ゼロのラウンド。
 
+### 第81ラウンド（ソクラテス式問答 — 「ミドルウェア・ロックファイルに孤児はないか？」）
+
+- `src/api/middleware/` 全10ファイルに消費者確認（ip-key.js は security.js・rate-limit.js
+  の same-dir `./ip-key` require で生存 — パス grep 偽陽性を除去）。
+- `src/api/utils/` 全8ファイルも同様に生存（第74ラウンド確認済み）。
+- package-lock root 依存と package.json は完全一致。削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

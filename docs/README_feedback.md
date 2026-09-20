@@ -19,7 +19,7 @@
 - 週次で自動集計・KPIレポート化も容易
 
 ## 運用Tips
-- 吸い上げたフィードバックは定期的にdocs/faq.mdやimprovement_checklist*.mdに反映
+- 吸い上げたフィードバックは定期的に improvement_checklist*.md に反映
 - 属人化ゼロ・現場ナレッジロスゼロを目指す
 
 ---

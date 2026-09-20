@@ -741,6 +741,16 @@ src/ 全ファイルの export 名を総当たり:
 - `createJsonRepository.js` のヘッダコメントが削除済み Reputation を
   列挙していた stale を修正（実在8リポジトリに更新）
 
+### 第51ラウンド（ソクラテス式問答 — 「削除した文書へのダングリング参照は？」）
+
+- `docs/faq.md` 削除 — 全回答が非存在インフラを指す架空運用文書だった:
+  deploy_public.sh（非存在）・scripts/config.js（第45ラウンド削除）・
+  locales/i18next（第5ラウンド削除/未導入）・markdown-toc（未導入）・
+  k8s Pod 運用（スタブのみ・第41ラウンド削除）・public/ 自動デプロイ
+  （workflow 非存在）。リンク元（operations.md・README_feedback.md）を修正
+- research 系文書の p2p-network 言及は時点スナップショット banner で
+  既に免責済み（第27ラウンド）
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

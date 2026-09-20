@@ -28,6 +28,8 @@ jobs:
         run: npm run lint || echo 'Lint errors (not blocking)'
       - name: Test
         run: npm test
+      - name: Optimize images
+        run: npm run optimize-images
       - name: Version assets
         run: npm run version-assets
       - name: Update HTML references

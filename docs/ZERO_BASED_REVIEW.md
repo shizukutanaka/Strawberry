@@ -115,8 +115,13 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
 1. 到達不能モジュール 38 件 + 付随テスト 14 件 + ルート孤立ファイル 6 件を削除。
 2. GraphQL エンドポイント削除（src/api/graphql.js・server.js マウント・依存 2 件・
    テスト 2 本削除 + probe34 の GraphQL ブロック除去）。
-3. prisma/ ・未使用 optionalDeps（aws-sdk, imagemin×3）・optimize-images パイプライン削除。
-4. **エスクロー LN 結線**: 8 箇所の `createEscrowService()` に `lnAdapter`（ガード付き
+3. prisma/ ・未使用 optionalDeps（aws-sdk, imagemin×3）削除。
+   ※ optimize-images 関連（.github/workflows/ci-cd.yml のステップ・
+   optimize-images.yml・scripts/optimize-images.js）は死コードだが、CI トークンが
+   `workflow` スコープを持たず .github/ を push できないため本 PR では温存。
+   （既存不整合: `npm run optimize-images` は package.json の script 未登録で
+   main 上でも実行不能）権限のある push で削除すれば完了。
+4. **エスクロー LN 結線**: 9 箇所の `createEscrowService()` 呼出点に `lnAdapter`（ガード付き
    lightning シングルトン）を注入。LN 未配備時は従来どおり no-op。配備時は
    settle/cancel/release の実 LN 操作が実行され、結果はエスクロー履歴に記録される。
    加えて、LN アクションが必要とするコンテキスト（preimage/preimageHash/providerInvoice）
@@ -128,9 +133,11 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。
-- 削除後: 同コマンドで全件 green を確認（失敗スイートの新規発生なし）。
-- `npm start` 起動確認 + `/health` `/ready` 応答確認。
-- npm install パッケージ数の比較を PR 本文に記載。
+- 削除後: 同コマンドで **123/123 スイート PASS、1,140 テスト、44 秒** を確認。
+- `npm start` 起動確認 + `/health` `/ready` 応答確認（両者 200、SPA 配信 200）。
+- npm 依存（lockfile node_modules エントリ）: **1,036 → 732（-29%）**。
+- src/ の到達不能ファイル: 38 → 2（残りは意図的温存: ln-adapter のテスト用モック
+  エクスポートと docs のみの孤立スクリプト）。
 
 ## 11. 残るギャップ（正直な棚卸し — 今回は手を付けない）
 

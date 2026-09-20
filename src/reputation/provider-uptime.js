@@ -16,7 +16,7 @@
 //    GAP_THRESHOLD_MS を超えて次が届いたケース（＝一度落ちて復帰した兆候）。
 
 const UptimeRepository = require('../db/json/UptimeRepository');
-const { logger } = require('../core/logger');
+const { logger } = require('../utils/logger');
 
 // 前回ビートからこの時間を超えて次のビートが来たら「切断イベント」1回とみなす。
 // heartbeat の最小間隔は既定 10s。その 6 倍（60s）を超える空白は、

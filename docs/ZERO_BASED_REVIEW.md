@@ -282,6 +282,26 @@ reputation-service の統計を参照しない。**書き込みがあり読み�
 - 検証: tests/api+marketplace+reputation+security+integration+verification —
   89 スイート 854 テスト全パス。
 
+### 第10ラウンド（ソクラテス式問答 続 — 「書くこと自体が目的か？」）
+
+write-only 判定を残データストアへ展開。結果はほぼ「何もしない」:
+
+| 対象 | 問い | 判定 |
+|---|---|---|
+| audit ログ（appendAuditLog + hash chain） | 「誰が読む？」→ 誰も — だが**書くことが目的**（forensic trail。インシデント後にオペレータがファイルを読む経路がある）。reputation 統計は「決定を変えるはずが変えない」が、audit は「事故時に読むための記録」という当初目的を果たす。verifyAuditLogIntegrity が整合性検証の読み出し口。 | 何もしない |
+| notification-settings | notifier.js が読んで LINE 通知送信に使う（write→read 完結）。 | 何もしない |
+| profit-addresses | btc-payment.js が読んで支払分配に使う。 | 何もしない |
+| feedback/kpi エンドポイント | 実装されず 401 のみ返す aspirational ネガティブテスト — 対象コードが存在しないので削除対象なし。 | 何もしない |
+| **src/core/logger.js** | 「utils/logger.js（24箇所が使用）と何が違う？」→ 何も。provider-uptime のみが使う重複ロガー。 | **削除**（統合） |
+
+- provider-uptime.js を utils/logger へ切替、core/logger.js（416行の重複実装）削除。
+- src/ 全モジュールの所有者スイープ: 残ファイルはすべて外部参照 ≥1 — 孤児ゼロ。
+- 検証: provider-reliability + sla-heartbeat-breach + order-limits + probe41 +
+  api.integration — 5 スイート 264 テスト全パス。
+
+**ラウンド10の知見**: 掘り進めるほど「何もしない」が増える — 削除可能なものは
+ほぼ尽き、残るは所有者を持つコードのみ。これが問い続けた先の状態。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

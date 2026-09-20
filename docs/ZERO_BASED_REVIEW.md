@@ -984,6 +984,14 @@ src/ 全ファイルの export 名を総当たり:
   同ディレクトリ require で消費 — パス省略形は grep で要確認）。
 - 削除ゼロのラウンド。
 
+### 第75ラウンド（ソクラテス式問答 — 「export したテストヘルパーを誰か import しているか？」）
+
+- tests/e2e/helpers.js の `logout`・`apiCompleteOrderCycle`（計43行）は spec からの
+  import ゼロ（apiCompleteOrderCycle は「manual駆動の代替」として参照されるだけで
+  未使用）→ 関数と export エントリを削除。order-lifecycle.spec の stale コメント修正。
+- user.register スキーマ4フィールド・process-guards（server.js で登録）は全消費者あり。
+- playwright test --list: 25 spec 全列挙、helpers 破損なし。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

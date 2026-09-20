@@ -86,8 +86,7 @@ test.describe('order lifecycle', () => {
   test('provider cannot stop an active order (must dispute instead)', async ({ page, request, baseURL }) => {
     const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'nostop', role: 'provider' });
     const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `NoStop GPU ${uniqueId()}` });
-    // Driven manually rather than via apiCompleteOrderCycle (which also
-    // stops the order) since this test needs the order to stay 'active'.
+    // Driven manually via API since this test needs the order to stay 'active'.
     const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'nostoprent' });
     const orderRes = await request.post(`${baseURL}/api/v1/orders`, {
       headers: { Authorization: `Bearer ${renter.token}` },

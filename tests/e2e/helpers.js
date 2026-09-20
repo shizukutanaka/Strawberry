@@ -59,9 +59,6 @@ async function loginUI(page, email, password) {
   return page.evaluate(() => localStorage.getItem('strawberry.token'));
 }
 
-async function logout(page) {
-  await page.evaluate(() => localStorage.clear());
-}
 
 // Registers a user via the API directly (faster than the UI form) and
 // returns their bearer token — used for setup steps that aren't themselves
@@ -103,44 +100,6 @@ async function apiCreateGpu(request, baseURL, token, overrides = {}) {
   return body.gpu;
 }
 
-// Drives an order all the way to 'completed' via the bank_transfer path
-// (admin-approvable synchronously, unlike Lightning which requires either a
-// real payer or direct mock-ledger manipulation only available from within
-// the Node process — see tests/api/lightning-payment-e2e-smoke.test.js for
-// that path's coverage at the jest layer instead). Promotes its own admin
-// account internally so callers don't need to plumb one through.
-async function apiCompleteOrderCycle(request, baseURL, { providerToken, renterToken, gpuId, durationMinutes = 60 }) {
-  const orderRes = await request.post(`${baseURL}/api/v1/orders`, {
-    headers: { Authorization: `Bearer ${renterToken}` },
-    data: { gpuId, durationMinutes },
-  });
-  const { orderId } = await orderRes.json();
-
-  await request.post(`${baseURL}/api/v1/orders/${orderId}/accept`, {
-    headers: { Authorization: `Bearer ${providerToken}` },
-  });
-
-  const payRes = await request.post(`${baseURL}/api/v1/payments/order/${orderId}`, {
-    headers: { Authorization: `Bearer ${renterToken}` },
-    data: { paymentMethod: 'bank_transfer' },
-  });
-  const { paymentId } = await payRes.json();
-
-  const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'e2eadmin' });
-  const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
-  await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`, {
-    headers: { Authorization: `Bearer ${adminToken}` },
-  });
-
-  await request.post(`${baseURL}/api/v1/orders/${orderId}/start`, {
-    headers: { Authorization: `Bearer ${renterToken}` },
-  });
-  await request.post(`${baseURL}/api/v1/orders/${orderId}/stop`, {
-    headers: { Authorization: `Bearer ${renterToken}` },
-  });
-
-  return { orderId, paymentId, adminToken };
-}
 
 // Promotes a freshly-registered user to admin by editing data/users.json
 // directly — there is no self-service admin-promotion API by design (admin
@@ -166,9 +125,7 @@ module.exports = {
   trackConsoleErrors,
   registerAndLoginUI,
   loginUI,
-  logout,
   apiRegisterAndLogin,
   apiCreateGpu,
-  apiCompleteOrderCycle,
   promoteToAdmin,
 };

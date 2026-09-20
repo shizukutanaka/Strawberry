@@ -7,7 +7,7 @@ const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { gpuDetector, vgpuManager, requireService } = require('../../../core/services');
+const { vgpuManager } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const GpuRepository = require('../../../db/json/GpuRepository');
 // GPU アテステーション（申告スペック vs デバイス計測の照合）

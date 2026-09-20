@@ -2,7 +2,6 @@
 const {
   verifyAttestation,
   createMockAttestationVerifier,
-  DEFAULTS,
 } = require('../../src/security/gpu-attestation-verifier');
 
 const claimed = { model: 'A100', vendor: 'NVIDIA', memoryGB: 80, driverVersion: '535.0' };

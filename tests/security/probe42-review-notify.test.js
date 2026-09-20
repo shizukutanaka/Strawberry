@@ -9,7 +9,7 @@
 // 42c-2: renter-review handler enforces 30-day window after order completion
 
 const request = require('supertest');
-const { app } = require('../../src/api/server');
+require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

@@ -6,7 +6,7 @@
 //    so order/start/stop/dispute gates (hasPaidPayment) work correctly for btc-onchain orders.
 
 const request = require('supertest');
-const { app } = require('../../src/api/server');
+require('../../src/api/server');
 const fs = require('fs');
 const path = require('path');
 

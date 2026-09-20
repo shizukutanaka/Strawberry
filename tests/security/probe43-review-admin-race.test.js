@@ -8,7 +8,7 @@
 // 43d-2: role-change handler rejects suspended acting admin
 
 const request = require('supertest');
-const { app } = require('../../src/api/server');
+require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

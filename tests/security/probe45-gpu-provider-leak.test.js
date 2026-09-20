@@ -7,7 +7,7 @@
 // 45a-4: apiKey always stripped regardless of caller role
 
 const request = require('supertest');
-const { app } = require('../../src/api/server');
+require('../../src/api/server');
 
 afterAll(() => {
   const { server } = require('../../src/api/server');

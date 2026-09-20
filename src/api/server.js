@@ -76,9 +76,9 @@ const app = express();
 const PORT = config.server.port || 3000;
 
 // キャッシュメトリクス統合
-const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./middleware/cache');
+const { cacheHitCounter, cacheMissCounter } = require('./middleware/cache');
 // サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
-const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
+const { setServices, startMonitor } = require('../core/service-monitor');
 
 // 新規為替レートAPIルート
 app.use('/api/exchange-rate', exchangeRateRouter);

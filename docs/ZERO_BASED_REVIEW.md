@@ -459,6 +459,20 @@ config.js の全キーに消費者を要求（書き込まれるが読まれな�
 
 検証: tests/api + probe20-29 — 33 スイート 146 テスト全パス。
 
+### 第23ラウンド（ソクラテス式問答 — 「import した名は使っているか？」）
+
+destructure された未使用 import の棚卸し（使用ゼロの名を除去）:
+
+- gpu/index.js: `gpuDetector`・`requireService` を除去（vgpuManager のみ使用）
+- server.js: `cachePurgeCounter`・`serviceRestartCounter`・`serviceDownCounter`
+  を除去（require 副作用での prom-client 登録は存続）
+- tests/security 9件: 未使用 `app` destructure を bare require へ
+- gpu-attestation-verifier.test.js: 未使用 `DEFAULTS` 除去
+- 偽陽性除外: `{ v4: uuidv4 }`/`{ rateLimit: readyRateLimit }` リネームは使用中
+- scripts/ の残りは全て package.json エントリ経由で所有者あり・依存充足
+
+検証: 対象スイート全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -9,7 +9,6 @@
     "test": "jest --forceExit",
     "test:e2e": "playwright test",
     "coverage": "jest --coverage --forceExit",
-    "lint": "eslint .",
     "openapi": "node src/api/openapi-generator.js",
     "openapi-gen": "node src/api/openapi-generator.js",
     "prepare-data": "node scripts/prepare-data.js",

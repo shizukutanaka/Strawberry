@@ -310,6 +310,17 @@ write-only 判定を残データストアへ展開。結果はほぼ「何もし
   テストが所有者 → 生存。scripts/* の npm エントリも全てファイル実在 → 生存。
 - 検証: provider-reliability + service-monitor.e2e + probe41 — 全パス。
 
+### 第12ラウンド（ソクラテス式問答 続 — 「実行できるか？」をスクリプト/フロントにも）
+
+- **npm script `lint` 削除**: `eslint .` は eslint が依存に無く設定ファイルも無い
+  （CI では `|| true`/`|| echo` で握り潰されていた）→ 実行不能なコマンド宣言は負債。
+- SPA 全監査: public/ の全ページは app.js のルーター登録で到達可能、api.js の
+  エンドポイント群は全て src/api/routes に実在 — 孤児なし。
+- notifier.js（チャネル抽象化層）と user-notify.js（ユーザー別配送層）は
+  重複ではなく層分担 — 両者とも order フロー・price-watch・notification-settings
+  が使用 → 生存。playwright e2e specs + test:e2e も設定・dep 揃い → 生存。
+- 検証: 影響範囲テスト全パス（lint script は CI 非ブロッキングのため影響なし）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

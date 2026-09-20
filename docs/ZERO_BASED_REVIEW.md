@@ -760,6 +760,17 @@ src/ 全ファイルの export 名を総当たり:
 - `docs/SECURITY_AUDIT.md` — ハッシュチェーン監査ログ・profit-addresses・
   LN API 等、実装済み機能を記述 → 生存
 
+### 第53ラウンド（ソクラテス式問答 — 「スクリプトの入力は誰が生産するか？」）
+
+- `slack-notify-notion.js` 削除 — notion-progress-report.md の生成側は
+  第5ラウンドで削除済み → 常に「レポートなし」で終わる dead-end
+- `alert-kpi-trend.js` 削除 — `checklist-kpi-report-YYYY-MM-DD.md`（日付付き）を
+  期待するが生成側は `checklist-kpi-report.md`（日付なし）を出力 →
+  永久に2ファイル未満で常に早期 return
+- 対応 npm script 2件除去。残りスクリプトは feedback→priority→alert の
+  生産→消費チェーン完結を確認（feedback-bot・feedback-priority・
+  alert-*・slack-notify 系は全て実在ファイルを読み書き）
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

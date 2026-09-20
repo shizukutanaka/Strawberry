@@ -333,6 +333,16 @@ write-only 判定を残データストアへ展開。結果はほぼ「何もし
   所有者あり（Verification/Uptime/Watch/Escrow/Payment/Order/Gpu/User）。
 - 検証: tests/api + utils + api.integration — 30 スイート 358 テスト全パス。
 
+### 第14ラウンド（ソクラテス式問答 続 — 「実行経路はあるが誰が選ぶか？」）
+
+- **BTC on-chain 決済（/payments/btc）**: SPA の支払選択は lightning/manual のみ —
+  btc-onchain は UI から選べない。ただし実装済み・テスト済み・profit-addresses
+  （支払分配読み出し）を支える実 payment rail であり、marketplace escrow と同じ
+  「実行可能だが現 UI が出していない製品面」→ 生存（製品判断に残す）。
+- **PRODUCT_ANALYSIS.md に deprecation banner 追加**: 削除済み機能を
+  「✅ 実装済み」と称する記述が多数残っていた（reputation・p2p・docker/k8s 等）。
+  歴史分析として残すが、stale な事実を最新状態への誘導で修正。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

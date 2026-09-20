@@ -1,5 +1,12 @@
 # Strawberry プロダクト分析 — 長所・短所・不足機能（2026-06）
 
+> ⚠️ この文書は 2026-06 時点の分析スナップショット。以降のゼロベース整理
+> （docs/ZERO_BASED_REVIEW.md）で多数の構成要素が削除されており、以下の
+> 「実装済み」表記には現在存在しないものを含む（P2P 層、docker/k8s vGPU、
+> GraphQL、レピュテーション統計、peerid API、marketplace マッチング API、
+> Google カレンダー/OAuth REST 等）。最新状態は ZERO_BASED_REVIEW.md を参照。
+
+
 コードベース実走査に基づく評価。チェックリスト類の自己申告ではなく、実装・テストで裏取りした内容のみを記載する。
 
 ---

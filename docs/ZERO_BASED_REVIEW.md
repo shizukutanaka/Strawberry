@@ -599,6 +599,16 @@ settle（精算）と cancel（返金）の別操作もある。ロジックは�
 検証: tests/api/order・tests/api/gpu・api.integration — 6 スイート
 258 テスト全パス。
 
+### 第36ラウンド（ソクラテス式問答 — 「gpu ルートの重複は統合可能か？」）
+
+第34ラウンドの重複スキャンが gpu/index.js に挙げた残ブロックを精査:
+- 「オーナー向け details/usageStats/availability 取得」は実際には
+  1 箇所のみ（4x フラグは 6 行窓の重なりによる偽陽性）
+- attestation 分岐・削除時ウォッチ後始末・見積競合チェックは
+  各々別目的 — 統合不可
+
+結論: gpu/index.js に統合可能な重複なし。全重複フラグを精査し尽くした。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

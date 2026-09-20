@@ -9,7 +9,7 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '../../data');
 
 module.exports = async function globalSetup() {
-  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'watches', 'uptime'];
+  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'verifications', 'watches', 'uptime'];
   const objectFiles = ['revoked-tokens', 'notification-settings'];
 
   // クリーンチェックアウト（CI 等）には data/ が無いため作成する。以前は

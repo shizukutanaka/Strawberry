@@ -321,6 +321,18 @@ write-only 判定を残データストアへ展開。結果はほぼ「何もし
   が使用 → 生存。playwright e2e specs + test:e2e も設定・dep 揃い → 生存。
 - 検証: 影響範囲テスト全パス（lint script は CI 非ブロッキングのため影響なし）。
 
+### 第13ラウンド（ソクラテス式問答 続 — 「このデータを読む機能はあるか？」）
+
+- **POST/GET /api/v1/users/peerid/* 削除** — 「peerId をリンクして誰が使う？」→
+  誰も。P2P 層（p2p-network.js）を第4ラウンドで削除済みのため、リンクした
+  peerId は読み出す機能が存在しない write-only フィールド。link/unlink/
+  get/admin/all + UserRepository.getByPeerId + peerid-uniqueness/probe47
+  テストを除去（audit ミドルウェアの peerId 出力は既存レコードの歴史表示で残す）。
+- **data/reputations.json + globalSetup の 'reputations' エントリ削除** —
+  削除済み reputation-service の実行時残骸。db/json リポジトリの残りは全て
+  所有者あり（Verification/Uptime/Watch/Escrow/Payment/Order/Gpu/User）。
+- 検証: tests/api + utils + api.integration — 30 スイート 358 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

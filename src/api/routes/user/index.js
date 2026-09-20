@@ -27,7 +27,6 @@ const { appendAuditLog } = require('../../../utils/audit-log');
 // ファイルベースJSONストレージリポジトリ
 const UserRepository = require('../../../db/json/UserRepository');
 // ピアID管理サブルート
-const peeridRouter = require('./peerid');
 
 // Dummy bcrypt hash for constant-time comparison when the email doesn't exist.
 // Without this, an attacker can enumerate valid emails by measuring whether the
@@ -837,8 +836,6 @@ router.put('/:id/role',
   })
 );
 
-// ピアID管理 /api/v1/users/peerid/*
-router.use('/peerid', peeridRouter);
 
 // 自分の GPU 価格ウォッチ一覧（GPU スナップショット付き）
 // GET /users/me/watches — 認証必須

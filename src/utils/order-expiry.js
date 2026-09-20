@@ -160,7 +160,8 @@ function expireStaleDisputedOrders() {
     try {
       const EscrowRepository = require('../db/json/EscrowRepository');
       const { createEscrowService } = require('../payments/escrow-service');
-      const escrowSvc = createEscrowService();
+      const { lightning } = require('../core/services');
+      const escrowSvc = createEscrowService({ lnAdapter: lightning });
       const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
       for (const esc of escrows) {
         try {

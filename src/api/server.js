@@ -282,23 +282,6 @@ if (process.env.NODE_ENV === 'development') {
 // APIルート
 app.use(config.server.apiPrefix || '/api/v1', routes);
 
-// GraphQL エンドポイント（/graphql）。Apollo の start() は非同期だが、SPA キャッチオール
-// より前に必ず配置する必要があるため、サブアプリを同期的にここへ mount してスロットを予約し、
-// Apollo は非同期でそのサブアプリへ後付けする。失敗してもサーバ本体は起動を継続（guard）。
-const graphqlApp = express();
-app.use(graphqlApp);
-const graphqlReady = (async () => {
-  try {
-    const { setupGraphQL } = require('./graphql');
-    await setupGraphQL(graphqlApp);
-    logger.info('GraphQL endpoint mounted at /graphql');
-    return true;
-  } catch (e) {
-    logger.warn(`GraphQL endpoint disabled: ${e.message}`);
-    return false;
-  }
-})();
-
 // フロントエンドルート（SPA対応）。
 // 拡張子付きパス（/js/foo.js, /css/foo.css 等）はアセット欠落・タイポを意味する —
 // index.html (200, text/html) にフォールバックすると「JSファイルなのにHTMLが
@@ -357,4 +340,4 @@ if (require.main === module) {
   registerProcessGuards({ logger, getServer: () => server });
 }
 
-module.exports = { app, server, graphqlReady };
+module.exports = { app, server };

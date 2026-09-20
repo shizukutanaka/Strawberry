@@ -2,7 +2,7 @@
 // Probe 20 regression tests:
 // 1. /system/info removed from PUBLIC_PATHS: unauthenticated access returns 401
 // 2. audit-log: entries dropped with console alert when file exceeds size limit
-// 3. encryption: AES-256-GCM round-trip, auth tag prevents tampered-ciphertext decryption
+// 3. (removed) encryption: AES-256-GCM — src/security/encryption.js deleted (unreachable code)
 
 const request = require('supertest');
 
@@ -71,53 +71,6 @@ describe('audit-log: size limit guard', () => {
       errorSpy.mockRestore();
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-});
-
-describe('encryption: AES-256-GCM', () => {
-  const { encrypt, decrypt } = require('../../src/security/encryption');
-
-  it('round-trips arbitrary plaintext', () => {
-    const plain = 'hello world 日本語 !@#$%';
-    expect(decrypt(encrypt(plain))).toBe(plain);
-  });
-
-  it('produces different ciphertext for same plaintext (random IV)', () => {
-    const plain = 'same input';
-    expect(encrypt(plain)).not.toBe(encrypt(plain));
-  });
-
-  it('output has three colon-separated parts (iv:tag:ciphertext)', () => {
-    const enc = encrypt('test');
-    const parts = enc.split(':');
-    expect(parts).toHaveLength(3);
-    // IV = 12 bytes = 24 hex chars
-    expect(parts[0]).toHaveLength(24);
-    // Auth tag = 16 bytes = 32 hex chars
-    expect(parts[1]).toHaveLength(32);
-  });
-
-  it('throws on tampered ciphertext (auth tag mismatch)', () => {
-    const enc = encrypt('secret data');
-    const parts = enc.split(':');
-    // Flip the last byte of the ciphertext
-    const tamperedHex = parts[2].slice(0, -2) + (
-      parts[2].slice(-2) === 'ff' ? '00' : 'ff'
-    );
-    const tampered = `${parts[0]}:${parts[1]}:${tamperedHex}`;
-    expect(() => decrypt(tampered)).toThrow();
-  });
-
-  it('throws on tampered auth tag', () => {
-    const enc = encrypt('secret');
-    const parts = enc.split(':');
-    const badTag = parts[1].replace(/./g, '0');
-    expect(() => decrypt(`${parts[0]}:${badTag}:${parts[2]}`)).toThrow();
-  });
-
-  it('throws on invalid format (missing parts)', () => {
-    expect(() => decrypt('onlyone')).toThrow(/Invalid ciphertext format/);
-    expect(() => decrypt('a:b')).toThrow(/Invalid ciphertext format/);
   });
 });
 

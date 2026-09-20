@@ -1,14 +1,20 @@
-# Strawberry アーキテクチャと現状（2026-06）
+# Strawberry アーキテクチャと現状（2026-09）
 
 このドキュメントは、リポジトリの**実態**を簡潔にまとめたもの。README や
 `improvement_checklist2.md` の一部記述は実装より先行（aspirational）しているため、
 本ファイルを一次情報として扱うこと。
 
+**2026-09 第一原理レビュー実施**（詳細: `docs/ZERO_BASED_REVIEW.md`）:
+エントリポイントから到達不能なモジュール 38 件（src の約 19%・3,359 行）、
+GraphQL エンドポイント（コンシューマーゼロ）、未配線の prisma/、Electron 残片、
+未使用 optionalDeps（aws-sdk/imagemin 系）を削除。エスクローの LN アクション実行を
+`createEscrowService({ lnAdapter })` 経由で結線した（LND 未配備時は従来どおり no-op）。
+
 ## 実体は何か
 
 - **本体は Node.js / Express の Web API サーバ**（`src/api/server.js`、`npm start`）。
-- Electron 用の `preload.js` / `react-app.tsx`（`ipcMain` ハンドラ無く未配線・デスクトップ
-  アプリとして未成立）は削除済み（2026-07）。デスクトップアプリを実装する場合は
+- Electron 断片（`public/preload.js` / `public/electron.js` / `src/web/`）は
+  2026-09 に完全削除済み。デスクトップアプリを実装する場合は
   `ipcMain`/`ipcRenderer` の配線から新規に設計すること。
 - **`public/` は実際に動くフロントエンド**（2026-07 追加）。ビルド不要の静的SPA
   （素の HTML + CSS + ネイティブ ES modules、依存追加ゼロ）。`http://localhost:3000`
@@ -21,7 +27,8 @@
   置換済み。未実装: GPU接続情報の実配信（`accessInfo.deliveryImplemented` が false の間は
   その旨を正直に表示するのみ）。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
-  `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
+  `prisma/` は未配線のまま 2026-09 に削除済み（将来 DB 移行する場合は
+  実ドメインモデルのスキーマ設計から）。`src/core/database.js`
   （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`
   （`ioredis`/`rate-limiter-flexible` も未インストール）はどこからも import されず、
   かつ依存先パッケージ自体が存在しないため import すれば即座に失敗するコードだった。
@@ -78,15 +85,11 @@ src/api/server.js
   - `virtual-gpu-manager` のシェル実行を識別子サニタイズでインジェクション対策。
   - `.env.example` に必須 env を明記。
 
-## テスト状況（正直版）
+## テスト状況（2026-09 実測）
 
-`npm test`（Jest）は完走する。**約半数のスイートが green**（`tests/security/*` 全件、
-API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）。
-残りの失敗は**本ブランチの回帰ではなく**、以下いずれかの既存（aspirational）テスト：
-
-- 未実装エンドポイントを叩く（`/notification/create` 等。JWT で 401 になる）。
-- 実装と異なる旧 API/スキーマを参照（`validator`・`logger`・`jwt-auth` 等）。
-- 実 DB/Prisma 前提（`prisma-basic`・`migration-rollback` は未提供時スキップ化済み）。
+`npm test`（Jest）は完走し、**全スイート green**（136/138、2 件スキップ、1,213 テスト、
+約 112 秒）。以前記載されていた「約半数の失敗」は既に是正済みで、到達不能モジュールと
+その専用テストは削除した（failover/gpu-*/security-*/prisma 前提テスト等）。
 
 実行: `npm install` → `npm test`。サーバ起動確認: `npm start`（`http://localhost:3000` で
 実際に動くマーケットプレイスUIが表示される。`/metrics` はPrometheusメトリクス、
@@ -95,14 +98,13 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
 ## フォローアップ（未対応・推奨順）
 
 1. `p2p-network` の有効化（libp2p ESM 対応 or 代替実装）。他3サービスは実機(Docker/k8s/LND)での結合検証。
-2. データ層を一本化（当面 JSON 維持、将来 Prisma へ。`prisma/schema.prisma` は User/Feedback/Task
-   のみで GPU/Order/Payment/Escrow 等の実ドメインモデルを欠いており、移行には未着手のスキーマ
-   設計から必要）。
+2. ~~データ層を一本化~~ → **方針決定済み（2026-09）**: 当面 JSON のみ。`prisma/` は削除済み。
+   将来 DB 化するなら実ドメインのスキーマ設計から新規に行う。
 3. サービスの DI/シングルトン統一、孤立 `*-fixed.js` の削除。
-4. ~~Electron の本実装 or 撤去判断~~ → **解決済み（2026-07）**: Electron 断片は削除し、
-   代わりに `public/` の実フロントエンド（上記）を新規実装。デスクトップアプリが必要になれば
-   このWeb版とは別に `ipcMain`/`ipcRenderer` から設計すること。
-5. 既存テストの実装整合化（未実装エンドポイント実装 or テスト是正）。
+4. ~~Electron の本実装 or 撤去判断~~ → **解決済み**: Electron 断片は全削除済み（2026-09 に
+   public/ 配下の残片も除去）。
+5. ~~既存テストの実装整合化~~ → **解決済み**: 現在 `npm test` は全スイート green（136/138、
+   2 件スキップ）。到達不能モジュールとその専用テストは削除済み。
 6. `.github/workflows/ci.yml` のデプロイ手順を Docker ビルド+`/health` スモークテストへ置換
    （2026-07、diff はコミット履歴に用意済みだが `workflows` 権限が無い環境からはプッシュ不可
    だったため未適用。`workflows` 権限を持つ人が手動適用する必要あり）。旧手順は存在しない
@@ -111,14 +113,16 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
 
 ### 既知の重大ギャップ（要対応・資金フロー）
 
-- **エスクロー action の未配線（money-movement gap）**: `escrow-state-machine` は
-  `DELIVER_OK`/`RESOLVE_SETTLE` 等で `reveal_preimage`/`payout_provider`/`collect_fee` の
-  「副作用の意図」を返すが、`action-executor.executeActions()` は本番コードのどこからも
-  呼ばれていない（テストのみ）。さらに `settle()` が算出する `providerPayoutSats` は
-  状態遷移パス（`evaluate`/`verifyAndSettle`）に渡されない。結果、エスクローは
-  `SETTLED` でも実際の LN 払い出しが実行されず資金が滞留しうる。LND/CLN アダプタ実装と
-  合わせて `evaluate`→`settle`→`executeActions(ctx.payoutSats=settlement.providerPayoutSats)`
-  を結線すること。**LN 実機統合を伴う大改修のため本ブランチでは未着手**。
+- **エスクロー LN アクションの実行経路（2026-09 結線済み）**: 全 9 箇所の本番
+  `createEscrowService()` 呼び出しに `lnAdapter`（ガード付き lightning シングルトン =
+  LightningService。`settleHoldInvoice`/`cancelHoldInvoice`/`payInvoice` を実装済み）を
+  注入した。LND 未配備環境では adapter が null のため従来どおり no-op。配備環境では
+  settle/cancel/release の実 LN 操作が実行され、結果はエスクロー履歴
+  （`LN_ACTIONS_EXECUTED`/`LN_ACTIONS_FAILED`）に記録される。コンテキスト
+  （preimage/preimageHash/providerInvoice）を持たない帳簿専用エスクローの action は
+  `skipped` として履歴に記録する。**残ギャップ**: エスクローに `providerInvoice`/
+  `preimage` を設定する入口が本番コードに存在しない — LN 払い出しを本稼働させるには
+  「プロバイダの payout インボイス/アドレス収集」機能が別途必要。
 - **JSON 層のクロスプロセス lost-update**: `createJsonRepository` の書き込みは
   temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
   flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で

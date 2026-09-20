@@ -13,7 +13,6 @@
     "openapi": "node src/api/openapi-generator.js",
     "openapi-gen": "node src/api/openapi-generator.js",
     "prepare-data": "node scripts/prepare-data.js",
-    "optimize-images": "node scripts/optimize-images.js",
     "version-assets": "node scripts/version-assets.js",
     "update-references": "node scripts/update-references.js",
     "feedback-report": "node scripts/feedback-report.js",
@@ -36,12 +35,8 @@
     "alert-overdue": "node scripts/alert-overdue.js",
     "alert-overdue-high": "node scripts/alert-overdue-high.js",
     "alert-kpi-trend": "node scripts/alert-kpi-trend.js",
-    "prisma": "prisma",
-    "prisma-generate": "prisma generate",
-    "prisma-migrate": "prisma migrate dev --name init",
-    "prisma-studio": "prisma studio",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
-    "setup": "npm ci && npm run prisma-migrate && npm run openapi-gen && npm test"
+    "setup": "npm ci && npm run openapi-gen && npm test"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.78.0",
@@ -49,7 +44,6 @@
     "@opentelemetry/resources": "^2.9.0",
     "@opentelemetry/sdk-node": "^0.220.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "apollo-server-express": "^3.13.0",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
@@ -57,7 +51,6 @@
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "express-session": "^1.18.0",
-    "graphql": "^16.9.0",
     "helmet": "^7.1.0",
     "joi": "^17.13.3",
     "joi-to-swagger": "^6.2.0",
@@ -78,11 +71,7 @@
     "@grpc/grpc-js": "^1.11.1",
     "@grpc/proto-loader": "^0.7.13",
     "@kubernetes/client-node": "^0.21.0",
-    "aws-sdk": "^2.1691.0",
-    "dockerode": "^4.0.2",
-    "imagemin": "^8.0.1",
-    "imagemin-mozjpeg": "^10.0.0",
-    "imagemin-pngquant": "^9.0.2"
+    "dockerode": "^4.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

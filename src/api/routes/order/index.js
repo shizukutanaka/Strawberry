@@ -149,7 +149,7 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
     try {
       const EscrowRepository = require('../../../db/json/EscrowRepository');
       const { createEscrowService } = require('../../../payments/escrow-service');
-      const escrowSvc = createEscrowService();
+      const escrowSvc = createEscrowService({ lnAdapter: lightning });
       const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
       for (const escrow of escrows) {
         escrowSvc.settle(escrow.id, { deliveredRatio, slaUptimePct: Math.round(deliveredRatio * 100) }, { minChargeRatio: 0 });
@@ -211,7 +211,7 @@ const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middlew
 const { withLock } = require('../../../utils/async-lock');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
+const { p2pNetwork, vgpuManager, lightning, requireService } = require('../../../core/services');
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
@@ -707,7 +707,7 @@ router.put('/:id',
         const escrows = EscrowRepository.getByOrderId(order.id) || [];
         if (escrows.length > 0) {
           const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
+          const escrowSvc = createEscrowService({ lnAdapter: lightning });
           for (const escrow of escrows) {
             if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
             // HELD escrow cancel failure must not be silently swallowed — propagate it.
@@ -795,7 +795,7 @@ router.delete('/:id',
       const escrows = EscrowRepository.getByOrderId(order.id);
       if (Array.isArray(escrows) && escrows.length > 0) {
         const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
+        const escrowSvc = createEscrowService({ lnAdapter: lightning });
         for (const escrow of escrows) {
           if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
           if (escrow.state === 'HELD') {
@@ -1168,7 +1168,7 @@ router.post('/:id/reject',
       const escrows = EscrowRepository.getByOrderId(order.id);
       if (Array.isArray(escrows) && escrows.length > 0) {
         const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
+        const escrowSvc = createEscrowService({ lnAdapter: lightning });
         for (const escrow of escrows) {
           if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
             try { escrowSvc.cancel(escrow.id); } catch (e) {
@@ -1402,7 +1402,7 @@ router.post('/:id/dispute/resolve',
         const escrows = EscrowRepository.getByOrderId(order.id);
         if (Array.isArray(escrows) && escrows.length > 0) {
           const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
+          const escrowSvc = createEscrowService({ lnAdapter: lightning });
           for (const e of escrows) {
             if (!['CANCELED', 'SETTLED'].includes(e.state)) {
               try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
@@ -1460,7 +1460,7 @@ router.post('/:id/dispute/resolve',
         const escrows = EscrowRepository.getByOrderId(order.id);
         if (Array.isArray(escrows) && escrows.length > 0) {
           const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
+          const escrowSvc = createEscrowService({ lnAdapter: lightning });
           for (const e of escrows) {
             if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
             const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'
@@ -1931,7 +1931,7 @@ router.post('/:id/stop',
       try {
         const EscrowRepository = require('../../../db/json/EscrowRepository');
         const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
+        const escrowSvc = createEscrowService({ lnAdapter: lightning });
         const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
         // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
         // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。

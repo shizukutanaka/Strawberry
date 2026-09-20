@@ -204,17 +204,6 @@ sequenceDiagram
     exchange_rate_fetch_duration_seconds_bucket{le="0.1"} 10
     ...
     ```
-- `/graphql`（GraphQL API/現金換算/ユーザー/注文/リソース一覧）
-  - 例: `exchangeRate(fresh: Boolean): ExchangeRateInfo` でrate/timestamp/isCacheを返却
-  - `Order`型でも`pricePer5Min`, `totalPriceJPY`, `exchangeRateTimestamp`を取得可能
-  - クエリ例:
-    ```graphql
-    query {
-      exchangeRate(fresh: true) { rate timestamp isCache }
-      orders { id pricePer5Min totalPriceJPY exchangeRateTimestamp }
-    }
-    ```
-
 ---
 
 ## 死活監視・監査証跡・障害通知
@@ -582,7 +571,7 @@ flowchart LR
   - `npm install && npm start`
   - Set environment variables: `SLACK_WEBHOOK_URL`, `SENTRY_DSN`, `LINE_TOKEN` as needed
 - **API Usage:**
-  - `/api/exchange-rate`, `/graphql` for real-time cash conversion
+  - `/api/exchange-rate` for real-time cash conversion
   - Check `timestamp` and `isCache` in all conversion API responses
 - **Monitoring:**
   - Scrape `/metrics` with Prometheus, visualize with Grafana
@@ -598,7 +587,7 @@ flowchart LR
   - `npm install && npm start`
   - 必要に応じてSLACK_WEBHOOK_URL/SENTRY_DSN/LINE_TOKENを設定
 - **API利用:**
-  - `/api/exchange-rate`や`/graphql`で現金換算APIを利用
+  - `/api/exchange-rate`で現金換算APIを利用
   - 返却値の`timestamp`や`isCache`で取得時刻・キャッシュ状態を必ず確認
 - **監視:**
   - `/metrics`をPrometheusで監視し、Grafanaで可視化

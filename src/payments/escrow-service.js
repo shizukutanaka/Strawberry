@@ -14,6 +14,16 @@ const { initial, transition, applyDecision } = require('./escrow-state-machine')
 const { computeSettlement } = require('./settlement-calculator');
 const { executeActions } = require('./action-executor');
 
+// LN アクションが必要とするエスクロー上のコンテキストフィールド。
+// 帳簿専用エスクロー（例: btc-onchain 2-tx 記録）には preimage/providerInvoice が無いため、
+// それを欠く action は LN を呼ばず 'skipped' として履歴に正直に記録する
+// （失敗を装わない・ノイズを出さない）。
+const LN_ACTION_REQUIRED_FIELD = {
+  reveal_preimage: 'preimage',
+  cancel_invoice: 'preimageHash',
+  payout_provider: 'providerInvoice',
+};
+
 function createEscrowService({ repository, lnAdapter } = {}) {
   // 遅延 require: テスト時は repository を注入し、JSON 層を読み込まない
   const repo = repository || require('../db/json/EscrowRepository');
@@ -31,8 +41,21 @@ function createEscrowService({ repository, lnAdapter } = {}) {
       payoutSats: (escrow.settlement && escrow.settlement.providerPayoutSats) ?? escrow.amountSats,
       ...extra,
     };
+    const runnable = [];
+    const skipped = [];
+    for (const action of actions) {
+      const field = LN_ACTION_REQUIRED_FIELD[action];
+      if (field && ctx[field] == null) {
+        skipped.push({ action, kind: 'ln', result: `skipped: escrow has no ${field}` });
+      } else {
+        runnable.push(action);
+      }
+    }
     try {
-      const results = await executeActions(actions, ctx, lnAdapter);
+      const results = [
+        ...(await executeActions(runnable, ctx, lnAdapter)),
+        ...skipped,
+      ];
       const now = new Date().toISOString();
       repo.update(escrow.id, {
         updatedAt: now,
@@ -48,7 +71,7 @@ function createEscrowService({ repository, lnAdapter } = {}) {
         updatedAt: now,
         history: [
           ...(escrow.history || []),
-          { event: 'LN_ACTIONS_FAILED', error: e.message, actions, at: now },
+          { event: 'LN_ACTIONS_FAILED', error: e.message, actions, skipped, at: now },
         ],
       });
       return null;

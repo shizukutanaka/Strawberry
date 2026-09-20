@@ -78,30 +78,10 @@ describe('Audit log: sensitive operations are now recorded', () => {
   });
 });
 
-// ─── 5–6. SSRF guards in notification dispatchers ─────────────────────────────
-describe('SSRF guards: env-configured notification URLs are validated', () => {
-  it('resilient-notify.js has assertPublicUrl guard before channel dispatch', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/resilient-notify.js'), 'utf-8'
-    );
-    expect(src).toMatch(/assertPublicUrl/);
-    expect(src).toMatch(/ssrf-guard/);
-  });
-
-  it('webhook.js sendWebhook has assertPublicUrl guard before axios.post', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/webhook.js'), 'utf-8'
-    );
-    expect(src).toMatch(/assertPublicUrl/);
-    expect(src).toMatch(/ssrf-guard/);
-    // The SSRF check must come BEFORE the axios.post call
-    const ssrfIdx = src.indexOf('assertPublicUrl(url)');
-    const axiosIdx = src.indexOf('axios.post(url, body)');
-    expect(ssrfIdx).toBeGreaterThan(-1);
-    expect(axiosIdx).toBeGreaterThan(-1);
-    expect(ssrfIdx).toBeLessThan(axiosIdx);
-  });
-});
+// ─── 5–6. (removed) SSRF guards in notification dispatchers — resilient-notify.js
+// and api/webhook.js were deleted (unreachable code). The live path is
+// utils/notifier.js, whose own assertPublicUrl/maxRedirects:0 guards are covered
+// by probe66 and api.integration tests.
 
 // ─── 7. Role change actually works and logs (integration) ────────────────────
 describe('Role change integration: admin can change user roles', () => {

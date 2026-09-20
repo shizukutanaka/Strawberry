@@ -44,7 +44,6 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | `/api/profit-addresses` | 運営受取先 | JWT+admin | ✅ |
 | GET `/metrics` | Prometheus | none | ✅ |
 | GET `/api/v1/node-info`,`/channels` | LN 情報 | JWT | 🟡(LN実機要) |
-| GraphQL `/graphql` | 換算等(orders/users/gpus/exchangeRate) | - | ✅(マウント済, server.js) |
 
 ※`users/register` の `userId` 未定義クラッシュ、role 変更/削除の存在しない `users` 配列参照、
 グローバル JWT ゲートが register/login も保護していた鶏卵問題は **すべて修正済**（2026-06）。

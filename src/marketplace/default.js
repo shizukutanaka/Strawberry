@@ -6,9 +6,10 @@ const { createEscrowService } = require('../payments/escrow-service');
 const { createVerificationService } = require('../verification/verification-service');
 const { createReputationService } = require('../reputation/reputation-service');
 const { createMarketplaceService } = require('./marketplace-service');
+const { lightning } = require('../core/services');
 
 const reputationService = createReputationService();
-const escrowService = createEscrowService();
+const escrowService = createEscrowService({ lnAdapter: lightning });
 const verificationService = createVerificationService({ reputationService });
 
 module.exports = createMarketplaceService({ escrowService, verificationService, reputationService });

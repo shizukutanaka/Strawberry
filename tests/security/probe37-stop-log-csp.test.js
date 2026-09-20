@@ -42,37 +42,9 @@ describe('/stop: wall-clock elapsed time is used when usageStats absent', () => 
   });
 });
 
-// ─── 37b-1: Log injection prevention in resilient-notify.js ──────────────────
-describe('resilient-notify.js: newlines stripped from log messages', () => {
-  it('source: safeType replaces newlines in channel type before logging', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/resilient-notify.js'), 'utf-8'
-    );
-    expect(src).toMatch(/safeType.*replace.*\\n.*\\r/);
-    expect(src).toMatch(/logger\.warn.*safeType/);
-  });
-
-  it('source: safeErrMsg replaces newlines in error messages before logging', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/resilient-notify.js'), 'utf-8'
-    );
-    expect(src).toMatch(/safeErrMsg.*replace.*\\n.*\\r/);
-    // Both SSRF and general failure paths must use safeErrMsg
-    const matches = (src.match(/safeErrMsg/g) || []).length;
-    expect(matches).toBeGreaterThanOrEqual(4); // definition (x2 for SSRF + err) + usage (x2)
-  });
-
-  it('resilientNotify: newline in error message does not appear raw in log', async () => {
-    // Verify the sanitization function removes \n characters.
-    // We test the replace logic directly since we can't easily capture logger output.
-    const injected = 'connection refused\nFAKE LOG LINE: admin approved payment';
-    const sanitized = injected.replace(/[\n\r]/g, ' ');
-    expect(sanitized).not.toMatch(/\n/);
-    expect(sanitized).toContain('connection refused');
-    expect(sanitized).toContain('FAKE LOG LINE');
-    expect(sanitized.split('\n').length).toBe(1);
-  });
-});
+// ─── 37b-1: (removed) resilient-notify.js deleted — unreachable duplicate of
+// notifier.js's guards. Log-injection coverage for the live path stays in
+// notifier/user-notify tests.
 
 // ─── 37b-4: CSP frame-ancestors and X-Frame-Options ─────────────────────────
 describe('security.js: clickjacking protection', () => {

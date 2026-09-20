@@ -2,7 +2,7 @@
 // Probe 34 regression tests:
 // 1. apiLimiter keyGenerator uses integer-only TRUST_PROXY (no XFF bypass via 'true')
 // 2. TOTP rate limiter is backed by server-side IP counter (not just session-scoped)
-// 3. GraphQL endpoint has rate limiting applied via apiLimiter
+// 3. (removed) GraphQL endpoint rate limiting — src/api/graphql.js deleted (no consumers)
 // 4. master-auth.js has _checkTotpIpLimit before session counter
 
 describe('Rate limiting: keyGenerator XFF bypass fix', () => {
@@ -73,18 +73,3 @@ describe('TOTP rate limiting: server-side IP counter supplements session counter
   });
 });
 
-describe('GraphQL: apiLimiter applied to /graphql endpoint', () => {
-  it('graphql.js: apiLimiter is applied before Apollo middleware', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/graphql.js'), 'utf-8'
-    );
-    expect(src).toMatch(/apiLimiter/);
-    expect(src).toMatch(/app\.use\(apiLimiter\)/);
-    // Rate limiter must be applied before server.applyMiddleware
-    const limiterIdx = src.indexOf('app.use(apiLimiter)');
-    const apolloIdx = src.indexOf('server.applyMiddleware');
-    expect(limiterIdx).toBeGreaterThan(-1);
-    expect(apolloIdx).toBeGreaterThan(-1);
-    expect(limiterIdx).toBeLessThan(apolloIdx);
-  });
-});

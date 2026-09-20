@@ -497,6 +497,15 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 
 検証: probe23b + basic — 全パス。
 
+### 第26ラウンド（ソクラテス式問答 — 「コメントは現在のコードを説明しているか？」）
+
+- order-expiry の 4 スイープ関数は全てスケジューラ/ルートに登録済みで生存
+- **修正**: 削除済み reputation サブシステムを現在形で説明する stale コメント
+  6箇所（marketplace.js の「二重 reputation slash」、order/index.js の
+  dispute/resolve・stop ハンドラの reputation 副作用記述）→ 実態
+  （escrow 二重精算防止）に書き換え
+- PUBLIC_PATHS は全エントリが実ルートに対応（stale なし）
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

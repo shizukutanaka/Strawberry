@@ -89,7 +89,7 @@ router.post('/escrow/:id/verify', adminOnly, async (req, res) => {
 });
 
 // 係争の解決（settle / refund）
-// withLock で同一エスクローへの並行呼び出しによる二重 reputation slash を防ぐ（/verify と同様）
+// withLock で同一エスクローへの並行呼び出しによる二重精算を防ぐ（/verify と同様）
 router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
   const { decision, providerId } = req.body || {};
   if (decision !== 'settle' && decision !== 'refund') {
@@ -98,7 +98,7 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
   try {
     const result = await withLock(`escrow:${req.params.id}`, async () => {
       // providerId が渡された場合、エスクローの注文に記録された実際のプロバイダと一致するか検証する。
-      // 不一致を許すと admin が任意の providerId を指定して無関係プロバイダの reputation を slash できてしまう。
+      // 不一致を許すと admin が任意の providerId を指定して無関係プロバイダ宛の精算を起動できてしまう。
       if (providerId) {
         const escrow = marketplace.getEscrow(req.params.id);
         if (!escrow) throw Object.assign(new Error('escrow not found'), { status: 404 });

@@ -1319,22 +1319,19 @@ router.post('/:id/dispute',
   })
 );
 
-// 係争の裁定（管理者のみ）— 宙ぶらりんの disputed 注文を終端状態へ遷移させ、
-// かつ「実フロー」のレピュテーションへ失敗を反映する（これまで失敗系は抽象 auction 経路でしか
-// 記録されず、実際の注文ライフサイクルでは reputation が単調増加しかしなかった欠陥を是正）。
+// 係争の裁定（管理者のみ）— 宙ぶらりんの disputed 注文を終端状態へ遷移させる。
 // POST /orders/:id/dispute/resolve { decision: 'refund'|'uphold', note?: string }
-//  - refund: 借り手勝訴（プロバイダ過失）→ 注文を cancelled、エスクロー返金、
-//            provider に recordJobResult(false) + slash（評判を減点）。
-//  - uphold: 係争棄却（プロバイダ正当）→ 注文を completed、provider に recordJobResult(true)。
+//  - refund: 借り手勝訴（プロバイダ過失）→ 注文を cancelled、エスクロー返金。
+//  - uphold: 係争棄却（プロバイダ正当）→ 注文を completed。
 router.post('/:id/dispute/resolve',
   authenticateJWT,
   checkRole(['admin']),
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
-    // 二重裁定の副作用（reputation slash + credit が両方走る、raiser counter の二重加算など）
+    // 二重裁定の副作用（escrow 精算・raiser counter の二重加算など）
     // を防ぐため、order 単位の mutex で全フローを直列化する。CAS だけだと CAS 前の副作用
-    // （raiser の getById+update、reputation の getById+update）が並行に走り得る。
+    // （raiser の getById+update）が並行に走り得る。
     // ロックキーを `order:${orderId}` に統一: /start・/stop と同一 mutex を共有することで、
     // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が escrow 精算を
     // 並行実行し GPU が二重解放・二重精算されるリスクを排除する（旧: dispute-resolve
@@ -1714,8 +1711,8 @@ router.post('/:id/stop',
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
 
-    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU,
-    // double-recording reputation, and double-settling escrow for the same order.
+    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU
+    // and double-settling escrow for the same order.
     return withLock(`order:${orderId}`, async () => {
       const order = OrderRepository.getById(orderId);
       if (!order) {
@@ -1776,8 +1773,8 @@ router.post('/:id/stop',
       _deleteHeartbeatsForOrder(orderId);
 
       // Atomic compare-and-swap: only write completed if still active.
-      // Reputation and escrow settlement only run when this write succeeds,
-      // preventing double-increment if a second concurrent stop somehow slipped through.
+      // Escrow settlement only runs when this write succeeds,
+      // preventing double-settlement if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
       const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
       const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);

@@ -725,6 +725,15 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: tests/api・tests/utils — 30 スイート 358 テスト全パス。
 
+### 第49ラウンド（ソクラテス式問答 — 「静的アセットの消費者は？」）
+
+- 全 public/ ファイル棚卸し: index.html・css・js・swagger.html 全て稼働中
+- `public/README_public.md` 削除 — ハッシュ付きビルド出力（ビルド無し）・
+  `optimize-images`（第5ラウンド削除）・i18n ディレクトリ（非存在）・
+  deploy_public.sh（非存在）を推奨する汎用テンプレート文書で、
+  このリポジトリの実態と無関係
+- src/ 全77ファイルに消費者再確認 — 孤児なし
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

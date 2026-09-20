@@ -909,6 +909,16 @@ src/ 全ファイルの export 名を総当たり:
   消費）・invoice-poller（server.js で起動）— 起動経路完結。
 - 削除ゼロのラウンド。
 
+### 第68ラウンド（ソクラテス式問答 — 「ハンドラ内の遅延 require は本当に遅延が必要か？」）
+
+- order/index.js の遅延 require 24箇所を先頭に集約: PaymentRepository×6、
+  UserRepository×3、GpuRepository×2、notifyUser×12、renter-eligibility×1。
+  全て post-load のハンドラ内でしか使わず遅延不要。OrderRepository の
+  sweeps 2箇所も先頭 const 参照へ変更（stale コメント除去）。
+- L1515 `require('../gpu/index')`（ルート間循環ガード）は意図的遅延として保持。
+- 検証: api+security+payments+db — 90スイート 875テスト全パス
+  （集約時に top-level require を誤削除する回帰を検出・即修正）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

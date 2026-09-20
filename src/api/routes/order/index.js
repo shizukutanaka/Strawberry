@@ -75,12 +75,10 @@ function _deleteHeartbeatsForOrder(orderId) {
   }
 }
 function reapUsageSessions() {
-  // 遅延 require: モジュール末尾で定義される OrderRepository をクロージャ経由で参照する。
-  const OrderRepo = require('../../../db/json/OrderRepository');
   for (const [orderId, session] of usageSessions) {
     session.checkTimeouts();
     let order = null;
-    try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
+    try { order = OrderRepository.getById(orderId); } catch (_) { order = null; }
     if (!order || TERMINAL_SESSION_STATUSES.has(order.status)) {
       usageSessions.delete(orderId);
       _deleteHeartbeatsForOrder(orderId);
@@ -108,7 +106,6 @@ const SLA_PROVIDER_TIMEOUT_MS = Math.max(
   Number(process.env.SLA_PROVIDER_HEARTBEAT_TIMEOUT_MS) || 5 * 60 * 1000,
 );
 function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
-  const OrderRepo = require('../../../db/json/OrderRepository');
   const breached = [];
   for (const [orderId, session] of usageSessions) {
     // 証拠主義: プロバイダーのハートビートが一度も無いセッションは対象外。
@@ -116,7 +113,7 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
     if (nowMs - session.lastLenderHeartbeat <= SLA_PROVIDER_TIMEOUT_MS) continue;
 
     let order = null;
-    try { order = OrderRepo.getById(orderId); } catch (_) { order = null; }
+    try { order = OrderRepository.getById(orderId); } catch (_) { order = null; }
     if (!order || order.status !== 'active') continue;
 
     const usageSeconds = typeof session.getUsageSeconds === 'function' ? session.getUsageSeconds() : 0;
@@ -127,7 +124,7 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
 
     // active → completed（SLA 違反フラグ付き）。CAS で二重処理を防ぐ。
     const nowIso = new Date(nowMs).toISOString();
-    const result = OrderRepo.updateIf(orderId, (o) => o.status === 'active', {
+    const result = OrderRepository.updateIf(orderId, (o) => o.status === 'active', {
       status: 'completed',
       completedAt: nowIso,
       stoppedAt: nowIso,
@@ -164,7 +161,6 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
 
     // 両者へ通知（best-effort）。
     try {
-      const { notifyUser } = require('../../../utils/user-notify');
       const pct = Math.round(deliveredRatio * 100);
       if (order.userId) {
         notifyUser(order.userId, 'order_sla_breach',
@@ -209,9 +205,13 @@ const { vgpuManager, lightning, requireService } = require('../../../core/servic
 const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
-const GpuRepository = require('../../../db/json/GpuRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
 const { createEscrowService } = require('../../../payments/escrow-service');
+const GpuRepository = require('../../../db/json/GpuRepository');
+const PaymentRepository = require('../../../db/json/PaymentRepository');
+const UserRepository = require('../../../db/json/UserRepository');
+const { notifyUser } = require('../../../utils/user-notify');
+const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
 const providerUptime = require('../../../reputation/provider-uptime');
 // 価格計算（時間単価解決・5分単価・JPY換算）の共通ユーティリティ
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
@@ -473,7 +473,6 @@ router.get('/provider/earnings',
       }
     }
     // GPU別収益内訳
-    const GpuRepository = require('../../../db/json/GpuRepository');
     const byGpu = {};
     for (const o of orders) {
       if (o.status !== 'completed') continue;
@@ -596,7 +595,6 @@ router.get('/:id/payment',
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
-    const PaymentRepository = require('../../../db/json/PaymentRepository');
 
     const payments = (PaymentRepository.getByOrderId(order.id) || []).map(p => ({
       id: p.id,
@@ -729,7 +727,6 @@ router.put('/:id',
     // ステータスが matched または active に変わった場合は借り手へ通知
     if (updateData.status && updateData.status !== prevStatus) {
       try {
-        const { notifyUser } = require('../../../utils/user-notify');
         if (updateData.status === 'matched') {
           notifyUser(order.userId, 'order_matched',
             `【Strawberry】注文がマッチしました\n注文: #${order.id}\nまもなく利用を開始できます`,
@@ -822,7 +819,6 @@ router.delete('/:id',
     // プロバイダへキャンセル通知（予約した GPU が開放されたことを即時連絡）
     if (order.providerId) {
       try {
-        const { notifyUser } = require('../../../utils/user-notify');
         const cancelledGpu = GpuRepository.getById(order.gpuId);
         const gpuLabel = cancelledGpu ? cancelledGpu.name : order.gpuId;
         notifyUser(order.providerId, 'order_cancelled',
@@ -912,7 +908,6 @@ router.post('/',
     // 既定は寛容とし、Sybil 耐性を必須としたいプロバイダは gpu.rejectUnratedRenters:true で
     // 明示的にオプトインできる（未評価の借り手も floor 扱いで拒否）。
     // minRenterRating を設定しない GPU（undefined/0/null）は全借り手を受け付ける。
-    const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
     const _allOrdersForRating = OrderRepository.getAll();
     const renterRating = computeRenterRating(_allOrdersForRating, req.user.id);
     const renterRatingAverage = renterRating.average; // 通知メッセージで使用
@@ -1040,7 +1035,6 @@ router.post('/',
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;
     // GPU 提供者（プロバイダ）へ通知（notification-settings で登録したチャネルへ）
     if (gpu.providerId) {
-      const { notifyUser } = require('../../../utils/user-notify');
       const renterRatingStr = renterRatingAverage !== null
         ? `借り手評価: ★${Math.round(renterRatingAverage * 10) / 10}（${renterReviewCount}件）\n`
         : '借り手評価: 未評価（新規）\n';
@@ -1148,7 +1142,6 @@ router.post('/:id/reject',
       logger.warn(`Escrow lookup on order reject failed (order=${order.id}): ${e.message}`);
     }
     // 借り手（レンター）へ通知
-    const { notifyUser } = require('../../../utils/user-notify');
     const gpuName = gpu ? gpu.name : order.gpuId;
     notifyUser(order.userId, 'order_rejected',
       `【Strawberry】プロバイダがあなたの注文を拒否しました\n注文: #${order.id}\nGPU: ${gpuName}${cancelNote ? `\n理由: ${cancelNote}` : ''}`,
@@ -1205,7 +1198,6 @@ router.post('/:id/accept',
     if (!acceptResult.ok) {
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before accept could complete; please retry', 409);
     }
-    const { notifyUser } = require('../../../utils/user-notify');
     const gpuName = gpu ? gpu.name : order.gpuId;
     notifyUser(order.userId, 'order_accepted',
       `【Strawberry】プロバイダがあなたの注文を承認しました\nGPU: ${gpuName}\n注文: #${order.id}`,
@@ -1240,7 +1232,6 @@ router.post('/:id/dispute',
     }
     // matched状態の係争は支払い済みの場合のみ許可（無支払いでプロバイダGPUをDoSする攻撃を防止）
     if (order.status === 'matched' && req.user.role !== 'admin') {
-      const PaymentRepository = require('../../../db/json/PaymentRepository');
       const payments = PaymentRepository.getByOrderId(order.id) || [];
       const hasPaidPayment = payments.some(p => p.status === 'paid');
       if (!hasPaidPayment) {
@@ -1258,7 +1249,6 @@ router.post('/:id/dispute',
       if (req.user.role !== 'admin') {
         const MIN_RESOLVED = Number(process.env.MIN_RESOLVED_DISPUTES) || 3;
         const MAX_DENIED_RATE = Number(process.env.MAX_DENIED_DISPUTE_RATE) || 0.67;
-        const UserRepository = require('../../../db/json/UserRepository');
         const me = UserRepository.getById(req.user.id);
         const denied = (me && me.deniedDisputeCount) || 0;
         const vindicated = (me && me.vindicatedDisputeCount) || 0;
@@ -1293,7 +1283,6 @@ router.post('/:id/dispute',
       }
 
       // 管理者・運営側へ通知（ユーザー通知設定経由）
-      const { notifyUser } = require('../../../utils/user-notify');
       const gpu = GpuRepository.getById(order.gpuId);
       const gpuName = gpu ? gpu.name : order.gpuId;
       notifyUser(order.userId, 'order_dispute_raised',
@@ -1343,7 +1332,6 @@ router.post('/:id/dispute/resolve',
     const resolvedAt = new Date().toISOString();
     const resolution = { decision, note, resolvedBy: req.user.id, resolvedAt };
 
-    const { notifyUser } = require('../../../utils/user-notify');
     const gpu = GpuRepository.getById(order.gpuId);
     const gpuName = gpu ? gpu.name : order.gpuId;
 
@@ -1380,7 +1368,6 @@ router.post('/:id/dispute/resolve',
       const vRaiser = order.dispute && order.dispute.raisedBy;
       if (vRaiser) {
         try {
-          const UserRepository = require('../../../db/json/UserRepository');
           const u = UserRepository.getById(vRaiser);
           if (u) {
             UserRepository.update(vRaiser, { vindicatedDisputeCount: (u.vindicatedDisputeCount || 0) + 1 });
@@ -1435,7 +1422,6 @@ router.post('/:id/dispute/resolve',
       const raiser = order.dispute && order.dispute.raisedBy;
       if (raiser) {
         try {
-          const UserRepository = require('../../../db/json/UserRepository');
           const u = UserRepository.getById(raiser);
           if (u) {
             UserRepository.update(raiser, { deniedDisputeCount: (u.deniedDisputeCount || 0) + 1 });
@@ -1494,7 +1480,6 @@ router.post('/:id/review',
     }
     // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
     if (req.user.role !== 'admin') {
-      const PaymentRepository = require('../../../db/json/PaymentRepository');
       const payments = PaymentRepository.getByOrderId(order.id) || [];
       const hasPaidPayment = payments.some(p => p.status === 'paid');
       if (!hasPaidPayment) {
@@ -1519,7 +1504,6 @@ router.post('/:id/review',
     }
     // プロバイダへレビュー通知
     if (order.providerId) {
-      const { notifyUser } = require('../../../utils/user-notify');
       const gpu = GpuRepository.getById(order.gpuId);
       const gpuName = gpu ? gpu.name : order.gpuId;
       notifyUser(order.providerId, 'order_reviewed',
@@ -1572,7 +1556,6 @@ router.post('/:id/renter-review',
     }
     // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
     if (req.user.role !== 'admin') {
-      const PaymentRepository = require('../../../db/json/PaymentRepository');
       const payments = PaymentRepository.getByOrderId(order.id) || [];
       const hasPaidPayment = payments.some(p => p.status === 'paid');
       if (!hasPaidPayment) {
@@ -1593,7 +1576,6 @@ router.post('/:id/renter-review',
       throw new APIError(ErrorTypes.CONFLICT, 'This order already has a renter review', 409);
     }
     // 借り手へ通知
-    const { notifyUser } = require('../../../utils/user-notify');
     notifyUser(order.userId, 'renter_reviewed',
       `【Strawberry】取引相手（プロバイダ）からあなたへの評価が投稿されました ★${rating}/5\n注文: #${order.id}${comment ? `\nコメント: ${comment}` : ''}`,
       { subject: `【Strawberry】あなたへの評価 ★${rating}/5（注文 #${order.id}）` });
@@ -1644,7 +1626,6 @@ router.post('/:id/start',
       // 支払い確認: 無償で GPU を起動されないよう、確定済み支払いレコードを要求する。
       // 管理者は手動割り当て・テスト環境のために免除。
       if (req.user.role !== 'admin') {
-        const PaymentRepository = require('../../../db/json/PaymentRepository');
         const payments = PaymentRepository.getByOrderId(order.id) || [];
         const hasPaidPayment = payments.some(p => p.status === 'paid');
         if (!hasPaidPayment) {
@@ -1681,7 +1662,6 @@ router.post('/:id/start',
       }
       // 借り手へ利用開始通知
       try {
-        const { notifyUser } = require('../../../utils/user-notify');
         notifyUser(order.userId, 'order_started',
           `【Strawberry】GPU の利用が開始されました\n注文: #${orderId}`,
           { subject: `【Strawberry】注文 #${orderId} 利用開始` });
@@ -1732,7 +1712,6 @@ router.post('/:id/stop',
       // GPU 利用を無償で受け取り、レピュテーションも加点される。
       // 管理者は決済記録なしでも停止できる（手動割り当て・テスト環境等の例外処理に対応）。
       if (req.user.role !== 'admin') {
-        const PaymentRepository = require('../../../db/json/PaymentRepository');
         const payments = PaymentRepository.getByOrderId(order.id) || [];
         const hasPaidPayment = payments.some(p => p.status === 'paid');
         if (!hasPaidPayment) {
@@ -1803,7 +1782,6 @@ router.post('/:id/stop',
 
       // 借り手へ完了通知（支払い確認と利用時間サマリを含む）
       try {
-        const { notifyUser } = require('../../../utils/user-notify');
         const duration = usageStats && usageStats.usageSeconds
           ? `${Math.round(usageStats.usageSeconds / 60)} 分` : `${order.durationMinutes} 分`;
         notifyUser(order.userId, 'order_completed',

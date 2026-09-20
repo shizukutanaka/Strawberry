@@ -811,6 +811,14 @@ src/ 全ファイルの export 名を総当たり:
 - CSS 死セレクタ削除: `.icon-btn`（参照ゼロ）、`.text-center`（同）。badge-*/chip-*/toast-*/
   docs-method-* は JS テンプレで動的構成のため生存
 
+### 第58ラウンド（ソクラテス式問答 — 「通知設定・docs ページ・テストヘルパーは消費者ありか？」）
+
+- 全生存を確認: LINE_TOKEN（service-monitor + order notify で実読み）、
+  swagger.html → js/docs.js + css/docs.css → /openapi.json の docs チェーン完結、
+  notification-settings（lineToken 等はユーザー設定経由で実消費）、
+  tests/helpers は存在せず監査対象なし
+- 削除ゼロのラウンド
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -1012,6 +1012,15 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: error-handler+middleware・audit-integrity 関連 — 33テスト全パス。
 
+### 第78ラウンド（ソクラテス式問答 — 「列挙・定数テーブルに死エントリはないか？」）
+
+- `NotifyType` 全6チャネル（LINE/Discord/Slack/Telegram/Email/Webhook）— 4〜6箇所で
+  実使用（notification-settings 駆動）。`TERMINAL_SESSION_STATUSES`・
+  `BLOCKING_ORDER_STATUSES`・escrow STATES/EVENTS も第50ラウンドで全生存確認済み。
+- src/marketplace/default.js の DI チェーン（escrow+verification→marketplace-service
+  →escrow admin ルート）は全リンク生存。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

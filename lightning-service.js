@@ -6,6 +6,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const { logger } = require('./src/utils/logger');
+const { appendAuditLog } = require('./src/utils/audit-log');
+const { schemas } = require('./src/utils/validator');
 
 class LightningService {
     /**
@@ -86,7 +88,6 @@ class LightningService {
 
     // gRPC自動再接続（指数バックオフ付）＋障害監査証跡・外部通知対応
     async connectToLND(maxRetries = process.env.NODE_ENV === 'test' ? 0 : 5, notifyOnError = true) {
-        const { appendAuditLog } = require('./src/utils/audit-log');
         let attempt = 0;
         let lastError = null;
         const backoff = (n) => Math.min(30000, 1000 * Math.pow(2, n)); // 最大30秒
@@ -392,8 +393,6 @@ class LightningService {
     async updateNodeInfo() {
         try {
             const info = await this.getInfo();
-            const { schemas } = require('./src/utils/validator');
-            const { appendAuditLog } = require('./src/utils/audit-log');
             // Joiバリデーション
             const nodeInfo = {
                 pubkey: info.identity_pubkey,
@@ -601,8 +600,6 @@ class LightningService {
                     else resolve(response);
                 });
             });
-            const { schemas } = require('./src/utils/validator');
-            const { appendAuditLog } = require('./src/utils/audit-log');
             this.channels.clear();
             let invalidCount = 0;
             channelList.channels.forEach(channel => {
@@ -635,7 +632,6 @@ class LightningService {
 
     setupEventStreams() {
         // 監査証跡
-        const { appendAuditLog } = require('./src/utils/audit-log');
 
         // イベントストリーム再接続ロジック
         const setupInvoiceStream = () => {

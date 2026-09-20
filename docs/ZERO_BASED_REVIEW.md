@@ -931,6 +931,19 @@ src/ 全ファイルの export 名を総当たり:
 検証: api+security+payments — 88スイート 861テスト全パス（集約漏れによる
 未定義参照を検出して即修正済み）。
 
+### 第70ラウンド（ソクラテス式問答 — 「サービス・ユーティリティ層の遅延 require は正当か？」）
+
+- order-expiry.js: notifyUser×4・EscrowRepository・createEscrowService・lightning を
+  先頭へ集約（全てタイマー発火の post-load 関数内のみ使用）。
+- lightning-service.js: メソッド内 lazy `require('./src/utils/audit-log')`/
+  `require('./src/utils/validator')` を先頭へ集約 — jest 環境破棄後に
+  「import after teardown」警告を撒いていた実行時 require を解消（機能改善を兼ねる）。
+- `require('fs').existsSync`（L100）は同期 fs のため別物として保持。
+- 残りの console.error（audit-log・token-denylist）はロガー自体が壊れた場合の
+  最終防衛線として意図的保持。
+
+検証: utils+payments+unit（111）、api+security+integration（83スイート814）全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

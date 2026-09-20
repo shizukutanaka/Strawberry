@@ -5,6 +5,10 @@
 // タイムアウトは env 変数で上書き可能。呼出し毎に解決してテスト・運用での動的変更を許容。
 const OrderRepository = require('../db/json/OrderRepository');
 const { logger } = require('./logger');
+const EscrowRepository = require('../db/json/EscrowRepository');
+const { createEscrowService } = require('../payments/escrow-service');
+const { lightning } = require('../core/services');
+const { notifyUser } = require('./user-notify');
 
 const DEFAULT_TIMEOUT_MINUTES = 30;
 const DEFAULT_MATCHED_TIMEOUT_MINUTES = 60;
@@ -59,7 +63,6 @@ function expireStaleOrders() {
     logger.info(`Order auto-expired (payment timeout): ${order.id}`);
     // 借り手へ失効通知（決済タイムアウトで自動キャンセルされたことを即時周知）
     try {
-      const { notifyUser } = require('./user-notify');
       notifyUser(order.userId, 'order_expired',
         `【Strawberry】注文が決済タイムアウトにより自動キャンセルされました\n注文: #${order.id}`,
         { subject: `【Strawberry】注文 #${order.id} 自動キャンセル通知` });
@@ -94,7 +97,6 @@ function expireStaleMatchedOrders() {
     expired++;
     logger.info(`Order auto-expired (match timeout): ${order.id}`);
     try {
-      const { notifyUser } = require('./user-notify');
       notifyUser(order.userId, 'order_match_timeout',
         `【Strawberry】マッチした注文が開始されないため自動キャンセルされました\n注文: #${order.id}`,
         { subject: `【Strawberry】注文 #${order.id} 自動キャンセル通知` });
@@ -158,9 +160,6 @@ function expireStaleDisputedOrders() {
     //   refund → CANCEL（cancel_invoice + refund_renter → CANCELED）
     //   uphold → DELIVER_OK（reveal_preimage + payout_provider → SETTLED）。
     try {
-      const EscrowRepository = require('../db/json/EscrowRepository');
-      const { createEscrowService } = require('../payments/escrow-service');
-      const { lightning } = require('../core/services');
       const escrowSvc = createEscrowService({ lnAdapter: lightning });
       const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
       for (const esc of escrows) {
@@ -180,7 +179,6 @@ function expireStaleDisputedOrders() {
     resolved++;
     logger.info(`Dispute auto-resolved (${decision}) after ${days}d: order=${order.id}`);
     try {
-      const { notifyUser } = require('./user-notify');
       const msg = `【Strawberry】係争が自動裁定（${decision === 'refund' ? '返金' : '提供者支持'}）されました\n注文: #${order.id}`;
       if (order.userId)     notifyUser(order.userId,     'dispute_auto_resolved', msg, {});
       if (order.providerId) notifyUser(order.providerId, 'dispute_auto_resolved', msg, {});
@@ -218,7 +216,6 @@ function expireStaleActiveOrders() {
     expired.push({ id: order.id, gpuId: order.gpuId });
     logger.info(`Order auto-expired (active timeout): ${order.id}`);
     try {
-      const { notifyUser } = require('./user-notify');
       const msg = `【Strawberry】GPU 利用時間が上限を超えたため注文が自動キャンセルされました\n注文: #${order.id}`;
       if (order.userId)     notifyUser(order.userId,     'order_active_timeout', msg, {});
       if (order.providerId) notifyUser(order.providerId, 'order_active_timeout', msg, {});

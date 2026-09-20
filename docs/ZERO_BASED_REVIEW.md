@@ -966,6 +966,15 @@ src/ 全ファイルの export 名を総当たり:
   と異なり不活性フィールドなし）。
 - 削除ゼロのラウンド — 遅延 require 監査はここで収束（残余は全て正当化済み）。
 
+### 第73ラウンド（ソクラテス式問答 — 「Mock 名を冠する src コードは偽の検証か？」）
+
+- `createMockAttestationVerifier`（gpu 登録で使用）は名前こそ Mock だが `verify` が
+  実 `verifyAttestation`（重み付きスコア・改ざん/鮮度検査）に委譲するため
+  **本番でも実検証が走っている** — ln-adapter（モックのみ export）とは別物で生存判定。
+  calls 履歴・buildReport はテスト用フックだが DI 境界の一部として保持。
+- marketplace.js は escrow admin 面+stats のみ残存（既知の製品判断面）。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

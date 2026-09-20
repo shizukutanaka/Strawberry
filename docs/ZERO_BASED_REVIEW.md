@@ -871,6 +871,17 @@ src/ 全ファイルの export 名を総当たり:
   実在エンドポイント・値検証付きで到達可能 — 到達不能アダプタなし。
 - 削除ゼロのラウンド。
 
+### 第64ラウンド（ソクラテス式問答 — 「スキーマが受理するフィールドをハンドラが読むか？」）
+
+- `schemas.order.create` の 11フィールド突合結果: ロジックで実使用は gpuId・
+  durationMinutes・maxPricePerHour（価格チェック）のみ。description・paymentMethod・
+  location・preferredCountry・maxDistance・latitude・longitude は orderData に
+  格納されるが業務ロジックで読まれない — ただし GET /orders のレスポンスで
+  クライアントへエコーされるため「write-only」ではなく「クライアント可視メタデータ」。
+  削除は API 契約の変更＝製品判断（第8ラウンドの marketplace 面削除で使い道が
+  消えた残存入力）。一覧に記録。
+- gpu.register/update スキーマは全フィールドが保存+応答で消費。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -187,16 +187,6 @@ const schemas = {
     })
   },
   
-  // マッチング関連
-  match: {
-    // マッチング要求用スキーマ
-    request: Joi.object({
-      orderId: Joi.string().required(),
-      maxResults: Joi.number().min(1).max(50).default(10),
-      timeout: Joi.number().min(1000).max(30000).default(5000)
-    })
-  },
-  
   // 決済関連
   payment: {
     // インボイス作成用スキーマ

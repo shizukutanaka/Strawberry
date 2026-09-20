@@ -609,6 +609,18 @@ settle（精算）と cancel（返金）の別操作もある。ロジックは�
 
 結論: gpu/index.js に統合可能な重複なし。全重複フラグを精査し尽くした。
 
+### 第37ラウンド（ソクラテス式問答 — 「定義済みスキーマに消費者はいるか？」）
+
+validator.js の全スキーマを監査:
+- `schemas.match`（/match エンドポイントのリクエスト検証）— エンドポイント
+  自体を第8ラウンドで削除済み → スキーマも残骸として削除
+- `schemas.idParam`/`gpu`/`order`/`payment`/`user`/`lightningNode`/
+  `lightningChannel` は全て消費者ありで生存
+- 「`messages` は Joi.extend カスタム uuid 拡張のオプション（スキーマではなく
+  フラグ）— 削除対象外
+
+検証: tests/api/order・api.integration — 254 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

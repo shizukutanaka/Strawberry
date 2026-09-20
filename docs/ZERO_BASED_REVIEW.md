@@ -956,6 +956,16 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: security+middleware — 505テスト全パス。
 
+### 第72ラウンド（ソクラテス式問答 — 「残る遅延 require は全て正当か？gpu.update スキーマは実態と一致するか？」）
+
+- 残遅延 require 全正当: exchange-rate の prom-client try/catch ガードと
+  notifyExternalAlert lazy rewire、service-monitor のアラート時スクリプトロード、
+  vgpu-manager のインライン crypto.randomBytes。
+- `schemas.gpu.update` 全8フィールドが PUT ハンドラの更新ホワイトリストで消費
+  （minRenterRating/rejectUnratedRenters/availability 等 — 第64ラウンドの order.create
+  と異なり不活性フィールドなし）。
+- 削除ゼロのラウンド — 遅延 require 監査はここで収束（残余は全て正当化済み）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

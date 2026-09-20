@@ -6,7 +6,7 @@ Thank you for considering contributing to Strawberry! 🚀
 
 - Fork this repository and create your branch from `main` or `develop`.
 - Make your changes (feature, fix, docs, etc.)
-- Run `npm run lint` and `npm test` to ensure quality.
+- Run `npm test` to ensure quality.
 - If you add/update API, run `npm run openapi` to update OpenAPI docs.
 - Push your branch and open a Pull Request (PR) with a clear description.
 - For bug reports and feature requests, use GitHub Issues.
@@ -35,7 +35,7 @@ Thank you for considering contributing to Strawberry! 🚀
 
 - このリポジトリをForkし、`main`または`develop`からブランチを作成
 - 機能追加・修正・ドキュメント更新など自由にどうぞ
-- `npm run lint`・`npm test`で品質確認
+- `npm test`で品質確認
 - API追加/修正時は`npm run openapi`でAPI仕様も更新
 - プルリクエスト（PR）には内容説明を明記
 - バグ報告・要望はGitHub Issueで受付

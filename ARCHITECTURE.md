@@ -51,8 +51,9 @@ src/api/server.js
 
 ### コアサービスのガード方針（重要）
 
-`virtual-gpu-manager` / `p2p-network` / `lightning-service` はリポジトリ直下に置かれた
-大型モジュールで、ネイティブ/ESM 依存（dockerode・libp2p・gRPC）を持つ。とくに現行
+`virtual-gpu-manager` / `lightning-service` はリポジトリ直下に置かれた
+大型モジュールで、ネイティブ/ESM 依存（gRPC 等）を持つ。`p2p-network`（libp2p 依存）は
+実行不能のため第4ラウンドで削除済み。とくに現行
 `libp2p` は **ESM 専用で `require()` 不可**。これらをモジュール読込時に `new` していたため、
 従来は Web API 全体が起動不能だった。
 
@@ -65,8 +66,7 @@ src/api/server.js
 `child_process.promises`・`fs.promises` 誤用、`lightning-service` のブレース不整合に
 よる構文エラー）を解消し、これら3つは**ロード・インスタンス化が可能**になった
 （実機能は Docker/k8s・LND 実機が必要。`virtual-gpu-manager` のコマンド実行は
-識別子サニタイズ済み）。`p2p-network` のみ **libp2p が ESM 専用で `require()` 不可**の
-ため依然無効。
+識別子サニタイズ済み）。（旧 `p2p-network` は libp2p が ESM 専用で `require()` 不可のため常に無効だった → 削除済み）
 
 これらインフラ系依存は `package.json` の `optionalDependencies`（libp2p 一式は未宣言）に置く。
 
@@ -126,5 +126,5 @@ src/api/server.js
   temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
   flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で
   更新消失が起こりうる。マルチプロセス運用前に flock もしくは単一ライタープロセス化が必要。
-  （単一プロセス運用では問題なし。`profit-addresses`/`peerID`/`notification-settings` は
+  （単一プロセス運用では問題なし。`profit-addresses`/`notification-settings` は
   プロセス内 `withLock` で直列化済み。）

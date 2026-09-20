@@ -704,7 +704,6 @@ flowchart LR
    ```sh
    npm install
    ```
-   - 必要に応じてlibp2p, @chainsafe/libp2p-noise, @libp2p/tcp, @libp2p/mplex, peer-id等を追加
 
 2. **環境変数の設定**
    - `.env`ファイルまたは環境変数で`LINE_TOKEN`などを設定（障害アラート通知用）

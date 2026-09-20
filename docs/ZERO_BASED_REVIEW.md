@@ -708,6 +708,14 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: user-watchlist・api.integration — 240 テスト全パス。
 
+### 第47ラウンド（ソクラテス式問答 — 「ルート文書の stale 参照は？」）
+
+- CONTRIBUTING.md: `npm run lint` 参照2箇所削除（スクリプトは第12ラウンドで除去済み）
+- README.md: libp2p インストール案内を削除（P2P 層は第4ラウンドで削除済み）
+- ARCHITECTURE.md: p2p-network を現在形で記述していた箇所を「削除済み」に修正、
+  peerID（第13ラウンド削除 API）の言及を除去
+- `npm run openapi` 等の残スクリプト参照は実在確認済み
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

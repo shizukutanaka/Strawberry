@@ -5,6 +5,8 @@ const { APIError, ErrorTypes } = require('./error-handler');
 
 // 共通バリデーションスキーマ
 const schemas = {
+  // :id パラメータ（uuidv4）— 各ルートで重複していた共通 params スキーマ
+  idParam: Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true),
   // Lightningノード情報
   lightningNode: Joi.object({
     pubkey: Joi.string().required(),

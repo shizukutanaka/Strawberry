@@ -549,7 +549,7 @@ router.post('/:id/heartbeat',
 // オーダー詳細取得 (認証必須)
 router.get('/:id',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res, next) => {
     try {
@@ -592,7 +592,7 @@ router.get('/:id',
 // 見えず、注文当事者が自分の注文の決済状態を確認できなかった。orderId 起点で一括照会する。
 router.get('/:id/payment',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
@@ -628,7 +628,7 @@ router.get('/:id/payment',
 // オーダー更新 (認証必須)
 router.put('/:id',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
@@ -751,7 +751,7 @@ router.put('/:id',
 // オーダー削除 (認証必須)
 router.delete('/:id',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
   asyncHandler(async (req, res) => {
     const order = req.resource;
@@ -1105,7 +1105,7 @@ router.post('/',
 // POST /orders/:id/reject { reason?: string }
 router.post('/:id/reject',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -1165,7 +1165,7 @@ router.post('/:id/reject',
 // 自動マッチングを使わず、プロバイダが手動で注文を確認・承認するフロー。
 router.post('/:id/accept',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -1222,7 +1222,7 @@ router.post('/:id/accept',
 // 管理者は別途 POST /api/v1/marketplace/escrow/:id/resolve で決済する。
 router.post('/:id/dispute',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -1319,7 +1319,7 @@ router.post('/:id/dispute',
 router.post('/:id/dispute/resolve',
   authenticateJWT,
   checkRole(['admin']),
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const orderId = req.params.id;
     // 二重裁定の副作用（escrow 精算・raiser counter の二重加算など）
@@ -1468,7 +1468,7 @@ router.post('/:id/dispute/resolve',
 // POST /orders/:id/review { rating: 1-5, comment?: string }
 router.post('/:id/review',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -1544,7 +1544,7 @@ router.post('/:id/review',
 // POST /orders/:id/renter-review { rating: 1-5, comment?: string }
 router.post('/:id/renter-review',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const order = OrderRepository.getById(req.params.id);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);

@@ -590,6 +590,15 @@ settle（精算）と cancel（返金）の別操作もある。ロジックは�
 検証: tests/api/order・tests/payments・api.integration — 10 スイート
 301 テスト全パス。
 
+### 第35ラウンド（ソクラテス式問答 — 「バリデータの重複は？」）
+
+`Joi.object({ id: uuidv4 })` params スキーマが order/gpu ルートに
+14 箇所逐語重複 → `schemas.idParam` として validator.js に一本化。
+（blockId 付き変種1箇所は別スキーマとして残置）
+
+検証: tests/api/order・tests/api/gpu・api.integration — 6 スイート
+258 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

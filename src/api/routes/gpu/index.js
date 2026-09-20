@@ -912,7 +912,7 @@ router.get('/:id/eligibility', authenticateJWT, asyncHandler(async (req, res) =>
 // POST /gpus/:id/block — 認証必須（GPU オーナーまたは管理者）
 router.post('/:id/block',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
   const gpuId = req.params.id;
   const gpu = GpuRepository.getById(gpuId);
@@ -1052,7 +1052,7 @@ router.get('/:id/schedule', asyncHandler(async (req, res) => {
 // POST /gpus/:id/watch — 認証必須（自分が提供していないGPUのみ登録可）
 router.post('/:id/watch',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const gpuId = req.params.id;
     const gpu = GpuRepository.getById(gpuId);
@@ -1105,7 +1105,7 @@ router.post('/:id/watch',
 // DELETE /gpus/:id/watch — 認証必須（自分のウォッチのみ削除可）
 router.delete('/:id/watch',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const gpuId = req.params.id;
     const gpu = GpuRepository.getById(gpuId);
@@ -1121,7 +1121,7 @@ router.delete('/:id/watch',
 // GET /gpus/:id/watch — 認証必須
 router.get('/:id/watch',
   authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  validateMiddleware(schemas.idParam, 'params'),
   asyncHandler(async (req, res) => {
     const gpuId = req.params.id;
     const gpu = GpuRepository.getById(gpuId);

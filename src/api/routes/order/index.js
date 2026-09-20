@@ -1056,15 +1056,15 @@ router.post('/',
         text: notifyMsg
       }).catch(() => {});
     }
-    // 環境変数から通知先を取得（例: LINE_TOKEN, DISCORD_WEBHOOK, SLACK_WEBHOOK, GENERIC_WEBHOOK）
+    // 環境変数から通知先を取得（例: LINE_TOKEN, DISCORD_WEBHOOK, SLACK_WEBHOOK_URL, GENERIC_WEBHOOK）
     if (process.env.LINE_TOKEN) {
       sendNotification(NotifyType.LINE, notifyMsg, { token: process.env.LINE_TOKEN }).catch(() => {});
     }
     if (process.env.DISCORD_WEBHOOK) {
       sendNotification(NotifyType.DISCORD, notifyMsg, { webhookUrl: process.env.DISCORD_WEBHOOK }).catch(() => {});
     }
-    if (process.env.SLACK_WEBHOOK) {
-      sendNotification(NotifyType.SLACK, notifyMsg, { webhookUrl: process.env.SLACK_WEBHOOK }).catch(() => {});
+    if (process.env.SLACK_WEBHOOK_URL) {
+      sendNotification(NotifyType.SLACK, notifyMsg, { webhookUrl: process.env.SLACK_WEBHOOK_URL }).catch(() => {});
     }
     if (process.env.GENERIC_WEBHOOK) {
       sendNotification(NotifyType.WEBHOOK, notifyMsg, { webhookUrl: process.env.GENERIC_WEBHOOK }).catch(() => {});

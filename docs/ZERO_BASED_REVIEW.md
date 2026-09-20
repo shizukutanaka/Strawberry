@@ -781,6 +781,17 @@ src/ 全ファイルの export 名を総当たり:
   feedback-priority.json + improvement_checklist4.md）
 - npm script→ファイル整合: 全21件 OK
 
+### 第55ラウンド（ソクラテス式問答 — 「env 変数は実装と整合しているか？」）
+
+- **名不一致バグ発見**: `SLACK_WEBHOOK`（order/index.js が読む）と
+  `SLACK_WEBHOOK_URL`（service-monitor・slack-feedback-bot が読む）が
+  分裂 — 片方だけ設定した運用者は半分の通知を失う。`SLACK_WEBHOOK_URL`
+  に統一（3箇所修正）
+- `.env.example`: 死んだ `API_KEY=`（x-api-key 認証は第19ラウンドで削除）を
+  除去し、コードが読むのに未記載だった44変数をオプション節として追加
+
+検証: tests/api/order・api.integration — 254 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

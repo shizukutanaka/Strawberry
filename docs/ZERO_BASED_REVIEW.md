@@ -1003,6 +1003,15 @@ src/ 全ファイルの export 名を総当たり:
 - user.register スキーマ4フィールド・process-guards も消費者確認済み。
 - 削除ゼロのラウンド。
 
+### 第77ラウンド（ソクラテス式問答 — 「定数表とログフィールドに消えた機能の残骸はないか？」）
+
+- `ErrorTypes` 死エントリ4件削除: EXTERNAL_SERVICE・GPU_ERROR・P2P_ERROR（P2P層
+  第4ラウンド削除の残滓）・PAYMENT_ERROR — 全て0使用。残6種は使用箇所あり。
+- audit.js アクセスログの `peerId` フィールド削除 — user.peerId は peerid リンク機能
+  （第13ラウンド削除）と共に消滅し常に null になっていた。
+
+検証: error-handler+middleware・audit-integrity 関連 — 33テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

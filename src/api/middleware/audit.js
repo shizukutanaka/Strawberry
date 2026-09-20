@@ -11,13 +11,11 @@ const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../..
 function auditLogger(req, res, next) {
   const start = Date.now();
   const user = req.user || {};
-  const peerId = user.peerId || null;
   const logEntry = {
     time: new Date().toISOString(),
     method: req.method,
     url: req.originalUrl,
     userId: user.id || null,
-    peerId,
     ip: req.ip,
     // 機密情報はマスキング（query も token/apiKey 等が混入し得るためマスクする）
     body: req.method !== 'GET' ? sanitizeSensitiveFields(req.body) : undefined,

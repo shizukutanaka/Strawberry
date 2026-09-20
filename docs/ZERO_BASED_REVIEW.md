@@ -506,6 +506,15 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
   （escrow 二重精算防止）に書き換え
 - PUBLIC_PATHS は全エントリが実ルートに対応（stale なし）
 
+### 第27ラウンド（ソクラテス式問答 — 「静的アセット・文書・実行時データは辿れるか？」）
+
+- swagger.html/docs.js/docs.css — 静的に配信される OpenAPI ビューア
+  （/openapi.json の spec 面）→ 生存
+- data/ 実行時ファイル全てが live リポジトリに対応（stale なし）
+- 運用系文書（SECURITY_AUDIT・operations・faq・LIGHTNING_API_SETUP 等）に
+  削除済み機能の記述なし — research 系2文書（improvement/category-research）に
+  時点スナップショットの記述のみ → deprecation banner で誘導
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

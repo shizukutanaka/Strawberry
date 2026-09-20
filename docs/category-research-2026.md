@@ -1,4 +1,8 @@
 # Strawberry カテゴリ別 改善点リサーチ（arXiv × GitHub / 2026-06）
+> ⚠️ この文書は 2026 時点のリサーチ記録。以降のゼロベース整理
+> （docs/ZERO_BASED_REVIEW.md）で記載されている多数の構成要素（P2P 層、
+> docker/k8s vGPU、GraphQL、レピュテーション統計等）は削除済み。
+
 
 Strawberry（P2P GPU マーケットプレイス＋BTC Lightning 決済）を **10カテゴリ**に分け、
 各カテゴリにつき **arXiv 論文＋GitHub リポジトリ等を約10件**集約し、コードに紐づく改善点を洗い出す。

@@ -944,6 +944,18 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: utils+payments+unit（111）、api+security+integration（83スイート814）全パス。
 
+### 第71ラウンド（ソクラテス式問答 — 「認証ミドルウェアの遅延 require は正当か？」）
+
+- jwt-auth.js（UserRepository・session-invalidation）と security.js
+  （isRevoked・UserRepository・session-invalidation）のリクエスト内 lazy require を
+  先頭へ集約 — 循環依存なし（UserRepository→audit-log は mw に戻らない）。
+- service-monitor.js の `require('../../scripts/slack-notify.js'|line-notify.js)` は
+  実在スクリプト + アラート発火時ロードで意図的 lazy として保持。
+- session-invalidation.js コメントの「GraphQL」残留言及を修正。
+- profit-addresses・master-auth・routes/index.js は既に全 top-level。
+
+検証: security+middleware — 505テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

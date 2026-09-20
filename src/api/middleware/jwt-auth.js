@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const { config } = require('../../utils/config');
 // logout で失効済みのトークン(jti)を拒否する
 const { isRevoked } = require('./token-denylist');
+const UserRepository = require('../../db/json/UserRepository');
+const { isSessionInvalidated } = require('../utils/session-invalidation');
 
 function resolveSecret() {
   // 明示的に設定された JWT_SECRET を優先し、無ければ config の解決値にフォールバック
@@ -41,12 +43,10 @@ module.exports = function(req, res, next) {
     }
     // パスワード変更・全セッション失効（リフレッシュ再利用検知等）後のトークンを拒否
     // （security.js / GraphQL / refresh と同一ポリシーを共有ヘルパーに集約）。
-    const UserRepository = require('../../db/json/UserRepository');
     const tokenUser = UserRepository.getById(payload.id);
     if (!tokenUser || tokenUser.status === 'deactivated') {
       return res.status(401).json({ error: '無効なトークン' });
     }
-    const { isSessionInvalidated } = require('../utils/session-invalidation');
     if (isSessionInvalidated(tokenUser, payload.iat)) {
       return res.status(401).json({ error: '無効なトークン' });
     }

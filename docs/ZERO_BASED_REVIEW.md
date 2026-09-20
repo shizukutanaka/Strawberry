@@ -697,6 +697,17 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: コード変更なし（孤立ファイル削除のみ）。
 
+### 第46ラウンド（ソクラテス式問答 — 「SPA ナビ到達性・テストリセット網羅性」）
+
+- SPA ルート全10件が nav/リンクから到達可能（JS 駆動 nav・初回スキャンは
+  href 正規表現の偽陰性だった）→ クリーン
+- `globalSetup.js` のリセット対象に `watches` が欠落 — watches.json が
+  テスト間で蓄積し続けていた（getAll() 線形スキャンの速度低下要因）。
+  arrayFiles に追加
+- services.js safeLoad 3件・SPECIFICATION.md の削除マーキングは整合済み
+
+検証: user-watchlist・api.integration — 240 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

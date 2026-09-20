@@ -689,6 +689,14 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: tests/security/probe57・api.integration — 242 テスト全パス。
 
+### 第45ラウンド（ソクラテス式問答 — 「設定・ヘルパーファイルの消費者は？」）
+
+- `scripts/config.js` 削除 — API_ENDPOINT=api.example.com の雛形残滓、
+  全スクリプトが直接 process.env を読み誰も require していない
+- `jest.config.js` — 全設定項目に根拠コメントあり・パス実在で生存
+
+検証: コード変更なし（孤立ファイル削除のみ）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

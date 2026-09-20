@@ -661,6 +661,15 @@ order.create・payment.*・user.* は全て消費者あり。
 
 検証: tests/gpu・api.integration — 257 テスト全パス。
 
+### 第42ラウンド（ソクラテス式問答 — 「リポジトリルートの孤立物は？」）
+
+- `logs/` — 42MB の実行時ログ（audit.log・error-*.log 等）は untracked +
+  .gitignore 済み → リポジトリ上の問題なし（ディスクのみ）
+- `improvement_checklist2.md` — README からリンク済み・免責 banner あり → 生存
+- `.github/workflows/optimize-images.yml` — 削除済み `scripts/optimize-images.js`
+  を参照する stale workflow → **要対応だが私のトークンは workflow スコープ無しで
+  push 不能。手動削除を推奨**（ci.yml の `optimize` ジョブも同様に dead）
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

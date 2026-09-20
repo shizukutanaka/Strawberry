@@ -442,6 +442,23 @@ ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正�
 
 検証: tests/gpu + basic — 全パス。
 
+### 第22ラウンド（ソクラテス式問答 — 「この設定キーは誰が読むか？」）
+
+config.js の全キーに消費者を要求（書き込まれるが読まれない=write-only 設定）:
+
+- **削除**: `config.p2p` 全節（第4ラウンドで層ごと削除済みの残骸 +
+  P2P_PORT/P2P_BOOTSTRAP_NODES envローダー）、`gpu.{scanIntervalMs,
+  virtualGpuEnabled,dockerSupport,kubernetesSupport,priceUpdateIntervalMs}`
+  + 対応 env ローダー（docker/k8s は第6ラウンドで削除済み）、
+  `lightning.{network,lndHost}`（lightning-service は env を直接読むため
+  config 経由は死んだ重複）、`security.{corsEnabled,helmetEnabled}`、
+  `logging` 全節（logger は process.env.LOG_LEVEL を直接読む）
+- **生存**: server 全キー・gpu.minMemoryGB（validator）・lightning.
+  {certPath,macaroonPath,invoiceExpirySeconds,minPaymentSatoshis,
+  maxPaymentSatoshis}・security.{jwt*,bcryptRounds,rateLimitEnabled}
+
+検証: tests/api + probe20-29 — 33 スイート 146 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

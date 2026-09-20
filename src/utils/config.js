@@ -39,32 +39,15 @@ const defaultConfig = {
     rateLimitMax: 100,
     rateLimitWindowMs: 15 * 60 * 1000, // 15分
   },
-  
-  // P2Pネットワーク設定
-  p2p: {
-    bootstrapNodes: [
-      '/dns4/bootstrap.libp2p.io/tcp/443/wss/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
-      '/dns4/bootstrap.libp2p.io/tcp/443/wss/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa'
-    ],
-    port: 9090,
-    announceInterval: 60000, // 1分
-    peerDiscoveryInterval: 300000, // 5分
-  },
+
   
   // GPU設定
   gpu: {
     minMemoryGB: 4,
-    scanIntervalMs: 60000, // 1分
-    virtualGpuEnabled: true,
-    dockerSupport: true,
-    kubernetesSupport: false,
-    priceUpdateIntervalMs: 300000, // 5分
   },
   
   // Lightning Network設定
   lightning: {
-    network: 'testnet', // mainnet, testnet, regtest
-    lndHost: '127.0.0.1:10009',
     certPath: '',
     macaroonPath: '',
     invoiceExpirySeconds: 3600, // 1時間
@@ -85,18 +68,8 @@ const defaultConfig = {
     jwtRefreshExpiresIn: '7d',
     bcryptRounds: 10,
     rateLimitEnabled: true,
-    corsEnabled: true,
-    helmetEnabled: true,
   },
   
-  // ログ設定
-  logging: {
-    level: process.env.LOG_LEVEL || 'info',
-    consoleEnabled: true,
-    fileEnabled: true,
-    maxFileSize: 10 * 1024 * 1024, // 10MB
-    maxFiles: 5,
-  }
 };
 
 // 環境変数から設定をロード
@@ -122,35 +95,10 @@ function loadFromEnv() {
   if (process.env.API_PREFIX) config.server.apiPrefix = process.env.API_PREFIX;
   if (process.env.CORS_ORIGINS) config.server.corsOrigins = process.env.CORS_ORIGINS;
 
-  // P2P設定
-  const p2pPort = safeInt('P2P_PORT', 1, 65535);
-  if (p2pPort !== undefined) config.p2p.port = p2pPort;
-  if (process.env.P2P_BOOTSTRAP_NODES) {
-    try {
-      config.p2p.bootstrapNodes = JSON.parse(process.env.P2P_BOOTSTRAP_NODES);
-    } catch (e) {
-      logger.warn('Invalid P2P_BOOTSTRAP_NODES format, using defaults');
-    }
-  }
-  
   // GPU設定
   const minMemGB = safeInt('GPU_MIN_MEMORY_GB', 1, 10000);
   if (minMemGB !== undefined) config.gpu.minMemoryGB = minMemGB;
-  const scanMs = safeInt('GPU_SCAN_INTERVAL_MS', 1000, 86400000);
-  if (scanMs !== undefined) config.gpu.scanIntervalMs = scanMs;
-  if (process.env.VIRTUAL_GPU_ENABLED) {
-    config.gpu.virtualGpuEnabled = process.env.VIRTUAL_GPU_ENABLED === 'true';
-  }
-  if (process.env.DOCKER_SUPPORT) {
-    config.gpu.dockerSupport = process.env.DOCKER_SUPPORT === 'true';
-  }
-  if (process.env.KUBERNETES_SUPPORT) {
-    config.gpu.kubernetesSupport = process.env.KUBERNETES_SUPPORT === 'true';
-  }
-  
   // Lightning設定
-  if (process.env.BITCOIN_NETWORK) config.lightning.network = process.env.BITCOIN_NETWORK;
-  if (process.env.LND_HOST) config.lightning.lndHost = process.env.LND_HOST;
   if (process.env.LND_CERT_PATH) config.lightning.certPath = process.env.LND_CERT_PATH;
   if (process.env.LND_MACAROON_PATH) config.lightning.macaroonPath = process.env.LND_MACAROON_PATH;
   
@@ -162,15 +110,7 @@ function loadFromEnv() {
   // (cost doubles per round; rounds=1 is ~0.1ms vs rounds=10's ~100ms per hash).
   const bcryptRounds = safeInt('BCRYPT_ROUNDS', 10, 31);
   if (bcryptRounds !== undefined) config.security.bcryptRounds = bcryptRounds;
-  
-  // ログ設定
-  if (process.env.LOG_LEVEL) config.logging.level = process.env.LOG_LEVEL;
-  if (process.env.LOG_CONSOLE_ENABLED) {
-    config.logging.consoleEnabled = process.env.LOG_CONSOLE_ENABLED === 'true';
-  }
-  if (process.env.LOG_FILE_ENABLED) {
-    config.logging.fileEnabled = process.env.LOG_FILE_ENABLED === 'true';
-  }
+
   
   return config;
 }

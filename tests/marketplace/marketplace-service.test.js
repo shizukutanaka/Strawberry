@@ -2,7 +2,6 @@
 const { createMarketplaceService } = require('../../src/marketplace/marketplace-service');
 const { createEscrowService } = require('../../src/payments/escrow-service');
 const { createVerificationService } = require('../../src/verification/verification-service');
-const { createReputationService } = require('../../src/reputation/reputation-service');
 const { STATES } = require('../../src/payments/escrow-state-machine');
 
 // 汎用インメモリ repo（id 採番 + keyField 検索）
@@ -21,9 +20,8 @@ function memRepo(keyField) {
 function build() {
   const escrowService = createEscrowService({ repository: memRepo('e') });
   const verificationService = createVerificationService({ repository: memRepo('job') });
-  const reputationService = createReputationService({ repository: memRepo('prov') });
-  const mkt = createMarketplaceService({ escrowService, verificationService, reputationService });
-  return { mkt, reputationService };
+  const mkt = createMarketplaceService({ escrowService, verificationService });
+  return { mkt };
 }
 
 const GPU = { vramGB: 80, memBandwidthGBs: 3350, benchmarkScore: 300, generation: 'hopper' };
@@ -33,8 +31,8 @@ describe('marketplace-service', () => {
     expect(() => createMarketplaceService({})).toThrow(/required/);
   });
 
-  it('happy path: open -> pay -> verify(honest) -> SETTLED + reputation credit', () => {
-    const { mkt, reputationService } = build();
+  it('happy path: open -> pay -> verify(honest) -> SETTLED', () => {
+    const { mkt } = build();
     const { escrow } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'p1', gpu: GPU, durationMinutes: 60 });
     mkt.recordPaid(escrow.id);
 
@@ -45,11 +43,10 @@ describe('marketplace-service', () => {
     expect(res.event).toBe('DELIVER_OK');
     expect(res.escrow.state).toBe(STATES.SETTLED);
     expect(res.actions).toContain('reveal_preimage');
-    expect(reputationService.getStats('p1').completedJobs).toBe(1);
   });
 
   it('fraud path: zero-load -> DISPUTED -> refund slashes provider', () => {
-    const { mkt, reputationService } = build();
+    const { mkt } = build();
     const { escrow } = mkt.openOrderEscrow({ orderId: 'o', providerId: 'bad', gpu: GPU, durationMinutes: 60 });
     mkt.recordPaid(escrow.id);
 
@@ -59,13 +56,10 @@ describe('marketplace-service', () => {
     });
     expect(res.event).toBe('DELIVER_FAIL');
     expect(res.escrow.state).toBe(STATES.DISPUTED);
-    expect(reputationService.getStats('bad').failedJobs).toBe(1);
 
-    const slashBefore = reputationService.getStats('bad').slashCount;
     const refund = mkt.resolveDispute(escrow.id, 'refund', 'bad');
     expect(refund.escrow.state).toBe(STATES.CANCELED);
     expect(refund.actions).toContain('refund_renter');
-    expect(reputationService.getStats('bad').slashCount).toBe(slashBefore + 1);
   });
 
   it('settleByUsage prorates the escrow by delivered usage', () => {

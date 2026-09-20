@@ -9,12 +9,11 @@ const featurePricer = require('../pricing/feature-pricer');
 function createMarketplaceService({
   escrowService,
   verificationService,
-  reputationService,
   pricer = featurePricer,
   pricingOpts = {},
 } = {}) {
-  if (!escrowService || !verificationService || !reputationService) {
-    throw new Error('escrowService, verificationService, reputationService are required');
+  if (!escrowService || !verificationService) {
+    throw new Error('escrowService and verificationService are required');
   }
 
   /**
@@ -50,18 +49,12 @@ function createMarketplaceService({
 
     const result = escrowService.evaluate(escrowId, v.verificationCtx);
 
-    if (providerId) {
-      if (result.event === 'DELIVER_OK') reputationService.recordJobResult(providerId, true);
-      else if (result.event === 'DELIVER_FAIL') reputationService.recordJobResult(providerId, false);
-    }
     return { verdict: v.verdict, event: result.event, escrow: result.escrow, actions: result.actions };
   }
 
   /** 係争の解決（'settle'/'refund'）。refund 時はプロバイダを slash。 */
   function resolveDispute(escrowId, decision, providerId = null) {
-    const r = escrowService.resolveDispute(escrowId, decision);
-    if (providerId && decision === 'refund') reputationService.slash(providerId);
-    return r;
+    return escrowService.resolveDispute(escrowId, decision);
   }
 
   /**

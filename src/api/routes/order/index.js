@@ -162,10 +162,6 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
     // プロバイダー信頼性の減点: 稼働スコアへ SLA 違反、ジョブ成否へ失敗を記録。
     if (order.providerId) {
       try { providerUptime.recordSlaBreach(order.providerId, nowMs); } catch (_) {}
-      try {
-        const { createReputationService } = require('../../../reputation/reputation-service');
-        createReputationService().recordJobResult(order.providerId, false);
-      } catch (_) {}
     }
 
     // 両者へ通知（best-effort）。
@@ -244,14 +240,6 @@ const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
 // スラッシュ/係争解決/レビュー後にレピュテーションキャッシュを無効化する
-let _invalidateRepCache = null;
-function invalidateRepCache(userId) {
-  if (!_invalidateRepCache) {
-    try { _invalidateRepCache = require('../user/index').invalidateReputationCache; } catch (_) { _invalidateRepCache = () => {}; }
-  }
-  if (userId && typeof _invalidateRepCache === 'function') _invalidateRepCache(userId);
-}
-
 // 注文作成のユーザー別レートリミット（IP ベースのグローバル制限を補完）。
 // 認証済みユーザーが在庫チェック・価格計算の重いパスを連打して DB を圧迫するのを防ぐ。
 // グローバル IP リミットだけでは：同一ユーザーが異なる IP (Tor/VPN) から来た場合に効果がなく、
@@ -367,7 +355,7 @@ router.get('/',
         const o = { ...order, ...computeOrderPricing(order, rateInfo) };
         // Strip reviewerId from review sub-objects: it is the reviewer's internal UUID.
         // Exposing it to the counterparty breaks reviewer anonymity — they can cross-reference
-        // with GET /users/:id/renter-profile to identify who left a specific review.
+        // with the renter's order history to identify who left a specific review.
         if (o.review) o.review = { ...o.review, reviewerId: undefined };
         if (o.renterReview) o.renterReview = { ...o.renterReview, reviewerId: undefined };
         return o;
@@ -1398,17 +1386,6 @@ router.post('/:id/dispute/resolve',
       } catch (e) {
         logger.warn(`Escrow refund on dispute resolve failed (order=${order.id}): ${e.message}`);
       }
-      // レピュテーション減点（実フローでの失敗反映）— ベストエフォート
-      if (order.providerId) {
-        try {
-          const { createReputationService } = require('../../../reputation/reputation-service');
-          const rep = createReputationService();
-          rep.recordJobResult(order.providerId, false);
-          rep.slash(order.providerId);
-        } catch (e) {
-          logger.warn(`reputation penalty on dispute refund failed (order=${order.id}): ${e.message}`);
-        }
-      }
       // 係争認容 = 申請者の主張は正当。申請者に「認容された係争」を加算する。
       // これにより申請者の「棄却率」が下がり、ゲート(#23の monotonic な永久バンを是正)から
       // 回復できる。正当な係争を多く起こす利用者を、数件の棄却で永久に締め出さない。
@@ -1466,14 +1443,6 @@ router.post('/:id/dispute/resolve',
       } catch (e) {
         logger.warn(`Escrow settlement on dispute uphold failed (order=${order.id}): ${e.message}`);
       }
-      if (order.providerId) {
-        try {
-          const { createReputationService } = require('../../../reputation/reputation-service');
-          createReputationService().recordJobResult(order.providerId, true);
-        } catch (e) {
-          logger.warn(`reputation credit on dispute uphold failed (order=${order.id}): ${e.message}`);
-        }
-      }
       // 係争棄却 = 申請者の主張は不当。申請者(raisedBy)に「棄却された係争」を加算する。
       // 係争は active 注文を凍結しプロバイダの完了・支払・評判加点をブロックするため、
       // 無償の連続係争はグリーフィング(DoS)になる。申請者にコストを課して対称性を回復する。
@@ -1504,9 +1473,7 @@ router.post('/:id/dispute/resolve',
     invalidateUserCache(order.userId);
     if (order.providerId) invalidateUserCache(order.providerId);
     // 係争解決後はスラッシュ/成功が記録されるためレピュテーションキャッシュを即時無効化する
-    invalidateRepCache(order.userId);
-    if (order.providerId) invalidateRepCache(order.providerId);
-    res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
+    if (order.providerId)    res.json({ message: 'Dispute resolved', orderId: order.id, resolution });
     }); // end withLock
   })
 );
@@ -1582,8 +1549,7 @@ router.post('/:id/review',
     } catch (_) { /* best-effort */ }
     logger.info(`Review submitted for order: ${order.id}`, { orderId: order.id, rating });
     // レビュー投稿でプロバイダの平均評価が変わる → キャッシュ無効化
-    if (order.providerId) invalidateRepCache(order.providerId);
-    res.status(201).json({ message: 'Review submitted', review });
+    if (order.providerId)    res.status(201).json({ message: 'Review submitted', review });
   })
 );
 
@@ -1647,7 +1613,6 @@ router.post('/:id/renter-review',
       { subject: `【Strawberry】あなたへの評価 ★${rating}/5（注文 #${order.id}）` });
     logger.info(`Renter review submitted for order: ${order.id}`, { orderId: order.id, rating, renterId: order.userId });
     // 借り手レビューが追加されると借り手の renterRatingAverage が変わる → キャッシュ無効化
-    invalidateRepCache(order.userId);
     res.status(201).json({ message: 'Renter review submitted', review: renterReview });
   })
 );
@@ -1818,16 +1783,6 @@ router.post('/:id/stop',
       const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);
       if (!result.ok) {
         return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });
-      }
-
-      // プロバイダ・レピュテーションへ完了を記録（updateIf 成功時のみ: 二重記録を防ぐ）。
-      if (order.providerId) {
-        try {
-          const { createReputationService } = require('../../../reputation/reputation-service');
-          createReputationService().recordJobResult(order.providerId, true);
-        } catch (e) {
-          logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
-        }
       }
 
       // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。

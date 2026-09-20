@@ -81,15 +81,6 @@ describe('verification-service', () => {
     expect(r.verificationCtx.verified).toBeNull();
   });
 
-  it('reports audit pass/fail to the reputation service', () => {
-    const calls = [];
-    const reputationService = { recordAudit: (pid, pass) => calls.push([pid, pass]) };
-    const s = svc({ reputationService });
-    s.open('j', { providerId: 'prov-1', auditRate: 0 });
-    s.recordPrimary('j', [1], { utilSamples: [90] });
-    s.finalize('j');
-    expect(calls).toEqual([['prov-1', true]]);
-  });
 
   it('integrates with escrow: finalize ctx drives settle/dispute', () => {
     const verification = svc();

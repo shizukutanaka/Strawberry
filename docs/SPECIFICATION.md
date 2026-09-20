@@ -23,7 +23,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | Gpu | id, vendor, memoryGB, pricePerHour, features, providerId | GpuRepository | ✅ |
 | Order | id, userId, gpuId, durationMinutes, status, price | OrderRepository | ✅ |
 | Payment | id, orderId, amount, method, status | PaymentRepository | ✅ |
-| **Provider reputation** | stake, slashCount, sla, auditPass/Fail | ReputationRepository | 🟡(永続化+サービス実装, 配線未) |
+| ~~Provider reputation~~ | — | — | ❌(write-only統計として第9ラウンドで削除) |
 | **Escrow** | orderId, invoice, state, history, deadline | EscrowRepository | 🟡(永続化+サービス実装, 配線/LN未) |
 | **Verification record** | jobId, audited, outputs, consensus, verdict | VerificationRepository | 🟡(永続化+サービス実装, 配線未) |
 
@@ -58,12 +58,12 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 6. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
 
 ### F2. 信頼基盤（最優先トリオ）
-- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。**ルート配線・実ジョブ収集は未**。
+- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返す。**ルート配線・実ジョブ収集は未**。
 - **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
 - **GPU アテステーション**: ❌（nvtrust 連携未, カテゴリ3）。
 
 ### F3. レピュテーション/インセンティブ
-- ステーク/スラッシング/レピュテーション: 🟡 `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）実装済。**ルート配線は未**。
+- ステーク/スラッシング/レピュテーション: ❌ 削除（第9ラウンド — イベントは記録されるが決定・表示の読出経路が存在しない write-only サブシステムと判定）
 
 ### F4. 運用・可観測性
 - Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **外部アンカリング(Merkle root)**: 🟡 `src/security/merkle-anchor.js`(root/証明/検証/digest) ＋ `src/security/audit-anchor.js`（audit.log を読みアンカー生成・永続化・包含証明、audit-log 結線済）。**残るは OTS への root 実提出のみ** / **OTel トレース**: ❌ / **カーボン配置**: ❌
@@ -90,7 +90,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
    **actions→LN 操作の変換層も実装済**（`src/payments/action-executor.js` ＋
    `src/payments/ln-adapter.js` の MockLnAdapter）。**残るは実 LND/CLN アダプタ実装、
    既存 order/payment ルートからの呼び出し、実ジョブの出力/利用率収集**。← 次の山
-3. **永続化エンティティは全て実装済**（Escrow / Provider reputation / Verification record）。将来 Prisma へ移行。
+3. **永続化エンティティは全て実装済**（Escrow / Verification record）。将来 Prisma へ移行。
 4. GPU アテステーション（nvtrust）、libp2p ESM 対応、OTel トレース、カーボン配置。
    監査ログ Merkle アンカリングは `merkle-anchor.js` 実装済（残るは OTS への実提出と audit.js 結線）。
 
@@ -100,13 +100,11 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 
 - `src/verification/work-verifier.js` — Proof-of-Compute 土台（13テスト）
 - `src/verification/verification-service.js` ＋ `src/db/json/VerificationRepository.js` — 検証の永続化/verdict 確定（8テスト）
-- `src/reputation/reputation-scorer.js` — stake加重レピュテーション（10テスト）
-- `src/reputation/reputation-service.js` ＋ `src/db/json/ReputationRepository.js` — レピュテーション永続化/イベント記録（8テスト）
 - `src/pricing/feature-pricer.js` — 特徴量ベース価格（7テスト）
 - `src/payments/escrow-state-machine.js` — エスクロー FSM（12テスト）
 - `src/payments/escrow-service.js` ＋ `src/db/json/EscrowRepository.js` — エスクロー永続化/オーケストレーション（9テスト）
 - `src/payments/settlement-calculator.js` — 従量・SLA 連動の精算分割（payout/refund/fee、最低課金/SLA ペナルティ、整数 sats 保存則, 12テスト）
-- `src/marketplace/marketplace-service.js` — エスクロー/検証/レピュテーションを束ねるドメイン合成層
+- `src/marketplace/marketplace-service.js` — エスクロー/検証を束ねるドメイン合成層
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）

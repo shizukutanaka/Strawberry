@@ -722,51 +722,8 @@ describe('API Integration', () => {
       expect(bad.statusCode).toBe(400);
     });
 
-    it('GET /users/:id/reputation returns provider trust profile (public, no auth)', async () => {
-      const res = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.providerId).toBe(providerId);
-      expect(res.body).toHaveProperty('score');
-      expect(res.body).toHaveProperty('tier');
-      expect(res.body).toHaveProperty('stats');
-      // 先行テストで★5レビューが1件付いている
-      expect(res.body.reviewCount).toBeGreaterThanOrEqual(1);
-      expect(res.body.ratingAverage).toBeGreaterThanOrEqual(1);
-      expect(typeof res.body.completedOrders).toBe('number');
-      expect(typeof res.body.rejectedOrders).toBe('number');
-    });
 
-    it('GET /users/:id/reputation → 404 for unknown user', async () => {
-      const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/reputation');
-      expect(res.statusCode).toBe(404);
-    });
 
-    it('completing an order records a provider job result in reputation', async () => {
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      const beforeCompleted = before.body.stats.completedJobs;
-
-      // pending → active → stop(completed) の主要フローを辿る
-      const create = await request(app)
-        .post('/api/v1/orders')
-        .set('Authorization', `Bearer ${renterToken}`)
-        .send({ gpuId, durationMinutes: 30 });
-      expect(create.statusCode).toBe(201);
-      const orderId = create.body.order.id;
-      // stop ハンドラは active 状態と支払い済みレコードを要求するので直接遷移させる
-      OrderRepository.update(orderId, { status: 'active', providerId });
-      const PaymentRepository = require('../src/db/json/PaymentRepository');
-      const orderUserId = create.body.order.userId;
-      PaymentRepository.create({ orderId, userId: orderUserId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
-
-      const stop = await request(app)
-        .post(`/api/v1/orders/${orderId}/stop`)
-        .set('Authorization', `Bearer ${renterToken}`)
-        .send({});
-      expect(stop.statusCode).toBe(200);
-
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
-    });
   });
 
   describe('Notification settings CRUD', () => {
@@ -1139,61 +1096,8 @@ describe('API Integration', () => {
       return orderId;
     }
 
-    it('refund verdict cancels the order and PENALIZES provider reputation', async () => {
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      const beforeFailed = before.body.stats.failedJobs;
-      const beforeSlash = before.body.stats.slashCount;
 
-      const orderId = await makeDisputedOrder();
-      const resolve = await request(app)
-        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ decision: 'refund', note: 'provider at fault' });
-      expect(resolve.statusCode).toBe(200);
 
-      const order = OrderRepository.getById(orderId);
-      expect(order.status).toBe('cancelled');
-      expect(order.cancelReason).toBe('dispute_resolved_refund');
-      expect(order.dispute.resolution.decision).toBe('refund');
-
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      expect(after.body.stats.failedJobs).toBe(beforeFailed + 1);
-      expect(after.body.stats.slashCount).toBe(beforeSlash + 1);
-    });
-
-    it('refund verdict actually LOWERS the provider score (reputation can decrease)', async () => {
-      // Seed a clean baseline of successes, capture score, then refund-dispute and re-check
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      const beforeScore = before.body.score;
-
-      const orderId = await makeDisputedOrder();
-      await request(app)
-        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ decision: 'refund' });
-
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      expect(after.body.score).toBeLessThan(beforeScore);
-    });
-
-    it('uphold verdict completes the order and CREDITS provider reputation', async () => {
-      const before = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      const beforeCompleted = before.body.stats.completedJobs;
-
-      const orderId = await makeDisputedOrder();
-      const resolve = await request(app)
-        .post(`/api/v1/orders/${orderId}/dispute/resolve`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ decision: 'uphold' });
-      expect(resolve.statusCode).toBe(200);
-
-      const order = OrderRepository.getById(orderId);
-      expect(order.status).toBe('completed');
-      expect(order.dispute.resolution.decision).toBe('uphold');
-
-      const after = await request(app).get(`/api/v1/users/${providerId}/reputation`);
-      expect(after.body.stats.completedJobs).toBe(beforeCompleted + 1);
-    });
 
     it('only admin can resolve a dispute (403 for renter)', async () => {
       const orderId = await makeDisputedOrder();
@@ -1627,15 +1531,6 @@ describe('API Integration', () => {
       expect(dup.statusCode).toBe(409);
     });
 
-    it('GET /users/:id/reputation surfaces the renter rating aggregate', async () => {
-      const res = await request(app).get(`/api/v1/users/${renterId}/reputation`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toHaveProperty('renterRatingAverage');
-      expect(res.body).toHaveProperty('renterReviewCount');
-      // earlier tests posted at least one renter review for this renter
-      expect(res.body.renterReviewCount).toBeGreaterThanOrEqual(1);
-      expect(res.body.renterRatingAverage).toBeGreaterThanOrEqual(1);
-    });
   });
 
   describe('Renter rating floor policy + public renter profile (#29, #32)', () => {
@@ -1745,19 +1640,7 @@ describe('API Integration', () => {
       OrderRepository.update(orderId, { status: 'cancelled' });
     });
 
-    it('GET /users/:id/renter-profile is public (no auth needed)', async () => {
-      const res = await request(app).get(`/api/v1/users/${lowRaterId}/renter-profile`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.userId).toBe(lowRaterId);
-      expect(res.body.reviewCount).toBeGreaterThanOrEqual(2);
-      expect(res.body.ratingAverage).toBe(2); // avg of two ★2 reviews
-      expect(Array.isArray(res.body.recentReviews)).toBe(true);
-    });
 
-    it('GET /users/:id/renter-profile for unknown user → 404', async () => {
-      const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/renter-profile');
-      expect(res.statusCode).toBe(404);
-    });
   });
 
   describe('Provider earnings date range filter (#30)', () => {

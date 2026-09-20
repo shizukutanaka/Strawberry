@@ -15,7 +15,6 @@ const { createMockAttestationVerifier } = require('../../../security/gpu-attesta
 // 開発/テスト時は Mock、本番では実 nvtrust アダプタへ置き換え可能（DI）
 const _attestationVerifier = createMockAttestationVerifier();
 // プロバイダ・レピュテーション記録（アテステーション結果の反映）
-const { createReputationService } = require('../../../reputation/reputation-service');
 // プロバイダー稼働実績（客観的な信頼性スコア）
 const providerUptime = require('../../../reputation/provider-uptime');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
@@ -353,7 +352,7 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
   // レビュー本体を spread すると reviewerId（借り手の UUID）が漏れ、認証済み任意ユーザーが
-   // GPU 単位で借り手を列挙できる（renter-profile と組合せて renter プロファイリング可能）。
+   // GPU 単位で借り手を列挙できる（renter の注文列挙に利用可能）。
    // 公開して問題ない rating/comment/reviewedAt のみを明示的に投影する。
   const reviews = OrderRepository.getAll()
     .filter(o => o.gpuId === gpuId && o.review)
@@ -428,7 +427,7 @@ router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
 
   const total = orders.length;
   // 借り手 userId を生で返すと、安価な GPU を撒餌に出品して借り手 UUID を量産収集する
-  // 大量列挙攻撃が成立する（renter-profile と組合せて prof作成可能）。
+  // 大量列挙攻撃が成立する（renter の注文列挙に利用可能）。
   // プロバイダは自分の GPU の稼働実績（料金・期間・レビュー有無）だけ知れれば十分なので
   // 借り手の内部 ID は返さない。
   const page = orders.slice(offset, offset + limit).map(o => ({
@@ -512,9 +511,6 @@ router.post('/',
           findings: attResult.findings,
           verifiedAt: new Date().toISOString(),
         };
-        // レピュテーション記録（DI 済みシングルトン）
-        const repSvc = createReputationService();
-        repSvc.recordAttestation(req.user.id, attResult.passed);
         if (!attResult.passed) {
           logger.warn(`[GPU登録] アテステーション失敗: providerId=${req.user.id} score=${attResult.score} findings=${attResult.findings.join('; ')}`);
         }
@@ -707,7 +703,6 @@ router.post('/bulk',
             findings: attResult.findings,
             verifiedAt: new Date().toISOString(),
           };
-          try { createReputationService().recordAttestation(req.user.id, attResult.passed); } catch (_) {}
         } catch (attErr) {
           gpuInfo.attestation = {
             passed: false, score: 0,

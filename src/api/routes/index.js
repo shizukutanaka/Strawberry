@@ -70,9 +70,6 @@ function isPublicPath(path, method) {
   const isGet = method === 'GET' || method === 'HEAD';
   return PUBLIC_PATHS.has(path)
     || (isGet && path.startsWith('/gpus/'))
-    // プロバイダ公開レピュテーション照会 & 借り手公開プロフィール（閲覧はマーケット信頼判断のため公開、GETのみ）
-    || (isGet && /^\/users\/[^/]+\/reputation$/.test(path))
-    || (isGet && /^\/users\/[^/]+\/renter-profile$/.test(path))
     // マーケット公開統計（サプライ・ディマンド・価格帯の概要 — 閲覧のみ）
     || (isGet && path === '/marketplace/stats');
 }

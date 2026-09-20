@@ -2,7 +2,6 @@
 // Probe 38 regression tests:
 // 38a-1: BTC on-chain payment rejects active orders (double-charge prevention)
 // 38a-2: Manual payment approval checks order status (no orphaned paid records)
-// 38b-1: renter-profile recentReviews does not include orderId
 // 38b-3: /me/activity review_received does not expose reviewedBy
 
 const request = require('supertest');
@@ -63,41 +62,6 @@ describe('Manual payment approval: order status guard', () => {
       .post('/api/v1/payment/manual/approve/nonexistent-id')
       .send({});
     expect([401, 403]).toContain(res.statusCode);
-  });
-});
-
-// ─── 38b-1: renter-profile does not leak orderId ─────────────────────────────
-describe('renter-profile: orderId stripped from recentReviews', () => {
-  it('user/index.js: renter-profile map does not include orderId', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    // The recentReviews map must not expose o.id
-    // Find the renter-profile map block
-    const mapIdx = src.indexOf('.map(o => ({ rating: o.renterReview.rating');
-    expect(mapIdx).toBeGreaterThan(-1);
-    // The map near renter-profile must not include orderId
-    const mapBlock = src.slice(mapIdx, mapIdx + 200);
-    expect(mapBlock).not.toMatch(/orderId.*o\.id/);
-  });
-
-  it('GET /users/:id/renter-profile: recentReviews entries have no orderId', async () => {
-    // Register a test user
-    const name = `p38rp${uniq}`.slice(0, 20);
-    const email = `${name}@example.com`;
-    await request(app).post('/api/v1/users/register')
-      .send({ username: name, email, password: 'Test1234!' });
-    const loginRes = await request(app).post('/api/v1/users/login')
-      .send({ email, password: 'Test1234!' });
-    const userId = loginRes.body.user && loginRes.body.user.id;
-    if (!userId) return;
-
-    const res = await request(app).get(`/api/v1/users/${userId}/renter-profile`);
-    expect(res.statusCode).toBe(200);
-    const reviews = res.body.recentReviews || [];
-    for (const r of reviews) {
-      expect(r).not.toHaveProperty('orderId');
-    }
   });
 });
 

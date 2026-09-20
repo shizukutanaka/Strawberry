@@ -4,12 +4,10 @@
 // 各サブサービスは repo を省略＝既定の JSON リポジトリを使用（読み込みは遅延）。
 const { createEscrowService } = require('../payments/escrow-service');
 const { createVerificationService } = require('../verification/verification-service');
-const { createReputationService } = require('../reputation/reputation-service');
 const { createMarketplaceService } = require('./marketplace-service');
 const { lightning } = require('../core/services');
 
-const reputationService = createReputationService();
 const escrowService = createEscrowService({ lnAdapter: lightning });
-const verificationService = createVerificationService({ reputationService });
+const verificationService = createVerificationService();
 
-module.exports = createMarketplaceService({ escrowService, verificationService, reputationService });
+module.exports = createMarketplaceService({ escrowService, verificationService });

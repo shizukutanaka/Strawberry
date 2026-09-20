@@ -2,12 +2,11 @@
 // 検証サービス（docs/SPECIFICATION.md F2）。work-verifier（純関数）と VerificationRepository
 // （永続化）を束ね、ジョブの監査要否決定・出力収集・consensus/ゼロ負荷判定で verdict を確定する。
 // finalize は escrow-service.evaluate にそのまま渡せる verificationCtx を返し、
-// 監査結果を reputationService へ反映する（いずれも DI、テストはインメモリ/省略可能）。
+// （repo は DI、テストはインメモリ/省略可能）。
 const { shouldAudit, outputsMatch, ternaryConsensus, detectZeroLoad } = require('./work-verifier');
 
 function createVerificationService({
   repository,
-  reputationService = null,
   auditRate = 0.1,
   tolerance = 1e-3,
   zeroLoad = {},
@@ -95,9 +94,6 @@ function createVerificationService({
         updatedAt: new Date().toISOString(),
       });
 
-      if (reputationService && rec.providerId && (verdict === 'verified' || verdict === 'failed')) {
-        reputationService.recordAudit(rec.providerId, verdict === 'verified');
-      }
 
       return {
         record: saved,

@@ -258,6 +258,30 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
   出していない」ことであり、削除ではなく UI 側の機能欠落と記録。
 - 検証: tests/marketplace + reputation + security + api — 全パス。
 
+### 第9ラウンド（ソクラテス式問答 続 — 「書かれたデータは誰が読むか？」）
+
+レピュテーション統計系を追跡した結果、order フロー・attestation・検証・
+係争がイベントを書き込み、GET /users/:id/reputation が唯一の読み出し口
+だったが、SPA はそれを呼ばない。さらに決定経路（renter-eligibility の
+minRenterRating ゲート等）は order.renterReview を直接読み、
+reputation-service の統計を参照しない。**書き込みがあり読み込みのない
+サブシステムは write-only の telemetry であり、誰の決定も変えない** → 削除。
+
+- 削除: reputation-service.js・reputation-scorer.js・ReputationRepository.js、
+  GET /users/:id/reputation・GET /users/:id/renter-profile（renter-profile は
+  review データの表示面だが消費者ゼロ — review データ自体は eligibility が
+  読むので生存）、_reputationCache/_renterProfileCache/invalidateReputationCache、
+  order/gpu/index.js の全 recordJobResult/slash/recordAttestation 書き込み、
+  marketplace-service/verification-service/default.js の reputationService 配線。
+- 連鎖テスト: reputation-service/scorer.test.js・probe74 削除、
+  marketplace-service.test・verification-service.test・probe38/42・
+  api.integration の該当 it/describe 除去（write-only コードの検証は消す）。
+- 判断が分かれた点: **レビュー機能は生存**（order.renterReview は
+  renter-eligibility の決定パスで読まれる — データが動作を変える）。
+  provider-uptime も生存（SLA breach が escrow 精算に使われる決定読み）。
+- 検証: tests/api+marketplace+reputation+security+integration+verification —
+  89 スイート 854 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

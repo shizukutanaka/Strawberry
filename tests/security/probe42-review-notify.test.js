@@ -2,7 +2,6 @@
 // Probe 42 regression tests:
 // 42a-1: dispute counts (deniedDisputeCount/vindicatedDisputeCount) hidden from sanitizeUser output
 // 42a-2: dispute counts removed from SENSITIVE_USER_FIELDS list
-// 42a-3: ratingAverage clamped to [1, 5] in renter-profile
 // 42a-4: ratingAverage uses clamped values per review
 // 42b-1: notifier AXIOS_SAFE_CONFIG defined with timeout + size limits
 // 42b-2: all axios.post calls in notifier use AXIOS_SAFE_CONFIG (no unbounded calls)
@@ -51,33 +50,6 @@ describe('sanitizeUser: dispute counts hidden from API responses', () => {
   });
 });
 
-// ─── 42a-3/42a-4: ratingAverage clamped in renter-profile ────────────────
-describe('renter-profile: ratingAverage clamped to [1, 5]', () => {
-  it('user/index.js: each renter-profile review rating is clamped to [1,5] before averaging', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    // Probe74 fix: per-review clamping happens via validRatings.map(Math.min(5, Math.max(1, r))),
-    // applied only to Number.isFinite-validated ratings (invalid ratings excluded, not
-    // defaulted to 1). Averaging already-clamped [1,5] values can never leave [1,5], so an
-    // additional outer clamp on the final average is redundant and was removed.
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
-    expect(idx).toBeGreaterThan(-1);
-    const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/Math\.min\(5,\s*Math\.max\(1,\s*r\)\)/);
-    expect(block).toMatch(/Number\.isFinite\(r\)/);
-  });
-
-  it('user/index.js: raw renterReview.rating not used directly in sum without clamping', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    // The old unclamped form should be gone
-    expect(src).not.toMatch(/reduce.*s \+ o\.renterReview\.rating/);
-  });
-});
-
-// ─── 42b-1/42b-2: notifier AXIOS_SAFE_CONFIG usage ───────────────────────
 describe('notifier: AXIOS_SAFE_CONFIG applied to all axios calls', () => {
   it('notifier.js: AXIOS_SAFE_CONFIG defined with timeout and size limits', () => {
     const src = require('fs').readFileSync(

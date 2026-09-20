@@ -621,6 +621,16 @@ validator.js の全スキーマを監査:
 
 検証: tests/api/order・api.integration — 254 テスト全パス。
 
+### 第38ラウンド（ソクラテス式問答 — 「SPA 関数と docs の消費者は？」）
+
+- SPA 未呼出スキャン: 6 候補は全て偽陽性（ローカル変数の値参照・
+  addEventListener 経由・map コールバック）— public/js に死関数なし
+- docs リンク監査: `feedback-report.md`（生成スクリプトが出力する
+  「今週なし」スタブを誤ってコミットした実行時アーティファクト）と
+  `README_docs.md`（markdown-toc 規約 — ツール未導入・全 doc に
+  toc マーカーなしの死んだ規約）を削除
+- `README_feedback.md` は対象スクリプト feedback-bot.js が稼働中で生存
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

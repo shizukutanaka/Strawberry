@@ -1,17 +1,16 @@
 // VirtualGPUManager のルート互換 API 契約テスト
 //
 // 背景: src/api/routes/{gpu,order} は vgpuManager.allocateGPU / releaseGPU /
-// getGPUUsageStats / getGPUDetails / getGPUAvailability / getGPUBenchmarkResults /
-// runGPUBenchmark を呼ぶが、クラス本来の API 名は allocateVirtualGPU /
-// releaseVirtualGPU / getVirtualGPUStats だった。名前・シグネチャの差異で vgpu 有効時に
-// 必ず TypeError になり、レンタル開始/終了フローが壊れていた。互換メソッドの存在と
-// allocate→release のラウンドトリップ（{success} 返却・gpuId 起点の解放）を固定する。
+// getGPUUsageStats / getGPUDetails / getGPUAvailability を呼ぶが、クラス本来の API 名は
+// allocateVirtualGPU / releaseVirtualGPU / getVirtualGPUStats だった。名前・シグネチャの差異で
+// vgpu 有効時に必ず TypeError になり、レンタル開始/終了フローが壊れていた。互換メソッドの
+// 存在と allocate→release のラウンドトリップ（{success} 返却・gpuId 起点の解放）を固定する。
 const { VirtualGPUManager } = require('../../virtual-gpu-manager');
 
 describe('VirtualGPUManager route-compat API', () => {
   const required = [
     'allocateGPU', 'releaseGPU', 'getGPUUsageStats',
-    'getGPUDetails', 'getGPUAvailability', 'getGPUBenchmarkResults', 'runGPUBenchmark'
+    'getGPUDetails', 'getGPUAvailability'
   ];
 
   it('exposes all method names the routes call', () => {

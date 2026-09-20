@@ -162,6 +162,17 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
 「API プロダクトとして意図的」と判断 — ただし外部 API 利用者が実在しない現状では
 **要件の所有者がユーザー自身**という状態。もし API 公開を諦めるなら次の大きな削除候補。
 
+### 第3ラウンドの追加削除（未呼出メソッド）
+
+- `lightning-service.js`: `getPendingPayments`/`closeChannel`/`getNodeStats` —
+  全コードベースで呼出ゼロ（テスト含む）のため削除。
+- `virtual-gpu-manager.js`: `getGPUBenchmarkResults`/`runGPUBenchmark` —
+  唯一の呼出点（削除した /gpus/:id/benchmark エンドポイント）が消えたため削除。
+  vgpu-route-contract.test の契約リストからも除去。
+- 監査結果: `vgpuManager` の公開面は allocate/release/usageStats/details/availability/
+  initialize の 6 メソッドのみ使用。残る ~34 メソッド（Docker/K8s/MIG/MPS パス等）は
+  エンジン内部構造であり、仮想化機能の削除はプロダクト判断のため温存。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

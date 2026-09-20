@@ -788,18 +788,6 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async getPendingPayments() {
-        // 保留中の支払い取得
-        const pending = [];
-        
-        this.invoices.forEach(invoice => {
-            if (invoice.status === 'pending' && invoice.expiresAt > Date.now()) {
-                pending.push(invoice);
-            }
-        });
-        
-        return pending;
-    }
 
     async settleHoldInvoice(preimage) {
         // HODL請求書決済
@@ -880,37 +868,6 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async closeChannel(channelPoint, force = false) {
-        // チャネル閉鎖
-        try {
-            const [fundingTxid, outputIndex] = channelPoint.split(':');
-            
-            const closeStream = this.lnd.closeChannel({
-                channel_point: {
-                    funding_txid_str: fundingTxid,
-                    output_index: parseInt(outputIndex)
-                },
-                force: force
-            });
-            
-            return new Promise((resolve, reject) => {
-                closeStream.on('data', (update) => {
-                    if (update.close_pending) {
-                        resolve({
-                            txid: update.close_pending.txid,
-                            status: 'pending'
-                        });
-                    }
-                });
-                
-                closeStream.on('error', reject);
-            });
-            
-        } catch (error) {
-            logger.error('Failed to close channel:', error);
-            throw error;
-        }
-    }
 
     startPeriodicTasks() {
         // チャネルバランス更新（5分ごと）
@@ -981,49 +938,6 @@ class LightningService extends EventEmitter {
         }
     }
 
-    async getNodeStats() {
-        try {
-            const [info, balance, channels] = await Promise.all([
-                this.getInfo(),
-                this.getChannelBalance(),
-                this.getChannelStats()
-            ]);
-            
-            return {
-                node: {
-                    pubkey: info.identity_pubkey,
-                    alias: info.alias,
-                    version: info.version,
-                    synced: info.synced_to_chain,
-                    blockHeight: info.block_height
-                },
-                channels: {
-                    active: channels.active,
-                    inactive: channels.inactive,
-                    pending: channels.pending,
-                    capacity: channels.totalCapacity
-                },
-                balance: {
-                    total: balance.balance,
-                    local: balance.localBalance.sat,
-                    remote: balance.remoteBalance.sat,
-                    pending: balance.pendingOpenBalance
-                },
-                payments: {
-                    sent: this.payments.size,
-                    received: Array.from(this.invoices.values()).filter(i => i.status === 'paid').length,
-                    totalSent: Array.from(this.payments.values()).reduce((sum, p) => sum + p.amount, 0),
-                    totalReceived: Array.from(this.invoices.values())
-                        .filter(i => i.status === 'paid')
-                        .reduce((sum, i) => sum + i.amountSats, 0)
-                }
-            };
-            
-        } catch (error) {
-            logger.error('Failed to get node stats:', error);
-            return null;
-        }
-    }
 
     async getChannelStats() {
         let active = 0;

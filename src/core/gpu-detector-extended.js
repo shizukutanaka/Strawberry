@@ -242,38 +242,6 @@ class ExtendedGPUDetector {
         return gpus;
     }
 
-    // ===== Intel GPU検出 =====
-    async detectIntelGPUsAdvanced() {
-        const gpus = [];
-        
-        try {
-            if (this.platform === 'linux') {
-                // Intel GPU Tools検出
-                gpus.push(...await this.detectIntelGPUTools());
-                
-                // sysfs経由の検出
-                gpus.push(...await this.detectIntelSysfs());
-            } else if (this.platform === 'win32') {
-                // Windows WMI経由
-                gpus.push(...await this.detectIntelGPUsWindows());
-            }
-            
-            // GPU情報の詳細取得
-            for (const gpu of gpus) {
-                gpu.details = await this.getIntelGPUDetails(gpu);
-                gpu.performance = await this.benchmarkIntelGPU(gpu);
-                this.intelGPUs.set(gpu.uuid, gpu);
-            }
-            
-            logger.info(`Detected ${gpus.length} Intel GPUs`);
-            return gpus;
-            
-        } catch (error) {
-            logger.error('Intel GPU detection failed:', error);
-            return [];
-        }
-    }
-
     async detectIntelGPUTools() {
         const gpus = [];
         

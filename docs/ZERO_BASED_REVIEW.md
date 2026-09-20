@@ -415,6 +415,21 @@ ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正�
   notification-settings `_isSSRFUrl` — 公開 API 面を実態に揃える
 - 計 −103 行（12 ファイル）。検証: 32 スイート 150 テスト全パス。
 
+### 第20ラウンド（ソクラテス式問答 — 「このメソッドの呼出し木の根はどこか？」）
+
+クラスメソッド到達性解析（外部エントリポイントから this.呼出しグラフを BFS）:
+
+- **virtual-gpu-manager.js**: 38 メソッド中 **12 が到達不能** — `createVirtualGPU`
+  が呼出し元ゼロ（allocateGPU/releaseGPU/getGPUDetails/getGPUUsageStats/
+  getGPUAvailability/initialize/isHealthy/shutdown が生存根）。その子孫
+  createNativeVirtualGPU→createMIGInstance/createVGPUInstance/createMPSInstance
+  + selectMIGProfile/selectVGPUType/determineVGPUType + calculate*Allocation +
+  saveVirtualGPUConfig — 「GPU を仮想化して切り出す」配信系は allocateGPU
+  （物理 GPU を丸ごと割当）とは別系統で未接続だった。−235 行。
+- **gpu-detector-extended.js**: `detectIntelGPUsAdvanced` 到達不能 −30 行。
+
+検証: tests/gpu + api.integration — 4 スイート 257 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

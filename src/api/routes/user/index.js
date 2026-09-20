@@ -93,7 +93,6 @@ router.post('/register',
         password: hashedPassword,
         role: assignedRole,
         lastLogin: null,
-        settings: { notifications: true, theme: 'light' }
       });
       return null;
     });
@@ -506,53 +505,6 @@ router.put('/me/password',
     logger.info(`Password changed for user: ${req.user.id}`);
     appendAuditLog('user_password_changed', { userId: req.user.id }, req.user.id);
     res.json({ message: 'Password changed successfully' });
-  })
-);
-
-// 許可された設定キーと各値のバリデータ（key allowlist + value type/range）
-const SETTINGS_SCHEMA = {
-  notifications: v => typeof v === 'boolean',
-  theme:         v => ['light', 'dark', 'system'].includes(v),
-  language:      v => typeof v === 'string' && /^[a-z]{2,5}(-[A-Z]{2})?$/.test(v),
-  timezone:      v => typeof v === 'string' && v.length > 0 && v.length <= 64 && /^[A-Za-z0-9/_+-]+$/.test(v),
-  currency:      v => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
-};
-
-// ユーザー設定更新 (認証必須)
-router.put('/me/settings',
-  authLimiter,
-  authenticateJWT,
-  asyncHandler(async (req, res) => {
-    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
-      return res.status(400).json({ error: 'Settings must be an object' });
-    }
-    const settings = {};
-    for (const [k, v] of Object.entries(req.body)) {
-      if (!Object.prototype.hasOwnProperty.call(SETTINGS_SCHEMA, k)) continue;
-      if (!SETTINGS_SCHEMA[k](v)) {
-        return res.status(400).json({ error: `Invalid value for setting: ${k}` });
-      }
-      settings[k] = v;
-    }
-    if (Object.keys(settings).length === 0) {
-      return res.status(400).json({ error: `No valid settings provided. Allowed: ${Object.keys(SETTINGS_SCHEMA).join(', ')}` });
-    }
-    logger.info(`Updating settings for user: ${req.user.id}`);
-    
-    // TOCTOU防止: settings はオブジェクトのマージ（stale-spread）で更新するため、
-    // 並行リクエストが互いの変更を上書き消去しないようにロックする。
-    return withLock(`user:${req.user.id}:settings`, async () => {
-      const user = UserRepository.getById(req.user.id);
-      if (!user) return res.status(404).json({ error: 'User not found' });
-      if (user.status === 'deactivated') {
-        return res.status(403).json({ error: 'Account is deactivated. Contact support to reactivate.' });
-      }
-      const updatedUser = UserRepository.update(req.user.id, {
-        settings: { ...user.settings, ...settings },
-        updatedAt: new Date().toISOString(),
-      });
-      return res.json({ message: 'Settings updated successfully', settings: updatedUser.settings });
-    });
   })
 );
 

@@ -383,6 +383,21 @@ ARCHITECTURE.md の p2p/libp2p 言及は削除履歴の文脈説明として正�
 結論: 3連続で新規削除ゼロ級。問答は全層で「弁明可能」に収束 — これが
 ゼロベースレビューの終点。以降は製品判断のみ。
 
+### 第18ラウンド（ソクラテス式問答 — 「ルート粒度で誰が呼ぶか？」）
+
+全 mounted エンドポイントと SPA 呼出しを突合（前ラウンドまではファイル粒度、
+今回はルート粒度）:
+
+- **削除**: `PUT /users/me/settings` + `SETTINGS_SCHEMA` + register 時の既定
+  settings（48行）— user.settings を読むコードが全体でゼロ。書込み専用の
+  write-only エンドポイント。テスト消費者もゼロ。
+- **生存（製品判断に残す、全てテスト消費者あり）**: renter-review・node-info・
+  channels・history・me/activity・me/watches・gpu bulk/clone/block/schedule/
+  eligibility — SPA が呼ばないが spec'd 製品面。marketplace escrow と同じ
+  「UI が出していない API」カテゴリ。切るなら明示の製品判断。
+
+検証: tests/api + tests/security — 83 スイート 577 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

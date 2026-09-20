@@ -37,12 +37,12 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | GET `/api/v1/gpus`, `/gpus/:id` | GPU 検索/詳細 | JWT | ✅(JSON層で動作) |
 | POST/PUT `/api/v1/gpus` | 出品登録/更新 | JWT+role | 🟡(アテステーション無し) |
 | GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
-| POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |
+| POST `/api/v1/payments/...` | 決済 | JWT | ✅(hold-invoice エスクロー結線済み — FSM+order settle/cancel) |
 | ~~POST `/api/v1/marketplace/quote`,`/rank`,`/auction`~~ | 実行時消費者ゼロのマッチング面 — 第8ラウンドで削除 | — | ❌ |
 | `/api/v1/marketplace/escrow/*` (open/pay/verify/resolve) | エスクロー駆動 | JWT+admin | 🟡(LN実機未) |
 | `/api/profit-addresses` | 運営受取先 | JWT+admin | ✅ |
 | GET `/metrics` | Prometheus | none | ✅ |
-| GET `/api/v1/node-info`,`/channels` | LN 情報 | JWT | 🟡(LN実機要) |
+| GET `/api/v1/payments/node-info`,`/channels`,`/history` | LN 情報 | JWT | 🟡(LN実機要) |
 
 ※`users/register` の `userId` 未定義クラッシュ、role 変更/削除の存在しない `users` 配列参照、
 グローバル JWT ゲートが register/login も保護していた鶏卵問題は **すべて修正済**（2026-06）。

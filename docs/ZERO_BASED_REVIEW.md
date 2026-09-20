@@ -834,6 +834,14 @@ src/ 全ファイルの export 名を総当たり:
 
 検証: tests/api + tests/security + api.integration — 83スイート 814テスト全パス。
 
+### 第60ラウンド（ソクラテス式問答 — 「唯一残ったAPI参照 SPECIFICATION.md は実ルートと一致するか？」）
+
+- stale 2箇所を修正: 支払い行の「🟡(エスクロー無し)」→ hold-invoice エスクローは
+  FSM+order settle/cancel で結線済み（第1ラウンド修正）の実績に更新。
+  LN 情報のパス `/api/v1/node-info` → 実マウント `/api/v1/payments/node-info` に修正
+  （+/channels+/history）。
+- 残行は削除済み注記付きで正確（reputation・marketplace 面・docker/k8s）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

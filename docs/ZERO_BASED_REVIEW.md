@@ -201,6 +201,24 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
   SENTRY_DSN 記述・logger.js のコメントアウト stub・probe57 の対応アサーションを除去。
 - 検証: probe57 + service-monitor.e2e + scripts + api.integration 全パス。
 
+### 第6ラウンドの追加削除（依存未導入の統合経路 — 全環境で実行不能）
+
+- **vgpu の docker/kubernetes プラットフォーム一式削除**（~460行）:
+  dockerode・@kubernetes/client-node が依存に存在しないため、検出→初期化→
+  作成/解放/破棄/統計の switch 分岐と 12 メソッド（initializeKubernetes/initializeDocker/
+  createK8sVirtualGPU/createDockerVirtualGPU/setupK8sAccess/setupDockerAccess/
+  releaseK8sAccess/releaseDockerAccess/destroyK8sVirtualGPU/destroyDockerVirtualGPU/
+  getK8sVGPUStats/getDockerVGPUStats/calculateGPUFraction）はどの環境でも実行不能。
+  platform は常に 'native'。marketplace GPU 特別分岐も不要になり単純化。
+- **utils/google-calendar.js + order 作成時の連携ブロック削除**（googleapis 未導入。
+  注文ごとに「読込失敗」エラーログを吐くノイズ源でもあった）。
+- **routes/auth/google.js（POST /api/v1/auth/google）削除**: google-auth-library 未導入で
+  idToken 検証は永久に 503/失敗。Google OAuth は passport 経由の GET /auth/google
+  フローが既に存在し、そちらは依存あり（passport-google-oauth20）で実行可能。
+- 連鎖: vgpu health/route-contract テストの docker/k8s 前提部、probe23a の
+  google describe、ARCHITECTURE.md・SPECIFICATION.md の stale 記述を整理。
+- 検証: tests/gpu + probe23a/28 + api.integration — 6 スイート 275 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -1,5 +1,5 @@
 // src/db/json/createJsonRepository.js
-// 7つのJSONリポジトリ（Gpu/Order/Payment/User/Escrow/Reputation/Verification）の
+// JSONリポジトリ群（Gpu/Order/Payment/User/Escrow/Verification/Uptime/Watch）の
 // 重複していた load/save/CRUD 実装を一本化するファクトリ。
 // すべての書き込みは atomicWriteJSON（temp+rename）経由で行う。
 //

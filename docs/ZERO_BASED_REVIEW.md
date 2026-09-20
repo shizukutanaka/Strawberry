@@ -734,6 +734,13 @@ src/ 全ファイルの export 名を総当たり:
   このリポジトリの実態と無関係
 - src/ 全77ファイルに消費者再確認 — 孤児なし
 
+### 第50ラウンド（ソクラテス式問答 — 「状態機械の死んだ遷移は？」）
+
+- escrow-state-machine の全7イベント（PAY/CANCEL/DEADLINE/DELIVER_OK/
+  DELIVER_FAIL/RESOLVE_SETTLE/RESOLVE_REFUND）に発火元あり — FSM 全生存
+- `createJsonRepository.js` のヘッダコメントが削除済み Reputation を
+  列挙していた stale を修正（実在8リポジトリに更新）
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

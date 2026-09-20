@@ -1059,6 +1059,14 @@ src/ 全ファイルの export 名を総当たり:
   自体が目的 = 監査ログと同じ理屈で生存判定）。
 - server.js の app.use 14段全て稼働中。削除ゼロのラウンド。
 
+### 第84ラウンド（ソクラテス式問答 — 「ファクトリのオプション面と config キーに死面はないか？」）
+
+- `createJsonRepository` の finders/onAccess オプションは各リポジトリが実使用、
+  未対応オプションを渡している呼出しなし。
+- `src/utils/config.js` 全26キー（server/gpu/security/lightning sections）に
+  `config.X.Y` 消費者確認。パース偽陽性（コメント片）を除き死キーなし。
+- 削除ゼロのラウンド。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -68,5 +68,5 @@ function invalidateUserCache(userId) {
   }
 }
 
-module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
+module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, cacheHitCounter, cacheMissCounter };
 

@@ -679,6 +679,16 @@ order.create・payment.*・user.* は全て消費者あり。
 
 結論: ルーティング層クリーン。
 
+### 第44ラウンド（ソクラテス式問答 — 「export 全量の消費者監査」）
+
+src/ 全ファイルの export 名を総当たり: 
+- `serviceDownCounter`・`serviceRestartCounter`・`cachePurgeCounter` —
+  prom-client 経由でメトリクスは発火するが JS 側の export 束縛は第23ラウンドで
+  import 先を消した残骸。`.inc()` 呼出しは生存のため export 名のみ除去
+- 残り全 export に消費者確認済み
+
+検証: tests/security/probe57・api.integration — 242 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

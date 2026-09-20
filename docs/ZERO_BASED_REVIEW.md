@@ -302,6 +302,14 @@ write-only 判定を残データストアへ展開。結果はほぼ「何もし
 **ラウンド10の知見**: 掘り進めるほど「何もしない」が増える — 削除可能なものは
 ほぼ尽き、残るは所有者を持つコードのみ。これが問い続けた先の状態。
 
+### 第11ラウンド（ソクラテス式問答 続 — 「この依存は誰が require するか？」）
+
+- **winston-daily-rotate-file 削除**: 依存宣言は残るが require するコードは
+  第10ラウンドで消した core/logger.js のみ — 所有者を失った依存は負債 → npm dep 除去。
+- openapi-generator → /openapi.json エンドポイント + npm scripts + openapi-rbac
+  テストが所有者 → 生存。scripts/* の npm エントリも全てファイル実在 → 生存。
+- 検証: provider-reliability + service-monitor.e2e + probe41 — 全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -558,6 +558,17 @@ destructure された未使用 import の棚卸し（使用ゼロの名を除去
 結論: 「統合」軸もクリーン。責務分離が適切で、統合による価値密度の
 改善余地なし。
 
+### 第32ラウンド（ソクラテス式問答 — 「テストだけが消費する製品コードはあるか？」）
+
+- `ln-adapter.js`: テスト参照3件で一見 test-only に見えたが、実体は
+  escrow-service の DI インターフェース（marketplace/default.js・
+  order/index.js・action-executor が消費）— PR #6 のエスクロー結線の
+  心臓部で生存
+- `order/index.js` の test-only フラグは basename スキャンの偽陽性
+  （`require('./order')` でディレクトリ経由）
+
+結論: 製品コードに test-only 消費の偽装はなし。収束維持。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -123,7 +123,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 現行の主要なコントロール:
 
 - **秘密情報の fail-fast**: 本番（`NODE_ENV==='production'`）で `JWT_SECRET` /
-  `ENCRYPTION_KEY` / `SESSION_SECRET` 未設定なら起動失敗（`requireSecret`）。開発時は
+  `SESSION_SECRET` 未設定なら起動失敗（`requireSecret`）。開発時は
   一時鍵を生成し警告。ハードコード秘密鍵フォールバックは全廃。
 - **JWT**: HS256 固定（`algorithms:['HS256']`）でアルゴリズム混同（alg=none / RS256 すり替え）を防止。
   access+refresh の2種＋リフレッシュトークンローテーション、再利用検知で全セッション失効。

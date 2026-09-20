@@ -4,8 +4,7 @@
 //
 // No-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set: this project has no
 // collector running in development, CI, or this sandbox, and every other
-// optional integration in this codebase (P2P network, Google/GitHub OAuth,
-// real LND) already follows the same "absent config -> disabled, not broken"
+// optional integration in this codebase (real LND node) already follows the same "absent config -> disabled, not broken"
 // pattern (see src/core/services.js, lightning-service.js). Gating the
 // require() calls themselves (not just sdk.start()) means the ~140
 // @opentelemetry/* packages this pulls in are never loaded at all when

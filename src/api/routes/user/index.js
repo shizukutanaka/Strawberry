@@ -218,7 +218,7 @@ router.post('/refresh',
       return res.status(401).json({ error: 'Refresh token reuse detected; all sessions have been revoked. Please log in again.' });
     }
     // パスワード変更・全セッション失効より後に発行されたリフレッシュトークンのみ受け付ける
-    // （共有ヘルパーで REST/GraphQL と同一ポリシー）。盗まれたトークンはこれらで無効化できる。
+    // （共有ヘルパーで REST 全ルートと同一ポリシー）。盗まれたトークンはこれらで無効化できる。
     if (isSessionInvalidated(user, payload.iat)) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }

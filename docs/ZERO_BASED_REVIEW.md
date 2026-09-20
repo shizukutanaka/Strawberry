@@ -716,6 +716,15 @@ src/ 全ファイルの export 名を総当たり:
   peerID（第13ラウンド削除 API）の言及を除去
 - `npm run openapi` 等の残スクリプト参照は実在確認済み
 
+### 第48ラウンド（ソクラテス式問答 — 「コメント中の削除済み機能言及は？」）
+
+- user/index.js: 「REST/GraphQL と同一ポリシー」→ GraphQL は除去済み → REST に修正
+- instrumentation.js: オプショナル統合の例として挙げていた P2P・OAuth（両方削除済み）を
+  real LND のみに修正
+- 残りの言及（P2P 製品名・apiKey フィールド除去等）は実在物で生存
+
+検証: tests/api・tests/utils — 30 スイート 358 テスト全パス。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

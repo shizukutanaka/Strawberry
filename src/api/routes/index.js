@@ -11,7 +11,6 @@ const orderRoutes = require('./order');
 const paymentRoutes = require('./payment');
 const userRoutes = require('./user');
 const marketplaceRoutes = require('./marketplace');
-const authRoutes = require('./auth');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
 const { gpuDetector, vgpuManager, lightning, requireService } = require('../../core/services');
@@ -63,14 +62,13 @@ const PUBLIC_PATHS = new Set([
   '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
-// /auth/* と /gpus/* は GET のみトークン不要（マーケット閲覧用途）。
+// /gpus/* は GET のみトークン不要（マーケット閲覧用途）。
 // 旧実装は method を問わず /gpus/ を startsWith で blanket 免除していたため、将来
 // /gpus/:id/<新ルート> に POST/PUT/DELETE が追加された際に意図せず認証バイパスとなる
 // 危険があった。method ガードで mutation は必ず JWT を要求する形に絞る。
 function isPublicPath(path, method) {
   const isGet = method === 'GET' || method === 'HEAD';
   return PUBLIC_PATHS.has(path)
-    || path.startsWith('/auth/')
     || (isGet && path.startsWith('/gpus/'))
     // プロバイダ公開レピュテーション照会 & 借り手公開プロフィール（閲覧はマーケット信頼判断のため公開、GETのみ）
     || (isGet && /^\/users\/[^/]+\/reputation$/.test(path))
@@ -92,7 +90,6 @@ router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
-router.use('/auth', authRoutes);
 // 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
 router.use(require('../notification-settings').router);
 

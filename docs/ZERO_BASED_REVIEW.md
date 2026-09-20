@@ -219,6 +219,26 @@ SLA スイープを同居）だが、動作しておりテストもあるため�
   google describe、ARCHITECTURE.md・SPECIFICATION.md の stale 記述を整理。
 - 検証: tests/gpu + probe23a/28 + api.integration — 6 スイート 275 テスト全パス。
 
+### 第7ラウンド（ソクラテス式問答 — 「誰が消えたら困るか？」を各構成に問う）
+
+問いのやり方: 各サブシステムに「目的は？利用者は？消したら誰が困る？」を当て、
+証拠（呼出元・UIリンク・テスト）で弁明できないものを削除。存続には所有者を要求。
+
+| 対象 | 問答の結論 | 判定 |
+|---|---|---|
+| routes/auth.js（GET /auth/google・/auth/github + callback） | SPA のどこにも OAuth リンクが無く（public/ 全grep 0件）、テスト消費者ゼロ。ブラウザ直叩き以外到達不能。master-auth の Google OAuth と機能重複。 | **削除** |
+| middleware/oauth.js（passport 戦略初期化） | 唯一の消費者は auth.js のみ（master-auth は passport を直接 require）。 | **削除**（連鎖） |
+| passport-github2 依存 | GitHub 戦略は oauth.js だけが使用 → npm dep 除去。 | **削除** |
+| master-auth + express-session + speakeasy | 「消したら誰が困る？」→ /api/profit-addresses を守る唯一の管理者認証。テスト 4 本が検証。所有者あり。 | 何もしない |
+| marketplace /quote・/rank・/auction・escrow系 | 実行時消費者ゼロだが SPECIFICATION §6-2 の規定機能であり、escrow verify が verification-service に実接続。HELD 資金の手動解決手段でもある。 | 何もしない（製品判断に残す） |
+| telemetry/instrumentation.js + /metrics | OTEL は env 未設定で完全 no-op（依存を load もしない）。既に最小構成。 | 何もしない |
+| gpu-detector-extended・src/data・残 scripts | 起動時初期化／profit-addresses 実データ／実行可能な運用ツール。所有者あり。 | 何もしない |
+
+- 連鎖: routes/index.js の `/auth/*` GET 免除・マウント・require を除去。
+- 検証: tests/security + tests/integration — 62 スイート 518 テスト全パス。
+- **ソクラテス式の限界**: 「ユーザーは誰か」「GPU 配信の実装意図」はコードからは
+  答えられない製品判断であり、前回の問い（§第6ラウンド末尾）に残置。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

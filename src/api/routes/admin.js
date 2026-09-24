@@ -7,6 +7,7 @@ const jwtAuth = require('../middleware/jwt-auth');
 const rbac = require('../middleware/rbac');
 const { lightning, requireService } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
+const { parsePagination } = require('../../utils/pagination');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
 const UserRepository = require('../../db/json/UserRepository');
 const GpuRepository = require('../../db/json/GpuRepository');
@@ -88,10 +89,7 @@ router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
 // 検証レコード一覧（管理者のみ）— ジョブ再実行監査の結果を閲覧・デバッグ用
 router.get('/admin/verifications', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   const all = VerificationRepository.getAll();
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const { limit, offset } = parsePagination(req.query);
   // ?passed=true/false でフィルタ
   let records = all;
   if (req.query.passed === 'true') records = all.filter(v => v.passed === true);
@@ -121,10 +119,7 @@ router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res
   let escrows = EscrowRepository.getAll();
   if (req.query.orderId) escrows = escrows.filter(e => e.orderId === req.query.orderId);
   if (req.query.state) escrows = escrows.filter(e => e.state === req.query.state);
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const { limit, offset } = parsePagination(req.query);
   const total = escrows.length;
   const page = escrows.slice(offset, offset + limit);
   res.json({ total, limit, offset, escrows: page });

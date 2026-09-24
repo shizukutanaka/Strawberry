@@ -11,6 +11,7 @@ const GpuRepository = require('../../../db/json/GpuRepository');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const providerUptime = require('../../../reputation/provider-uptime');
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+const { parsePagination } = require('../../../utils/pagination');
 const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
@@ -234,10 +235,7 @@ router.get('/', asyncHandler(async (req, res) => {
   // offset を上限化する理由: 未認証エンドポイントで offset=999999999 を指定されると
   // gpus 配列全体をロードした後 O(n) slice が走りイベントループをブロックする DoS になる。
   const totalCount = gpus.length;
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
+  const { limit, offset } = parsePagination(req.query, { maxOffset: 100000 });
   const pagedGpus = gpus.slice(offset, offset + limit);
 
   // 全 GPU の状況サマリ（ページング前の全体集計）
@@ -275,10 +273,7 @@ router.get('/', asyncHandler(async (req, res) => {
 
 router.get('/my', authenticateJWT, asyncHandler(async (req, res) => {
   const providerId = req.user.id;
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
+  const { limit, offset } = parsePagination(req.query, { maxOffset: 100000 });
 
   let gpus = GpuRepository.getAll().filter(g => g.providerId === providerId);
   const total = gpus.length;
@@ -334,10 +329,7 @@ router.get('/:id/reviews', asyncHandler(async (req, res) => {
   const gpu = GpuRepository.getById(gpuId);
   if (!gpu) return res.status(404).json({ error: 'GPU not found' });
 
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const { limit, offset } = parsePagination(req.query, { maxLimit: 100, defaultLimit: 20 });
 
   // レビュー本体を spread すると reviewerId（借り手の UUID）が漏れ、認証済み任意ユーザーが
    // GPU 単位で借り手を列挙できる（renter の注文列挙に利用可能）。
@@ -404,10 +396,7 @@ router.get('/:id/history', authenticateJWT, asyncHandler(async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+  const { limit, offset } = parsePagination(req.query, { maxLimit: 100, defaultLimit: 20 });
   const statusFilter = req.query.status || null;
 
   let orders = OrderRepository.getAll().filter(o => o.gpuId === gpuId);

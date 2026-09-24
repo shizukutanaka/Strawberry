@@ -14,6 +14,7 @@ const EscrowRepository = require('../../../db/json/EscrowRepository');
 const GpuRepository = require('../../../db/json/GpuRepository');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
+const { parsePagination } = require('../../../utils/pagination');
 const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../../utils/order-expiry');
 const { cacheMiddleware } = require('../../middleware/cache');
 
@@ -99,10 +100,7 @@ router.get('/',
       });
       // ページネーション（limit: 1..200 既定50 / offset: 0..）
       const total = orders.length;
-      const limitRaw = parseInt(req.query.limit, 10);
-      const offsetRaw = parseInt(req.query.offset, 10);
-      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-      const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
+      const { limit, offset } = parsePagination(req.query, { maxOffset: 100000 });
       orders = orders.slice(offset, offset + limit);
       // リアルタイムBTC/JPY換算（レートは一覧全体で1回だけ取得して使い回す）
       const rateInfo = await fetchRateInfo();

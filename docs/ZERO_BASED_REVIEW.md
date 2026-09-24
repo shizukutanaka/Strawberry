@@ -1569,6 +1569,20 @@ src/ 全ファイルの export 名を総当たり:
   （'user_*' 分岐削除で残った stale 命名 — 契約は NotifyType のみ）。
   public/js/api.js の helper 32本・fetch 経路は全て実ルート対応で死面ゼロ。
 
+### 第116ラウンド（ソクラテス式問答 — 「?limit=&offset= の解釈が9箇所にあるのはなぜ？」）
+
+- 問い: ページネーションの parse+clamp が 9 サイトに手作業複写 — 重複か？
+  → 意味差あり（maxLimit 200/100・defaultLimit 50/20・offset 上限 100000/なし）
+  だが、差分は全てパラメータとして表現可能 → 真の重複。
+- **集約**: `src/utils/pagination.js` の `parsePagination(query, {maxLimit,
+  defaultLimit, maxOffset})` へ統一。offset 上限あり版は GPU/ユーザー/注文の
+  未認証・広範囲リスト向け DoS 防御（offset=999999999 で O(n) slice）を維持、
+  上限なし版は本人スコープの履歴・admin 一覧（既に認証済み）を維持。
+- **接続**: order/reads×1・gpu/reads×4・payment/reads×1・user/admin×1・
+  routes/admin×2 — 計9サイト。`limitRaw/offsetRaw` は pagination.js 内のみ残存。
+- **差分の保存**: 100/20 版はレビュー系2エンドポイント固有契約として
+  `{maxLimit:100, defaultLimit:20}` で保持 — 意味差を平坦化せず引数化。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
+const { parsePagination } = require('../../../utils/pagination');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { lightning, requireService } = require('../../../core/services');
@@ -99,10 +100,7 @@ router.get('/history',
     const sorted = [...raw].sort((a, b) =>
       (b.paidAt || b.createdAt || '').localeCompare(a.paidAt || a.createdAt || ''));
     const total = sorted.length;
-    const limitRaw = parseInt(req.query.limit, 10);
-    const offsetRaw = parseInt(req.query.offset, 10);
-    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
+    const { limit, offset } = parsePagination(req.query);
     const page = sorted.slice(offset, offset + limit);
     const payments = page.map(payment => ({
       id: payment.id,

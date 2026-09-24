@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 
 const { asyncHandler } = require('../../../utils/error-handler');
+const { parsePagination } = require('../../../utils/pagination');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { sanitizeUser } = require('../../utils/sanitize-user');
@@ -24,10 +25,7 @@ router.get('/',
     if (req.query.status) users = users.filter(u => u.status === req.query.status);
     const total = users.length;
     // ページネーション
-    const limitRaw = parseInt(req.query.limit, 10);
-    const offsetRaw = parseInt(req.query.offset, 10);
-    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? Math.min(offsetRaw, 100000) : 0;
+    const { limit, offset } = parsePagination(req.query, { maxOffset: 100000 });
     const page = users.slice(offset, offset + limit);
     // パスワード・APIキー等の機密フィールドを除外
     const usersNoSecrets = page.map(sanitizeUser);

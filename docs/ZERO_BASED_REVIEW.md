@@ -1727,6 +1727,24 @@ src/ 全ファイルの export 名を総当たり:
   order-expiry 全4関数・request-context 全4 export・e2e helpers 全7関数・
   marketplace/default・docs 全8ファイル・全ルートマウント — 消費者不在ゼロ。
 
+### 第126ラウンド（ソクラテス式問答 — 「この require はなぜファイル中盤にいる？」）
+
+- **問い**: server.js に遅延 require が6件残っている — 第90・96ラウンドのホイストが
+  なぜここを取りこぼしたか？
+- **答え**: 中盤の `const invoicePoller`（try 内）、`const fs`/`express-rate-limit`
+  （/ready 直前）、`const { cacheHitCounter, cacheMissCounter }`、
+  `const { setServices, startMonitor }`（「TDZ回避」コメント付き）、
+  `registerProcessGuards`（main ガード内）を全て冒頭へホイスト。
+  いずれも副作用なしモジュールで循環参照なし（invoice-poller の依存は
+  logger/Repo/audit-log のみ、server が既に遷移的に読込済み）。
+  呼出し側の try/main ガードは保持 — 失敗許容性は変えない。
+- **残した面**: `require('../../lightning-service')` は「存在しない場合はスキップ」の
+  意図的遅延のため try 内に温存。`token-denylist` の audit-log 遅延 require も
+  失敗黙殺を意図した catch ガード内のため温存。
+- **監査して生存**: ExtendedGPUDetector 全18メソッド（detectAMDGPUsAdvanced 外部呼出し
+  1件＋内部 this.* チェーン＋Windows WMIC テスト直叩き）、security.js 全7 export、
+  marketpalce/default、provider-uptime・attestation-verifier 全 export。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

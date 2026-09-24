@@ -28,6 +28,12 @@ const {
 const GpuRepository = require('../db/json/GpuRepository');
 const OrderRepository = require('../db/json/OrderRepository');
 const coreServices = require('../core/services');
+const fs = require('fs');
+const { rateLimit: readyRateLimit } = require('express-rate-limit');
+const invoicePoller = require('../core/invoice-poller');
+const { registerProcessGuards } = require('../utils/process-guards');
+const { cacheHitCounter, cacheMissCounter } = require('./middleware/cache');
+const { setServices, startMonitor } = require('../core/service-monitor');
 
 // Prometheusメトリクス
 const client = require('prom-client');
@@ -75,11 +81,6 @@ if (metricsInterval && metricsInterval.unref) metricsInterval.unref();
 const app = express();
 const PORT = config.server.port || 3000;
 
-// キャッシュメトリクス統合
-const { cacheHitCounter, cacheMissCounter } = require('./middleware/cache');
-// サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
-const { setServices, startMonitor } = require('../core/service-monitor');
-
 // 新規為替レートAPIルート
 app.use('/api/exchange-rate', exchangeRateRouter);
 
@@ -111,7 +112,6 @@ try {
 // Lightning サービス参照のバインドも兼ねており、ここで呼び出しごとスキップすると
 // pollOnce() を直接叩くテストが「poller not started」で動かなくなるため）。
 try {
-  const invoicePoller = require('../core/invoice-poller');
   const { lightning: lightningForPoller } = coreServices;
   invoicePoller.start(lightningForPoller);
 } catch (e) {
@@ -163,8 +163,6 @@ app.get('/health', (req, res) => {
 // 併記するが readiness のゲートには含めない（未導入でも API 本体は機能するため）。
 // 同期 I/O を含むため専用レート制限を設ける（グローバル apiLimiter より前にマウントされるが
 // このエンドポイント単体には 30 req/min のガードを掛ける）。
-const fs = require('fs');
-const { rateLimit: readyRateLimit } = require('express-rate-limit');
 const readyLimiter = readyRateLimit({
   windowMs: 60 * 1000,
   max: () => process.env.NODE_ENV === 'test' ? 10000 : 30,
@@ -320,7 +318,6 @@ if (require.main === module) {
 
   // プロセスレベルの最終防衛ライン（未処理例外/リジェクションのログ記録＋安全終了）。
   // main 実行時のみ登録し、テスト（require 経由）では登録しない（テストランナーを落とさない）。
-  const { registerProcessGuards } = require('../utils/process-guards');
   registerProcessGuards({ logger, getServer: () => server });
 }
 

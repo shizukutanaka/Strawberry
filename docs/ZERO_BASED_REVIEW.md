@@ -1824,6 +1824,20 @@ src/ 全ファイルの export 名を総当たり:
 - **判定**: export 面は層別総当たりで完全収束。これ以上の層別再走査は
   同一面の反復になるため、次は「export ではない内部記述」方向が唯一の残存面。
 
+### 第132ラウンド（ソクラテス式問答 — 「export しない内部コードに死分岐はないか？」）
+
+- **問い**: 大規模ファイル12本の内部（非 export）に未使用関数・到達不能コード・
+  死DOM参照は残るか？
+- **答え**: ゼロ — 嫌疑は全て偽陽性。
+  - 「return 後の行」ヒューリスティックで18件検出したが全て `return res.json({...})`・
+    `return withLock(...)` の複数行継続（引数の中身）— 実到達不能ゼロ
+  - 未使用内部 function 宣言ゼロ（lightning-service・vgpu-manager・gpu-detector
+    最大3ファイル含む）
+- **DOM 双方向監査**: JS が参照する getElementById/querySelector('#x') 全5 id が
+  index.html に実在。逆方向の孤リファレンスもゼロ（el() 動的生成を考慮）。
+- **CSS 重複ルール**: `.field-row` が2箇所に見えたが `.field-row > .field` との
+  別セレクタ混同 — 同一ルールの複写なし。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

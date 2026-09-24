@@ -74,10 +74,8 @@ router.post('/', authenticateJWT, async (req, res) => {
     return await withLock(`payment:${orderId}`, async () => {
 
     // 貸し手(プロバイダ)への送金先(lenderWallet)はサーバーが管理する provider.payoutAddress
-    // のみを使用する。クライアント提供の bodyLenderWallet は一切受け付けない。
-    // 旧実装は provider.payoutAddress 未設定時に bodyLenderWallet へフォールバックしており、
-    // renter が lenderWallet フィールドで任意のウォレットを指定することで
-    // provider の受取分(TX2)を第三者に横取りできた（クライアント制御の資金移送）。
+    // のみを使用する。クライアント提供の bodyLenderWallet は受け付けない — renter が
+    // 任意ウォレットを指定できると provider の受取分(TX2)を横取りできてしまうため。
     const provider = order.providerId ? UserRepository.getById(order.providerId) : null;
     const lenderWallet = provider && provider.payoutAddress ? provider.payoutAddress : null;
     if (!lenderWallet) {

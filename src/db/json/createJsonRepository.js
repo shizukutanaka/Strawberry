@@ -5,7 +5,7 @@
 //
 // 契約:
 //  - getById / 単一ファインダは「見つからなければ null」を返す
-//    （サービス層テストのモックと同一契約。旧実装の undefined も falsy のため互換)
+//    （サービス層テストのモックと同一契約）
 //  - create は id を必ず採番し直し、createdAt は呼び出し側指定があれば尊重する
 //  - finders: { name: { field, many } } で getByXxx を宣言的に生成する
 //  - onAccess(action, detail): 監査フック（UserRepository の db-access.log 用）。
@@ -72,10 +72,10 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       }
       return parsed;
     } catch (e) {
-      // 旧実装はパース失敗時にサイレントで [] を返していた。これは致命的:
-      // 後続の create/update が「空配列 + 1 行」で既存ファイルを atomicWrite し、
-      // 一時的・回復可能な破損を「不可逆なデータ全消失」へ変換してしまう
-      // （escrows.json / payments.json で資金記録が消える）。
+      // パース失敗時にサイレントで [] を返すと致命的: 後続の create/update が
+      // 「空配列 + 1 行」で既存ファイルを atomicWrite し、一時的・回復可能な破損を
+      // 「不可逆なデータ全消失」へ変換してしまう（escrows.json / payments.json で
+      // 資金記録が消える）。
       // fail-closed: 破損ファイルは温存（rename しない＝次回 load が [] を返して
       // 上書きするのを防ぐ）し、明示的に throw して運用者に検知させる。
       throw new Error(

@@ -28,16 +28,11 @@ class VirtualGPUManager {
     async isHealthy() {
         // 1. initializedフラグ
         if (!this.initialized) return false;
-        // 2. プラットフォーム別の追加チェックは不要（native のみ）
-        // 注: 以前はここに「仮想GPUが1つ以上管理されているか
-        // (this.virtualGPUs.size === 0 なら unhealthy)」という条件があったが、
-        // これは誤り。仮想GPU が 0 個なのは「まだ誰にも貸し出していない」という
-        // 正常な初期状態であって障害ではない。service-monitor は unhealthy を
-        // 見ると initialize() をやり直すため、貸出前のサーバーでは
-        //   [Monitor] VirtualGPUManager unhealthy. Attempting restart.
-        //   [Monitor] VirtualGPUManager restarted successfully.
-        // が監視周期（10秒）ごとに永久に繰り返され、毎回 GPU 検出コマンドと
-        // 設定復元 I/O が走っていた（実機で確認）。在庫数は死活とは無関係。
+        // 2. プラットフォーム別の追加チェックは不要（native のみ）。
+        // 仮想GPUが 0 個なのは「まだ誰にも貸し出していない」という正常な初期状態で
+        // あって障害ではないため、ヘルス条件には含めない。service-monitor は
+        // unhealthy を見ると initialize() をやり直すため、在庫数を条件に入れると
+        // 貸出前のサーバーで監視周期ごとに再起動ループが起きる。在庫数は死活とは無関係。
         return true;
     }
 
@@ -49,8 +44,8 @@ class VirtualGPUManager {
     }
 
     detectPlatform() {
-        // docker/k8s プラットフォームは dockerode/@kubernetes/client-node が依存に
-        // 存在せず実行不能のため削除。native（nvidia-smi 経由）のみ。
+        // native（nvidia-smi 経由）のみ対応。docker/k8s プラットフォームは
+        // dockerode/@kubernetes/client-node が依存に存在せず実行不能。
         return 'native';
     }
 
@@ -303,11 +298,9 @@ class VirtualGPUManager {
 
 
     async setupNativeAccess(vgpu, allocation) {
-        // ネイティブアクセス設定。
-        // 旧実装は実在しない `strawberry-gpu-proxy` バイナリを spawn し、誰も listen して
-        // いない endpoint URL を「成功」として返していた（renter は支払い後に接続できない
-        // 空約束を受け取っていた）。実プロキシ配線は別途のフォローアップ課題とし、ここでは
-        // 割り当て自体（課金・スケジューリング・状態遷移）を正しく完了させることを優先する。
+        // ネイティブアクセス設定。実プロキシ配線は別途のフォローアップ課題とし、
+        // ここでは割り当て自体（課金・スケジューリング・状態遷移）を正しく完了させる
+        // ことを優先する。
         // トークンは実際に発行して記録するが、endpoint は null にし
         // deliveryImplemented:false で「まだ配信未実装」であることを明示する。
         const accessToken = this.generateAccessToken();

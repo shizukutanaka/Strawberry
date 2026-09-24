@@ -18,9 +18,8 @@ function setServices(refs) {
 // 外部通知hook（Slack/LINE/他サービス拡張）
 async function notifyExternalAlert(event, data) {
   // 各チャネルの通知モジュール require は、対応する env が設定されている場合のみ行う。
-  // 旧実装は env チェックより前に require していたため、未設定でも未導入依存の解決に失敗し、
-  // アラートごとに「モジュール呼び出し失敗」警告を量産していた（本物の障害がログに埋もれる衛生問題）。
-  // env ゲートにより、未設定チャネルでは require 自体を行わずノイズを出さない。
+  // env ゲートにより、未設定チャネルでは require 自体を行わずノイズを出さない
+  // （未導入依存の解決失敗や「モジュール呼び出し失敗」警告で本物の障害が埋もれるのを防ぐ）。
   // Slack通知（SLACK_WEBHOOK_URL 設定時のみ）
   if (process.env.SLACK_WEBHOOK_URL) {
     try {

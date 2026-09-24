@@ -4,10 +4,9 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { getBTCtoJPYRate } = require('../../utils/exchange-rate');
 
-// 未認証エンドポイントなので独自レート制限を必ず掛ける。
-// 旧実装はグローバル apiLimiter より前にマウントされていたため
-// `?fresh=true` でキャッシュをバイパスして最大 4 つの外部 HTTP を
-// 1 リクエストあたり起こす SSRF 増幅 / 上流レートリミット消費 DoS が成立していた。
+// 未認証エンドポイントなので独自レート制限を必ず掛ける。`?fresh=true` は
+// キャッシュをバイパスして1リクエストあたり最大4つの外部 HTTP を起こすため、
+// SSRF 増幅・上流レートリミット消費の DoS を抑える制限にする。
 const _erLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: () => process.env.NODE_ENV === 'test' ? 10000 : 30,

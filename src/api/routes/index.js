@@ -71,9 +71,7 @@ const PUBLIC_PATHS = new Set([
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
 // /gpus/* は GET のみトークン不要（マーケット閲覧用途）。
-// 旧実装は method を問わず /gpus/ を startsWith で blanket 免除していたため、将来
-// /gpus/:id/<新ルート> に POST/PUT/DELETE が追加された際に意図せず認証バイパスとなる
-// 危険があった。method ガードで mutation は必ず JWT を要求する形に絞る。
+// method ガードで mutation は必ず JWT を要求する。
 function isPublicPath(path, method) {
   const isGet = method === 'GET' || method === 'HEAD';
   return PUBLIC_PATHS.has(path)

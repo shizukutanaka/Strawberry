@@ -34,7 +34,7 @@ const client = require('prom-client');
 const collectDefaultMetrics = client.collectDefaultMetrics;
 collectDefaultMetrics();
 
-// LightningServiceからメトリクスを取得するための参照（必要に応じて適切なimportに修正）
+// LightningServiceからメトリクスを取得するための参照
 let lightningService;
 try {
   lightningService = require('../../lightning-service');

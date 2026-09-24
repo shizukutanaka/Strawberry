@@ -68,9 +68,9 @@ function computeSettlement(input = {}, opts = {}) {
   const renterRefundSats = total - chargedSats;
 
   // 4. 課金額から運営手数料を控除し、残りがプロバイダ payout。
-  //    旧実装は payout を Math.round し fee を残差にしていたため、charged * feeRate < 0.5
-  //    のとき operatorFeeSats が常に 0 となり手数料回避(reverse fee evasion)を許していた。
-  //    fee 側を ceil し、feeRate>0 のときは最低 1 sat 徴収する。feeRate==0 のときは 0 のまま。
+  //    fee 側を ceil し、feeRate>0 のときは最低 1 sat 徴収する
+  //    （charged * feeRate < 0.5 で fee が 0 になると手数料回避が可能になるため）。
+  //    feeRate==0 のときは 0 のまま。
   let operatorFeeSats;
   if (chargedSats <= 0 || feeRate <= 0) {
     operatorFeeSats = 0;

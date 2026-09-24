@@ -925,12 +925,8 @@ router.post('/',
 
     // 為替レートを先にフェッチ（キャッシュ活用）。以下の全チェックと create() は
     // 同期的に実行される（await なし）ため、この await の後に事前予約/二重予約の
-    // TOCTOU レースウィンドウが生じない。
-    // 旧実装: fetchRateInfo を洪水チェックと二重予約チェックの「間」に置いていた。
-    // これにより Node.js イベントループが yield し、並行リクエストが洪水チェックを通過した
-    // 後・二重予約チェック前に create() を実行できた（GPU 二重予約）。
-    // 修正: fetchRateInfo を全チェックより前に移動。洪水上限超過時は若干余分なキャッシュ
-    // 参照が発生するが、fetchRateInfo はほぼ常にキャッシュヒットするため許容範囲。
+    // TOCTOU レースウィンドウが生じない。洪水上限超過時は若干余分なキャッシュ参照が
+    // 発生するが、fetchRateInfo はほぼ常にキャッシュヒットするため許容範囲。
     // fetchRateInfo().rate は「1 BTC あたりの JPY」（getBTCtoJPYRate の単位）。
     // 変数名 satoshiToJPY は誤解を招く（実体は BTC あたりのレート）— sat→JPY 換算は
     // totalPrice(sat) を 1e8 で割って BTC に変換してから乗じる必要がある（下記参照）。
@@ -1390,8 +1386,7 @@ router.post('/:id/dispute/resolve',
       // エスクロー精算（uphold = 仕事は有効 → HELD 資金をプロバイダへ解放）。
       // refund 側が escrowSvc.cancel で返金するのと対称に、uphold 側でも明示的に
       // SETTLED へ遷移させないと HELD のまま資金が永久ロックされ、プロバイダは
-      // 正当に裁定勝ちしても入金されない（resolveUphold が status だけ completed に
-      // して escrow を放置していた漏れの修正）。escrow の現状態に応じて正しい
+      // 正当に裁定勝ちしても入金されない。escrow の現状態に応じて正しい
       // イベント（HELD→DELIVER_OK / DISPUTED→RESOLVE_SETTLE）を選ぶ。
       try {
           const escrows = EscrowRepository.getByOrderId(order.id);
@@ -1734,8 +1729,8 @@ router.post('/:id/stop',
       }
 
       // ハートビートセッションを削除（メモリリーク防止）。
-      // heartbeatTimestamps の対応エントリも同時に除去（旧実装は usageSessions だけ
-      // 削除し timestamps Map が無限増加していた）。
+      // heartbeatTimestamps の対応エントリも同時に除去しないと timestamps Map が
+      // 無限増加する。
       usageSessions.delete(orderId);
       _deleteHeartbeatsForOrder(orderId);
 

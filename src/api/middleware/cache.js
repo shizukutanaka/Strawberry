@@ -34,8 +34,6 @@ function cacheMiddleware(options = {}) {
       return res.status(cached.status || 200).json(cached.body);
     }
     // レスポンスキャプチャ: 2xx のみキャッシュし、4xx/5xx の一時的エラーは保存しない。
-    // 旧実装はステータスを問わず body だけ保存し、ヒット時に常に 200 で返したため
-    // 過渡的な 500 を 60 秒間 "200 OK で空の orders"  として replay する致命的バグだった。
     const originalJson = res.json.bind(res);
     res.json = (body) => {
       if (res.statusCode >= 200 && res.statusCode < 300) {

@@ -137,8 +137,8 @@ async function getBTCtoJPYRate(force = false, withTimestamp = false) {
 
   // 2. stale-while-revalidate: 期限切れだが値が存在する場合、stale 値を即返しし、
   //    バックグラウンドで更新する（重複集約）。これにより注文作成・一覧・支払い等の
-  //    ホットパスが外部レートAPIのレイテンシから切り離される。旧実装はTTL満了直後の
-  //    最初のリクエストが4本のAPIを順次待ち（全タイムアウト時は最大16秒）ブロックしていた。
+  //    ホットパスが外部レートAPIのレイテンシから切り離される（TTL満了直後の
+  //    リクエストも4本のAPIを順次待たない）。
   if (!force && hasCache) {
     exchangeRateStaleServeCounter.inc();
     exchangeRateCacheHitCounter.inc();

@@ -17,9 +17,8 @@ if (!fs.existsSync(logDir)) {
 // 重要な2点を担保する:
 //  1) metadata splat の対象化: logger.error('msg', { body: req.body }) のように
 //     第2引数で渡されたメタデータは info.message ではなく info 直下のキーに展開される。
-//     旧実装は info.message が object のときしか見ておらず、メタdata 内の password/
-//     apiKey 等がファイルログに素通りしていた（fail-open）。ここで info 直下の
-//     メタデータキーも再帰的にマスクする。
+//     info.message だけでなく info 直下に展開されたメタdata 内の password/apiKey 等も
+//     ファイルログへ素通りさせないため、メタデータキーを再帰的にマスクする。
 //  2) json() より前に適用する: format.combine は左→右に適用され、json() が時点の info を
 //     直列化して出力シンボルに焼き込む。json() の *後* にサニタイズしても出力には反映され
 //     ないため、必ず json() の前段に置く。
@@ -115,8 +114,8 @@ const logger = winston.createLogger({
     }),
     // ファイル出力
     // maxsize + maxFiles でローテーションし、ログ肥大化（ディスク枯渇）を防ぐ。
-    // 以前は無制限で、combined.log/error.log が数GBまで膨張し
-    // readFileSync が ERR_STRING_TOO_LONG で失敗する事態を招いていた。
+    // 無制限だと combined.log/error.log が数GBまで膨張し readFileSync が
+    // ERR_STRING_TOO_LONG で失敗しうる。
     new winston.transports.File({
       filename: path.join(logDir, 'error.log'),
       level: 'error',
@@ -169,10 +168,6 @@ logger.gpuEvent = (event, data) => {
     data: sanitizeSensitiveFields(data),
   };
   fs.appendFileSync(gpuLogPath, JSON.stringify(logEntry) + '\n');
-  // winston のメタデータは format filter が message を object のときしかサニタイズ
-  // しないため、ここで先にサニタイズしてから渡す。旧実装は同じイベントを 2 回 info
-  // し、2 回目は data を生で渡していたため将来 apiKey 等を含む caller が
-  // combined.log にプレーンで漏らす fail-open になっていた。
 };
 
 // ログ統計

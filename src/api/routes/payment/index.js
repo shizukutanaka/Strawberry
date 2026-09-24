@@ -214,9 +214,8 @@ router.post('/order/:id',
     // 新たに請求書/決済レコードを作らず既存を返す。クライアントのタイムアウト再送で
     // 二重請求書発行・二重支払いが起きるのを防ぐ（決済系で最も避けたい事故）。
     const nowMs = Date.now();
-    // べき等性チェック: orderId で検索（userId を問わない）。
-    // 以前は p.userId === req.user.id で絞っていたため、管理者が同一注文で invoiceA を
-    // 作成した後に借り手が invoiceB を作成できる二重インボイス問題があった。
+    // べき等性チェック: orderId で検索（userId を問わない）。管理者が同一注文に
+    // 作成した既存の pending 請求書も再利用対象に含め、二重インボイスを防ぐ。
     const existingPending = (PaymentRepository.getByOrderId(orderId) || []).find(p =>
       p.status === 'pending' &&
       (!p.invoiceExpiresAt || new Date(p.invoiceExpiresAt).getTime() > nowMs)

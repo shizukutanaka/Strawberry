@@ -153,9 +153,9 @@ function expireStaleDisputedOrders() {
     if (!result.ok) continue; // 既に他経路で解決済み（冪等）
 
     // エスクロー精算（状態確定後にのみ実行。失敗してもログのみ）。
-    // 重要: 旧実装は decision を問わず一律 state='SETTLED'（=プロバイダへ払い出し）に
-    // 生 update していた。refund 決定（借り手返金）なのに資金フローが逆転し、かつ
-    // 状態機械の CAS を迂回して CANCELED 等を踏み潰す危険があった。
+    // 重要: decision を問わず一律 state='SETTLED'（=プロバイダへ払い出し）に生 update
+    // すると、refund 決定（借り手返金）なのに資金フローが逆転し、かつ状態機械の CAS を
+    // 迂回して CANCELED 等を踏み潰す。
     // 必ず FSM 経由で遷移させる: HELD からの正規イベントは
     //   refund → CANCEL（cancel_invoice + refund_renter → CANCELED）
     //   uphold → DELIVER_OK（reveal_preimage + payout_provider → SETTLED）。

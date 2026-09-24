@@ -642,10 +642,9 @@ router.post('/bulk',
       return raw !== undefined && raw !== '' && Number.isFinite(n) && n > 0 ? n : 50;
     })();
     // getAll() は呼ぶ度に gpus.json を同期読み込み+パースする（キャッシュなし）。
-    // 旧実装はループ内で毎エントリ getAll() を再呼び出しし、20件バッチで最大21回
-    // 同じファイルを読み直していた。バッチ内の重複は below の batchKeys（name|model|
-    // vendor|memoryGB — 既存重複チェックと同一の一致条件）で完全にカバーされるため、
-    // 既存データに対する重複チェックはループ開始前の1回のスナップショットで十分。
+    // バッチ内の重複は below の batchKeys（name|model|vendor|memoryGB — 既存重複
+    // チェックと同一の一致条件）で完全にカバーされるため、既存データに対する
+    // 重複チェックはループ開始前の1回のスナップショットで十分。
     const allGpusSnapshot = GpuRepository.getAll();
     if (req.user.role !== 'admin') {
       const currentCount = allGpusSnapshot.filter(g => g.providerId === req.user.id).length;
@@ -690,10 +689,9 @@ router.post('/bulk',
       if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
       if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
       if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
-      // バルクでも単体登録と同等にアテステーションを処理する。
-      // 旧実装は単に { passed:false } を埋めて recordAttestation を呼ばないため、
-      // 単体登録で attestation 失敗の slashCount を負っているプロバイダがバルクに
-      // 切り替えることでレピュテーション罰則を回避できる reputation laundering 経路だった。
+      // バルクでも単体登録と同等にアテステーションを処理する。単体登録で
+      // attestation 失敗の slashCount を負っているプロバイダがバルク経由で罰則を
+      // 回避できないよう、recordAttestation を呼ぶ。
       if (value.attestationReport) {
         try {
           const attResult = await _attestationVerifier.verify(gpuInfo, value.attestationReport);

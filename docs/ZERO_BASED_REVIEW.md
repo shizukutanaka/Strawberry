@@ -1222,10 +1222,49 @@ src/ 全ファイルの export 名を総当たり:
 - 残した面: action-executor/gpu-attestation-verifier の「ln-adapter」はファイル名ではなく
   DI インタフェース名として正当、probe34 の「(removed) GraphQL」は歴史記述として正当。
 
+### 第99ラウンド（ソクラテス式問答 — 「コメントはコードそのものを説明しているか、過去のコードとの差分を説明しているか？」）
+
+- 第一原理的整理: コメントの役割は「コードが一般に何をするか」の説明。
+  「旧実装は X だったが…」「以前は…」「残っていたため削除」は過去のコードとの差分の
+  説明であり、diff を読まないと意味を成さない — その履歴はコミットメッセージと
+  PR 説明文の領分。コードコメント規約に照らして全リポジトリを走査。
+- **書き換え**: 「旧実装は…/以前は…」の差分説明を含むコメントを 16 箇所（13 ファイル）
+  摘出し、一般説明のみ残す形へ書き換え:
+  - lightning-service.js ×3（createInvoice/checkInvoice/sendPayment の旧契約説明を除去）
+  - `middleware/cache.js`（旧 body-only キャッシュバグ説明を除去）
+  - `notification-settings.js` ×2（catch→{} 説明 / .pattern 説明を一般形へ）
+  - `routes/exchange-rate.js`（旧マウント順説明を一般形へ）
+  - `routes/gpu/index.js` ×2（バッチ getAll 説明 / attestation 説明を一般形へ）
+  - `routes/index.js`（/gpus blanket 免除の旧説明を除去）
+  - `routes/order/index.js` ×2（TOCTOU 移動履歴 / timestamps 旧説明を一般形へ）
+  - `routes/payment/index.js` + `routes/payment/btc-onchain.js`（二重インボイス /
+    lenderWallet フォールバックの旧説明を一般形へ）
+  - `server.js`（「必要に応じて適切なimportに修正」という stale 指示を除去）
+  - `core/service-monitor.js`（旧 require 配置説明を一般形へ）
+  - `db/json/createJsonRepository.js` ×2（旧 [] 返却の説明を一般形へ）
+  - `payments/settlement-calculator.js`（旧 Math.round 説明を一般形へ）
+  - `utils/audit-log.js`（旧 self-heal 書き換え説明を一般形へ）
+  - `utils/exchange-rate.js`（旧 TTL ブロッキング説明を一般形へ）
+  - `utils/logger.js` ×2（旧メタデータ fail-open / 無制限ローテ説明を一般形へ）
+  - `utils/order-expiry.js`（旧 SETTLED 一律 update 説明を一般形へ）
+  - `virtual-gpu-manager.js` ×3（旧 unhealthy 条件 / 旧 proxy spawn / 旧 docker
+    プラットフォーム削除説明を一般形へ）
+  - `tests/e2e/globalSetup.js`（旧 existsSync ガード説明を一般形へ）
+- **孤立コメント削除**: `utils/logger.js` の `gpuEvent` 末尾 — かつて存在した
+  `logger.info` 呼び出し（前ラウンドで削除済み）を説明するコメントが残り、
+  説明対象のコードが無かった。
+- **Dockerfile 同種削除**: `docker/Dockerfile.api` の「存在しない build script を
+  `|| true` で握りつぶす行を削除した名残り」説明 — 差分由来のため除去。
+- **監査して残した面**: Joi schemas 全キー生存確認（lightningNode/lightningChannel は
+  ルート lightning-service.js の RPC 応答検証で使用 — 第95ラウンドの教訓:
+  git grep のパススペックではルートファイルを含めないと再撞着する）、
+  public/index.html の全 id が JS で参照、tests インフラ4ファイル結線、
+  全ルートヘルパー消費者あり、package.json main / Dockerfile CMD 整合。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。
-- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、53 秒** を確認（第96ラウンド後）。
+- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、53 秒** を確認（第99ラウンド後）。
 - `npm start` 起動確認 + `/health` `/ready` 応答確認（両者 200、SPA 配信 200）。
 - npm 依存（lockfile node_modules エントリ）: **1,036 → 732（-29%）**。
 - src/ の到達不能ファイル: 38 → 2（残りは意図的温存: ln-adapter のテスト用モック

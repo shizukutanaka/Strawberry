@@ -4,9 +4,6 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
-# 本アプリにビルド工程は無い（public/ 配下は素の HTML/CSS/JS をそのまま配信する
-# no-build SPA。src/ はトランスパイル不要な CommonJS）。存在しない "build" script
-# を `|| true` で握りつぶす行が残っていたため削除（かつては雛形だった名残り）。
 
 FROM node:20-slim AS runtime
 WORKDIR /app

@@ -52,7 +52,6 @@ function loadSettings() {
   if (!fs.existsSync(SETTINGS_PATH)) return {};
   const raw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
   // JSON.parse を素通りさせる: parse 失敗は throw し呼び出し元で 500 にする。
-  // 旧実装の catch→{} では POST が即座に上書きして全ユーザーの設定を消去していた。
   const parsed = JSON.parse(raw);
   if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
     throw new Error('[notification-settings] settings file is corrupt: expected a JSON object');
@@ -112,11 +111,11 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
     telegramChatId: Joi.string().pattern(/^-?\d+$|^@[A-Za-z0-9_]{5,32}$/).allow('').optional(),
     email: Joi.string().email().allow('').optional(),
     genericWebhook: safeWebhookUrl.allow('').optional(),
-    // enabled は資料消費側（user-notify.js resolveChannels）が参照する既知の6チャネルに
-    // 厳格化する。旧実装の .pattern(/.*/, Joi.boolean()) は任意キー（__proto__/constructor
-    // 含む）を boolean 値であれば受理し、notification-settings.json（リポジトリ層の
-    // stripDangerousKeys を経由しない別保存経路）にそのまま永続化していた。明示キー＋
-    // Joi 既定の unknown:false で未知キーを 400 拒否し、実際に使われる項目だけ保存する。
+    // enabled は消費側（user-notify.js resolveChannels）が参照する既知の6チャネルの
+    // 明示キーに限定する。Joi 既定の unknown:false で未知キーは 400 拒否する。
+    // notification-settings.json はリポジトリ層の stripDangerousKeys を経由しない
+    // 別保存経路のため、ここでのキー制限が __proto__/constructor 等の危険キー
+    // 永続化を防ぐ防御点になる。
     enabled: Joi.object({
       line: Joi.boolean(),
       discord: Joi.boolean(),

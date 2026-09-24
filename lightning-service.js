@@ -441,13 +441,9 @@ class LightningService {
 
     // 実際の呼び出し元（src/api/routes/payment/index.js）は常に
     // { value, memo, expiry } オブジェクトを渡し、value は satoshi 建てで確定済みの
-    // 注文総額（order-pricing.js が算出）である。旧実装は (amount, memo) の位置引数
-    // を期待し amount を「米ドル」とみなして convertUSDToSats() で再変換していたため、
-    // オブジェクトを渡すと amount がオブジェクトのまま演算され NaN が生成され、
-    // 結果の BOLT11 風文字列に "NaN" がそのまま埋め込まれる不正インボイスになっていた
-    // （実 LND 接続時も value:"NaN" を渡すことになり同様に失敗する）。
-    // LND の実 AddInvoice API は value を satoshi でそのまま受け取るため、USD 変換は
-    // 不要かつ誤り。sats をそのまま渡す。
+    // 注文総額（order-pricing.js が算出）である。LND の実 AddInvoice API は
+    // value を satoshi でそのまま受け取るため、USD 変換は不要かつ誤り。
+    // sats をそのまま渡す。
     async createInvoice({ value, memo, expiry } = {}) {
         try {
             const amountSats = Math.round(Number(value));
@@ -496,9 +492,6 @@ class LightningService {
 
     // src/core/invoice-poller.js が 15 秒間隔で全 pending Lightning 決済を確認するために
     // 呼び出す（この呼び出しが唯一 PaymentRepository の 'paid' 遷移をトリガーする経路）。
-    // 以前はこのメソッド自体が存在せず、ポーラーが毎回 TypeError を送出して
-    // try/catch に握りつぶされていた — つまり Lightning 決済は一度も自動確定せず、
-    // 全ての注文が支払い済みでも invoiceExpiresAt 経過で単に failed になっていた。
     // LND の実 gRPC API lookupInvoice をラップし、ポーラーが期待する
     // { settled, amountPaid, value, settleDate } 形式へ正規化する。
     async checkInvoice(paymentHash) {
@@ -533,11 +526,6 @@ class LightningService {
     // maxFeePercent はインボイス額に対する手数料上限の割合（例: 1 = 1%）。
     // 呼び出し元（src/api/routes/payment/index.js）は schemas.payment.pay で
     // 0-10 の範囲・デフォルト1に検証済みのパーセンテージを渡す。
-    // 旧実装は第2引数を「USD建て手数料上限額」として扱い convertUSDToSats() で
-    // sats へ再変換していたが、実際に渡されていたのは決済額そのもの(amount, sats建て)
-    // だったため、これを USD とみなして再度為替変換する二重誤変換になっていた
-    // （呼び出し側の maxFeePercent は payInvoice(paymentRequest, maxFee) の2引数
-    // シグネチャでは受け取れず黙って捨てられてもいた）。
     async sendPayment(paymentRequest, maxFeePercent = null) {
         try {
             // 請求書デコード

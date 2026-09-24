@@ -1550,6 +1550,25 @@ src/ 全ファイルの export 名を総当たり:
   スコープ再実行（変更有無両方）と全量再実行で再現せず — 並列ワーカー下の
   トークン発行タイミング flake と判定（本編集は認証経路に無関係）。
 
+### 第115ラウンド（ソクラテス式問答 — 「マウント層にハンドラが8本残っているのはなぜ？」）
+
+- 問い: 全ドメインルートがサブルータへ分割された後、`routes/index.js` に
+  インラインハンドラ8本が残っている — mount 層と実装が同居。
+- **抽出**: `src/api/routes/admin.js`（206行）を新設しルート直下の
+  admin/info 系を集約: GET /node-info・/channels、POST /admin/cache/purge、
+  GET /admin/stats・/admin/verifications・/admin/verifications/:jobId・
+  /admin/escrow、POST /admin/expire-orders、GET /system/info。
+  全てリテラルパスのため '/' マウントでシャドウイングなし。
+- **index.js は 251 → 96 行**: ミドルウェア配線（rateLimit・JWT ゲート・
+  audit）＋マウント＋コア初期化のみ。不用 import 除去
+  （rbac・requireService・asyncHandler・cache 系・Repo×5・order-expiry×4）。
+- **準拠確認**: /system/info の「グローバル jwtAuth 前提・inline jwtAuth 不要」
+  契約、/admin/verifications リテラル→param の登録順、node-info/channels の
+  cacheMiddleware を全て原状維持。probe ソース直読みなし（HTTP 検証のみ）。
+- 併せて実施: `sendNotification` の引数 `typeOrUserId` → `type` に rename
+  （'user_*' 分岐削除で残った stale 命名 — 契約は NotifyType のみ）。
+  public/js/api.js の helper 32本・fetch 経路は全て実ルート対応で死面ゼロ。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

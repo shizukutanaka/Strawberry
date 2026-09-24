@@ -57,10 +57,10 @@ function loadNotificationSettings() {
 // sendNotification(type, message, options): NotifyType 定数を第1引数に取る
 // チャネル直送の低層API。ユーザー設定解決つきの通知は user-notify.js の
 // notifyUser() がこの関数の上に組み立てる（層分離）。
-async function sendNotification(typeOrUserId, message, options = {}) {
+async function sendNotification(type, message, options = {}) {
   // 既存のtype/message/options送信
   try {
-    switch (typeOrUserId) {
+    switch (type) {
       case NotifyType.LINE:
         return await sendLineNotify(message, options);
       case NotifyType.DISCORD:
@@ -79,10 +79,10 @@ async function sendNotification(typeOrUserId, message, options = {}) {
       case NotifyType.WEBHOOK:
         return await sendWebhookNotify(message, options);
       default:
-        throw new Error(`Unknown notification type: ${typeOrUserId}`);
+        throw new Error(`Unknown notification type: ${type}`);
     }
   } catch (err) {
-    logger.error(`通知送信失敗(${typeOrUserId}): ${err.message}`);
+    logger.error(`通知送信失敗(${type}): ${err.message}`);
     throw err;
   }
 }

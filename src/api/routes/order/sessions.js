@@ -201,6 +201,10 @@ const sessionTimeoutInterval = process.env.NODE_ENV === 'test' ? null : setInter
 }, 30000);
 if (sessionTimeoutInterval && sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
 
+function stopSessionSweep() {
+  if (sessionTimeoutInterval) clearInterval(sessionTimeoutInterval);
+}
+
 module.exports = {
   usageSessions,
   heartbeatTimestamps,
@@ -208,4 +212,5 @@ module.exports = {
   reapUsageSessions,
   sweepHeartbeatSlaBreaches,
   _deleteHeartbeatsForOrder,
+  stopSessionSweep,
 };

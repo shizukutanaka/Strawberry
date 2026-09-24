@@ -1937,6 +1937,30 @@ src/ 全ファイルの export 名を総当たり:
   unref/clearInterval/テスト環境ガード済み — 本件が唯一の未管理ライフサイクル。
 - `npx jest --forceExit` 全緑: 115/115・1,045・52秒。
 
+### 第139ラウンド（ソクラテス式問答 — 「stop/shutdown は誰が呼ぶのか？」）
+
+- **問い**: 第138で実装した `lightning.shutdown()`、`invoicePoller.stop()`、
+  `service-monitor.stopMonitor()`、sessions の SLA 掃討 — どこからも呼ばれていない
+  停止フックは存在理由があるか？
+- **答え**: **未配線ライフサイクルを gracefulShutdown へ結線**。
+  - `gracefulShutdown` は `server.close()` のみ待ち、`process.exit(0)` へ直行
+    — ドレイン中（最大30秒）も invoice-poller・service-monitor・SLA 掃討・
+    LN ストリーム再接続が発火し続けていた
+  - ドレイン開始前に `invoicePoller.stop()`・`stopMonitor()`・`metricsInterval`
+    ・新設の `stopSessionSweep()`（sessions.js の非公開 interval を外部から
+    止められるように export）を実行 — 各 stop は try/catch でシャットダウン
+    を妨げない
+  - `server.close()` 後に `coreServices.lightning.shutdown()` を await して
+    から `process.exit(0)`
+- **同ラウンドで捕捉した潜伏欠陥**: server.js の `lightningService` は
+  `require('../../lightning-service')` のモジュールオブジェクト（`{LightningService}`）
+  であり、実インスタンスは `safeLoad` が `new` した `coreServices.lightning`。
+  `updateLightningMetrics` が `lightningService.channels`（常に undefined）を
+  読んでいたためチャネル容量ゲージは一度も更新されていなかった → 実体参照へ
+  修正し、死参照 `let lightningService` ブロックを削除。138 で結線した
+  shutdown も同じ罠（モジュールに `.shutdown` は無い）を踏みかけていた。
+- `npx jest --forceExit` 全緑: 115/115・1,045・64秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

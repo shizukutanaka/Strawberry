@@ -33,20 +33,13 @@ const { rateLimit: readyRateLimit } = require('express-rate-limit');
 const invoicePoller = require('../core/invoice-poller');
 const { registerProcessGuards } = require('../utils/process-guards');
 const { cacheHitCounter, cacheMissCounter } = require('./middleware/cache');
-const { setServices, startMonitor } = require('../core/service-monitor');
+const { setServices, startMonitor, stopMonitor } = require('../core/service-monitor');
+const { stopSessionSweep } = require('./routes/order/sessions');
 
 // Prometheusメトリクス
 const client = require('prom-client');
 const collectDefaultMetrics = client.collectDefaultMetrics;
 collectDefaultMetrics();
-
-// LightningServiceからメトリクスを取得するための参照
-let lightningService;
-try {
-  lightningService = require('../../lightning-service');
-} catch (e) {
-  // LightningServiceが存在しない場合はスキップ
-}
 
 // チャネル数・容量のカスタムメトリクス
 const channelCountGauge = new client.Gauge({ name: 'lightning_channel_count', help: 'Number of Lightning channels' });
@@ -54,10 +47,11 @@ const channelCapacityGauge = new client.Gauge({ name: 'lightning_channel_total_c
 
 // メトリクス更新関数
 async function updateLightningMetrics() {
-  if (lightningService && lightningService.channels) {
-    channelCountGauge.set(lightningService.channels.size);
+  const lightning = coreServices.lightning;
+  if (lightning && lightning.channels) {
+    channelCountGauge.set(lightning.channels.size);
     let totalCapacity = 0;
-    for (const ch of lightningService.channels.values()) {
+    for (const ch of lightning.channels.values()) {
       totalCapacity += ch.capacity || 0;
     }
     channelCapacityGauge.set(totalCapacity);
@@ -307,10 +301,23 @@ if (require.main === module) {
       process.exit(1);
     }, 30000);
     if (forceExit.unref) forceExit.unref();
+    // ドレイン中にバックグラウンド処理が発火しないよう、先に止めてから
+    // HTTP 接続の終了を待つ（各 stop の失敗はシャットダウンを妨げない）。
+    try { invoicePoller.stop(); } catch (_) {}
+    try { stopMonitor(); } catch (_) {}
+    try { stopSessionSweep(); } catch (_) {}
+    if (metricsInterval) clearInterval(metricsInterval);
     server.close(() => {
       clearTimeout(forceExit);
-      logger.info('HTTP server closed');
-      process.exit(0);
+      const lnShutdown = coreServices.lightning && typeof coreServices.lightning.shutdown === 'function'
+        ? coreServices.lightning.shutdown()
+        : null;
+      Promise.resolve(lnShutdown)
+        .catch((err) => logger.error('Error during Lightning shutdown', { error: err.message }))
+        .finally(() => {
+          logger.info('HTTP server closed');
+          process.exit(0);
+        });
     });
   };
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

@@ -1345,6 +1345,28 @@ src/ 全ファイルの export 名を総当たり:
 - **結果**: index.js 1,619 → 985行（−39%）、order/ は4ファイル構成
   （index.js 985 + runtime.js 287 + disputes.js 401 + sessions.js 211）。
 
+### 第104ラウンド（ソクラテス式問答 — 「読み取り系ハンドラが index.js に残る必要はあるか？」）
+
+- 問い: index.js 残留の GET ハンドラ5本は「変更系」と同居しなくてよいのでは？
+  probe テストは全て mutation 側（PUT/DELETE/POST/accept）を検証しており、
+  GET ハンドラのソースを読むテストはゼロ — 移動の制約なし。
+- **抽出**: `src/api/routes/order/reads.js`（333行）を新設し、GET ハンドラを
+  ドメイン内順序を保ったまま全て移動 — `GET /`・`/stats`・`/provider/earnings`・
+  `/:id`・`/:id/payment`。`/stats` と `/provider/earnings` が `/:id` より先に
+  登録される唯一の順序制約は、5本を塊として先頭に mount することで保持。
+  GET/POST の衝突はメソッドが別なので発生しない。
+- **共有状態の扱い**: `SWEEP_THROTTLE_MS`/`_lastOrderSweepAt`（一覧取得時の
+  遅延スイープスロットル）は GET / のみが使う — 共有ではなく reads.js へ
+  そのまま移動（sessions.js のような共有モジュール化は不要と判断）。
+- **index.js に残すもの**: mutation 系のみ（PUT /:id・DELETE /:id・POST /・
+  /reject・/accept）+ 共有ヘルパー（rate-limit・BLOCKING_ORDER_STATUSES）+
+  テストフック + `router.use` の mount 列。移動に伴い expireStaleDisputed/
+  Active・cacheMiddleware・checkRole・PaymentRepository の import を除去
+  （expireStaleOrders/Matched は POST / の作成時スイープで使用のため残留）。
+- **結果**: index.js 985 → 665行。order/ は5ファイル構成
+  （index.js 665 + reads.js 333 + disputes.js 401 + runtime.js 287 +
+  sessions.js 211 = 計1,897行）。index.js は「変更系 + 共有部品」のみに。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

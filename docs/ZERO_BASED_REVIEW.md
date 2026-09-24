@@ -1978,6 +1978,22 @@ src/ 全ファイルの export 名を総当たり:
   gracefulShutdown 結線済）、LN 再接続タイマー（138 で管理済）。
 - `npx jest --forceExit` 全緑: 115/115・1,045・57秒。
 
+### 第141ラウンド（ソクラテス式問答 — 「レート制限の記憶は有限か？」）
+
+- **問い**: `createSlidingWindowLimiter` の `state` Map はキー単位に無制限に
+  成長する — ユニークキー噴霧（攻撃元 IP・メール列挙）でメモリを枯渇させる
+  攻撃が、レート制限機構そのものに向けられるのでは？
+- **答え**: **`maxKeys` 上限を追加して境界化**。失効キーは isLimited/reset が
+  同じキーを再度読まない限り Map に残り続けるため、`hit()` で `state.size` が
+  上限を超えた時点で一掃する: まず失効キー（windowStart 超過）を全て捨て、
+  なお超過なら最古の窓から追い出す。直前に hit したキーは windowStart が
+  最新のため即座に追い出されない。既定 100,000 キー（call site は変更不要）。
+- **監査して生存（契約強制済み）**: `LRUCache`（max:1000+ttl をライブラリが
+  ネイティブ強制）、token-denylist（revoke 時に prune+persist・isRevoked で
+  遅延削除 — revoke 件数で境界化済）、usageSessions/heartbeatTimestamps
+  （SLA 掃討+reap）。
+- `npx jest --forceExit` 全緑: 115/115・1,045・54秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

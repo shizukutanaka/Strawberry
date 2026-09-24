@@ -1710,6 +1710,23 @@ src/ 全ファイルの export 名を総当たり:
   メール系2経路（nodemailer SMTP=master-auth 用 / SendGrid+Mailgun API=notifier 用）
   は別契約のため並存維持。
 
+### 第125ラウンド（ソクラテス式問答 — 「未踏のディレクトリに見落としはないか？」）
+
+- **問い**: `src/security/`・`src/reputation/`・`src/data/`・`src/pricing/` — これまでの
+  走査が src の末端ディレクトリを個別に開いたか？
+- **答え**: 全て生存。`provider-uptime.js`（recordProviderHeartbeat/recordSlaBreach/
+  getReliability — order/runtime・sessions・gpu ルートが消費、GAP_THRESHOLD_MS・
+  MIN_BEATS_FOR_SCORE・_resetVolatileState も輸出先あり）、`gpu-attestation-verifier.js`
+  （verifyAttestation + mock ファクトリ — routes + 専用テスト）、`feature-pricer.js`
+  （computePrice/generationScore — marketplace-service）、`UptimeRepository`
+  （getByProviderId finder — provider-uptime 経由）。`src/data/profit-addresses.json` は
+  profit-addresses ユーティリティが読む実データ。削除対象ゼロ。
+- **並走監査（死面ゼロ）**: api/utils 全8ファイル・api/middleware 全10ファイル・
+  payments 全4ファイル（executeActions/computeSettlement/DEFAULTS）・
+  verification 全 export（shouldAudit/outputsMatch/ternaryConsensus/detectZeroLoad）・
+  order-expiry 全4関数・request-context 全4 export・e2e helpers 全7関数・
+  marketplace/default・docs 全8ファイル・全ルートマウント — 消費者不在ゼロ。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

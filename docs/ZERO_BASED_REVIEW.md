@@ -1295,6 +1295,26 @@ src/ 全ファイルの export 名を総当たり:
 - 判定: 削除系の監査は機械・意味論の両面で収束。以降の「続けて」は削除ではなく
   §11 の設計作業（order/index.js 分割 / provider payout 配線）への移行が筋。
 
+### 第102ラウンド（ソクラテス式問答 — 「1,800行の order/index.js はどの境界で割れるか？」）
+
+- §11 棚卸し項目「order/index.js 分割」に着手。まず制約を洗い出し:
+  約10件の probe テスト（probe25/29/31/32/36/37/40 等）が index.js のソースを
+  テキストとして読み正規表現で検証している（withLock 配置・escrow 順序・audit 呼出し）。
+  ルートハンドラを別ファイルへ移すとこれらが全て赤になる — テストを変えずに
+  割れるのは「ハンドラではない機構」だけ。
+- **抽出**: `src/api/routes/order/sessions.js`（211行）を新設し、セッション機構を
+  丸ごと移動 — `usageSessions`/`heartbeatTimestamps` Map、`OrderUsageSession` クラス、
+  `reapUsageSessions`/`sweepHeartbeatSlaBreaches`/`_deleteHeartbeatsForOrder`、
+  `SLA_PROVIDER_TIMEOUT_MS`、30秒 `setInterval` 駆動。HTTP ハンドラ17本は全て
+  index.js に残す（probe テストの対象コードを移動しない）。
+- **結合面**: index.js は `require('./sessions')` で状態を共有（マップは同一オブジェクト）。
+  テストフック（`_usageSessions`/`_reapUsageSessions`/`_sweepHeartbeatSlaBreaches`/
+  `_OrderUsageSession`）は index.js から re-export し既存テスト互換を保持。
+  sessions.js は route を import しないため循環参照なし。
+- **結果**: index.js 1,800 → 1,619行（−10%）。残りのハンドラ分割は
+  「probe テストが index.js 直読み」の制約を解く（正規表現の対象ファイルを
+  変更する=テスト変更を伴う）かどうかの判断待ち — 本ラウンドでは止める。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

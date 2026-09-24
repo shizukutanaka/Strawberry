@@ -49,4 +49,4 @@ function parseTraceId(traceparent) {
   return traceId;
 }
 
-module.exports = { als, runWithContext, getRequestId, getTraceId, parseTraceId };
+module.exports = { runWithContext, getRequestId, getTraceId, parseTraceId };

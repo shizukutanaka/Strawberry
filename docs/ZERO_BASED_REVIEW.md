@@ -1628,6 +1628,23 @@ src/ 全ファイルの export 名を総当たり:
   resolveContext が参照 — 第118で残した payout 配線面）、cancelledAt/
   completedAt/startedAt/attestationReport/verificationCtx 全て読出しあり。
 
+### 第120ラウンド（ソクラテス式問答 — 「export された実装詳細はあるか？」）
+
+- 問い: module.exports に「外から一度も触れられない内部実装」を公開していないか？
+  → ミドルウェア・api/utils・db/json 全モジュールの export↔消費者を再走査。
+  `request-context.js` の `als`（AsyncLocalStorage インスタンス）のみ全
+  リポジトリで import ゼロ — runWithContext/getRequestId/getTraceId 経由の
+  間接利用のみで、直参照する外部消費者は存在しない。
+- **削除**: `module.exports` から `als` を除去（内部 const は存続 —
+  実装詳細の漏洩を塞ぎ、外側 API を getRequestId 系に限定）。
+- **監査して生存**: db/json 宣言ファインダ全9件（getByOrderId/getByUserId/
+  getByPaymentHash/getByProviderId/getByUsername/getByEmail/getByJobId/
+  getByUser/getByGpu 全て呼出し実在）、middleware/utils 全 export
+  （rawClientIp は rateLimitKeyGenerator の内部呼出し＋probe34 ソース検証
+  対象 — 識別子保持規則で温存）、escrow.invoice/settlement/feeRate/history、
+  order.paymentRequest 全て読出しあり。`order.usageMinutes`/`order.escrowId`/
+  `user.totpSecret` は誤検出（存在しないフィールド／blocklist 文字列）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

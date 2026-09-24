@@ -1765,6 +1765,20 @@ src/ 全ファイルの export 名を総当たり:
   workflows が参照する `openapi-generator.js`/`optimize-images.js`/lint script は
   不存在 — `.github/workflows` 未push 権限制約の既知 CI 失敗として記録。
 
+### 第128ラウンド（ソクラテス式問答 — 「SPA が呼ぶエンドポイントは実在するか？」）
+
+- **問い**: public/js が fetch する API パスに削除済み・不存在の死呼出しは残っていないか？
+- **答え**: SPA 呼出し26パスを全抽出 → 実ルート定義（6マウント×67ハンドラ）と照合、
+  全て実在・死呼出しゼロ。テンプレート展開（`${id}`）込みでも全経路解決。
+- **逆方向監査（SPA が呼ばない API 面）**: `/me/password`・`/me/activity`・
+  `/me/watches`・`/totp`・`/logout`・`/node-info`・`/channels`・`/system/info`・
+  `/marketplace/*` は SPA 非呼出しだが、全て tests/ に消費者あり（logout 4 件・
+  channels 6 件・escrow 23 件等）— 公開 API 契約として生存。SPA 非呼出し =
+  死エンドポイントではない（API クライアント経路）。
+- **並走監査（死面ゼロ）**: `data/` 全10 json は対応 Repository が読書き、
+  `docker/Dockerfile.api` はデプロイ基盤、`src/api/utils/` 全7ファイル消費者あり
+  （session-invalidation は jwt-auth、profit-addresses は admin ルート経由）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

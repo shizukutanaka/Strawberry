@@ -4,10 +4,10 @@
 // HTTP ハンドラ（index.js）はこのモジュールの状態を操作する。
 
 const { logger } = require('../../../utils/logger');
-const { vgpuManager, lightning } = require('../../../core/services');
+const { vgpuManager } = require('../../../core/services');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
-const { createEscrowService } = require('../../../payments/escrow-service');
+const { escrowService } = require('./escrow');
 const providerUptime = require('../../../reputation/provider-uptime');
 const { notifyUser } = require('../../../utils/user-notify');
 
@@ -152,7 +152,7 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
 
     // エスクロー按分精算（プロバイダー起因 → 最低料金床なし）。best-effort。
     try {
-      const escrowSvc = createEscrowService({ lnAdapter: lightning });
+      const escrowSvc = escrowService();
       const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
       for (const escrow of escrows) {
         escrowSvc.settle(escrow.id, { deliveredRatio, slaUptimePct: Math.round(deliveredRatio * 100) }, { minChargeRatio: 0 });

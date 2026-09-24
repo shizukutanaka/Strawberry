@@ -8,10 +8,9 @@ const { validateMiddleware, schemas, Joi } = require('../../../utils/validator')
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
-const { vgpuManager, lightning } = require('../../../core/services');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
-const { createEscrowService } = require('../../../payments/escrow-service');
+const { escrowService } = require('./escrow');
 const GpuRepository = require('../../../db/json/GpuRepository');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const UserRepository = require('../../../db/json/UserRepository');
@@ -161,7 +160,7 @@ router.post('/:id/dispute/resolve',
       try {
           const escrows = EscrowRepository.getByOrderId(order.id);
         if (Array.isArray(escrows) && escrows.length > 0) {
-            const escrowSvc = createEscrowService({ lnAdapter: lightning });
+            const escrowSvc = escrowService();
           for (const e of escrows) {
             if (!['CANCELED', 'SETTLED'].includes(e.state)) {
               try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
@@ -204,7 +203,7 @@ router.post('/:id/dispute/resolve',
       try {
           const escrows = EscrowRepository.getByOrderId(order.id);
         if (Array.isArray(escrows) && escrows.length > 0) {
-            const escrowSvc = createEscrowService({ lnAdapter: lightning });
+            const escrowSvc = escrowService();
           for (const e of escrows) {
             if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
             const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'

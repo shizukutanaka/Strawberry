@@ -9,10 +9,10 @@ const { validateMiddleware, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
-const { vgpuManager, lightning, requireService } = require('../../../core/services');
+const { vgpuManager, requireService } = require('../../../core/services');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
-const { createEscrowService } = require('../../../payments/escrow-service');
+const { escrowService } = require('./escrow');
 const GpuRepository = require('../../../db/json/GpuRepository');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const { notifyUser } = require('../../../utils/user-notify');
@@ -238,7 +238,7 @@ router.post('/:id/stop',
       // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
       // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
       try {
-          const escrowSvc = createEscrowService({ lnAdapter: lightning });
+          const escrowSvc = escrowService();
         const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
         // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
         // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。

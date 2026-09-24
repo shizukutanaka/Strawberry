@@ -1486,6 +1486,22 @@ src/ 全ファイルの export 名を総当たり:
   セッションスコープの TOTP/mail カウンタ（意図的にスコープ分離）。
 - **結果**: 3 実装 → 1 util + 各サイト ≤6行の設定。意味変更ゼロ。
 
+### 第111ラウンド（ソクラテス式問答 — 「同一の escrow 配線が7箇所ある理由は？」）
+
+- 問い: order ルート群の 7 ハンドラがそれぞれ
+  `createEscrowService({ lnAdapter: lightning })` を逐次呼ぶ — 配線の一意化は？
+  → `order/escrow.js` に遅延シングルトン `escrowService()` を新設。
+  初回呼出し時に生成して lnAdapter を捕捉（ルート require 時点では
+  lightning 未初期化の可能性があるため、モジュール先頭での生成は不可）。
+- **接続**: mutations×3・disputes×2・runtime×1・sessions×1 — 全7サイト。
+  テストは `createEscrowService({repository: fake})` を直接注入するため無影響。
+- **派生クリーン**: 置き換え後 `{lightning}` のみが import 残骸になった
+  mutations・disputes の core/services require を削除、
+  runtime/sessions は destructure から lightning のみ除去
+  （vgpuManager・requireService は存続）。
+- ドキュメント参照は stale なし（routes パス記述を保持確認）。
+- **結果**: escrow 配線が1箇所に集約 — LN アダプタ変更時の修正点が一意化。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

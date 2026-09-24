@@ -9,10 +9,9 @@ const { logger } = require('../../../utils/logger');
 const { appendAuditLog } = require('../../../utils/audit-log');
 const { authenticateJWT, allowOwnerOrAdmin } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
-const { lightning } = require('../../../core/services');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
-const { createEscrowService } = require('../../../payments/escrow-service');
+const { escrowService } = require('./escrow');
 const GpuRepository = require('../../../db/json/GpuRepository');
 const { notifyUser } = require('../../../utils/user-notify');
 const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
@@ -122,7 +121,7 @@ router.put('/:id',
       try {
           const escrows = EscrowRepository.getByOrderId(order.id) || [];
         if (escrows.length > 0) {
-            const escrowSvc = createEscrowService({ lnAdapter: lightning });
+            const escrowSvc = escrowService();
           for (const escrow of escrows) {
             if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
             // HELD escrow cancel failure must not be silently swallowed — propagate it.
@@ -207,7 +206,7 @@ router.delete('/:id',
     try {
       const escrows = EscrowRepository.getByOrderId(order.id);
       if (Array.isArray(escrows) && escrows.length > 0) {
-        const escrowSvc = createEscrowService({ lnAdapter: lightning });
+        const escrowSvc = escrowService();
         for (const escrow of escrows) {
           if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
           if (escrow.state === 'HELD') {
@@ -557,7 +556,7 @@ router.post('/:id/reject',
     try {
       const escrows = EscrowRepository.getByOrderId(order.id);
       if (Array.isArray(escrows) && escrows.length > 0) {
-        const escrowSvc = createEscrowService({ lnAdapter: lightning });
+        const escrowSvc = escrowService();
         for (const escrow of escrows) {
           if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
             try { escrowSvc.cancel(escrow.id); } catch (e) {

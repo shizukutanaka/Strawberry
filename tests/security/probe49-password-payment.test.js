@@ -65,10 +65,10 @@ describe('password change: both invalidation fields written', () => {
 // ─── 49b: manual payment approval guarded by withLock ─────────────────────
 describe('manual payment approval: withLock guards check + CAS', () => {
   const src = require('fs').readFileSync(
-    require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
+    require.resolve('../../src/api/routes/payment/admin.js'), 'utf-8'
   );
 
-  it('payment/index.js: manual/approve handler wraps body in withLock', () => {
+  it('payment/admin.js: manual/approve handler wraps body in withLock', () => {
     const idx = src.indexOf("'/manual/approve/:id'");
     expect(idx).toBeGreaterThan(-1);
     // Within the handler, a withLock keyed on the paymentId must appear

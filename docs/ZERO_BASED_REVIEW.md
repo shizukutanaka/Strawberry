@@ -1414,6 +1414,27 @@ src/ 全ファイルの export 名を総当たり:
 - **結果**: user/index.js 816 → 11行。ルート層の3大ファイル全て分割完了
   （order・gpu・user）。残る500行級は payment/index.js（516行）のみ。
 
+### 第107ラウンド（ソクラテス式問答 — 「payment/index.js の境界と順序制約は？」）
+
+- 問い: 516行・11ハンドラのドメイン境界は？ インボイス発行/支払・注文支払・
+  状態読取・管理審査の4ドメイン。順序制約は `/invoice/:id` と `/:id/status`
+  の2セグ重なりのみ（`/invoice/status` は先に登録された前者が勝つ —
+  invoices を reads より先に mount で保持）。btc マウントは GET 経路なし
+  のため位置不問（元順序の reads→btc→admin 相対順を維持）。
+- **抽出（4ファイル）**:
+  - `invoices.js`（173行）— POST /invoice・POST /pay・GET /invoice/:id。
+  - `order-pay.js`（155行）— POST /order/:id（価格計算 + withLock 二重発行抑止）。
+  - `reads.js`（124行）— GET /:id/status・/node-info・/channels・/history。
+  - `admin.js`（97行）— GET /admin/pending・POST /manual/approve/:id。
+- **結合面**: index.js は14行（invoices→order-pay→reads→btc→admin）。
+- **probe 参照更新**: probe38/49→admin.js（manual/approve 検証）、
+  probe44→order-pay.js（manual payment + POST /order/:id）と reads.js
+  （status endpoint）。probe44 の manual-payment ブロックは当初 admin.js
+  と誤判定して一度赤 — `method: paymentMethod` の実在位置を確認し
+  order-pay.js へ修正して緑（アサーション不変）。
+- **結果**: payment/index.js 516 → 14行。routes/ 全ファイルが300行以下
+  （最大は order/reads.js 333行と order/index.js 665行の mount+mutation 層）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

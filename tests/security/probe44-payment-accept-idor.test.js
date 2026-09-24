@@ -17,9 +17,9 @@ afterAll(() => {
 
 // ─── 44a-1: payment record userId = order.userId, not creator ─────────────
 describe('payment creation: userId stored from order owner, not creator', () => {
-  it('payment/index.js: manual payment uses order.userId', () => {
+  it('payment/order-pay.js: manual payment uses order.userId', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/payment/order-pay.js'), 'utf-8'
     );
     // Find non-Lightning payment record creation block
     // Newline-agnostic (source files may use CRLF on Windows)
@@ -32,9 +32,9 @@ describe('payment creation: userId stored from order owner, not creator', () => 
     expect(manualBlock).not.toMatch(/userId:\s*req\.user\.id/);
   });
 
-  it('payment/index.js: Lightning order payment (POST /order/:id) uses order.userId', () => {
+  it('payment/order-pay.js: Lightning order payment (POST /order/:id) uses order.userId', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/payment/order-pay.js'), 'utf-8'
     );
     // Find the Lightning invoice creation block specific to /order/:id handler.
     // This block creates the invoice and then the payment record with invoiceExpiresAt.
@@ -45,9 +45,9 @@ describe('payment creation: userId stored from order owner, not creator', () => 
     expect(invoiceBlock).not.toMatch(/userId:\s*req\.user\.id/);
   });
 
-  it('payment/index.js: status endpoint allows access by payment.userId', () => {
+  it('payment/reads.js: status endpoint allows access by payment.userId', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/payment/reads.js'), 'utf-8'
     );
     // Authorization check uses payment.userId (which now equals order.userId)
     expect(src).toMatch(/payment\.userId\s*!==\s*req\.user\.id/);

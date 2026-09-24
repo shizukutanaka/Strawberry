@@ -48,9 +48,9 @@ describe('BTC on-chain: active orders are rejected', () => {
 
 // ─── 38a-2: Manual payment approval order-status guard ───────────────────────
 describe('Manual payment approval: order status guard', () => {
-  it('payment/index.js: manual approve reads order and checks status', () => {
+  it('payment/admin.js: manual approve reads order and checks status', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/payment/admin.js'), 'utf-8'
     );
     expect(src).toMatch(/payment\.orderId/);
     expect(src).toMatch(/OrderRepository\.getById\(payment\.orderId\)/);

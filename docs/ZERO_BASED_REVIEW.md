@@ -1535,6 +1535,21 @@ src/ 全ファイルの export 名を総当たり:
   残る §11 は設計判断領域2件のみ（プロバイダ払い出し配線・JSON 複数プロセス
   lost-update）— 共に削除ではなく実装/移行判断。
 
+### 第114ラウンド（ソクラテス式問答 — 「sendNotification の 'user_*' 分岐は誰が呼ぶのか？」）
+
+- 問い: `sendNotification(typeOrUserId)` に「第1引数が `user_` 始まりなら
+  ユーザー設定を解決して多段通知する」分岐（約45行）が残っている — 消費者は？
+  → 全コード・tests・scripts を grep: **呼出しゼロ**。全呼出しサイトは
+  `NotifyType` 定数のみ。ユーザー通知の正規経路は `notifyUser()`
+  （user-notify.js → resolveChannels → 本関数への NotifyType 呼出し）。
+  分岐内の「webhooks 配列・payloadTemplate」処理も user-notify の
+  resolveChannels が別実装として持つ完全な死複製。
+- **削除**: `sendNotification('user_*')` 分岐を除去（−49行）。低層APIの
+  契約を「NotifyType 直送のみ」に固定し、層分離をコメントで明示。
+- **flaky 記録**: 適用直後の全量実行で api.integration が5件 401 失敗したが、
+  スコープ再実行（変更有無両方）と全量再実行で再現せず — 並列ワーカー下の
+  トークン発行タイミング flake と判定（本編集は認証経路に無関係）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

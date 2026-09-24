@@ -54,56 +54,10 @@ function loadNotificationSettings() {
   }
 }
 
+// sendNotification(type, message, options): NotifyType 定数を第1引数に取る
+// チャネル直送の低層API。ユーザー設定解決つきの通知は user-notify.js の
+// notifyUser() がこの関数の上に組み立てる（層分離）。
 async function sendNotification(typeOrUserId, message, options = {}) {
-  // typeOrUserIdがユーザーIDの場合、多段通知
-  if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
-    // 設定ファイルから通知設定を取得
-    const userId = typeOrUserId;
-    const settings = loadNotificationSettings()[userId] || {};
-    const enabled = settings.enabled || {};
-    const tasks = [];
-    if (enabled.line && settings.lineToken) {
-      tasks.push(sendNotification(NotifyType.LINE, message, { token: settings.lineToken }));
-    }
-    if (enabled.discord && settings.discordWebhook) {
-      tasks.push(sendNotification(NotifyType.DISCORD, message, { webhookUrl: settings.discordWebhook }));
-    }
-    if (enabled.slack && settings.slackWebhook) {
-      tasks.push(sendNotification(NotifyType.SLACK, message, { webhookUrl: settings.slackWebhook }));
-    }
-    if (enabled.telegram && settings.telegramBotToken && settings.telegramChatId) {
-      tasks.push(sendNotification(NotifyType.TELEGRAM, message, { botToken: settings.telegramBotToken, chatId: settings.telegramChatId }));
-    }
-    if (enabled.email && settings.email) {
-      tasks.push(sendNotification(NotifyType.EMAIL, message, { to: settings.email }));
-    }
-    if (enabled.webhook && settings.genericWebhook) {
-      tasks.push(sendNotification(NotifyType.WEBHOOK, message, { webhookUrl: settings.genericWebhook }));
-    }
-    // 柔軟Webhook拡張: webhooks配列
-    if (Array.isArray(settings.webhooks)) {
-      const event = options.event || null;
-      for (const wh of settings.webhooks) {
-        if (wh.enabled !== false && (!event || wh.event === event) && wh.url) {
-          // payloadテンプレートがあれば適用、なければデフォルト
-          let payload = { message };
-          if (wh.payloadTemplate) {
-            try {
-              // テンプレートは ${message} 置換のみサポート。
-              // JSON.stringify でエスケープして注入攻撃・不正 JSON を防ぐ。
-              const safeMsg = JSON.stringify(String(message)).slice(1, -1);
-              payload = JSON.parse(wh.payloadTemplate.replace(/\$\{message\}/g, safeMsg));
-            } catch (e) {
-              logger.warn(`Webhook payloadTemplate parse failed (url=${wh.url}): ${e.message}`);
-              payload = { message };
-            }
-          }
-          tasks.push(sendNotification(NotifyType.WEBHOOK, message, { webhookUrl: wh.url, payload }));
-        }
-      }
-    }
-    return Promise.all(tasks);
-  }
   // 既存のtype/message/options送信
   try {
     switch (typeOrUserId) {

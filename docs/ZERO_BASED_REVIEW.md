@@ -1516,6 +1516,25 @@ src/ 全ファイルの export 名を総当たり:
 - **結果**: 寛容リーダー1箇所・厳格リーダー1箇所 — 意味の違いを維持しつつ
   真の重複のみ消去。
 
+### 第113ラウンド（ソクラテス式問答 — 「まだ重複・死面は潜んでいないか？」— 検証ラウンド）
+
+- 問い: 分割・共通化を経た残存面に未検出の死面は？ → 機械監査、全て生存。
+- **監査結果（全て生存・変更なし）**:
+  - JSON 書込原子性: data 層は atomicWriteJSON 一貫、scripts/ の writeFileSync は
+    レポート出力のみ、server.js の writeFileSync は readiness プローブ（正）。
+  - `/node-info`・`/channels` の二重定義: `/api/v1/*` と `/api/v1/payments/*` の
+    意図的デュアルマウント — e2e テストが両パスを実測（死面でなく契約）。
+  - SSRF 二層防御: POST 時 regex + 送信時 assertPublicUrl は意図的多層（温存）。
+  - scripts/ 全17本: package.json 非登録3本も全て生存（slack-feedback-bot は
+    5スクリプト共有lib、line-notify は probe57+README+service-monitor 参照、
+    feedback-bot は docs/README_feedback.md の運用対象）。
+  - routes/index.js 全 import 使用済み（expiry 4 関数・VerificationRepository 等）。
+  - public/js/pages/order-detail.js（477行・最大残存ファイル）: 全18関数に
+    呼出しサイトあり、cleanup は router 契約の返却値。
+- **判定**: 構造整理（分割+共通化）後の再走査でも死面ゼロ。
+  残る §11 は設計判断領域2件のみ（プロバイダ払い出し配線・JSON 複数プロセス
+  lost-update）— 共に削除ではなく実装/移行判断。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

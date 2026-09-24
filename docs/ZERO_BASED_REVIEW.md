@@ -1745,6 +1745,26 @@ src/ 全ファイルの export 名を総当たり:
   1件＋内部 this.* チェーン＋Windows WMIC テスト直叩き）、security.js 全7 export、
   marketpalce/default、provider-uptime・attestation-verifier 全 export。
 
+### 第127ラウンド（ソクラテス式問答 — 「docs が指すファイルはまだ存在するか？」）
+
+- **問い**: 分割ラウンド（103–108）で動いたコードへの docs 参照は生きているか？
+- **答え**: `SPECIFICATION.md` の Escrow フィールド列に `deadline` が残留
+  （118ラウンドで `deadlineAt`/`expire` 削除済み）→ `orderId, amountSats,
+  feeRate, invoice, state, history`（`escrow-service.js` create() の実フィールド）へ修正。
+- **監査して生存（stale に見えるが実在）**: `src/api/utils/btc-payment.js`・
+  `lightning-api.js` — category-research で「置換対象」として言及される両ファイルは
+  `src/api/utils/` に実在・稼働中（btc-onchain.js ルート + sendLightningPayment が
+  btc-payment 内部経由）。ルートパスではなく `utils/` 配下のため初回 ls で見落とし
+  —— 存在チェックは推定パスではなくリポジトリ全走査で行うべき。
+- **判断して温存**: `category-research-2026` / `improvement-research-2026` /
+  `PRODUCT_ANALYSIS` の `routes/payment.js`・`order/index.js` 参照 — 日付付きの
+  時点分析記録であり「当時の現状」を述べる文脈を現在形へ書き換えると記録を偽造する。
+- **並走監査（死面ゼロ）**: 残り遅延 require 全8件は router.use マウント式・telemetry
+  副作用 import・denylist の catch ガード内 — 全て意図的。import 束縛走査は
+  `_rlKeyGeneratorShared`（別名インポート）等を誤検出したが全て生存確認済み。
+  workflows が参照する `openapi-generator.js`/`optimize-images.js`/lint script は
+  不存在 — `.github/workflows` 未push 権限制約の既知 CI 失敗として記録。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

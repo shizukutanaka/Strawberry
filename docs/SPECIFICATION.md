@@ -24,7 +24,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | Order | id, userId, gpuId, durationMinutes, status, price | OrderRepository | ✅ |
 | Payment | id, orderId, amount, method, status | PaymentRepository | ✅ |
 | ~~Provider reputation~~ | — | — | ❌(write-only統計として第9ラウンドで削除) |
-| **Escrow** | orderId, invoice, state, history, deadline | EscrowRepository | 🟡(永続化+サービス+HTTP配線済, 実LN未) |
+| **Escrow** | orderId, amountSats, feeRate, invoice, state, history | EscrowRepository | 🟡(永続化+サービス+HTTP配線済, 実LN未) |
 | **Verification record** | jobId, audited, outputs, consensus, verdict | VerificationRepository | 🟡(永続化+サービス+HTTP閲覧配線済, 実ジョブ収集未) |
 
 > データ層は JSON のみ稼働。Prisma/pg/knex は未配線（三重化, `ARCHITECTURE.md`）。並行書込み保護なし=🟡。

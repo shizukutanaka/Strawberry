@@ -1,10 +1,10 @@
 // src/reputation/reputation-service.js
 // レピュテーション・サービス（docs/SPECIFICATION.md F3）。
 // ReputationRepository（永続化）と reputation-scorer（算出）を束ね、
-// ジョブ成否・検証監査・スラッシング・ステーク・SLA のイベントを記録し、スコアを返す。
-// order/index.js の係争裁定（slash）/ work-verifier の監査結果から呼ばれる想定。
+// ジョブ成否・利用率監査・スラッシング・アテステーションのイベントを記録し、スコアを返す。
+// order/index.js（完了・係争裁定の slash・利用率監査）と gpu/index.js（アテステーション）から呼ばれる。
 // repository は DI 可能（既定 JSON、テストはインメモリ fake）。
-const { computeReputation, rankProviders } = require('./reputation-scorer');
+const { computeReputation } = require('./reputation-scorer');
 
 function defaultStats() {
   return {
@@ -14,7 +14,6 @@ function defaultStats() {
     auditFails: 0,
     slaUptimePct: 100,
     interruptionRate: 0,
-    stake: 0,
     slashCount: 0,
   };
 }
@@ -50,12 +49,6 @@ function createReputationService({ repository } = {}) {
     slash: (providerId, count = 1) =>
       mutate(providerId, (s) => ({ slashCount: s.slashCount + Math.max(0, count) })),
 
-    /** 担保ステークの増減/設定。 */
-    addStake: (providerId, amount) =>
-      mutate(providerId, (s) => ({ stake: Math.max(0, s.stake + amount) })),
-    setStake: (providerId, amount) =>
-      mutate(providerId, () => ({ stake: Math.max(0, amount) })),
-
     /**
      * GPU アテステーション合否を記録。
      * 失敗時はスラッシュも加算（申告詐称は最重大のペナルティ）。
@@ -70,28 +63,11 @@ function createReputationService({ repository } = {}) {
             },
       ),
 
-    /** SLA 指標の更新。 */
-    setSla: (providerId, { slaUptimePct, interruptionRate } = {}) =>
-      mutate(providerId, (s) => ({
-        slaUptimePct: typeof slaUptimePct === 'number' ? slaUptimePct : s.slaUptimePct,
-        interruptionRate: typeof interruptionRate === 'number' ? interruptionRate : s.interruptionRate,
-      })),
-
     /** スコア＋tier を算出（未登録は既定 stats）。 */
     getScore: (providerId, opts = {}) => {
       const rec = repo.getByProviderId(providerId);
       const stats = rec ? { ...defaultStats(), ...rec.stats } : defaultStats();
       return computeReputation(stats, opts);
-    },
-
-    /** プロバイダ群をスコア降順に並べる（マッチング/検索ランキング）。 */
-    rank: (providerIds, opts = {}) => {
-      if (!Array.isArray(providerIds)) throw new Error('providerIds must be an array');
-      const providers = providerIds.map((providerId) => {
-        const rec = repo.getByProviderId(providerId);
-        return { id: providerId, stats: rec ? { ...defaultStats(), ...rec.stats } : defaultStats() };
-      });
-      return rankProviders(providers, opts);
     },
 
     getStats: (providerId) => {

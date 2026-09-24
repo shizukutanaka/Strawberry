@@ -247,8 +247,12 @@ function expireStaleActiveOrders() {
  * (arXiv:2204.12013) が示す「猶予ゼロの中断は借り手の計算を丸ごと捨てさせる」問題への対処。
  * ここはその窓が閉じたあとの確定処理で、借り手が /stop で早期確定しなかった場合の受け皿。
  *
- * 精算は spot-tier.preemptionSettlement に従い**最低課金を効かせない**厳密な従量按分。
- * 最低課金を残すと「受注→即中断→最低課金だけ回収」のゼロワーク課金が成立してしまう。
+ * 実提供割合（開始→停止の壁時計時間）を spot-tier.preemptionDelivery で求め、注文に
+ * `deliveredRatio` として書き込む。精算は payout-ledger.js がこの値だけを読んで従量按分し、
+ * 中断終了には最低課金を効かせない（「受注→即中断→最低課金だけ回収」を塞ぐ）。
+ * **書き込まないと精算は提供ゼロ扱いになり、プロバイダには 1 sat も払われない**
+ * （2026-09 第9回点検まで実際にそうなっていた。按分値はエスクロー経路にしか渡っておらず、
+ * そのエスクローは実注文で一度も使われていなかった）。
  *
  * @returns {{ id: string, gpuId: string }[]} 終了させた注文
  */
@@ -265,7 +269,7 @@ function finalizePreemptedOrders() {
     if (Number.isFinite(deadlineMs) && deadlineMs > nowMs) continue;
 
     const now = new Date().toISOString();
-    const settlement = spotTier.preemptionSettlement(order, nowMs);
+    const delivery = spotTier.preemptionDelivery(order, nowMs);
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'preempting', {
       status: 'completed',
       terminationReason: 'preempted',
@@ -273,7 +277,8 @@ function finalizePreemptedOrders() {
       preemptedAt: now,
       stoppedAt: now,
       completedAt: now,
-      deliveredSeconds: Math.round(settlement.deliveredSeconds),
+      deliveredSeconds: Math.round(delivery.deliveredSeconds),
+      deliveredRatio: delivery.deliveredRatio,
       updatedAt: now,
     });
     if (!result.ok) continue; // 借り手が /stop で先に確定させた（冪等）
@@ -284,7 +289,7 @@ function finalizePreemptedOrders() {
     try { require('../verification/utilization-collector').clear(order.id); } catch (_) {}
     logger.info(
       `Spot order preempted and finalized: ${order.id} `
-      + `(delivered ${Math.round(settlement.deliveredSeconds)}s, ratio ${settlement.usage.deliveredRatio.toFixed(3)})`
+      + `(delivered ${Math.round(delivery.deliveredSeconds)}s, ratio ${delivery.deliveredRatio.toFixed(3)})`
     );
 
     // 中断は SLA 違反ではないので reputation の失敗としては記録しない（ティア仕様どおりの動作を

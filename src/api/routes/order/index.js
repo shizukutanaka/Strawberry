@@ -1793,8 +1793,9 @@ router.get('/:id/access',
 //   1. spot 注文にのみ許可する（専有注文は従来どおり打ち切れない）
 //   2. 即時停止ではなく**猶予窓**を置く（Bamboo arXiv:2204.12013 — 猶予ゼロの中断は
 //      借り手の計算を丸ごと捨てさせ、ティア自体を使い物にならなくする）
-//   3. 精算は最低課金を効かせない厳密な従量按分にする（src/marketplace/spot-tier.js の
-//      preemptionSettlement。これが無いと「受注→即中断→最低課金だけ回収」が成立する）
+//   3. 精算は最低課金を効かせない厳密な従量按分にする（終了時に spot-tier.preemptionDelivery
+//      で deliveredRatio を注文へ書き、payout-ledger.js が terminationReason='preempted' を見て
+//      minChargeRatio=0 で精算する。これが無いと「受注→即中断→最低課金だけ回収」が成立する）
 router.post('/:id/preempt',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
@@ -1968,6 +1969,13 @@ router.post('/:id/stop',
         // terminationReason から導出され、借り手がプロバイダを選ぶ材料になる。
         updateData.terminationReason = 'preempted';
         updateData.preemptedAt = now43g;
+        // 精算（payout-ledger.deliveredRatioOf）は注文に書かれた deliveredRatio だけを読み、
+        // 中断終了で測定値が無ければ提供ゼロ＝プロバイダへの支払いゼロになる。猶予切れで
+        // 確定するスイープ（order-expiry.finalizePreemptedOrders）と同じ計算で書き込む。
+        const delivery = require('../../../marketplace/spot-tier')
+          .preemptionDelivery(order, Date.parse(now43g));
+        updateData.deliveredSeconds = Math.round(delivery.deliveredSeconds);
+        updateData.deliveredRatio = delivery.deliveredRatio;
       }
       const result = OrderRepository.updateIf(
         orderId,

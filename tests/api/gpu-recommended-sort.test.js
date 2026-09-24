@@ -40,7 +40,6 @@ beforeAll(async () => {
 
   const rep = createReputationService();
   for (let i = 0; i < 100; i++) rep.recordJobResult(strongId, true);
-  rep.addStake(strongId, 5_000_000);
   rep.recordJobResult(weakId, false);
 
   // 低評価プロバイダの方が**安い**。それでも上に来てはいけない。

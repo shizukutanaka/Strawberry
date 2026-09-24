@@ -23,7 +23,7 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 | Gpu | id, vendor, memoryGB, pricePerHour, features, providerId | GpuRepository | ✅ |
 | Order | id, userId, gpuId, durationMinutes, status, price | OrderRepository | ✅ |
 | Payment | id, orderId, amount, method, status | PaymentRepository | ✅ |
-| **Provider reputation** | stake, slashCount, sla, auditPass/Fail | ReputationRepository | ✅(注文完了・ゼロ負荷監査・係争裁定から記録、`sort=recommended` と `/rank` が参照) |
+| **Provider reputation** | completed/failedJobs, slashCount, auditPass/Fail, attestation | ReputationRepository | ✅(注文完了・ゼロ負荷監査・係争裁定・アテステーションから記録、GPU 詳細の信頼度と `sort=recommended` が参照。stake は 2026-09 第9回点検で削除) |
 | **Escrow** | orderId, invoice, state, history, deadline | EscrowRepository | 🟡(永続化+サービス実装, 配線/LN未) |
 | **Verification record** | jobId, audited, outputs, consensus, verdict | VerificationRepository | 🟡(`POST /marketplace/escrow/:id/verify` から配線済。実ジョブ出力の収集経路は未) |
 
@@ -106,6 +106,14 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 7. 課金ティア: ✅ **Spot（中断許容）ティア実装済**（`src/marketplace/spot-tier.js`。出品側の
    オプトイン + 割引、猶予窓つき中断 `POST /orders/:id/preempt`、最低課金を効かせない従量按分
    での精算、注文履歴から導出する中断率の開示。Vast.ai interruptible / Bamboo arXiv:2204.12013）
+   **訂正（2026-09 第9回点検）**: 「従量按分での精算」は実際には行われていなかった。按分値
+   （開始→停止の提供割合）はエスクローの settle にしか渡っておらず、そのエスクローは実注文で
+   一度も使われていなかった。台帳（`payout-ledger.js`）は注文の `deliveredRatio` しか読まず、
+   中断終了の注文にはそれが書かれていなかったため「中断終了・測定値なし」として提供ゼロ扱いになり、
+   **中断された spot 注文ではプロバイダに 1 sat も支払われず、借り手に全額返金されていた**
+   （UI は「実際に提供された時間分のみ課金」と表示していた）。現在は中断の確定経路 2 本
+   （猶予切れのスイープ、借り手の早期 `/stop`）が `spot-tier.preemptionDelivery` で
+   `deliveredRatio` を注文に書き込み、台帳が最低課金なしで按分する。
 8. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`src/payments/payout-ledger.js` の `settlementForOrder()` から呼ばれる）
 
 ### F2. 信頼基盤（最優先トリオ）
@@ -146,7 +154,8 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
   この規定は 2026-09 まで**文書だけが守っていた**: UI は `passed` を「実測検証済み」と緑で表示し、perf-score は confidence を `attested` に引き上げ、`sort=recommended` はアテステーション枠（総合の 10%）を満点で与えていた。プロバイダーは自分で書いた JSON を添えるだけでその 3 つを買えた。現在は結果に `trustLevel`（`self_reported` / `hardware_attested`）を持たせ、**3 つの利得すべてが `hardware_attested` を要求する**。現在の検証器は `hardware_attested` を返さない。
 
 ### F3. レピュテーション/インセンティブ
-- ステーク/スラッシング/レピュテーション: ✅ `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）。**配線済**: 注文完了時の成否記録、ゼロ負荷監査の結果反映、係争の返金裁定での slash、`GET /gpus?sort=recommended` での参照（`POST /marketplace/rank` は UI から呼ばれていなかったため 2026-09 に削除）。
+- スラッシング/レピュテーション: ✅ `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）。**配線済**: 注文完了時の成否記録、ゼロ負荷監査の結果反映、係争の返金裁定での slash、`GET /gpus?sort=recommended` での参照（`POST /marketplace/rank` は UI から呼ばれていなかったため 2026-09 に削除）。
+  **訂正（2026-09 第9回点検）**: 本書は長らく「ステーク ✅」と書いていたが、ステークを預ける経路は製品に存在せず（`addStake`/`setStake` は本番から一度も呼ばれていなかった）、全員 stake=0 のためスコアの乗数が 0.5 に固定されていた。**全員のスコアが一律に半分に抑えられ、tier の閾値（silver 0.65 / gold 0.85）には誰も届かず、GPU 詳細の「評判」は bronze か probation しか表示し得なかった**。担保ステークは運営を信頼しなくてよいためのトラストレス機構で、custodial 設計の本製品では成立しない（エスクロー削除と同じ判断）ため、stake 項・`addStake`/`setStake`/`setSla`/`rank`/`rankProviders` を削除した。
 
 ### F4. 運用・可観測性
 - Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **OTel トレース**: ✅（`src/telemetry/instrumentation.js` を
@@ -209,7 +218,7 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - `src/verification/work-verifier.js` — Proof-of-Compute 土台（13テスト）。旧 `verification-service.js`
   ＋ `VerificationRepository.js`（合成層・永続化）は削除済（2026-09 第8回点検。唯一の呼び出し元
   だった旧 `/marketplace/escrow/:id/verify` をエスクローごと削除したため）
-- `src/reputation/reputation-scorer.js` — stake加重レピュテーション（10テスト）
+- `src/reputation/reputation-scorer.js` — 実績ベースのレピュテーション（ベイズ平滑化・スラッシュ減点, 9テスト）
 - `src/reputation/reputation-service.js` ＋ `src/db/json/ReputationRepository.js` — レピュテーション永続化/イベント記録（8テスト）
 - `src/pricing/feature-pricer.js` — 特徴量ベース価格（7テスト）
 - `src/payments/settlement-calculator.js` — 従量・SLA 連動の精算分割（payout/refund/fee、最低課金/SLA ペナルティ、整数 sats 保存則, 12テスト）
@@ -235,5 +244,5 @@ GPU マーケットプレイス（運営者仲介・カストディアル）＋B
 - `src/db/json/fileLock.js` — JSON データファイルのクロスプロセス排他（open(O_EXCL) 方式、同期待機、stale 奪取、再入対応。子プロセス実起動の回帰テスト付き, 15テスト）
 - `src/gpu/carbon-intensity.js` — 申告所在地に基づく系統カーボン強度・排出量推定（サブリージョン対応、実データ差込口、不明は推測しない, 19テスト）
 - `src/verification/utilization-collector.js` — ゼロ負荷課金の検出（両者申告の突き合わせ、リングバッファ、断定しない判定, 15テスト）。**供給元はエージェント／スクリプトのみ**（ブラウザは GPU 利用率を測れない）
-- `src/marketplace/spot-tier.js` — Spot（中断許容）ティアのポリシー（割引・猶予窓・最低課金を効かせない中断精算・中断率の導出, 18テスト）
+- `src/marketplace/spot-tier.js` — Spot（中断許容）ティアのポリシー（割引・猶予窓・中断時の実提供割合・中断率の導出, 17テスト）
 - `src/gpu/perf-score.js` — 機種横断の正規化性能スコア／価格対性能（DLPerf 風。参照表照合・電力由来の TFLOPS 上限クランプ・未検証型番の上限・算出不能は null、feature-pricer への特徴量変換つき, 27テスト）

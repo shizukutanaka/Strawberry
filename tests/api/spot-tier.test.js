@@ -11,7 +11,9 @@ const { app } = require('../../src/api/server');
 const UserRepository = require('../../src/db/json/UserRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 const OrderRepository = require('../../src/db/json/OrderRepository');
+const PaymentRepository = require('../../src/db/json/PaymentRepository');
 const { finalizePreemptedOrders } = require('../../src/utils/order-expiry');
+const { settlementForOrder } = require('../../src/payments/payout-ledger');
 
 const uniq = Date.now().toString(36);
 let providerTok, providerId, renterTok, renterId, otherTok, adminTok;
@@ -102,6 +104,17 @@ describe('GET /gpus exposes the spot offer', () => {
 
 describe('POST /orders/:id/preempt', () => {
   // 注文を active まで進める（決済経路を通さず直接遷移させる — ここでの関心は中断側）
+  // 30 分 / 予約 60 分・500 sats 支払い済み → 課金は約半分、最低課金の床は効かない。
+  function expectProRataPayout(order) {
+    const d = { PaymentRepository: { getByOrderId: () => [{ status: 'paid', amount: 500 }] } };
+    const s = settlementForOrder(order, d);
+    expect(s.deliveredRatio).toBeCloseTo(order.deliveredRatio, 6);
+    expect(s.chargedSats).toBeGreaterThan(225);
+    expect(s.chargedSats).toBeLessThan(275);
+    expect(s.providerPayoutSats).toBeGreaterThan(0);
+    expect(s.renterRefundSats + s.chargedSats).toBe(500);
+  }
+
   function seedActiveOrder(over = {}) {
     const gpu = mkGpu({ spotEnabled: true, spotDiscountPct: 50, spotNoticeSeconds: 60 });
     const order = OrderRepository.create({
@@ -191,6 +204,25 @@ describe('POST /orders/:id/preempt', () => {
     // 30 分稼働していたので約 1800 秒
     expect(after.deliveredSeconds).toBeGreaterThan(1700);
     expect(after.deliveredSeconds).toBeLessThan(1900);
+    // 精算が読むのは deliveredRatio。これが注文に無いと payout-ledger は「中断終了・測定値なし」
+    // として提供ゼロ扱いにし、プロバイダには 1 sat も払われない（第9回点検まで実際にそうだった）。
+    expect(after.deliveredRatio).toBeGreaterThan(0.45);
+    expect(after.deliveredRatio).toBeLessThan(0.55);
+    expectProRataPayout(after);
+  });
+
+  it('settles pro-rata when the renter confirms early with /stop during the grace window', async () => {
+    const { order } = seedActiveOrder();
+    PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 500, method: 'lightning', paidAt: new Date().toISOString() });
+    await request(app).post(`/api/v1/orders/${order.id}/preempt`).set('Authorization', `Bearer ${providerTok}`);
+    const stop = await request(app).post(`/api/v1/orders/${order.id}/stop`).set('Authorization', `Bearer ${renterTok}`);
+    expect(stop.status).toBe(200);
+
+    const after = OrderRepository.getById(order.id);
+    expect(after.terminationReason).toBe('preempted');
+    expect(after.deliveredRatio).toBeGreaterThan(0.45);
+    expect(after.deliveredRatio).toBeLessThan(0.55);
+    expectProRataPayout(after);
   });
 
   it('is idempotent — finalizing twice does not re-complete the order', async () => {

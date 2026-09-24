@@ -117,19 +117,20 @@ function buildPreemptionNotice(gpu = {}, nowMs = Date.now()) {
 }
 
 /**
- * 中断された注文の精算入力を求める。
+ * 中断された注文の実提供量を求める（開始から停止までの壁時計時間）。
  *
- * **最低課金を効かせない**のが要点。settlement-calculator の既定は「即時解約でも総額の 10% は
- * 課金」（セットアップ費の考え方）だが、これは*借り手都合*の解約を前提にした floor である。
- * プロバイダ都合の中断にこれを適用すると、「受注 → 即中断 → 最低課金だけ回収」を繰り返す
- * ゼロワーク課金が成立してしまう（/stop がプロバイダに禁止されているのと同じ理由の穴）。
- * したがって中断時は minChargeRatio=0 とし、借り手は実際に提供された時間の分だけ支払う。
+ * 呼び出し側は結果の `deliveredRatio` を**注文に書き込む**こと。精算は
+ * payout-ledger.js の deliveredRatioOf() が注文だけを読んで行い、中断終了
+ * （terminationReason='preempted'）で測定値が無い注文は提供ゼロ＝全額返金として扱われる。
+ * 最低課金を効かせない（「受注→即中断→最低課金だけ回収」を塞ぐ）のも payout-ledger 側で、
+ * terminationReason='preempted' を見て minChargeRatio=0 にしている。
+ * 中断は SLA 違反としても扱わない（仕様どおり中断したプロバイダを罰しない。可視化は preemptionRate）。
  *
  * @param {object} order { startedAt, durationMinutes }
  * @param {number} preemptedAtMs 実際に停止した時刻
- * @returns {{usage:{deliveredRatio:number, slaUptimePct:number}, opts:{minChargeRatio:number}, deliveredSeconds:number}}
+ * @returns {{deliveredSeconds:number, deliveredRatio:number}}
  */
-function preemptionSettlement(order = {}, preemptedAtMs = Date.now()) {
+function preemptionDelivery(order = {}, preemptedAtMs = Date.now()) {
   const durationSeconds = Math.max(0, (num(order.durationMinutes) || 0) * 60);
   const startedMs = order.startedAt ? new Date(order.startedAt).getTime() : NaN;
   const deliveredSeconds = Number.isFinite(startedMs)
@@ -138,16 +139,7 @@ function preemptionSettlement(order = {}, preemptedAtMs = Date.now()) {
   const deliveredRatio = durationSeconds > 0
     ? clamp(deliveredSeconds / durationSeconds, 0, 1)
     : 0;
-  return {
-    deliveredSeconds,
-    usage: {
-      deliveredRatio,
-      // 中断は SLA 違反ではない（ティアの仕様どおりの動作）。SLA ペナルティを課すと
-      // 「約束どおり中断したプロバイダ」を罰することになる。可視化は preemptionRate で行う。
-      slaUptimePct: 100,
-    },
-    opts: { minChargeRatio: 0 },
-  };
+  return { deliveredSeconds, deliveredRatio };
 }
 
 /**
@@ -183,6 +175,6 @@ module.exports = {
   resolveSpotConfig,
   effectivePrice,
   buildPreemptionNotice,
-  preemptionSettlement,
+  preemptionDelivery,
   preemptionRate,
 };

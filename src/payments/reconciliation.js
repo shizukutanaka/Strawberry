@@ -33,7 +33,6 @@
 //
 // 読み取り専用。ここで自動修復はしない（帳簿の不一致を黙って書き換えるのは、
 // 検出できる問題を検出できない問題に変えるだけ）。
-const { computeSettlement: _computeSettlement } = require('./settlement-calculator');
 const payoutLedger = require('./payout-ledger');
 
 function round(v) {

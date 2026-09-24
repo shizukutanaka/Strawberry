@@ -53,30 +53,10 @@ describe('reputation-service', () => {
   it('slashing lowers the score', () => {
     const s = svc();
     for (let i = 0; i < 50; i++) s.recordJobResult('p', true);
-    s.addStake('p', 2_000_000);
     const before = s.getScore('p').score;
     s.slash('p');
     const after = s.getScore('p').score;
     expect(after).toBeLessThan(before);
-  });
-
-  it('adding stake raises the score', () => {
-    const s = svc();
-    for (let i = 0; i < 50; i++) s.recordJobResult('p', true);
-    const before = s.getScore('p').score;
-    s.addStake('p', 5_000_000);
-    const after = s.getScore('p').score;
-    expect(after).toBeGreaterThan(before);
-  });
-
-  it('setSla updates reliability inputs', () => {
-    const s = svc();
-    for (let i = 0; i < 50; i++) s.recordJobResult('p', true);
-    s.addStake('p', 1_000_000);
-    const stable = s.getScore('p').score;
-    s.setSla('p', { interruptionRate: 0.5 });
-    const flaky = s.getScore('p').score;
-    expect(flaky).toBeLessThan(stable);
   });
 
   it('getScore on unknown provider returns a baseline (no crash)', () => {
@@ -85,14 +65,10 @@ describe('reputation-service', () => {
     expect(r.score).toBeLessThanOrEqual(1);
   });
 
-  it('rank orders known providers by score and throws on non-array', () => {
+  it('a provider with a solid completion record is shown as gold, not capped at bronze', () => {
     const s = svc();
-    for (let i = 0; i < 100; i++) s.recordJobResult('strong', true);
-    s.addStake('strong', 5_000_000);
-    s.recordJobResult('weak', false);
-    s.recordJobResult('weak', false);
-    const ranked = s.rank(['weak', 'strong']);
-    expect(ranked[0].id).toBe('strong');
-    expect(() => s.rank('nope')).toThrow();
+    for (let i = 0; i < 100; i++) s.recordJobResult('p', true);
+    expect(s.getScore('p').tier).toBe('gold');
+    expect(s.getStats('p')).not.toHaveProperty('stake');
   });
 });

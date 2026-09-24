@@ -79,7 +79,7 @@ async function submitToCalendar(calendar, digest, deps = {}) {
   const url = digestUrl(calendar);
 
   // SSRF ガード: カレンダー URL は env から来るため、内部アドレスへ向けられる可能性がある。
-  // webhook.js と同じ扱いにする。
+  // notifier.js の汎用 webhook と同じ扱いにする。
   try {
     await assertPublicUrl(url, resolver);
   } catch (e) {

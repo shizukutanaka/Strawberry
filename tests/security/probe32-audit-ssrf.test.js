@@ -5,7 +5,7 @@
 // 3. Payout address change is now audit-logged
 // 4. Admin order status override is now audit-logged
 // 5. resilient-notify.js has SSRF guard (assertPublicUrl) before dispatching
-// 6. webhook.js sendWebhook has SSRF guard before dispatching
+// 6. notifier.js sendWebhookNotify (the live generic-webhook path) has SSRF guard before dispatching
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
@@ -80,20 +80,25 @@ describe('Audit log: sensitive operations are now recorded', () => {
 describe('SSRF guards: env-configured notification URLs are validated', () => {
   // （`src/utils/resilient-notify.js` を検証していたケースは削除。モジュール自体が
   //   どこからも require されておらず、到達不能なコードの堅牢性を検証していた。
-  //   2026-08 のデッドコード掃除でモジュールごと削除。live な通知経路である
-  //   notifier.js / webhook.js の検証はそのまま残している。）
-  it('webhook.js sendWebhook has assertPublicUrl guard before axios.post', () => {
+  //   2026-08 のデッドコード掃除でモジュールごと削除。）
+  // （`src/api/webhook.js` を検証していたケースも同じ理由で差し替えた（2026-09 第9回点検）。
+  //   あのルータはどこにもマウントされておらず、しかも素の axios（リダイレクト追従あり）で
+  //   送っていたので probe66 のリダイレクト迂回対策も入っていなかった。守られていたのは
+  //   到達不能なコードで、実際に動く汎用 webhook 経路は notifier.js の sendWebhookNotify。）
+  it('notifier.js sendWebhookNotify guards with assertPublicUrl before axios.post and never follows redirects', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/webhook.js'), 'utf-8'
+      require.resolve('../../src/utils/notifier.js'), 'utf-8'
     );
-    expect(src).toMatch(/assertPublicUrl/);
-    expect(src).toMatch(/ssrf-guard/);
-    // The SSRF check must come BEFORE the axios.post call
-    const ssrfIdx = src.indexOf('assertPublicUrl(url)');
-    const axiosIdx = src.indexOf('axios.post(url, body)');
+    const fnStart = src.indexOf('async function sendWebhookNotify(');
+    expect(fnStart).toBeGreaterThan(-1);
+    const body = src.slice(fnStart, src.indexOf('\n}\n', fnStart));
+    const ssrfIdx = body.indexOf('await assertPublicUrl(webhookUrl)');
+    const axiosIdx = body.indexOf('axios.post(webhookUrl');
     expect(ssrfIdx).toBeGreaterThan(-1);
     expect(axiosIdx).toBeGreaterThan(-1);
     expect(ssrfIdx).toBeLessThan(axiosIdx);
+    expect(body).toMatch(/AXIOS_SAFE_CONFIG/);
+    expect(src).toMatch(/maxRedirects:\s*0/);
   });
 });
 

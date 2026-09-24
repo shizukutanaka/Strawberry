@@ -413,6 +413,52 @@ admin PUT cancel、DELETE、reject、係争裁定 refund/uphold、`/stop`
 
 ---
 
+### M. 削除の連鎖を最後まで辿る——死んだ経路が運んでいた「生きた値」（第 9 回）
+
+第 8 回の削除のあと、一般則 4（削除は連鎖する）に従って「呼び出し元を失ったもの」を
+全数調査した。モジュール単位で孤立したものは無く、関数単位で `work-verifier.js` の
+`shouldAudit`/`outputsMatch`/`ternaryConsensus`（再実行監査。別プロバイダへの再投入経路は
+製品に無い）と、`spot-tier.preemptionSettlement` の戻り値の半分（`opts`・`slaUptimePct`）が
+呼び手を失っていた。前者は②削除、後者は③単純化（`preemptionDelivery` に改名し
+`{deliveredSeconds, deliveredRatio}` だけを返す）で片付く——はずだった。
+
+**問い: 戻り値のうち、生き残った呼び手は何を読み、それをどこへ渡しているのか。**
+答え: `order-expiry.finalizePreemptedOrders()` は `deliveredSeconds` だけを注文に書き、
+按分値 `deliveredRatio` はログに出すだけだった。**問い: では精算は按分値をどこから得るのか。**
+答え: `payout-ledger.deliveredRatioOf()` は注文の `deliveredRatio` と `usageStats` しか読まない。
+中断終了で両方とも無いと「中断終了・測定値なし」＝提供ゼロとして扱う（fail-safe として
+意図された分岐）。つまり**中断で終わった spot 注文は、プロバイダへの支払いゼロ・借り手へ
+全額返金**になっていた。借り手の画面は「実際に提供された時間分のみ課金」と表示していた。
+
+按分値を実際に金額へ変換していたのはエスクローの `settle()` だけで、そのエスクローは実注文で
+一度も使われていなかった。**死んだ経路が、生きた値の唯一の運び手だった。** 既存テストの
+名前は「finalizes with strict pro-rata」だったが、中身は `deliveredSeconds` を見るだけで、
+精算額までは一度も見ていなかった。仕様書も「最低課金を効かせない従量按分での精算 ✅」と書いていた。
+
+修正: 中断の確定経路 2 本（猶予切れのスイープ、借り手の早期 `/stop`）が
+`preemptionDelivery` の値を注文の `deliveredRatio` に書く。テストは台帳の精算額
+（課金は約半分・プロバイダ支払い > 0・課金＋返金＝支払額）まで検査し、書き込みを
+外すと 2 件とも落ちることを確認した。
+
+同じ全数調査で、以前から呼び手の無かったものも片付けた: `lightning-service.js` の
+`getPendingPayments`/`openChannel`/`closeChannel`/`getNodeStats`（とそれにしか使われて
+いなかった `getChannelBalance`/`getChannelStats`——削除はここでも連鎖した）、importer ゼロの
+`src/gpu/metrics.js`（687 行）と `src/api/webhook.js`。後者は probe32 が「live な通知経路」
+として SSRF ガードを検査していたが、ルータはどこにもマウントされておらず、しかも素の axios
+（リダイレクト追従あり）で送っていたので probe66 のリダイレクト迂回対策も入っていなかった。
+**テストが守っていたのは到達不能なコードで、実際に動く `notifier.sendWebhookNotify` は
+その検査の外にあった。** 検査を実在する経路へ移した。
+
+最後に、ユーザー確認のうえ担保ステークを削除した。**問い: `stake` は誰が書くのか。**
+答え: 誰も（`addStake`/`setStake` は本番から一度も呼ばれない）。全員 stake=0 のため
+`stakeFactor = minStakeFactor = 0.5` で固定され、**全スコアが一律に半分**、tier の閾値
+（silver 0.65 / gold 0.85）には誰も届かず、GPU 詳細の「評判」は bronze か probation しか
+表示し得なかった。順位は変わらないので `sort=recommended` のテストは緑のままだった。
+担保ステークはエスクローと同じくトラストレス機構で、custodial 設計では成立しない（第 8 回と同じ
+①の答え）。`setSla`/`rank`/`rankProviders` も呼び手が無かったため合わせて削除した。
+
+---
+
 ## 短所（今も残る境界線。3 件は検討済みの設計判断）
 
 1. **実送金は運営の手作業のまま。** 検討済み・意図的（上記 J-1）。自動承認してよい
@@ -451,6 +497,8 @@ admin PUT cancel、DELETE、reject、係争裁定 refund/uphold、`/stop`
 | `docs-match-code` の npm script 検査 | 実行できない手順をドキュメントに書くこと |
 | `src/security/audit-integrity-monitor.js` | 監査ログの改ざん検知が起動時の一回しか実行されないこと。5 分ごとに検証し、検出は `/ready` にも反映される |
 | `tests/payments/no-unledgered-money.test.js`（第 8 回で更新） | `escrow-service.js` が再導入されること。ファイルの非存在を恒久的に確認する |
+| `tests/api/spot-tier.test.js` の精算額検査（第 9 回） | 中断終了の注文が `deliveredRatio` を持たず、台帳で提供ゼロ扱いになること |
+| `tests/reputation/*` の上位 tier 到達検査（第 9 回） | 書き手のいない乗数が復活し、誰も silver/gold に届かなくなること |
 
 既存の `no-dead-endpoints` は「叩けば応答するか」を、新しい `ui-reachability` は
 「そもそも誰かが叩くのか」を見る。応答するが誰も呼ばないエンドポイントは、
@@ -475,6 +523,7 @@ admin PUT cancel、DELETE、reject、係争裁定 refund/uphold、`/stop`
 | ①（再訪）要件を疑う | 「『未対処』のリストそのものは検討済みか」 | 第 6 回。残る 4 件のうち 3 件（手動送金・Mock 検証・JSON トランザクション）は「検討した結果これが正しい」という確定判断であり todo ではないと判定。1 件（hold invoice）は本当の未完成だが、以前より正確な理由（preimage/invoice 生成の不在）を確認した |
 | ①（再々訪）要件を疑う | 「『実装済み』という自分の記述は検証済みか」 | 第 7 回。`lightning-service.js` の `settleHoldInvoice`/`cancelHoldInvoice` を「実装済み」と書いていたが、実際は存在しない gRPC メソッドを呼んでおり必ず落ちると判明。②削除（invoicesrpc を実装する）は実機 LND 無しでは無責任と判断して見送り、④加速（呼べば理由が分かる形にする）を実行した |
 | ①（四度目）要件そのものを疑う→②削除 | 「④加速で留めたが、そもそもこの機構自体が要件として成立するのか」 | 第 8 回。hold-invoice/HTLC エスクロー（トラストレス機構）は、運営を信頼する custodial 設計の本製品には要件として矛盾すると判定し、状態機械・LN 連携層・検証合成層・全ルート・全連携フックを丸ごと削除した。資金移動は最初から実処理を担っていた `payout-ledger.js` の 1 本に一本化した |
+| ②（連鎖）削除の後始末を全数で | 「消したものに依存していたもの、消したものだけが運んでいたものは何か」 | 第 9 回。呼び手を失った関数を削除し、残った戻り値の行き先を辿ったところ、spot 中断の按分値がエスクロー経由でしか金額に届いていなかった（＝実際には一度も届いていなかった）ことが判明。台帳が読む場所へ書くよう修正。担保ステーク・未マウントの webhook ルータ・importer ゼロのモジュールも削除 |
 
 第一原理に戻した点: 「帳簿が合っている」は「現金が合っている」を含意しない
 （不変条件は読む範囲の外を守れない）。「登録されている」「テストが通る」は
@@ -501,6 +550,7 @@ admin PUT cancel、DELETE、reject、係争裁定 refund/uphold、`/stop`
 16. 主張（この文書自身、第 6 回まで）「`lightning-service.js` は `settleHoldInvoice`/`cancelHoldInvoice` を実装済み」 → 問「その実装は検証したのか」 → 答「していなかった。既存テストは独立した Mock（`ln-adapter.js`）を注入しており、`lightning-service.js` の実物を一度も通していない」 → 実際に読んだら `this.lnd.settleInvoice` という存在しない gRPC メソッドを呼んでおり、本番でも Mock でも必ず `TypeError` で落ちると判明 → K
 17. 主張（Stop hook、第 7 回への反応）「④加速で留めたのは不十分。②削除か③単純化か、invoicesrpc の実装が要る」 → 問「では②削除すべきなのか。この機構は本当に要件なのか」 → 答「要件ではなかった。hold-invoice/HTLC エスクローはトラストレス機構だが、この製品は借り手が運営のノードへ直接入金し運営が台帳で後払いする custodial 設計を一貫して採っている。トラストレス機構を custodial 設計に足しても、運営を信頼する前提そのものは消えない」 → 問「削除して失うものは何か」 → 答「何も無い。実注文で一度も使われておらず、`payout-ledger.js` と精算計算が重複していただけだった」 → L（②削除を実行）
 
+18. 主張（仕様書・テスト名）「spot の中断は最低課金なしの従量按分で精算する」 → 問「按分値は誰が書き、誰が読むのか」 → 答「`preemptionSettlement` が計算し、読むのはエスクローの `settle()` だけ。台帳は注文の `deliveredRatio` しか読まず、そこには誰も書いていない」 → 問「ではエスクローが使われていない今、中断注文はいくらで精算されるのか」 → 答「提供ゼロ。プロバイダには 1 sat も払われない」 → M。同じ問いを `stake` に向けると「誰も書かない → 全員 0 → 全スコアが半分」 → M
 答えは毎回コードで確かめ、確かめられなかったものは「未対処」に残した。
 
 ---
@@ -550,3 +600,9 @@ admin PUT cancel、DELETE、reject、係争裁定 refund/uphold、`/stop`
     設計原則（custodial）を照らし合わせるだけで、3 回分の深掘り（第 5〜7 回）が
     ①一問で②削除に置き換えられることが分かった。「直せるか」ではなく「直す価値が
     あるか」を先に問う。
+13. **死んだ経路が、生きた値の唯一の運び手であることがある。** 削除の連鎖を辿るときは
+    「何が呼び手を失ったか」だけでなく「消した経路が何を運んでいたか」を問う。
+    エスクローは使われていなかったが、spot 中断の按分値はそこにしか流れておらず、
+    結果として一度も金額に反映されていなかった。同じく、書き手のいない入力（stake）は
+    既定値に固定され、その既定値が製品の数字（全員のスコア）を黙って歪める。
+    どちらも順位や状態遷移のテストは緑のままで、**金額・表示値そのものを検査して初めて見える**。

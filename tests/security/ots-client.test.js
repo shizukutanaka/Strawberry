@@ -102,7 +102,7 @@ describe('submission', () => {
   });
 
   it('blocks a calendar that resolves to a private address (SSRF)', async () => {
-    // カレンダー URL は env 由来なので内部アドレスへ向けられうる。webhook.js と同じ扱い。
+    // カレンダー URL は env 由来なので内部アドレスへ向けられうる。notifier.js の汎用 webhook と同じ扱い。
     const httpPost = jest.fn();
     const privateResolver = async () => [{ address: '169.254.169.254' }];
     const receipts = await ots.submitRoot(ROOT, { httpPost, resolver: privateResolver });

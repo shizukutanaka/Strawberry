@@ -703,53 +703,6 @@ class LightningService extends EventEmitter {
         setupChannelStream();
     }
 
-    async getChannelBalance() {
-        try {
-            const balance = await new Promise((resolve, reject) => {
-                this.lnd.channelBalance({}, (error, response) => {
-                    if (error) reject(error);
-                    else resolve(response);
-                });
-            });
-            
-            return {
-                balance: parseInt(balance.balance),
-                pendingOpenBalance: parseInt(balance.pending_open_balance),
-                localBalance: {
-                    sat: parseInt(balance.local_balance?.sat || 0),
-                    msat: parseInt(balance.local_balance?.msat || 0)
-                },
-                remoteBalance: {
-                    sat: parseInt(balance.remote_balance?.sat || 0),
-                    msat: parseInt(balance.remote_balance?.msat || 0)
-                }
-            };
-            
-        } catch (error) {
-            logger.error('Failed to get channel balance:', error);
-            // モックデータ返却
-            return {
-                balance: 1000000,
-                pendingOpenBalance: 0,
-                localBalance: { sat: 500000, msat: 500000000 },
-                remoteBalance: { sat: 500000, msat: 500000000 }
-            };
-        }
-    }
-
-    async getPendingPayments() {
-        // 保留中の支払い取得
-        const pending = [];
-        
-        this.invoices.forEach(invoice => {
-            if (invoice.status === 'pending' && invoice.expiresAt > Date.now()) {
-                pending.push(invoice);
-            }
-        });
-        
-        return pending;
-    }
-
     // **注意（2026-09 第8回点検で削除）**: hold invoice（settleHoldInvoice/
     // cancelHoldInvoice）は削除した。これらは LND の invoicesrpc（`invoices.proto`、
     // lnrpc とは別サービス）が提供する RPC を必要とするが、このファイルが読み込む
@@ -759,67 +712,6 @@ class LightningService extends EventEmitter {
     // には要件として噛み合わず、実注文でも一度も使われていなかった。実装するに
     // 値する要件ではないと判断し、呼び出し元の escrow-service.js ごと削除した
     // （ARCHITECTURE.md「エスクロー機構の削除」節）。
-
-    async openChannel(nodePubkey, localAmount, pushAmount = 0) {
-        // チャネル開設
-        try {
-            const result = await new Promise((resolve, reject) => {
-                this.lnd.openChannelSync({
-                    node_pubkey_string: nodePubkey,
-                    local_funding_amount: localAmount,
-                    push_sat: pushAmount,
-                    target_conf: 3,
-                    sat_per_vbyte: 1
-                }, (error, response) => {
-                    if (error) reject(error);
-                    else resolve(response);
-                });
-            });
-            
-            logger.info(`Channel opened with ${nodePubkey.substring(0, 16)}...`);
-            
-            return {
-                fundingTxid: result.funding_txid_str,
-                outputIndex: result.output_index
-            };
-            
-        } catch (error) {
-            logger.error('Failed to open channel:', error);
-            throw error;
-        }
-    }
-
-    async closeChannel(channelPoint, force = false) {
-        // チャネル閉鎖
-        try {
-            const [fundingTxid, outputIndex] = channelPoint.split(':');
-            
-            const closeStream = this.lnd.closeChannel({
-                channel_point: {
-                    funding_txid_str: fundingTxid,
-                    output_index: parseInt(outputIndex)
-                },
-                force: force
-            });
-            
-            return new Promise((resolve, reject) => {
-                closeStream.on('data', (update) => {
-                    if (update.close_pending) {
-                        resolve({
-                            txid: update.close_pending.txid,
-                            status: 'pending'
-                        });
-                    }
-                });
-                
-                closeStream.on('error', reject);
-            });
-            
-        } catch (error) {
-            logger.error('Failed to close channel:', error);
-            throw error;
-        }
-    }
 
     startPeriodicTasks() {
         // チャネルバランス更新（5分ごと）
@@ -888,80 +780,6 @@ class LightningService extends EventEmitter {
                 this.channels.delete(sorted[i][0]);
             }
         }
-    }
-
-    async getNodeStats() {
-        try {
-            const [info, balance, channels] = await Promise.all([
-                this.getInfo(),
-                this.getChannelBalance(),
-                this.getChannelStats()
-            ]);
-            
-            return {
-                node: {
-                    pubkey: info.identity_pubkey,
-                    alias: info.alias,
-                    version: info.version,
-                    synced: info.synced_to_chain,
-                    blockHeight: info.block_height
-                },
-                channels: {
-                    active: channels.active,
-                    inactive: channels.inactive,
-                    pending: channels.pending,
-                    capacity: channels.totalCapacity
-                },
-                balance: {
-                    total: balance.balance,
-                    local: balance.localBalance.sat,
-                    remote: balance.remoteBalance.sat,
-                    pending: balance.pendingOpenBalance
-                },
-                payments: {
-                    sent: this.payments.size,
-                    received: Array.from(this.invoices.values()).filter(i => i.status === 'paid').length,
-                    totalSent: Array.from(this.payments.values()).reduce((sum, p) => sum + p.amount, 0),
-                    totalReceived: Array.from(this.invoices.values())
-                        .filter(i => i.status === 'paid')
-                        .reduce((sum, i) => sum + i.amountSats, 0)
-                }
-            };
-            
-        } catch (error) {
-            logger.error('Failed to get node stats:', error);
-            return null;
-        }
-    }
-
-    async getChannelStats() {
-        let active = 0;
-        let inactive = 0;
-        let pending = 0;
-        let totalCapacity = 0;
-        
-        this.channels.forEach(channel => {
-            if (channel.active) active++;
-            else inactive++;
-            totalCapacity += channel.capacity;
-        });
-        
-        // 保留中のチャネル取得
-        try {
-            const pendingChannels = await new Promise((resolve, reject) => {
-                this.lnd.pendingChannels({}, (error, response) => {
-                    if (error) reject(error);
-                    else resolve(response);
-                });
-            });
-            
-            pending = pendingChannels.total_limbo_balance || 0;
-            
-        } catch (error) {
-            logger.debug('Failed to get pending channels:', error);
-        }
-        
-        return { active, inactive, pending, totalCapacity };
     }
 
     // amount 引数は現状未使用（インボイス自体に金額がエンコード済みで decodePaymentRequest

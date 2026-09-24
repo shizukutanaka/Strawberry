@@ -80,37 +80,28 @@ describe('buildPreemptionNotice', () => {
   });
 });
 
-describe('preemptionSettlement', () => {
+describe('preemptionDelivery', () => {
   const order = { startedAt: '2026-08-01T00:00:00.000Z', durationMinutes: 60 };
 
-  it('charges strictly for delivered time', () => {
+  it('measures delivered time from start to stop', () => {
     const halfway = Date.parse('2026-08-01T00:30:00.000Z');
-    const s = spot.preemptionSettlement(order, halfway);
-    expect(s.deliveredSeconds).toBe(1800);
-    expect(s.usage.deliveredRatio).toBeCloseTo(0.5, 6);
+    const d = spot.preemptionDelivery(order, halfway);
+    expect(d.deliveredSeconds).toBe(1800);
+    expect(d.deliveredRatio).toBeCloseTo(0.5, 6);
   });
 
-  it('disables the minimum charge floor — this is what blocks zero-work billing', () => {
-    // floor が残ると「受注→即中断→最低課金だけ回収」を繰り返せてしまう
-    const s = spot.preemptionSettlement(order, Date.parse('2026-08-01T00:00:00.000Z'));
-    expect(s.opts.minChargeRatio).toBe(0);
-    expect(s.usage.deliveredRatio).toBe(0);
-  });
-
-  it('does not treat a preemption as an SLA breach', () => {
-    // 仕様どおりに中断したプロバイダを SLA ペナルティで罰してはならない
-    expect(spot.preemptionSettlement(order, Date.now()).usage.slaUptimePct).toBe(100);
+  it('reports zero delivery for an instant preemption', () => {
+    expect(spot.preemptionDelivery(order, Date.parse('2026-08-01T00:00:00.000Z')).deliveredRatio).toBe(0);
   });
 
   it('never exceeds the full reservation even if the clock overruns', () => {
-    const s = spot.preemptionSettlement(order, Date.parse('2026-08-01T09:00:00.000Z'));
-    expect(s.usage.deliveredRatio).toBe(1);
+    expect(spot.preemptionDelivery(order, Date.parse('2026-08-01T09:00:00.000Z')).deliveredRatio).toBe(1);
   });
 
   it('is safe when the order never started or has no duration', () => {
-    expect(spot.preemptionSettlement({ durationMinutes: 60 }, Date.now()).usage.deliveredRatio).toBe(0);
-    expect(spot.preemptionSettlement({ startedAt: order.startedAt }, Date.now()).usage.deliveredRatio).toBe(0);
-    expect(spot.preemptionSettlement().usage.deliveredRatio).toBe(0);
+    expect(spot.preemptionDelivery({ durationMinutes: 60 }, Date.now()).deliveredRatio).toBe(0);
+    expect(spot.preemptionDelivery({ startedAt: order.startedAt }, Date.now()).deliveredRatio).toBe(0);
+    expect(spot.preemptionDelivery().deliveredRatio).toBe(0);
   });
 });
 

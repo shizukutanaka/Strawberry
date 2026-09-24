@@ -90,7 +90,7 @@ describe('notify modules disable redirect following in their shared axios config
   // （`src/utils/resilient-notify.js` を検証していたケースは削除。モジュール自体が
   //   どこからも require されておらず、到達不能なコードの堅牢性を検証していた。
   //   2026-08 のデッドコード掃除でモジュールごと削除。live な通知経路である
-  //   notifier.js / webhook.js の検証はそのまま残している。）
+  //   notifier.js の検証はそのまま残している。）
 });
 
 // ── Integration: notifier send funcs reject a redirecting webhook ───────────────

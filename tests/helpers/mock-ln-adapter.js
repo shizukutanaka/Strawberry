@@ -1,5 +1,5 @@
-// src/payments/ln-adapter.js
-// Lightning アダプタ・インターフェース（docs/SPECIFICATION.md §6: LN 実機結線）。
+// tests/helpers/mock-ln-adapter.js
+// Lightning アダプタ・インターフェースの Mock 実装（docs/SPECIFICATION.md §6: LN 実機結線）。
 // エスクロー(hold invoice)操作を実装非依存の IF に抽象化する。実機は LND/CLN gRPC で
 // 実装し、テスト/開発は MockLnAdapter を使う。escrow の actions はこの IF 経由で実行する。
 //

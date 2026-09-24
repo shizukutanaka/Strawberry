@@ -1196,6 +1196,32 @@ src/ 全ファイルの export 名を総当たり:
   全て（app.js が全 import）、全ルートファイル（server.js/routes/index.js で
   マウント済み）、data/（.gitignore 済み・未追跡）。
 
+### 第97ラウンド（ソクラテス式問答 — 「中間層（ミドルウェア・リポジトリ・設定キー）に死 export はないか？」）
+
+- 機械監査、死面ゼロ: middleware 10ファイル全 export（authenticateJWT/checkRole/
+  resolveSecret/ip-key 3件/masterSession/revoke/isRevoked/cache 3件/logger 4件/
+  security 5件）、db/json 全 finders（7リポジトリ・宣言的 getByXxx 全て消費者あり）、
+  config.js 全キー（rateLimitMax/jwt*ExpiresIn/bcryptRounds/corsOrigins/
+  minMemoryGB/certPath/macaroonPath/invoiceExpiry/min+maxPaymentSatoshis）、
+  notifier 全 export（sendNotification/NotifyType/withRetry）、api/utils 8ファイル、
+  order/index.js のヘルパー5件（_deleteHeartbeatsForOrder/reapUsageSessions/
+  sweepHeartbeatSlaBreaches/resolvePositiveIntEnv/_checkOrderCreateRateLimit）、
+  全ルート + server.js の require で未使用ゼロ。
+- 判定して残した面: `detectIntelGPUsWindows`（ベンダー対称 API）、notification-settings の
+  PRIVATE_IP_PATTERNS regex と ssrf-guard assertPublicUrl は設計上の多層防御
+  （保存時の軽量regex + 送信時のDNS解決）で重複ではない、config.json ロード経路
+  （小さなドーマント機能、未文書化だが getConfig が毎回呼ぶ生コード）。
+
+### 第98ラウンド（ソクラテス式問答 — 「コメントが削除済モジュールを現役のように参照していないか？」）
+
+- `middleware/audit.js` の `audit-anchor` 言及 → 削除済モジュール名を除去
+  （verifyAuditLogIntegrity のみ残す）。
+- `middleware/jwt-auth.js` の `GraphQL` 言及（削除済 GraphQL エンドポイント）を除去。
+- `tests/helpers/mock-ln-adapter.js` 冒頭の `// src/payments/ln-adapter.js` —
+  削除済ファイルのパスをコメントしていた → Mock 実装の自己言及へ修正。
+- 残した面: action-executor/gpu-attestation-verifier の「ln-adapter」はファイル名ではなく
+  DI インタフェース名として正当、probe34 の「(removed) GraphQL」は歴史記述として正当。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

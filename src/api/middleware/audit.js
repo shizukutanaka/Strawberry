@@ -5,7 +5,7 @@ const { sanitizeSensitiveFields } = require('../../utils/sanitize');
 // HTTP リクエスト監査の出力先。
 // 重要: 改ざん検知ハッシュチェーン(src/utils/audit-log.js)が管理する logs/audit.log とは
 // 別ファイルにする。同一ファイルへ追記すると、ハッシュチェーンに含まれない本ミドルウェアの
-// エントリが間に挟まり、verifyAuditLogIntegrity / audit-anchor の検証が常に失敗していた。
+// エントリが間に挟まり、verifyAuditLogIntegrity の検証が常に失敗していた。
 const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../../../logs/access-audit.log');
 
 function auditLogger(req, res, next) {

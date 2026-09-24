@@ -42,7 +42,7 @@ module.exports = function(req, res, next) {
       return res.status(401).json({ error: '無効なトークン' });
     }
     // パスワード変更・全セッション失効（リフレッシュ再利用検知等）後のトークンを拒否
-    // （security.js / GraphQL / refresh と同一ポリシーを共有ヘルパーに集約）。
+    // （security.js / refresh と同一ポリシーを共有ヘルパーに集約）。
     const tokenUser = UserRepository.getById(payload.id);
     if (!tokenUser || tokenUser.status === 'deactivated') {
       return res.status(401).json({ error: '無効なトークン' });

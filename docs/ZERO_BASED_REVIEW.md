@@ -2117,6 +2117,26 @@ src/ 全ファイルの export 名を総当たり:
   字列と除外対象が衝突しないか確認必須（第95/124 型の再発）。
 - **監査して生存**: 宣言された制限は全て実装に配線済み — 「宣言のみ契約」なし。
 
+### 第149ラウンド（ソクラテス式問答 — 「withLock なしの書込みは競合するか？」）
+
+- **問い**: withLock を持たないファイルの repo 書込み（gpu/lifecycle ×6、
+  user/me ×4、user/admin ×2、payment/invoices ×2、order/sessions ×1）—
+  競合更新の面はないか。
+- **答え**: **全て契約強制済み、削除対象ゼロ** —
+  - `createJsonRepository` の create/update/delete は**全同期**（`readFileSync`
+    + `atomicWriteJSON` の temp+rename）。単一呼出しは単一 tick で不可分 —
+    単一プロセス内で部分書込み・撕裂は起きない。
+  - `withLock` の実目的は**複数ステップ非同期シーケンス**（check → await →
+    write の interleave 窓）の直列化で、それを必要とする order/escrow/
+    user auth 経路には全て配線済み。
+  - `order/sessions.js` は `updateIf`（compare-and-swap — load→predicate→write を
+    一同期区間で）で述語と書込みを結合。GPU PUT の重複名チェック→update も
+    同期連続（間に await なし）。
+  - 単一呼出し書込みにロックは不要 — 同期不可分なため。
+- **教訓**: 「withLock がない = 競合」は偽陽性 — ロック必要性は「await を挟む
+  複数ステップ」で判定する。単一プロセス前提の残存露出（複数プロセスからの
+  JSON lost-update）は §11 の設計判断項目として棚卸し済み。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

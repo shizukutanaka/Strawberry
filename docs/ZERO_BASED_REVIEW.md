@@ -1854,6 +1854,22 @@ src/ 全ファイルの export 名を総当たり:
 - **並走監査（死面ゼロ）**: routes/ 横断の内部関数名に他の複写なし
   （daysSinceCompletion の2件のみが嫌疑、上記）。
 
+### 第134ラウンド（ソクラテス式問答 — 「似た形のコードは本当に同じ契約か？」）
+
+- **問い**: probe が読まないルートファイルに 4行以上の複写ブロックが残るか？
+- **答え**: probe の require.resolve 対象ファイルを先に全列挙（mutations×12・
+  master-auth×10・auth×8・disputes×8 等）し、**非読み込みファイルのみ**を
+  対象にスライド窓スキャン。嫌疑は全て不適合と判定。
+  - `order-pay.js` の `PaymentRepository.create` 2箇所 — manual vs lightning で
+    paymentHash/paymentRequest/method/invoiceExpiresAt が実契約差。共通部だけ
+    抽出すると差分が散逸し可読性を損なうため温存
+  - `reads.js` の `} catch (error) { next(error); }` 連続ヒット — Express
+    asyncHandler の標準末尾パターンであり dedup 対象ではない
+  - ファイル冒頭の import 群一致 — ライセンス的な共通ヘッダ（dedup 非対象）
+- **方法論の改善**: dedup 監査は probe 契約ファイルを事前除外 — 第133ラウンドで
+  probe42/43 を撞いた失敗を手順化で防止。
+- **備考**: 複写系は probe 非制約面でも契約差または標準形のみ — dedup 面も収束。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -2137,6 +2137,31 @@ src/ 全ファイルの export 名を総当たり:
   複数ステップ」で判定する。単一プロセス前提の残存露出（複数プロセスからの
   JSON lost-update）は §11 の設計判断項目として棚卸し済み。
 
+### 第150ラウンド（ソクラテス式問答 — 「検査と更新の間に await が挟まるパスはどこか？」）
+
+- **問い**: `getById`/`getAll` → `await` → `create`/`update` の形を全ルートで
+  機械走査（read→await→write のパターン検出）。withLock/updateIf の外に残った
+  真の TOCTOU はどこか。
+- **答え**: **GPU 登録2経路に実 TOCTOU を修正** —
+  - `POST /gpus`: `getAll` でクォータ+重複チェック → `await attestation.verify`
+    → `GpuRepository.create` — 同一プロバイダの並行 POST が両方チェックを
+    通過して両方 create できた（重複名・クォータ超過）。
+  - `POST /gpus/bulk`: ループ先頭の `allGpusSnapshot` がループ内の
+    attestation await を挟んで stale 化 — bulk+bulk や bulk+単体の並行で同じ。
+  - 修正: 両経路を `withLock('gpu:create:' + providerId)` で包み、クォータ/
+    重複チェックから create まで同一ロックで直列化（プロバイダ単位なので
+    他プロバイダの登録は並行のまま）。cap 拒否は `{status,error}` を
+    ロックコールバックから返し応答形状を保持。
+- **監査して生存（他の await-挟まりは全て保護済み）**: mutations の cancel/
+  create（withLock または設計どおりの同期ブロック — コメントで明記）、
+  runtime.js の heartbeat/start（withLock）、btc-onchain/order-pay/auth（各
+  withLock）、sessions の updateIf CAS。me.js のパスワード更新は
+  `bcrypt.compare`→`hash`→`update` で read-modify-write だが、書き込みは
+  merge 型で last-writer-wins が意味的に正しい（同一ユーザーの2並行変更は
+  両方有効な新パスワードを設定 — 後勝ちは許容）。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・53秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -13,6 +13,7 @@ const WatchRepository = require('../../../db/json/WatchRepository');
 const { createMockAttestationVerifier } = require('../../../security/gpu-attestation-verifier');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { appendAuditLog } = require('../../../utils/audit-log');
+const { withLock } = require('../../../utils/async-lock');
 const { notifyPriceWatchers } = require('../../../services/price-watch');
 
 const _attestationVerifier = createMockAttestationVerifier();
@@ -40,60 +41,68 @@ router.post('/',
     })();
     // getAll() は呼び出す度に gpus.json を同期読み込み+パースするためキャッシュしない。
     // クォータチェックと重複チェックで別々に呼ぶと 1 リクエストで 2 回のディスク I/O が
-    // 発生するため、1 回のロードを両方のチェックで再利用する。
-    const allGpus = GpuRepository.getAll();
-    if (req.user.role !== 'admin') {
-      const providerGpuCount = allGpus.filter(g => g.providerId === req.user.id).length;
-      if (providerGpuCount >= MAX_GPUS) {
-        return res.status(429).json({ error: `GPU registration limit reached (max ${MAX_GPUS} per provider)` });
-      }
-    }
-
-    // 重複登録チェック（model, vendor, providerId, memoryGB）
-    const duplicate = allGpus.find(g =>
-      g.name === gpuInfo.name &&
-      g.model === gpuInfo.model &&
-      g.vendor === gpuInfo.vendor &&
-      g.memoryGB === gpuInfo.memoryGB &&
-      g.providerId === req.user.id
-    );
-    if (duplicate) {
-      return res.status(409).json({ error: 'Duplicate GPU spec already registered' });
-    }
-    // ユーザーIDを設定
-    gpuInfo.providerId = req.user.id;
-    // クロスベンダー用のcapabilities自動補完
-    gpuInfo.capabilities = gpuInfo.capabilities || {};
-    if (gpuInfo.apiType === 'CUDA') gpuInfo.capabilities.cuda = true;
-    if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
-    if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
-    if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
-
-    // GPU アテステーション（任意）— validatedBody から読む（Joi で許可フィールドを限定済み）。
-    // req.body から直接読むと攻撃者が任意フィールドを注入し検証を欺けるため必ず validated 側を使う。
-    const attestationReport = (req.validatedBody || {}).attestationReport;
-    if (attestationReport) {
-      try {
-        const attResult = await _attestationVerifier.verify(gpuInfo, attestationReport);
-        gpuInfo.attestation = {
-          passed: attResult.passed,
-          score: attResult.score,
-          findings: attResult.findings,
-          verifiedAt: new Date().toISOString(),
-        };
-        if (!attResult.passed) {
-          logger.warn(`[GPU登録] アテステーション失敗: providerId=${req.user.id} score=${attResult.score} findings=${attResult.findings.join('; ')}`);
+    // 発生するため、1 回のロードを��方のチェックで再利用する。
+    // getAll → attestation(await) → create の間に同一プロバイダの別リクエストが
+    // 挟まるとクォータ/重複チェックが stale になるため、プロバイダ単位で直列化する。
+    const createResult = await withLock(`gpu:create:${req.user.id}`, async () => {
+      const allGpus = GpuRepository.getAll();
+      if (req.user.role !== 'admin') {
+        const providerGpuCount = allGpus.filter(g => g.providerId === req.user.id).length;
+        if (providerGpuCount >= MAX_GPUS) {
+          return { status: 429, error: `GPU registration limit reached (max ${MAX_GPUS} per provider)` };
         }
-      } catch (attErr) {
-        logger.warn(`[GPU登録] アテステーション検証エラー（スキップ）: ${attErr.message}`);
-        gpuInfo.attestation = { passed: false, score: 0, findings: ['verifier error: ' + attErr.message], verifiedAt: new Date().toISOString() };
       }
-    } else {
-      gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
-    }
 
-    // ファイル永続化リポジトリに登録
-    const registeredGpu = GpuRepository.create(gpuInfo);
+      // 重複登録チェック（model, vendor, providerId, memoryGB）
+      const duplicate = allGpus.find(g =>
+        g.name === gpuInfo.name &&
+        g.model === gpuInfo.model &&
+        g.vendor === gpuInfo.vendor &&
+        g.memoryGB === gpuInfo.memoryGB &&
+        g.providerId === req.user.id
+      );
+      if (duplicate) {
+        return { status: 409, error: 'Duplicate GPU spec already registered' };
+      }
+      // ユーザーIDを設定
+      gpuInfo.providerId = req.user.id;
+      // クロスベンダー用のcapabilities自動補完
+      gpuInfo.capabilities = gpuInfo.capabilities || {};
+      if (gpuInfo.apiType === 'CUDA') gpuInfo.capabilities.cuda = true;
+      if (gpuInfo.apiType === 'ROCm') gpuInfo.capabilities.rocm = true;
+      if (gpuInfo.apiType === 'oneAPI') gpuInfo.capabilities.oneapi = true;
+      if (gpuInfo.apiType === 'OpenCL') gpuInfo.capabilities.opencl = true;
+
+      // GPU アテステーション（任意）— validatedBody から読む（Joi で許可フィールドを限定済み）。
+      // req.body から直接読むと攻撃者が任意フィールドを注入し検証を欺けるため必ず validated 側を使う。
+      const attestationReport = (req.validatedBody || {}).attestationReport;
+      if (attestationReport) {
+        try {
+          const attResult = await _attestationVerifier.verify(gpuInfo, attestationReport);
+          gpuInfo.attestation = {
+            passed: attResult.passed,
+            score: attResult.score,
+            findings: attResult.findings,
+            verifiedAt: new Date().toISOString(),
+          };
+          if (!attResult.passed) {
+            logger.warn(`[GPU登録] アテステーション失敗: providerId=${req.user.id} score=${attResult.score} findings=${attResult.findings.join('; ')}`);
+          }
+        } catch (attErr) {
+          logger.warn(`[GPU登録] アテステーション検証エラー（スキップ）: ${attErr.message}`);
+          gpuInfo.attestation = { passed: false, score: 0, findings: ['verifier error: ' + attErr.message], verifiedAt: new Date().toISOString() };
+        }
+      } else {
+        gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
+      }
+
+      // ファイル永続化リポジトリに登録
+      return { gpu: GpuRepository.create(gpuInfo) };
+    });
+    if (createResult.error) {
+      return res.status(createResult.status).json({ error: createResult.error });
+    }
+    const registeredGpu = createResult.gpu;
     // GPUイベントをログに記録
     logger.gpuEvent('gpu_registered', {
       gpuId: registeredGpu.id,
@@ -215,21 +224,22 @@ router.post('/bulk',
     })();
     // getAll() は呼ぶ度に gpus.json を同期読み込み+パースする（キャッシュなし）。
     // バッチ内の重複は below の batchKeys（name|model|vendor|memoryGB — 既存重複
-    // チェックと同一の一致条件）で完全にカバーされるため、既存データに対する
-    // 重複チェックはループ開始前の1回のスナップショットで十分。
-    const allGpusSnapshot = GpuRepository.getAll();
-    if (req.user.role !== 'admin') {
-      const currentCount = allGpusSnapshot.filter(g => g.providerId === req.user.id).length;
-      if (currentCount + entries.length > MAX_GPUS_BULK) {
-        return res.status(429).json({
-          error: `Would exceed GPU registration limit. Current: ${currentCount}, limit: ${MAX_GPUS_BULK}, requested: ${entries.length}`,
-        });
+    // チェックと同一の一致条件）で完全にカバーされる。
+    // 単体登録と同じ TOCTOU: snapshot → attestation(await) → create の間に同一
+    // プロバイダの別リクエストが挟まるとスナップショットが stale になるため、
+    // 同一キーのロックでクォータ/重複チェックから create まで直列化する。
+    const bulkResult = await withLock(`gpu:create:${req.user.id}`, async () => {
+      const allGpusSnapshot = GpuRepository.getAll();
+      if (req.user.role !== 'admin') {
+        const currentCount = allGpusSnapshot.filter(g => g.providerId === req.user.id).length;
+        if (currentCount + entries.length > MAX_GPUS_BULK) {
+          return { status: 429, error: `Would exceed GPU registration limit. Current: ${currentCount}, limit: ${MAX_GPUS_BULK}, requested: ${entries.length}` };
+        }
       }
-    }
-    const gpuSchemas = schemas.gpu;
-    const results = [];
-    const batchKeys = new Set();
-    for (const entry of entries) {
+      const gpuSchemas = schemas.gpu;
+      const results = [];
+      const batchKeys = new Set();
+      for (const entry of entries) {
       const { error: valErr, value } = gpuSchemas.register.validate(entry, { abortEarly: false, stripUnknown: true });
       if (valErr) {
         results.push({ success: false, id: entry.id || null, error: valErr.details.map(d => d.message).join('; ') });
@@ -286,7 +296,13 @@ router.post('/bulk',
       const registered = GpuRepository.create(gpuInfo);
       const { apiKey: _k, ...safe } = registered;
       results.push({ success: true, gpu: safe });
+      }
+      return { results };
+    });
+    if (bulkResult.error) {
+      return res.status(bulkResult.status).json({ error: bulkResult.error });
     }
+    const results = bulkResult.results;
     const successCount = results.filter(r => r.success).length;
     res.status(successCount > 0 ? 201 : 400).json({ registered: successCount, total: entries.length, results });
   })

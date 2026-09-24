@@ -1994,6 +1994,22 @@ src/ 全ファイルの export 名を総当たり:
   （SLA 掃討+reap）。
 - `npx jest --forceExit` 全緑: 115/115・1,045・54秒。
 
+### 第142ラウンド（ソクラテス式問答 — 「ログはディスクを食い尽くさないか？」）
+
+- **問い**: `access-audit.log`（全 HTTP リクエスト）・`db-access.log`（UserRepository
+  の全アクセス）・`gpu-events.log` はローテーション・サイズ上限なく素追記 —
+  トラフィックに比例してディスクを枯渇させるのでは？
+- **答え**: **`src/utils/bounded-append.js` を新設して3箇所を境界化**。
+  上限到達時は `file.log → file.log.1` へロールオーバーして新ファイルを開始
+  — audit-log.js の「上限で追記停止（以後の証跡が暗くなる）」より、直近の
+  証跡を残す方がフォレンジック補助ログでは有効。ディスク使用は最大2×上限で
+  境界化。上限は既存の `MAX_AUDIT_LOG_MB`（既定50MB）を共有。
+- **監査して生存（契約強制済み）**: winston ファイル転送（maxsize 10MB +
+  maxFiles 5 でローテーション済）、`audit.log` ハッシュチェーン（
+  MAX_AUDIT_LOG_BYTES で drop+alert — ロールオーバーはチェーンを分断するため
+  drop 方式が正しい）。
+- `npx jest --forceExit` 全緑: 115/115・1,045・63秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { sanitizeSensitiveFields } = require('./sanitize');
 const { getRequestId, getTraceId } = require('./request-context');
+const { appendBoundedLine } = require('./bounded-append');
 
 // ログディレクトリ
 const logDir = path.join(__dirname, '../../logs');
@@ -167,7 +168,7 @@ logger.gpuEvent = (event, data) => {
     event,
     data: sanitizeSensitiveFields(data),
   };
-  fs.appendFileSync(gpuLogPath, JSON.stringify(logEntry) + '\n');
+  appendBoundedLine(gpuLogPath, JSON.stringify(logEntry) + '\n');
 };
 
 // ログ統計

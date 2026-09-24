@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { sanitizeSensitiveFields } = require('../../utils/sanitize');
+const { appendBoundedLine } = require('../../utils/bounded-append');
 // HTTP リクエスト監査の出力先。
 // 重要: 改ざん検知ハッシュチェーン(src/utils/audit-log.js)が管理する logs/audit.log とは
 // 別ファイルにする。同一ファイルへ追記すると、ハッシュチェーンに含まれない本ミドルウェアの
@@ -49,7 +50,7 @@ function auditLogger(req, res, next) {
 function writeAuditLog(entry) {
   try {
     fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    fs.appendFileSync(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
+    appendBoundedLine(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
   } catch (e) {
     // ログ失敗時はサイレント
   }

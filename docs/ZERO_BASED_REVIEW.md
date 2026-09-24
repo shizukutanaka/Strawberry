@@ -1104,6 +1104,51 @@ src/ 全ファイルの export 名を総当たり:
   「(test)」へ修正。
 - README の stale チェックリスト参照先を `docs/improvement-research-2026.md` へ修正。
 
+### 第88ラウンド（ソクラテス式問答 — 「環境変数・依存・スクリプト・CSS/マークアップに死面はないか？」）
+
+- `process.env.X` 全65 read を .env.example と照合: 全てコメント記載あり
+  （safeInt/requireSecret 経由の読み取りは grep で拾えない偽陰性を含む。
+  CI/HOME は標準環境変数で非文書対象）。文書化のみで未読の変数なし。
+- package.json 依存24件・dev3件・scripts19件: 全て require/参照経路実在
+  （scripts/ の3孤児に見えたファイルも兄弟スクリプト・CI・docs から結線済）。
+- public/: 全ページモジュール import 済・全 id 参照済・CSS 82クラス中
+  動的生成分（badge-*/chip-*/toast-*/active/done/invalid/ok）を除き死クラスなし。
+- src/ 全ファイル到達可能（require グラフ走査で孤児ゼロ）。削除ゼロのラウンド。
+
+### 第89ラウンド（ソクラテス式問答 — 「export でも呼出しでもない宣言はないか？」）
+
+- `src/utils/notifier.js` の `sendEmailNotify` は宣言のみ・呼出しゼロ
+  （EMAIL 経路は `src/utils/email.js` の sendEmailNotification を使用）。削除。
+- `public/js/rate.js` の `satsToJpy` は export されているが外部消費者なし
+  （priceLine からの内部利用のみ）。export を除去。
+
+### 第90ラウンド（ソクラテス式問答 — 「前回の require ホイスト方針に漏れはないか？」）
+
+- `routes/order/index.js` の `require('../gpu/index')`（レビュー後キャッシュ無効化）と
+  後方に残っていた sanitize/cache 2 require を冒頭へ集約（gpu→order の逆向き参照は
+  存在せず循環なし）。
+- `marketplace.js` のハンドラ内遅延 require 3サイト（OrderRepository/GpuRepository）
+  を冒頭へ。`payment/index.js` の `/btc` マウント内 require を変数化して冒頭へ。
+- `notification-settings.js` の inline `require('fs')` ×2 を冒頭の `const fs` へ。
+- `routes/index.js` の中盤 require 3件（rateLimit/auditLogger/errorMiddleware）を
+  冒頭へ（errorMiddleware は error-handler の既存 import へ統合）。
+
+### 第91ラウンド（ソクラテス式問答 — 「仕様書・コメントが削除済み要素を実在として語っていないか？」）
+
+- SPECIFICATION.md を実態へ同期: merkle-anchor/audit-anchor/ln-adapter は削除済と
+  記す、escrow/verification/attestation/feature-pricer/OTel の配線ステータスを更新、
+  テスト数 40/215 → 115/1,045 へ修正、付録から削除済3モジュールを除去。
+- `order/index.js` の wash-trade コメントが削除済み関数 `recordJobResult` を
+  参照していた — 稼働実績の記述へ修正。
+- PRODUCT_ANALYSIS.md は冒頭にスナップショット免責済みのため対象外。
+- ZERO_BASED_REVIEW.md 自体の削除済ファイル言及は台帳として正当（対象外）。
+
+### 第92ラウンド（ソクラテス式問答 — 「test と名付きながら走らないファイルはないか？」）
+
+- `tests/unit/test_exchange_rate.js` は jest testMatch (`*.test.js`) に非適合で
+  一度も実行されていない死テスト。Mocha API (`this.timeout`) 使用・実外部 API を
+  叩く・同対象の正当な jest テスト `exchange-rate-swr.test.js` が存在。削除。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

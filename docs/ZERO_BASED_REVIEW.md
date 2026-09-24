@@ -1808,6 +1808,22 @@ src/ 全ファイルの export 名を総当たり:
 - **備考**: 削除系監査面の完全収束を継続確認 — 4 連続検証ラウンド（127–130）で
   削除対象ゼロ。残るは §11 の設計判断2件（実装領域）のみ。
 
+### 第131ラウンド（ソクラテス式問答 — 「層ごとに export は全て消費されているか？」）
+
+- **問い**: utils/middleware/services/core/payments/verification 各層の export を
+  層別に全照合したら、消費者なしの面が残るか？
+- **答え**: ゼロ — 全層完全消費を機械確認。
+  - `src/utils` 全42 export（validator/sanitize/notifier/error-handler/ssrf-guard/
+    sliding-window-limit/pagination/exchange-rate/order-expiry/order-pricing/
+    process-guards/request-context/async-lock/audit-log/config/email/logger/
+    state-checker/user-notify）→ 外部消費者全件存在
+  - `src/api/middleware` 全10ファイル24 export（jwt-auth/rbac/security/rate-limit/
+    cache/audit/logger/token-denylist/ip-key/master-session）→ 全件存在
+  - `src/services`+`core`+`payments`+`verification`+`reputation`+`security`+
+    `pricing`+`db/json` 層36 export → 全件2ファイル以上の消費者
+- **判定**: export 面は層別総当たりで完全収束。これ以上の層別再走査は
+  同一面の反復になるため、次は「export ではない内部記述」方向が唯一の残存面。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

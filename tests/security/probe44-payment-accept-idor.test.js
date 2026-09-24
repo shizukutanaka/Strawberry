@@ -66,18 +66,18 @@ describe('payment creation: userId stored from order owner, not creator', () => 
 
 // ─── 44b-1: /accept updateIf re-checks GPU ownership atomically ───────────
 describe('/accept: GPU ownership verified inside updateIf predicate', () => {
-  it('order/index.js: updateIf predicate for accept re-checks GPU providerId', () => {
+  it('order/mutations.js: updateIf predicate for accept re-checks GPU providerId', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     // The predicate passed to updateIf must include a GPU ownership check
     expect(src).toMatch(/GpuRepository\.getById\(o\.gpuId\)/);
     expect(src).toMatch(/freshGpu.*providerId.*acceptingUserId|acceptingUserId.*freshGpu.*providerId/s);
   });
 
-  it('order/index.js: admin role bypasses GPU ownership re-check inside predicate', () => {
+  it('order/mutations.js: admin role bypasses GPU ownership re-check inside predicate', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     // Admin path should skip the GPU ownership check
     expect(src).toMatch(/req\.user\.role\s*===\s*['"]admin['"]\s*\|\|/);

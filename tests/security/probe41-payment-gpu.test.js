@@ -117,9 +117,9 @@ describe('order creation: minRenterRating floor policy', () => {
     expect(r.hasHistory).toBe(true);
   });
 
-  it('order/index.js delegates the eligibility check to the shared module', () => {
+  it('order/mutations.js delegates the eligibility check to the shared module', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     // Must use the single source of truth, not a re-implemented inline check.
     expect(src).toMatch(/evaluateRenterEligibility/);

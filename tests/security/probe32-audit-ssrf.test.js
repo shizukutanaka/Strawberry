@@ -69,9 +69,9 @@ describe('Audit log: sensitive operations are now recorded', () => {
     expect(src).toMatch(/appendAuditLog\('user_payout_address_changed'/);
   });
 
-  it('order/index.js: admin status override calls appendAuditLog', () => {
+  it('order/mutations.js: admin status override calls appendAuditLog', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     expect(src).toMatch(/appendAuditLog\('admin_order_status_override'/);
     expect(src).toMatch(/adminId.*req\.user\.id/);

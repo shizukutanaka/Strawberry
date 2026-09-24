@@ -147,7 +147,7 @@ describe('GPU: /accept TOCTOU — ex-provider blocked after GPU reassignment', (
     // Since the PUT sanitizes to allowed fields only, providerId cannot be changed via PUT.
     // This test verifies the source-level guard exists.
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     expect(src).toMatch(/gpu\.providerId !== req\.user\.id/);
     expect(src).toMatch(/GPU ownership has changed/);

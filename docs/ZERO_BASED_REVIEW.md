@@ -1435,6 +1435,26 @@ src/ 全ファイルの export 名を総当たり:
 - **結果**: payment/index.js 516 → 14行。routes/ 全ファイルが300行以下
   （最大は order/reads.js 333行と order/index.js 665行の mount+mutation 層）。
 
+### 第108ラウンド（ソクラテス式問答 — 「order/index.js の残り669行はまだ2役か？」）
+
+- 問い: 分割後も index.js が mount 層＋mutation ハンドラ5件＋レート制限
+  状態を同居させている — gpu/user/payment の「index = mount のみ」の
+  パターンと不整合では？ → 不整合。mutation 群を `mutations.js` へ抽出。
+- **抽出**: `mutations.js`（648行）— PUT/DELETE/POST/・reject/accept +
+  `BLOCKING_ORDER_STATUSES`・`MAX_ORDER_SCHEDULE_AHEAD_DAYS`・
+  `resolvePositiveIntEnv`・作成レート制限状態（`_orderCreateRateState`・
+  `_checkOrderCreateRateLimit` — 消費者は POST / のみのため同梱）。
+- **結合面**: index.js は25行 — sessions.js のテストフック re-export 4件 +
+  mounts（reads→runtime→mutations→disputes、元の登録順を厳密保持）+
+  `mutations._checkOrderCreateRateLimit` の再公開（probe64 の既存フック互換）。
+- **probe 参照更新**: order/index.js を直読みする8ファイル計11箇所は全て
+  mutation ハンドラ狙い（cancel=PUT・DELETE・POST /・accept predicate・
+  admin status audit）— 一括 mutations.js へ（アサーション不変）。
+- **結果**: order/index.js 669 → 25行。routes/ 配下は全てマウント層か
+  ドメイン別サブルータのみ — 第102–108ラウンドでルート層のモノリス化は
+  完全に解消（order 1,800 → 6ファイル、gpu 1,125 → 5、user 816 → 4、
+  payment 516 → 5）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

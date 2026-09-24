@@ -13,7 +13,7 @@
 //
 //   1. src/utils/order-pricing.js computeOrderPricing() — used for order list/
 //      detail display.
-//   2. src/api/routes/order/index.js order-creation handler — computes and
+//   2. src/api/routes/order/mutations.js order-creation handler — computes and
 //      PERSISTS totalPriceJPY at order creation (the authoritative on-disk
 //      value used later for admin GMV stats and earnings summaries).
 //
@@ -81,9 +81,9 @@ describe('order-pricing.js source: divides by 1e8 before multiplying by the BTC/
   });
 });
 
-describe('order/index.js source: order-creation totalPriceJPY also divides by 1e8', () => {
+describe('order/mutations.js source: order-creation totalPriceJPY also divides by 1e8', () => {
   const src = require('fs').readFileSync(
-    require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+    require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
   );
 
   it('order-creation rawJPY computation includes a sats→BTC conversion (/ 1e8)', () => {

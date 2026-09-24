@@ -21,9 +21,9 @@ afterAll(() => {
 
 // ─── 40a-2: Cancel uses withLock ─────────────────────────────────────────────
 describe('DELETE /orders/:id cancel: withLock prevents double escrow cancel', () => {
-  it('order/index.js: cancel handler wraps escrowSvc.cancel inside withLock', () => {
+  it('order/mutations.js: cancel handler wraps escrowSvc.cancel inside withLock', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     const lockIdx = src.indexOf("withLock(`order:${order.id}:cancel`");
     expect(lockIdx).toBeGreaterThan(-1);
@@ -34,9 +34,9 @@ describe('DELETE /orders/:id cancel: withLock prevents double escrow cancel', ()
     expect(afterLock).toMatch(/end withLock\(cancel\)/);
   });
 
-  it('order/index.js: cancel handler re-reads fresh order state inside the lock', () => {
+  it('order/mutations.js: cancel handler re-reads fresh order state inside the lock', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     // Fresh read inside the lock: freshOrder = OrderRepository.getById(order.id)
     expect(src).toMatch(/freshOrder.*OrderRepository\.getById\(order\.id\)/);

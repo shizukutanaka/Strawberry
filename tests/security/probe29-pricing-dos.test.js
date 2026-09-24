@@ -91,9 +91,9 @@ describe('NaN guards exist in source', () => {
     expect(src).toMatch(/Number\.isFinite.*rawJPY|Number\.isFinite.*totalPriceJPY/);
   });
 
-  it('order/index.js has Number.isFinite guard for satoshiToJPY product', () => {
+  it('order/mutations.js has Number.isFinite guard for satoshiToJPY product', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     expect(src).toMatch(/Number\.isFinite.*rawJPY/);
   });

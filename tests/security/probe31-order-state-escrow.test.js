@@ -99,9 +99,9 @@ describe('Admin PUT /:id: status=completed is blocked', () => {
 
 // ─── 2. Source: PUT → cancelled triggers escrow cancel, not swallowed ────────
 describe('Source guards: admin PUT status=cancelled and DELETE escrow handling', () => {
-  it('order/index.js: PUT handler cancels escrow before changing order status', () => {
+  it('order/mutations.js: PUT handler cancels escrow before changing order status', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     // Must check updateData.status === 'cancelled' and call escrowSvc.cancel() in PUT handler
     expect(src).toMatch(/updateData\.status === 'cancelled'/);
@@ -110,17 +110,17 @@ describe('Source guards: admin PUT status=cancelled and DELETE escrow handling',
     expect(cancelMatches).toBeGreaterThanOrEqual(2); // at least DELETE + PUT
   });
 
-  it("order/index.js: PUT handler blocks 'completed' status", () => {
+  it("order/mutations.js: PUT handler blocks 'completed' status", () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     expect(src).toMatch(/sanitized\.status === 'completed'/);
     expect(src).toMatch(/Use POST.*stop.*to complete/);
   });
 
-  it('order/index.js: DELETE handler does NOT silently swallow HELD escrow cancel failures', () => {
+  it('order/mutations.js: DELETE handler does NOT silently swallow HELD escrow cancel failures', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/mutations.js'), 'utf-8'
     );
     // Must distinguish HELD escrows from non-HELD (no blanket try/catch around HELD cancel)
     expect(src).toMatch(/escrow\.state === 'HELD'/);

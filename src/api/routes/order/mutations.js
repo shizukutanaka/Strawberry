@@ -11,7 +11,7 @@ const { authenticateJWT, allowOwnerOrAdmin } = require('../../middleware/securit
 const { withLock } = require('../../../utils/async-lock');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
-const { escrowService } = require('./escrow');
+const { escrowService, cancelEscrowsForOrder } = require('./escrow');
 const GpuRepository = require('../../../db/json/GpuRepository');
 const { notifyUser } = require('../../../utils/user-notify');
 const { computeRenterRating, evaluateRenterEligibility } = require('../../../services/renter-eligibility');
@@ -553,21 +553,7 @@ router.post('/:id/reject',
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before reject could complete; please retry', 409);
     }
     // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
-    try {
-      const escrows = EscrowRepository.getByOrderId(order.id);
-      if (Array.isArray(escrows) && escrows.length > 0) {
-        const escrowSvc = escrowService();
-        for (const escrow of escrows) {
-          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
-            try { escrowSvc.cancel(escrow.id); } catch (e) {
-              logger.warn(`Escrow cancel failed on reject (id=${escrow.id}): ${e.message}`);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      logger.warn(`Escrow lookup on order reject failed (order=${order.id}): ${e.message}`);
-    }
+    cancelEscrowsForOrder(order.id, 'order reject');
     // 借り手（レンター）へ通知
     const gpuName = gpu ? gpu.name : order.gpuId;
     notifyUser(order.userId, 'order_rejected',

@@ -10,7 +10,7 @@ const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');
-const { escrowService } = require('./escrow');
+const { escrowService, cancelEscrowsForOrder } = require('./escrow');
 const GpuRepository = require('../../../db/json/GpuRepository');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 const UserRepository = require('../../../db/json/UserRepository');
@@ -157,19 +157,7 @@ router.post('/:id/dispute/resolve',
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
       }
       // エスクロー返金（存在すれば、ベストエフォート）
-      try {
-          const escrows = EscrowRepository.getByOrderId(order.id);
-        if (Array.isArray(escrows) && escrows.length > 0) {
-            const escrowSvc = escrowService();
-          for (const e of escrows) {
-            if (!['CANCELED', 'SETTLED'].includes(e.state)) {
-              try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
-            }
-          }
-        }
-      } catch (e) {
-        logger.warn(`Escrow refund on dispute resolve failed (order=${order.id}): ${e.message}`);
-      }
+      cancelEscrowsForOrder(order.id, 'dispute resolve');
       // 係争認容 = 申請者の主張は正当。申請者に「認容された係争」を加算する。
       // これにより申請者の「棄却率」が下がり、ゲート(#23の monotonic な永久バンを是正)から
       // 回復できる。正当な係争を多く起こす利用者を、数件の棄却で永久に締め出さない。

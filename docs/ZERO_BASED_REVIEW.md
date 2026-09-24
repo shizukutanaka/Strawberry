@@ -1583,6 +1583,20 @@ src/ 全ファイルの export 名を総当たり:
 - **差分の保存**: 100/20 版はレビュー系2エンドポイント固有契約として
   `{maxLimit:100, defaultLimit:20}` で保持 — 意味差を平坦化せず引数化。
 
+### 第117ラウンド（ソクラテス式問答 — 「ベストエフォート escrow cancel が3箇所ある理由は？」）
+
+- 問い: 「注文の未終了エスクローを全部 cancel」ブロックが mutations(reject)・
+  disputes(refund) で同一形 — 重複か？ → 接続先が同じなら真の重複。
+  ただし意味差のある2箇所は統合対象外:
+  - DELETE（HELD 失敗は致命的・伝播）— probe31 が `escrow.state === 'HELD'`・
+    `Non-critical escrow cancel failed`・`escrowSvc.cancel`≥2 をソース検証 → 温存。
+  - PUT（status=cancelled 時に全失敗を伝播・502）— 別契約 → 温存。
+- **集約**: `order/escrow.js` に `cancelEscrowsForOrder(orderId, context)` を追加
+  （lookup 失敗・個別失敗は warn のみ — reject/resolve-refund の best-effort 契約）。
+  mutations:reject・disputes:resolve-refund の2サイトを接続（−27行）。
+- 並走監査: `req.user.role !== 'admin'` 約30サイト・`sanitizeString().slice(0,N)`
+  6サイトは「バグを生む式」でなく単純比較/合成一貫のため統合価値なし・温存判定。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

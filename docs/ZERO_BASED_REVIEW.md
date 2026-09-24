@@ -2026,6 +2026,26 @@ src/ 全ファイルの export 名を総当たり:
   （窓ごとにリセット）。
 - `npx jest --forceExit` 全緑: 115/115・1,045・55秒。
 
+### 第144ラウンド（ソクラテス式問答 — 「全てのタイマーと蓄積は追跡・境界化されているか？」）
+
+- **問い**: ライフサイクル・保持契約の監査を2面で総走査 — (a) `setInterval`/
+  `setTimeout` を使う全ファイルに clear/unref があるか、(b) 残るインメモリ/
+  永続蓄積（notifications、watches、escrow、btc-onchain、audit-log キュー、
+  attestation/order-expiry）に境界があるか。
+- **答え**: **全て契約強制済み、削除対象ゼロ** —
+  - タイマー全8ファイル: runtime.js の1件はコメント言及、notifier.js の
+    `await new Promise(setTimeout(backoff))` は一回限りのリトライ遅延（await
+    で settle するまで参照保持 — 追跡不能でも漏洩でもない）。残りは全て
+    clear/unref/stop フック済み。
+  - `notifyUser`/`user-notify` はチャネル発信専用で蓄積なし（NotificationRepository
+    は存在しない — インバンド通知は外部チャネル経由のみ）。
+  - watches.json の発火済み price watch は削除されないが**契約として正しい**:
+    継続アラート（lastNotifiedAt で重複通知抑制）かつユーザー削除 API あり。
+  - `MAX_AUDIT_LOG_MB` は audit-log.js（drop+alert）と bounded-append.js
+    （rollover）が同一 env を参照し .env.example 記載済みで整合。
+- **監査して生存（契約強制済み）**: audit-log `_hashCache`（logPath でキー付き、
+  プロセス内定数個）、order-expiry/attestation-verifier（タイマー・Map なし）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

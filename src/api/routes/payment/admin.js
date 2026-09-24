@@ -4,7 +4,6 @@ const express = require('express');
 const router = express.Router();
 
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
-const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole } = require('../../middleware/security');
 const { lightning } = require('../../../core/services');
 const PaymentRepository = require('../../../db/json/PaymentRepository');

@@ -1916,6 +1916,27 @@ src/ 全ファイルの export 名を総当たり:
   notification-settings・profit-addresses 等）全て実モジュール、
   `/marketplace/stats` の特別扱い（stats は :id より先に照合済）も順序保証済。
 
+### 第138ラウンド（ソクラテス式問答 — 「shutdown() は本当にシャットダウンするか？」）
+
+- **問い**: `lightning-service.shutdown()` の「イベントストリームのクリーンアップ」が
+  `(実装省略)` のまま — シャットダウン後に再接続タイマーは止まるか？
+- **答え**: **実 lifecycle 欠陥を修正** — shutdown() がプレースホルダで、
+  invoice/channel ストリームの error/end/close ハンドラが発行する
+  `setTimeout(setupXStream, 5000)`×10 は unref も取消も停止ガードもなく、
+  シャットダウン後も最長5秒後に再サブスクライブを発火し続けていた。
+  - `this._stopped`/`_reconnectTimers`/`_streams` の追跡フィールドをコンストラクタへ
+  - `_scheduleReconnect(fn)` を新設 — `_stopped` 時は早期return、タイマーは
+    unref して発火時にセットから除去、発火前にも `_stopped` を再検査
+  - 全10箇所の `setTimeout(setupX, 5000)` を `_scheduleReconnect` へ置換
+  - `shutdown()` にストリームクリーンアップを実装 — 全タイマー取消・
+    全ストリームの removeAllListeners + cancel/destroy（モックの
+    EventEmitter には存在しないため optional call）
+  - `initialize()` で `_stopped = false` リセット（再 init 対応）
+- **監査して生存**: 他の setInterval/setTimeout（invoice-poller・service-monitor・
+  server.js メトリクス・sessions の SLA 掃討・LN バックオフ）は全て
+  unref/clearInterval/テスト環境ガード済み — 本件が唯一の未管理ライフサイクル。
+- `npx jest --forceExit` 全緑: 115/115・1,045・52秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

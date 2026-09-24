@@ -55,6 +55,11 @@ class LightningService {
         this.maxChannels = 500;
         this.invoiceRetentionMs = 24 * 60 * 60 * 1000; // 24h
         this.paymentRetentionMs = 24 * 60 * 60 * 1000; // 24h
+        // shutdown 後にも再接続タイマーが発火しないよう、保留リスケジュールと
+        // 開いているイベントストリームを追跡する。
+        this._stopped = false;
+        this._reconnectTimers = new Set();
+        this._streams = new Set();
     }
 
     async initialize() {
@@ -71,6 +76,7 @@ class LightningService {
             await this.updateChannels();
             
             // イベントストリーム設定
+            this._stopped = false;
             this.setupEventStreams();
             
             // 定期タスク開始
@@ -620,16 +626,18 @@ class LightningService {
 
     setupEventStreams() {
         // 監査証跡
+        if (this._stopped) return;
 
         // イベントストリーム再接続ロジック
         const setupInvoiceStream = () => {
             let invoiceStream;
             try {
                 invoiceStream = this.lnd.subscribeInvoices({});
+                this._streams.add(invoiceStream);
             } catch (err) {
                 logger.error('Failed to subscribe to invoice stream', err);
                 appendAuditLog('invoice_stream_subscribe_error', { error: err.message });
-                setTimeout(setupInvoiceStream, 5000);
+                this._scheduleReconnect(setupInvoiceStream);
                 return;
             }
             invoiceStream.on('data', (invoice) => {
@@ -647,17 +655,17 @@ class LightningService {
                 logger.error('Invoice stream error:', error);
                 appendAuditLog('invoice_stream_error', { error: error.message });
                 // 自動再接続
-                setTimeout(setupInvoiceStream, 5000);
+                this._scheduleReconnect(setupInvoiceStream);
             });
             invoiceStream.on('end', () => {
                 logger.warn('Invoice stream ended, reconnecting...');
                 appendAuditLog('invoice_stream_end', {});
-                setTimeout(setupInvoiceStream, 5000);
+                this._scheduleReconnect(setupInvoiceStream);
             });
             invoiceStream.on('close', () => {
                 logger.warn('Invoice stream closed, reconnecting...');
                 appendAuditLog('invoice_stream_close', {});
-                setTimeout(setupInvoiceStream, 5000);
+                this._scheduleReconnect(setupInvoiceStream);
             });
         };
         setupInvoiceStream();
@@ -667,10 +675,11 @@ class LightningService {
             let channelStream;
             try {
                 channelStream = this.lnd.subscribeChannelEvents({});
+                this._streams.add(channelStream);
             } catch (err) {
                 logger.error('Failed to subscribe to channel stream', err);
                 appendAuditLog('channel_stream_subscribe_error', { error: err.message });
-                setTimeout(setupChannelStream, 5000);
+                this._scheduleReconnect(setupChannelStream);
                 return;
             }
             channelStream.on('data', (event) => {
@@ -687,17 +696,17 @@ class LightningService {
             channelStream.on('error', (error) => {
                 logger.error('Channel stream error:', error);
                 appendAuditLog('channel_stream_error', { error: error.message });
-                setTimeout(setupChannelStream, 5000);
+                this._scheduleReconnect(setupChannelStream);
             });
             channelStream.on('end', () => {
                 logger.warn('Channel stream ended, reconnecting...');
                 appendAuditLog('channel_stream_end', {});
-                setTimeout(setupChannelStream, 5000);
+                this._scheduleReconnect(setupChannelStream);
             });
             channelStream.on('close', () => {
                 logger.warn('Channel stream closed, reconnecting...');
                 appendAuditLog('channel_stream_close', {});
-                setTimeout(setupChannelStream, 5000);
+                this._scheduleReconnect(setupChannelStream);
             });
         };
         setupChannelStream();
@@ -926,13 +935,36 @@ class LightningService {
         return await this.sendPayment(paymentRequest, maxFeePercent);
     }
 
+    // shutdown 後に再接続タイマーが発火しないよう、保留中のリスケジュールを
+    // 追跡・取消可能にする（gRPC ストリームは error/end/close で5秒後に再接続する）。
+    _scheduleReconnect(fn) {
+        if (this._stopped) return;
+        const t = setTimeout(() => {
+            this._reconnectTimers.delete(t);
+            if (!this._stopped) fn();
+        }, 5000);
+        this._reconnectTimers.add(t);
+        if (t.unref) t.unref();
+    }
+
     async shutdown() {
         try {
             logger.info('Shutting down Lightning service...');
-            
-            // イベントストリームのクリーンアップ
-            // (実装省略)
-            
+
+            // イベントストリームのクリーンアップ: 再接続タイマーを全て取消し、
+            // 開いているストリームのリスナーと gRPC ハンドルを解放する。
+            this._stopped = true;
+            for (const t of this._reconnectTimers) clearTimeout(t);
+            this._reconnectTimers.clear();
+            for (const s of this._streams) {
+                try {
+                    s.removeAllListeners();
+                    s.cancel?.();
+                    s.destroy?.();
+                } catch (_) { /* ストリーム停止失敗は黙殺 — シャットダウンは続行する */ }
+            }
+            this._streams.clear();
+
             logger.info('Lightning service shutdown complete');
             
         } catch (error) {

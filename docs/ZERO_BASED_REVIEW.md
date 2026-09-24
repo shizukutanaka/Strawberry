@@ -1392,6 +1392,28 @@ src/ 全ファイルの export 名を総当たり:
 - **結果**: gpu/index.js 1,125 → 15行。routes/ 直下の最大ファイルは
   user/index.js（816行）が次の候補。
 
+### 第106ラウンド（ソクラテス式問答 — 「user/index.js の分割境界は何か？」）
+
+- 問い: 816行・15ハンドラの user/index.js のドメイン境界は？ 認証系・
+  セルフサービス系・管理者系の3ドメインが自然境界。GET/DELETE /me と
+  /:id のパラメータ衝突だけが唯一の順序制約（me を admin より先に mount）。
+- **抽出（3ファイル）**:
+  - `auth.js`（268行）— register・login・refresh・logout + `_DUMMY_HASH`・
+    ログイン失敗ロック状態（`_loginFailures`/`_recordLoginFailure`/
+    `_resetLoginFailures`/`_isLoginLocked` — 消費者は login のみのため同梱）。
+  - `me.js`（385行）— GET/DELETE/PUT /me・/me/password・/me/activity・
+    /me/watches + `ALLOWED_PROFILE_FIELDS`。
+  - `admin.js`（203行）— GET /・/:id・DELETE /:id・PUT /:id/role。
+- **結合面**: index.js は11行（mount のみ、auth→me→admin の順）。
+  モジュール外部の import（テストフック等）は存在しないことを確認済み。
+- **probe 参照更新（アサーション不変・パスのみ）**: 認証系→auth.js
+  （probe36/40/68/35/23a）、me系→me.js（probe38/51/49 + probe32 の
+  password/payout 件）、admin系→admin.js（probe43×2 + probe32 の
+  role 件）。probe32 はファイル内で me/admin 混在のため it ブロック単位で
+  マッピング。
+- **結果**: user/index.js 816 → 11行。ルート層の3大ファイル全て分割完了
+  （order・gpu・user）。残る500行級は payment/index.js（516行）のみ。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

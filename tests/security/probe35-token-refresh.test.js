@@ -52,7 +52,7 @@ describe('Refresh token: jti is required', () => {
 
   it('source: user/index.js rejects !payload.jti before lock key', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     expect(src).toMatch(/if \(!payload\.jti\)/);
     // Lock key must not fall back to user.id
@@ -126,7 +126,7 @@ describe('Logout: post-logout refresh token protection', () => {
 
   it('source: logout updates sessionsRevokedAt when refreshToken is absent', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     expect(src).toMatch(/sessionsRevokedAt.*new Date/);
     // The update must be in the else branch of the refreshToken check

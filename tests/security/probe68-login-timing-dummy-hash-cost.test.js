@@ -27,7 +27,7 @@ function costOf(hash) {
 describe('login dummy-hash cost matches the production bcrypt cost factor', () => {
   it('source derives _DUMMY_HASH cost from config.security.bcryptRounds (not a literal)', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     // Must build the dummy hash using the configured rounds…
     expect(src).toMatch(/_DUMMY_HASH\s*=\s*bcrypt\.hashSync\([^,]+,\s*config\.security\.bcryptRounds\s*\)/);

@@ -50,7 +50,7 @@ describe('POST /users/refresh: single-use enforcement', () => {
 
   it('withLock guard is present in refresh route source', () => {
     const fs = require('fs');
-    const src = fs.readFileSync(require.resolve('../../src/api/routes/user/index.js'), 'utf-8');
+    const src = fs.readFileSync(require.resolve('../../src/api/routes/user/auth.js'), 'utf-8');
     // The lock key is constructed as `refresh:${jti}` and passed to withLock.
     expect(src).toMatch(/refresh:/);
     expect(src).toMatch(/withLock\(lockKey/);

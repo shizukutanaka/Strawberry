@@ -75,9 +75,9 @@ describe('review handlers: 30-day window uses stoppedAt fallback', () => {
 
 // ─── 43d: active-admin check in role-change handler ──────────────────────
 describe('role-change handler: rejects deactivated/suspended acting admin', () => {
-  it('user/index.js: fresh DB lookup of acting admin before role change', () => {
+  it('user/admin.js: fresh DB lookup of acting admin before role change', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/admin.js'), 'utf-8'
     );
     // Must re-fetch acting admin from repository (not just trust JWT)
     expect(src).toMatch(/UserRepository\.getById\(req\.user\.id\)/);
@@ -85,9 +85,9 @@ describe('role-change handler: rejects deactivated/suspended acting admin', () =
     expect(src).toMatch(/actingAdmin.*status.*deactivated|deactivated.*actingAdmin/s);
   });
 
-  it('user/index.js: suspended acting admin also rejected', () => {
+  it('user/admin.js: suspended acting admin also rejected', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/admin.js'), 'utf-8'
     );
     expect(src).toMatch(/actingAdmin.*status.*suspended|suspended.*actingAdmin/s);
   });

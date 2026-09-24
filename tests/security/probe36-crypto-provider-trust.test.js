@@ -54,9 +54,9 @@ describe('Crypto: resolveRefreshSecret is exported from jwt-auth', () => {
     expect(src).toMatch(/resolveRefreshSecret\(\)/);
   });
 
-  it('user/index.js: refresh endpoint uses resolveRefreshSecret', () => {
+  it('user/auth.js: refresh endpoint uses resolveRefreshSecret', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     expect(src).toMatch(/resolveRefreshSecret/);
     // Both the /refresh and /logout refresh-token verification paths must use it

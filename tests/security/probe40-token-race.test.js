@@ -77,17 +77,17 @@ describe('Token rotation: refresh revokes prior access token via ati claim', () 
     expect(src).toMatch(/signAccessToken\(user, jti/);
   });
 
-  it('user/index.js: login passes accessJti to both signAccessToken and signRefreshToken', () => {
+  it('user/auth.js: login passes accessJti to both signAccessToken and signRefreshToken', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     expect(src).toMatch(/signAccessToken\(user, accessJti\)/);
     expect(src).toMatch(/signRefreshToken\(user, accessJti\)/);
   });
 
-  it('user/index.js: /refresh revokes payload.ati if present', () => {
+  it('user/auth.js: /refresh revokes payload.ati if present', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     expect(src).toMatch(/payload\.ati/);
     expect(src).toMatch(/revoke\(payload\.ati/);
@@ -151,9 +151,9 @@ describe('token-denylist.js: corruption is logged not silently swallowed', () =>
 
 // ─── 40b-1: lastLogin is persisted ───────────────────────────────────────────
 describe('Login: lastLogin is persisted via UserRepository.update', () => {
-  it('user/index.js: login uses UserRepository.update for lastLogin, not in-memory mutation', () => {
+  it('user/auth.js: login uses UserRepository.update for lastLogin, not in-memory mutation', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/auth.js'), 'utf-8'
     );
     expect(src).toMatch(/UserRepository\.update\(user\.id.*lastLogin/);
     expect(src).not.toMatch(/user\.lastLogin\s*=/);

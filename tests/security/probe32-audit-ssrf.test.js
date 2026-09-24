@@ -47,24 +47,24 @@ afterAll(() => {
 
 // ─── 1–4. Source checks for audit logging ─────────────────────────────────────
 describe('Audit log: sensitive operations are now recorded', () => {
-  it('user/index.js: password change calls appendAuditLog', () => {
+  it('user/me.js: password change calls appendAuditLog', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/me.js'), 'utf-8'
     );
     expect(src).toMatch(/appendAuditLog\('user_password_changed'/);
   });
 
-  it('user/index.js: role change calls appendAuditLog with previousRole and changedBy', () => {
+  it('user/admin.js: role change calls appendAuditLog with previousRole and changedBy', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/admin.js'), 'utf-8'
     );
     expect(src).toMatch(/appendAuditLog\('user_role_changed'/);
     expect(src).toMatch(/previousRole.*target\.role|changedBy.*req\.user\.id/s);
   });
 
-  it('user/index.js: payout address change calls appendAuditLog', () => {
+  it('user/me.js: payout address change calls appendAuditLog', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/me.js'), 'utf-8'
     );
     expect(src).toMatch(/appendAuditLog\('user_payout_address_changed'/);
   });

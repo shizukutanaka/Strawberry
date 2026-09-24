@@ -18,15 +18,15 @@ afterAll(() => {
 // ─── 49a: password change sets sessionsRevokedAt alongside passwordChangedAt ─
 describe('password change: both invalidation fields written', () => {
   const src = require('fs').readFileSync(
-    require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+    require.resolve('../../src/api/routes/user/me.js'), 'utf-8'
   );
 
-  it('user/index.js: password change update sets passwordChangedAt', () => {
+  it('user/me.js: password change update sets passwordChangedAt', () => {
     expect(src).toMatch(/password:\s*hashedPassword/);
     expect(src).toMatch(/passwordChangedAt:\s*changedAt/);
   });
 
-  it('user/index.js: password change update ALSO sets sessionsRevokedAt', () => {
+  it('user/me.js: password change update ALSO sets sessionsRevokedAt', () => {
     // Anchor on passwordChangedAt (unique to the password-change handler — the
     // registration handler also has a `password: hashedPassword` line).
     const idx = src.indexOf('passwordChangedAt: changedAt');
@@ -35,7 +35,7 @@ describe('password change: both invalidation fields written', () => {
     expect(block).toMatch(/sessionsRevokedAt:\s*changedAt/);
   });
 
-  it('user/index.js: both fields use the same changedAt timestamp (consistency)', () => {
+  it('user/me.js: both fields use the same changedAt timestamp (consistency)', () => {
     // Newline-agnostic (source files may use CRLF on Windows)
     const m = src.match(/password:\s*hashedPassword,\s*updatedAt:\s*changedAt/);
     expect(m).not.toBeNull();

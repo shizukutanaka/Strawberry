@@ -67,9 +67,9 @@ describe('Manual payment approval: order status guard', () => {
 
 // ─── 38b-3: /me/activity does not expose reviewedBy ─────────────────────────
 describe('/me/activity: reviewedBy removed from review_received events', () => {
-  it('user/index.js: review_received events do not include reviewedBy', () => {
+  it('user/me.js: review_received events do not include reviewedBy', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/me.js'), 'utf-8'
     );
     // Find the review_received push blocks and ensure they don't include reviewedBy
     const reviewReceivedBlocks = [];

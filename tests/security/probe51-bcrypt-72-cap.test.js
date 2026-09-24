@@ -29,9 +29,9 @@ describe('password schemas: bcrypt 72-byte cap', () => {
     expect(block).toMatch(/password:\s*Joi\.string\(\)[\s\S]*?\.max\(72\)/);
   });
 
-  it('user/index.js: newPassword has max(72)', () => {
+  it('user/me.js: newPassword has max(72)', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/user/me.js'), 'utf-8'
     );
     const idx = src.indexOf('newPassword: Joi.string()');
     expect(idx).toBeGreaterThan(-1);

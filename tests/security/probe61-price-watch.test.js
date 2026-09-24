@@ -575,7 +575,6 @@ describe('GET /api/v1/users/me/watches', () => {
 
 describe('watch resource limits and lifecycle', () => {
   const WatchRepository = require('../../src/db/json/WatchRepository');
-  const GpuRepo = require('../../src/db/json/GpuRepository');
 
   it('enforces a per-user watch cap (429) and does not persist the over-limit watch', async () => {
     const provider = await registerAndLogin('provcap');

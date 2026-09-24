@@ -6,7 +6,6 @@
 // 45a-3: owner/admin still receives providerId and manualBlocks in detail response
 // 45a-4: apiKey always stripped regardless of caller role
 
-const request = require('supertest');
 require('../../src/api/server');
 
 afterAll(() => {

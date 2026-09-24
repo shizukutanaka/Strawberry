@@ -7,7 +7,6 @@
 // 43d-1: role-change handler rejects deactivated acting admin (fresh DB lookup)
 // 43d-2: role-change handler rejects suspended acting admin
 
-const request = require('supertest');
 require('../../src/api/server');
 
 afterAll(() => {

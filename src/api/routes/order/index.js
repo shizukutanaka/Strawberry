@@ -202,7 +202,6 @@ const { withLock } = require('../../../utils/async-lock');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
 const { vgpuManager, lightning, requireService } = require('../../../core/services');
-const { v4: uuidv4 } = require('uuid');
 // ファイルベースJSONストレージリポジトリ
 const OrderRepository = require('../../../db/json/OrderRepository');
 const EscrowRepository = require('../../../db/json/EscrowRepository');

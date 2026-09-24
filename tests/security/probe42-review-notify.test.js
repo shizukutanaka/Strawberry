@@ -8,7 +8,6 @@
 // 42c-1: review handler enforces 30-day window after order completion
 // 42c-2: renter-review handler enforces 30-day window after order completion
 
-const request = require('supertest');
 require('../../src/api/server');
 
 afterAll(() => {

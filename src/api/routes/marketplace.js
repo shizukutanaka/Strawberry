@@ -11,7 +11,6 @@ const { withLock } = require('../../utils/async-lock');
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
 // 未想定の内部エラー（5xx）は本番では詳細を隠す。
-const clientError = (e) => e.message || 'Invalid request';
 const internalError = (e) => isProd ? 'Internal server error' : (e.message || 'Internal server error');
 
 // エスクロー操作は資金フローに直結するため admin 限定

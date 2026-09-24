@@ -7,7 +7,6 @@ const { logger } = require('./src/utils/logger');
 // (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
 const exec = require('util').promisify(require('child_process').exec);
 const fs = require('fs').promises;
-const fsSync = require('fs'); // existsSync 等の同期APIは fs.promises に無いため別途参照
 const path = require('path');
 
 // シェルコマンドへ埋め込む識別子の検証（コマンドインジェクション防止）。

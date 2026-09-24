@@ -1885,6 +1885,23 @@ src/ 全ファイルの export 名を総当たり:
 - **並走監査（死面ゼロ）**: tests/e2e の playwright spec・helpers 消費者確認済み、
   globalSetup の data/ 初期化は全スイート共通の生機構。
 
+### 第136ラウンド（ソクラテス式問答 — 「設定ファイルの列挙項目は全て実在か？」）
+
+- **問い**: .gitignore・jest.config・data/*.json に、削除済みコード由来の
+  残留エントリはないか？
+- **答え**: ゼロ。
+  - `.gitignore` の生成物列挙（feedback-report.md・checklist-kpi-report.md・
+    assignee-progress-report.md・feedback-log.json・feedback-priority.json・
+    improvement_checklist4.md）は全て実在スクリプトの出力先（feedback-to-
+    checklist・alert-overdue・slack-notify 等の npm scripts 経由で消費）
+  - `jest.config.js` の全4キー（testTimeout/globalSetup/maxWorkers/
+    testPathIgnorePatterns）はコメント記述どおり意図的設定 — maxWorkers:1 は
+    JSON 層の cross-process lost-update 回避で必須（§11 設計判断と整合）
+  - `data/*.json` 全10ファイルは globalSetup により空リセット — 削除済みコード
+    （deadlineAt/cachePurgeCounter 等）の stale フィールド混入なし
+- **並走監査**: logs/ の combined1-4.log は winston maxsize ローテーションの
+  正常生成物（gitignore 済・削除対象外）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -1280,6 +1280,21 @@ src/ 全ファイルの export 名を総当たり:
   （order/index.js 分割・プロバイダ払い出し配線）のみ — どちらも「削除」ではなく
   設計判断が要る領域のため本パス対象外。
 
+### 第101ラウンド（ソクラテス式問答 — 「意味論的死面（未読変数・死フィールド・死分岐）は残っていないか？」）
+
+- 機械スキャン、全て死面ゼロ:
+  - **未読 const**: order/gpu/user 各大ルートファイル + lightning-service +
+    virtual-gpu-manager + server.js の全 `const X =` 宣言を走査 — 代入のみで
+    一度も読まれない変数ゼロ。
+  - **sanitizeObject / isValidOrderTransition / state-checker**: 全て生呼出しあり
+    （sanitizeObject は3ファイル5箇所、isValidOrderTransition は order PATCH で使用）。
+  - **gpu.register スキーマフィールド**: Joi `stripUnknown:true` で未知キーは
+    検証層で剥がれる設計 — スキーマ内フィールドは API 契約面であり「使わない」
+    フィールドの削除は契約変更になるため、第一原理削除の対象外（§11 棚卸しへ）。
+  - **重複実装の最終確認**: 同名関数は全て別ファイルの正当な別実装。
+- 判定: 削除系の監査は機械・意味論の両面で収束。以降の「続けて」は削除ではなく
+  §11 の設計作業（order/index.js 分割 / provider payout 配線）への移行が筋。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -1,6 +1,7 @@
 // 通知チャネル設定API（ユーザーごとにLINE/Discord/Slack等の通知先を管理）
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
 const path = require('path');
 const Joi = require('joi');
 const { authenticateJWT } = require('./middleware/security');
@@ -49,8 +50,8 @@ const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)
 const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
 
 function loadSettings() {
-  if (!require('fs').existsSync(SETTINGS_PATH)) return {};
-  const raw = require('fs').readFileSync(SETTINGS_PATH, 'utf-8');
+  if (!fs.existsSync(SETTINGS_PATH)) return {};
+  const raw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
   // JSON.parse を素通りさせる: parse 失敗は throw し呼び出し元で 500 にする。
   // 旧実装の catch→{} では POST が即座に上書きして全ユーザーの設定を消去していた。
   const parsed = JSON.parse(raw);

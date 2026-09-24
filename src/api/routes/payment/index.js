@@ -17,6 +17,7 @@ const UserRepository = require('../../../db/json/UserRepository');
 const { fetchRateInfo, computeOrderPricing } = require('../../../utils/order-pricing');
 // 並行リクエストによる二重請求書発行を防ぐためのミューテックス
 const { withLock } = require('../../../utils/async-lock');
+const btcOnchainRoutes = require('./btc-onchain');
 
 // インボイス作成 (管理者専用)
 // 汎用インボイス発行は注文との紐付けなしにプラットフォームノードのインバウンド容量を消費するため
@@ -427,7 +428,7 @@ router.get('/history',
 // 旧 routes/payment.js がディレクトリ解決を遮蔽（payment.js が payment/index.js より
 // 優先）し、本ファイルの Lightning 決済API全体が未マウントになっていたため、
 // /btc 配下のサブルートとして取り込んだ。グローバルJWTゲートの保護下にある。
-router.use('/btc', require('./btc-onchain'));
+router.use('/btc', btcOnchainRoutes);
 
 // 管理者向け：承認待ちの手動決済（銀行振込等）一覧。
 // GET /payments/history は req.user.id のみに絞られるため（本人の決済履歴専用）、

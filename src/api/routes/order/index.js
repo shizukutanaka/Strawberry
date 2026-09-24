@@ -220,6 +220,10 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
 const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../../utils/order-expiry');
+// レビュー投稿時に GPU 評価キャッシュを無効化するため gpu ルートモジュールを参照
+const GpuRoutes = require('../gpu/index');
+const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
+const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
@@ -236,9 +240,6 @@ function resolvePositiveIntEnv(name, def) {
 }
 const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_AHEAD_DAYS', 90); // pending TTL と整合
 
-const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
-const { cacheMiddleware, invalidateUserCache } = require('../../middleware/cache');
-// スラッシュ/係争解決/レビュー後にレピュテーションキャッシュを無効化する
 // 注文作成のユーザー別レートリミット（IP ベースのグローバル制限を補完）。
 // 認証済みユーザーが在庫チェック・価格計算の重いパスを連打して DB を圧迫するのを防ぐ。
 // グローバル IP リミットだけでは：同一ユーザーが異なる IP (Tor/VPN) から来た場合に効果がなく、
@@ -868,8 +869,8 @@ router.post('/',
       throw new APIError(ErrorTypes.NOT_FOUND, 'Specified GPU not found', 404);
     }
     // 自己取引（ウォッシュトレード）防止: プロバイダは自分の GPU を注文できない。
-    // これを許すと、注文→完了で recordJobResult(true) により自分の評判を、
-    // 自己レビューで自分の GPU 評価を、いずれも無から捏造できてしまう（信頼層の偽造）。
+    // これを許すと、注文→完了で稼働実績を、自己レビューで GPU 評価を、
+    // いずれも無から捏造できてしまう（信頼層の偽造）。
     if (gpu.providerId && gpu.providerId === req.user.id) {
       throw new APIError(ErrorTypes.VALIDATION, 'You cannot order your own GPU', 400);
     }
@@ -1511,7 +1512,6 @@ router.post('/:id/review',
     }
     // Invalidate GPU rating cache so the next GET /gpus/:id reflects the new review
     try {
-      const GpuRoutes = require('../gpu/index');
       if (typeof GpuRoutes._invalidateGpuRatingCache === 'function') {
         GpuRoutes._invalidateGpuRatingCache(order.gpuId);
       }

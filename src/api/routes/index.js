@@ -15,8 +15,10 @@ const notificationSettings = require('../notification-settings');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
 const { gpuDetector, vgpuManager, lightning, requireService } = require('../../core/services');
-const { asyncHandler } = require('../../utils/error-handler');
+const { asyncHandler, errorMiddleware } = require('../../utils/error-handler');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
+const rateLimit = require('../middleware/rate-limit');
+const auditLogger = require('../middleware/audit');
 const UserRepository = require('../../db/json/UserRepository');
 const GpuRepository = require('../../db/json/GpuRepository');
 const OrderRepository = require('../../db/json/OrderRepository');
@@ -52,7 +54,6 @@ const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, 
 // ここで cors({origin:'*'}) を重ねると後勝ちで Access-Control-Allow-Origin が '*' に
 // 上書きされ、security.js の corsOrigins 許可リスト設定が無効化されるため適用しない。
 // --- レートリミット ---
-const rateLimit = require('../middleware/rate-limit');
 router.use(rateLimit);
 // --- JWT認証を全ルートに適用（公開エンドポイントは除外） ---
 // 重要: 認証情報を取得する前にアクセスする必要があるエンドポイント（新規登録・ログイン）は
@@ -85,7 +86,6 @@ router.use((req, res, next) => {
   jwtAuth(req, res, next);
 });
 // --- 監査ログ ---
-const auditLogger = require('../middleware/audit');
 router.use(auditLogger);
 
 // 各ルートモジュールをマウント
@@ -248,7 +248,6 @@ router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
 }));
 
 // --- 共通エラーハンドリング ---
-const { errorMiddleware } = require('../../utils/error-handler');
 router.use(errorMiddleware);
 
 module.exports = router;

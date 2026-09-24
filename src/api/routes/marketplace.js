@@ -7,6 +7,8 @@ const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 const { withLock } = require('../../utils/async-lock');
+const GpuRepository = require('../../db/json/GpuRepository');
+const OrderRepository = require('../../db/json/OrderRepository');
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -26,8 +28,6 @@ router.post('/escrow/open', adminOnly, (req, res) => {
   const { orderId, feeRate } = req.body || {};
   if (!orderId) return res.status(400).json({ error: 'orderId is required' });
   try {
-    const OrderRepository = require('../../db/json/OrderRepository');
-    const GpuRepository = require('../../db/json/GpuRepository');
     const order = OrderRepository.getById(orderId);
     if (!order) return res.status(404).json({ error: 'order not found' });
     if (typeof order.totalPrice !== 'number' || order.totalPrice <= 0) {
@@ -101,7 +101,6 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
       if (providerId) {
         const escrow = marketplace.getEscrow(req.params.id);
         if (!escrow) throw Object.assign(new Error('escrow not found'), { status: 404 });
-        const OrderRepository = require('../../db/json/OrderRepository');
         const order = OrderRepository.getById(escrow.orderId);
         if (order && order.providerId && order.providerId !== providerId) {
           throw Object.assign(new Error('providerId does not match the escrow order provider'), { status: 400 });
@@ -120,9 +119,6 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
 // GET /marketplace/stats — GPU 供給・需要・価格帯の概要
 router.get('/stats', (req, res) => {
   try {
-    const GpuRepository = require('../../db/json/GpuRepository');
-    const OrderRepository = require('../../db/json/OrderRepository');
-
     const allGpus = GpuRepository.getAll();
     const allOrders = OrderRepository.getAll();
     const nowMs = Date.now();

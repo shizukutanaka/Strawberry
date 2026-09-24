@@ -2078,6 +2078,23 @@ src/ 全ファイルの export 名を総当たり:
   フィルタ適用（reads.js:46-184）で、バリデーション済みだが無視される
   パラメータなし。
 
+### 第147ラウンド（ソクラテス式問答 — 「宣言された保護は実際に配線されているか？」）
+
+- **問い**: 44個の mutation ルート — rate-limit・認証・権限チェックは全て
+  実際に適用されているか。認証なしで状態を変えられるパスはないか。
+- **答え**: **全て保護配線済み、削除対象ゼロ** —
+  - グローバル: `app.use(apiLimiter)`（config ゲート）+ `router.use(rateLimit)`
+    が全 API ルートに先行適用。`/metrics`・`/ready` には専用リミッター。
+  - mutation 全44ルートに `authenticateJWT` 直後配線（複数行定義のため次行 —
+    order mutations/runtime/disputes、gpu lifecycle/blocks/watch 全て）。
+  - `admin.js` の mutation も `jwtAuth + rbac('admin')`。
+  - master-auth `/totp`・`/mail` のみ jwtAuth 不在だが**意図的で正しい**:
+    ログイン前の多要素チェーンで、各々 `req.session.googleAuth`（OAuth 前段）・
+    `req.session.totpAuth`（TOTP 前段）を要求。セッション+IP 二層レート制限、
+    TOTP ウィンドウ再利用防止、メールコード TTL・単回消去・試行上限を完備。
+- **監査して生存**: 保護契約は全ルートで強制済み — 認証なし mutation なし、
+  admin は rbac 保護、master-auth はセッションゲート多要素チェーン。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

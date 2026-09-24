@@ -1612,6 +1612,22 @@ src/ 全ファイルの export 名を総当たり:
   第95教訓の再適用）、escrow サービスの create/markPaid/cancel/resolveDispute/
   evaluate/settle/apply/get 全て消費者あり（get は marketplace-service 経由）。
 
+### 第119ラウンド（ソクラテス式問答 — 「書かれるが読まれないフィールドはあるか？」）
+
+- 問い: レコードに書き込まれるが読出し側が存在しないフィールドはないか？
+  → src 全 export の消費者再走査（新規・分割後の面を含む）で死export ゼロ。
+  フィールド書込↔読出し対で走査した結果 `escrow.deadlineAt` のみ write-only
+  を検出（create 引数として受け取り保存するが、deadline スイープ未配線で
+  全リポジトリに読出し側ゼロ — §11 の deadline/payout 配線と同じ領域）。
+- **削除**: `create()` の `deadlineAt` 引数とフィールド格納を除去。
+  第118ラウンドの `expire` 削除と同じ「deadline 未配線」面の続き。
+  状態遷移 DEADLINE 自体は state-machine に残存。
+- **監査して生存**: lightning-service.js 全23メソッド（connectToLND/
+  cleanMaps/startPeriodicTasks は内部呼出しで生存 — 外部 grep 0 は
+  自己参照のため除外）、providerInvoice/payoutSats（action-executor の
+  resolveContext が参照 — 第118で残した payout 配線面）、cancelledAt/
+  completedAt/startedAt/attestationReport/verificationCtx 全て読出しあり。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

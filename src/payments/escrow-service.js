@@ -128,7 +128,7 @@ function createEscrowService({ repository, lnAdapter } = {}) {
 
   return {
     /** 注文に対するエスクローを生成（PENDING）。hold invoice 情報は invoice に格納。 */
-    create({ orderId, amountSats, feeRate = 0, deadlineAt = null, invoice = null }) {
+    create({ orderId, amountSats, feeRate = 0, invoice = null }) {
       if (!orderId) throw new Error('orderId required');
       if (typeof amountSats !== 'number' || !Number.isFinite(amountSats) || amountSats <= 0) {
         throw new Error('amountSats must be a positive finite number');
@@ -149,7 +149,6 @@ function createEscrowService({ repository, lnAdapter } = {}) {
         orderId,
         amountSats,
         feeRate: clampedFeeRate,
-        deadlineAt,
         invoice,
         state: initial(),
         history: [],

@@ -1261,6 +1261,25 @@ src/ 全ファイルの export 名を総当たり:
   public/index.html の全 id が JS で参照、tests インフラ4ファイル結線、
   全ルートヘルパー消費者あり、package.json main / Dockerfile CMD 整合。
 
+### 第100ラウンド（ソクラテス式問答 — 「残りの機械的面に死はないか？」— 収束認定）
+
+- 機械監査バッテリーを残存面へ適用、全て死面ゼロ:
+  - **public/js 全関数**: 定義と呼出しを走査 — 全関数に呼出しサイト1件以上（21関数）。
+    fmtDate/fmtSats/fmtJpy は ui.js の共有 export を全ページが import（重複定義なし）、
+    escapeText は router.js の一本のみ。
+  - **scripts/ 全関数**: 全て定義元ファイル内で呼出しあり。
+  - **PUBLIC_PATHS**: /users/register・/users/login・/users/refresh・/gpus の全エントリに
+    実ルートあり（/system/info を外す意図的設計注記は keep — 差分説明ではなく
+    「admin を認証不要パスに置かない」不変条件）。
+  - **重複実装チェック**: 同名関数4件（load/num/persist/writeAuditLog）は全て
+    モジュール別の正当な別実装（writeAuditLog は access-audit.log / db-access.log の別ログ）。
+  - **死分岐チェック**: if(false)/if(true) 等ゼロ、NODE_ENV チェックは
+    test/production/development の全生モード。
+  - **TODO/FIXME/HACK マーカー**: ゼロ。
+- 判定: src/ の機械的監査面は全て収束。残る非機械的面は §11 の文書化済み棚卸し
+  （order/index.js 分割・プロバイダ払い出し配線）のみ — どちらも「削除」ではなく
+  設計判断が要る領域のため本パス対象外。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

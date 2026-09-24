@@ -20,7 +20,7 @@ export async function getRate() {
   }
 }
 
-export function satsToJpy(sats, rate) {
+function satsToJpy(sats, rate) {
   if (sats == null || rate == null) return null;
   return (sats / 1e8) * rate;
 }

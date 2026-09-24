@@ -11,11 +11,18 @@ const orderRoutes = require('./order');
 const paymentRoutes = require('./payment');
 const userRoutes = require('./user');
 const marketplaceRoutes = require('./marketplace');
+const notificationSettings = require('../notification-settings');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
 const { gpuDetector, vgpuManager, lightning, requireService } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
+const UserRepository = require('../../db/json/UserRepository');
+const GpuRepository = require('../../db/json/GpuRepository');
+const OrderRepository = require('../../db/json/OrderRepository');
+const VerificationRepository = require('../../db/json/VerificationRepository');
+const EscrowRepository = require('../../db/json/EscrowRepository');
+const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../utils/order-expiry');
 
 // 初期化処理（各ステップを個別にガード。一部のサービスが未導入でも継続し、
 // Web API 本体は常に起動できるようにする）
@@ -88,7 +95,7 @@ router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
 // 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
-router.use(require('../notification-settings').router);
+router.use(notificationSettings.router);
 
 // Lightningノード情報API（管理者のみ: ノード公開鍵・ピア情報・容量を含む）
 // payment/index.js の同等エンドポイントと同じ admin ガードを適用する。
@@ -127,10 +134,6 @@ router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {
 
 // マーケットプレイス統計API（管理者のみ）— GMV・注文状況・GPU 稼働の俯瞰
 router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const UserRepository = require('../../db/json/UserRepository');
-  const GpuRepository = require('../../db/json/GpuRepository');
-  const OrderRepository = require('../../db/json/OrderRepository');
-
   const users = UserRepository.getAll();
   const gpus = GpuRepository.getAll();
   const orders = OrderRepository.getAll();
@@ -167,7 +170,6 @@ router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
 
 // 検証レコード一覧（管理者のみ）— ジョブ再実行監査の結果を閲覧・デバッグ用
 router.get('/admin/verifications', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const VerificationRepository = require('../../db/json/VerificationRepository');
   const all = VerificationRepository.getAll();
   const limitRaw = parseInt(req.query.limit, 10);
   const offsetRaw = parseInt(req.query.offset, 10);
@@ -190,7 +192,6 @@ router.get('/admin/verifications', jwtAuth, rbac('admin'), asyncHandler(async (r
 
 // 単一検証レコード取得（管理者のみ）
 router.get('/admin/verifications/:jobId', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const VerificationRepository = require('../../db/json/VerificationRepository');
   const record = VerificationRepository.getByJobId(req.params.jobId);
   if (!record) return res.status(404).json({ error: 'Verification record not found' });
   res.json(record);
@@ -200,7 +201,6 @@ router.get('/admin/verifications/:jobId', jwtAuth, rbac('admin'), asyncHandler(a
 // 注文当事者は GET /orders/:id/payment で自分の注文のエスクローを閲覧できるが、
 // 管理者が全エスクローをクロス検索する手段がなかった。
 router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const EscrowRepository = require('../../db/json/EscrowRepository');
   let escrows = EscrowRepository.getAll();
   if (req.query.orderId) escrows = escrows.filter(e => e.orderId === req.query.orderId);
   if (req.query.state) escrows = escrows.filter(e => e.state === req.query.state);
@@ -216,7 +216,6 @@ router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res
 // 期限切れ注文の手動スイープ（管理者のみ）— インシデント対応・テストで使用。
 // POST /admin/expire-orders { types?: ['pending','matched','disputed'] }
 router.post('/admin/expire-orders', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../utils/order-expiry');
   const types = Array.isArray(req.body && req.body.types) ? req.body.types : ['pending', 'matched', 'disputed', 'active'];
   const VALID = new Set(['pending', 'matched', 'disputed', 'active']);
   const invalid = types.filter(t => !VALID.has(t));

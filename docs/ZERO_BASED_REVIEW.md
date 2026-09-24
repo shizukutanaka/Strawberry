@@ -2095,6 +2095,28 @@ src/ 全ファイルの export 名を総当たり:
 - **監査して生存**: 保護契約は全ルートで強制済み — 認証なし mutation なし、
   admin は rbac 保護、master-auth はセッションゲート多要素チェーン。
 
+### 第148ラウンド（ソクラテス式問答 — 「宣言された数値上限は強制されているか？」）
+
+- **問い**: `.env.example` の制限系 env 変数16件（MAX_PENDING_ORDERS/
+  MAX_GPUS_PER_PROVIDER/MAX_OPEN_DISPUTES/MIN_RESOLVED_DISPUTES/
+  MAX_DENIED_DISPUTE_RATE/HEARTBEAT_MIN_INTERVAL/UPTIME_*/SLA_*/
+  ORDER_*_TIMEOUT 等）— ハンドラで実際に強制されているか。
+- **答え**: **全て強制済み、stale 宣言ゼロ** — 全件 `process.env.X` の実参照で
+  enforcement サイトに存在:
+  - `MAX_GPUS_PER_PROVIDER` → lifecycle.js プロバイダ上限チェック
+  - `MAX_OPEN_DISPUTES_PER_USER`/`MIN_RESOLVED_DISPUTES`/
+    `MAX_DENIED_DISPUTE_RATE` → disputes.js:57-75（denied 率制限+オープン数上限）
+  - `HEARTBEAT_MIN_INTERVAL_MS` → runtime.js 心拍間隔下限
+  - `UPTIME_GAP_THRESHOLD_MS`/`UPTIME_MIN_BEATS`/`UPTIME_BREACH_PENALTY` →
+    provider-uptime.js:24-34（スコア計算の閾値）
+  - `SLA_PROVIDER_HEARTBEAT_TIMEOUT_MS` → sessions.js SLA 掃討
+  - `ORDER_*_TIMEOUT_*` → order-expiry.js 満了スイープ
+  - `SERVICE_MONITOR_INTERVAL_MS` → service-monitor.js:113
+- **教訓**: 初回 grep が `\.env` を除外する際 `process.env.X` の参照行自体を
+  巻き込んで除外し、全件 0 件という偽陰性に陥った — フィルタ設計時に参照形の
+  字列と除外対象が衝突しないか確認必須（第95/124 型の再発）。
+- **監査して生存**: 宣言された制限は全て実装に配線済み — 「宣言のみ契約」なし。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -1870,6 +1870,21 @@ src/ 全ファイルの export 名を総当たり:
   probe42/43 を撞いた失敗を手順化で防止。
 - **備考**: 複写系は probe 非制約面でも契約差または標準形のみ — dedup 面も収束。
 
+### 第135ラウンド（ソクラテス式問答 — 「テストの未使用 require は残るか？」）
+
+- **問い**: tests/ の `const x = require(...)` に使用ゼロの束縛は残るか（第85ラウンドの
+  supertest request×9 削除の続き）？
+- **答え**: **削除対象ゼロ** — naive な名前頻度スキャナで約30件の嫌疑が出たが、
+  全て直接 grep で生存確認（`request` は supertest 経由で使用、`server` は
+  afterAll の `require` で使用、`GpuRepository`/`OrderRepository`/
+  `UserRepository`/`sanitizeUser`/`jwtAuth`/`rbac` 全て実呼出しあり）。
+- **教訓**: 内部スキャナの偽陽性は本セッションで4度目（124・131・132・135）。
+  「name の match 回数 ≤1 → 死」の単純ヒューリスティックは、ファイル内
+  require・コメント内言及・`afterAll` 内の遅延 require を見落とす。
+  **機械検出は候補列挙に留め、削除判断は必ず手動 grep で1件ずつ検証する**。
+- **並走監査（死面ゼロ）**: tests/e2e の playwright spec・helpers 消費者確認済み、
+  globalSetup の data/ 初期化は全スイート共通の生機構。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

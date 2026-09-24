@@ -1694,6 +1694,22 @@ src/ 全ファイルの export 名を総当たり:
 - **手順記録**: 重複ブロックスキャナ（8行窓・空白除去）が誤位置を報告したため
   実窓を再表示して真の重複を特定 — 監査スクリプトの偽陽性対策として再記録。
 
+### 第124ラウンド（ソクラテス式問答 — 「参照ゼロと思われるファイルは本当に死か？」）
+
+- **問い**: 消費者カウントの偽陰性をもう一度疑えるか — 前回までの「参照ゼロ」は
+  パターン設計の死角ではなかったか？
+- **答え**: 2件の偽陰性を捕捉 — `src/api/utils/mailer.js`/`totp.js` は
+  master-auth.js が `../utils/*` で require（パス前方一致 grep が不一致で 0 件と
+  誤報）、`scripts/slack-feedback-bot.js` は兄弟スクリプト7本が require する
+  sendSlackMessage 共有ヘルパー（検索対象ディレクトリに scripts/ 自身を
+  入れ忘れたため 0 件と誤報）。いずれも生存、削除対象ゼロ。
+- **並走監査（死面ゼロ）**: config.js 全キー消費者あり（apiPrefix〜bcryptRounds 全18件）、
+  全 router.get/post/put/delete パスに重複登録なし、console.error 4箇所はロガー自体が
+  障害点になり得る failsafe 経路（audit-log ディスク満杯・denylist 読込失敗）、
+  public/js・CSS リンク全て実在ファイル、TODO/FIXME マーカーなし、
+  メール系2経路（nodemailer SMTP=master-auth 用 / SendGrid+Mailgun API=notifier 用）
+  は別契約のため並存維持。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

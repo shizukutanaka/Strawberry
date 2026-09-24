@@ -1779,6 +1779,21 @@ src/ 全ファイルの export 名を総当たり:
   `docker/Dockerfile.api` はデプロイ基盤、`src/api/utils/` 全7ファイル消費者あり
   （session-invalidation は jwt-auth、profit-addresses は admin ルート経由）。
 
+### 第129ラウンド（ソクラテス式問答 — 「CSS クラスはテンプレート経由でも消費されるか？」）
+
+- **問い**: app.css の81クラスに HTML/JS 側の参照がないものはないか？
+- **答え**: リテラル `class="..."` grep だけでは `badge-${status}` 等の
+  テンプレート合成を見落とす。動的パターンを全展開して照合した結果、
+  死セレクタゼロ — badge-×6状態（PENDING/MATCHED/ACTIVE/COMPLETED/CANCELLED/
+  DISPUTED 全てサーバー値域に対応）・chip-reliability-×5ティア（excellent/good/
+  fair/poor/unrated）・toast-×3種（info 既定/error/success）全て生成経路あり。
+- **教訓**: 第95・124ラウンドと同型 — 「リテラル参照なし = 死」は動的言語・
+  動的CSSでは偽陰性。合成テンプレートの値域を先に列挙しないと誤判定する。
+- **並走監査（死面ゼロ）**: `.bak/.orig/.swp/.old` 残留ゼロ、
+  `telemetry/instrumentation.js`（41行・環境変数ゲート付き no-op）は意図的設計、
+  `tests/helpers/`（mock-ln-adapter のみ）と `tests/utils/`（src/utils の
+  テスト置き場）は別用途で重複なし、globalSetup.js は data/ 初期化の中核。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

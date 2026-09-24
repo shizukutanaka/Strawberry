@@ -18,24 +18,24 @@ afterAll(() => {
 
 // ─── Source-level checks ──────────────────────────────────────────────────
 describe('GET /gpus/:id: providerId/manualBlocks hidden from public', () => {
-  it('gpu/index.js: detail endpoint destructures providerId out of gpuSafe', () => {
+  it('gpu/reads.js: detail endpoint destructures providerId out of gpuSafe', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/reads.js'), 'utf-8'
     );
     // providerId must be destructured separately (not included in ...gpuSafe spread)
     expect(src).toMatch(/const\s*\{[^}]*providerId[^}]*\}\s*=\s*gpu/);
   });
 
-  it('gpu/index.js: detail endpoint destructures manualBlocks out of gpuSafe', () => {
+  it('gpu/reads.js: detail endpoint destructures manualBlocks out of gpuSafe', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/reads.js'), 'utf-8'
     );
     expect(src).toMatch(/const\s*\{[^}]*manualBlocks[^}]*\}\s*=\s*gpu/);
   });
 
-  it('gpu/index.js: apiKey destructured out of gpu before response is built', () => {
+  it('gpu/reads.js: apiKey destructured out of gpu before response is built', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/reads.js'), 'utf-8'
     );
     // apiKey must appear in the destructuring of `gpu` in the detail handler
     // (i.e. it's extracted and discarded, not spread into gpuSafe)
@@ -49,17 +49,17 @@ describe('GET /gpus/:id: providerId/manualBlocks hidden from public', () => {
     expect(responseBlock).not.toMatch(/apiKey\s*:/);
   });
 
-  it('gpu/index.js: providerId returned only for owner/admin', () => {
+  it('gpu/reads.js: providerId returned only for owner/admin', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/reads.js'), 'utf-8'
     );
     // Conditional providerId inclusion tied to viewerIsOwnerOrAdmin
     expect(src).toMatch(/viewerIsOwnerOrAdmin.*providerId|providerId.*viewerIsOwnerOrAdmin/s);
   });
 
-  it('gpu/index.js: list endpoint also strips providerId (regression guard)', () => {
+  it('gpu/reads.js: list endpoint also strips providerId (regression guard)', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/reads.js'), 'utf-8'
     );
     // The list gpus map uses destructuring to drop providerId
     expect(src).toMatch(/providerId:\s*_pid/);

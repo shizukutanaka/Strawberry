@@ -22,14 +22,14 @@
 // within the same batch that would collide is already caught by batchKeys first.
 
 const src = require('fs').readFileSync(
-  require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+  require.resolve('../../src/api/routes/gpu/lifecycle.js'), 'utf-8'
 );
 
 function countOccurrences(text, pattern) {
   return (text.match(pattern) || []).length;
 }
 
-describe('gpu/index.js: single-registration handler calls getAll() once, not twice', () => {
+describe('gpu/lifecycle.js: single-registration handler calls getAll() once, not twice', () => {
   it('POST /gpus register handler snapshots allGpus once and reuses it', () => {
     const idx = src.indexOf("router.post('/',");
     expect(idx).toBeGreaterThan(-1);
@@ -42,7 +42,7 @@ describe('gpu/index.js: single-registration handler calls getAll() once, not twi
   });
 });
 
-describe('gpu/index.js: clone handler calls getAll() once, not twice', () => {
+describe('gpu/lifecycle.js: clone handler calls getAll() once, not twice', () => {
   it('POST /gpus/:id/clone snapshots allGpus once and reuses it for quota + duplicate checks', () => {
     const idx = src.indexOf("router.post('/:id/clone'");
     expect(idx).toBeGreaterThan(-1);
@@ -54,7 +54,7 @@ describe('gpu/index.js: clone handler calls getAll() once, not twice', () => {
   });
 });
 
-describe('gpu/index.js: bulk handler calls getAll() once total, not once per entry', () => {
+describe('gpu/lifecycle.js: bulk handler calls getAll() once total, not once per entry', () => {
   it('POST /gpus/bulk snapshots allGpusSnapshot once before the entry loop', () => {
     const idx = src.indexOf("router.post('/bulk'");
     expect(idx).toBeGreaterThan(-1);

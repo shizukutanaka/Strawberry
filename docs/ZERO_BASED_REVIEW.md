@@ -1367,6 +1367,31 @@ src/ 全ファイルの export 名を総当たり:
   （index.js 665 + reads.js 333 + disputes.js 401 + runtime.js 287 +
   sessions.js 211 = 計1,897行）。index.js は「変更系 + 共有部品」のみに。
 
+### 第105ラウンド（ソクラテス式問答 — 「最大ルートファイル gpu/index.js も同じ境界で割れるか？」）
+
+- 問い: order/ と同じ問いを残存最大ファイル `gpu/index.js`（1,125行・19ハンドラ）
+  に適用 — ドメイン境界は自明か？ ハンドラの依存解析で4ドメインに分割可能と確認。
+- **抽出（4ファイル）**:
+  - `reads.js`（564行）— GET 9本（一覧・/my・/:id・/reviews・/market-rate・
+    /history・/estimate・/eligibility・/schedule）+ 評価集計キャッシュ
+    （getGpuRating/_gpuRatingCache/GPU_RATING_TTL/invalidateGpuRatingCache —
+    唯一の利用者は GET /:id のため同所へ移動）。
+  - `lifecycle.js`（413行）— POST /・clone・bulk・PUT・DELETE +
+    `_attestationVerifier`（利用者は POST / と POST /bulk のみ）。
+  - `blocks.js`（100行）— POST/DELETE メンテナンスブロック。
+  - `watch.js`（99行）— POST/DELETE/GET 価格ウォッチ。
+- **結合面**: index.js は15行のマウント層に縮退（`router.use`×4）。
+  `module.exports._invalidateGpuRatingCache` は reads ルータ経由で re-export —
+  消費者 disputes.js は変更不要。マウント順序解析: GET /my が GET /:id より
+  先に登録される唯一の制約は reads.js 内の順序で保持、その他は
+  メソッド/セグメント数が異なり衝突なし。
+- **probe 参照更新（アサーション不変・パスのみ）**: probe28/36→lifecycle.js、
+  probe45/72→reads.js、probe46→blocks.js、probe75→lifecycle.js
+  （名前は getall だが検証対象は POST ハンドラ — 誤って reads へ向け一度赤、
+  即 lifecycle へ修正して緑）。
+- **結果**: gpu/index.js 1,125 → 15行。routes/ 直下の最大ファイルは
+  user/index.js（816行）が次の候補。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

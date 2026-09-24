@@ -20,18 +20,18 @@ afterAll(() => {
 
 // ─── 46e-2: UUID validation on block endpoints ────────────────────────────
 describe('POST /gpus/:id/block: requires valid UUID for GPU id', () => {
-  it('gpu/index.js: POST /block route has validateMiddleware with uuid params schema', () => {
+  it('gpu/blocks.js: POST /block route has validateMiddleware with uuid params schema', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/blocks.js'), 'utf-8'
     );
     // The block creation route must have validateMiddleware with 'params' source
     // Newline-agnostic (source files may use CRLF on Windows)
     expect(src).toMatch(/'\/:id\/block',\s*authenticateJWT,\s*validateMiddleware/);
   });
 
-  it('gpu/index.js: DELETE /block/:blockId validates GPU id as UUID, blockId as bounded string', () => {
+  it('gpu/blocks.js: DELETE /block/:blockId validates GPU id as UUID, blockId as bounded string', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/blocks.js'), 'utf-8'
     );
     const deleteBlockIdx = src.indexOf("router.delete('/:id/block/:blockId'");
     expect(deleteBlockIdx).toBeGreaterThan(-1);
@@ -60,7 +60,7 @@ describe('createJsonRepository: no in-memory cache (live reference false positiv
 
   it('createJsonRepository.js: withLock is used on both block add and block delete', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/blocks.js'), 'utf-8'
     );
     // Both endpoints use the same per-GPU lock key
     const lockMatches = (src.match(/withLock\(`gpu:\$\{gpuId\}:blocks`/g) || []).length;

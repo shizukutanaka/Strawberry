@@ -67,9 +67,9 @@ describe('Crypto: resolveRefreshSecret is exported from jwt-auth', () => {
 
 // ─── 36a: GPU provider trust ─────────────────────────────────────────────────
 describe('GPU: minRenterRating changes are audited', () => {
-  it('gpu/index.js: PUT handler appends audit log when minRenterRating changes', () => {
+  it('gpu/lifecycle.js: PUT handler appends audit log when minRenterRating changes', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/lifecycle.js'), 'utf-8'
     );
     expect(src).toMatch(/appendAuditLog/);
     expect(src).toMatch(/gpu_min_renter_rating_changed/);

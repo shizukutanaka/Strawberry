@@ -79,7 +79,7 @@ describe('POST /gpus/:id/clone: name field is sanitized against XSS', () => {
 
   it('gpu/index.js source: clone uses sanitizeString on targetName', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/gpu/lifecycle.js'), 'utf-8'
     );
     // Must apply sanitizeString before slicing
     expect(src).toMatch(/sanitizeString\(rawName\)/);

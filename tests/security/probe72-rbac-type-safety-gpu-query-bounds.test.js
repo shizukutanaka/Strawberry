@@ -86,7 +86,7 @@ describe('rbac: non-string role is rejected with 403 (type confusion guard)', ()
 
 describe('gpu/index.js source: minMemoryGB and maxPrice bound checks', () => {
   const src = require('fs').readFileSync(
-    require.resolve('../../src/api/routes/gpu/index.js'), 'utf-8'
+    require.resolve('../../src/api/routes/gpu/reads.js'), 'utf-8'
   );
 
   it('validates minMemoryGB lower bound (no negative bypass)', () => {

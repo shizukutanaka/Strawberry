@@ -1067,10 +1067,47 @@ src/ 全ファイルの export 名を総当たり:
   `config.X.Y` 消費者確認。パース偽陽性（コメント片）を除き死キーなし。
 - 削除ゼロのラウンド。
 
+### 第85ラウンド（ソクラテス式問答 — 「import/export とファイル内に消費者ゼロの宣言はないか？」）
+
+- `virtual-gpu-manager.js` の `const fsSync = require('fs')` は `existsSync` 呼出し
+  なし（`fs.promises` のみ経由）。削除。
+- `src/api/routes/marketplace.js` の `clientError` ヘルパーは定義のみ・呼出しゼロ
+  （`internalError` は生存）。削除。
+- `src/api/routes/order/index.js` の `const { v4: uuidv4 } = require('uuid')` は
+  Joi `.uuid()` バリデーターと別物で、生成呼出しゼロ。削除。
+- プローブ系テスト 9 ファイルで未使用の supertest `request` インポート、
+  probe61 で未使用の `GpuRepo` インポートを各々削除。
+- src/ 全体の export 監査（モジュール全 export 名 × 外部 require サイト走査）で
+  未使用 export ゼロを確認。
+
+### 第86ラウンド（ソクラテス式問答 — 「文脈参照・環境変数文書・require 位置の一貫性はあるか？」）
+
+- `master-auth.js` コメントの「security.js の API キー比較と同じ」は削除済み
+  ファイルへの吊り下がった参照。Double-HMAC 方式の記述に修正。
+- `.env.example` に `MAX_PENDING_ORDERS_PER_USER` のドキュメント行が欠落
+  （order-limits コメントブロックが未記述のまま途切れていた）。追記。
+- `routes/index.js` の遅延 require（notificationSettings・5 リポジトリ・
+  order-expiry 4 関数）はルート登録時に毎回評価されるだけで遅延の利益なし。
+  ファイル先頭へホイスト（68–72 ラウンドの方針と同型）。
+- `order-expiry.js` の require 時副作用なしを確認してホイスト適用。
+
+### 第87ラウンド（ソクラテス式問答 — 「README/CONTRIBUTING に削除済み・不存在の面が残っていないか？」）
+
+- README の P2P セクション（~27 行）を削除: 消えた P2P 機能名の記述は
+  実 API と乖離し虚偽の契約になる。
+- 空の「## API仕様・Swagger UI」見出しを削除（openapi 生成スクリプトは
+  第12ラウンドで除去済み）。
+- 「具体的な自動化コマンド例」から存在しない `npm run start:prometheus` /
+  `npm run monitor:nodes` を除去し、`logs/audit-*.log` を実パス
+  `logs/audit.log` へ修正・/metrics 認証確認コマンドを追加。
+- CONTRIBUTING の `npm run openapi` 行（EN/JA 両方）を削除、CI 記述を
+  「(test)」へ修正。
+- README の stale チェックリスト参照先を `docs/improvement-research-2026.md` へ修正。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。
-- 削除後: 同コマンドで **123/123 スイート PASS、1,140 テスト、44 秒** を確認。
+- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、63 秒** を確認（第85–87ラウンド後）。
 - `npm start` 起動確認 + `/health` `/ready` 応答確認（両者 200、SPA 配信 200）。
 - npm 依存（lockfile node_modules エントリ）: **1,036 → 732（-29%）**。
 - src/ の到達不能ファイル: 38 → 2（残りは意図的温存: ln-adapter のテスト用モック

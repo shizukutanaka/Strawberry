@@ -277,7 +277,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 - Lightning/P2P/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
 - 今後は外部通知hook本実装、現金換算ロジックの外部API化、E2E監視・テスト自動化を推奨
-- 詳細は`improvement_checklist2.md`参照
+- 改善点リサーチは [`docs/improvement-research-2026.md`](./docs/improvement-research-2026.md) を参照
 
 ---
 
@@ -288,33 +288,6 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - PR/Issue/質問は日英どちらも歓迎
 
 ---
-
-## P2Pノード運用・スケールアウト例
-
-### P2Pノード構成・障害時フロー図（Mermaid）
-```mermaid
-flowchart LR
-  subgraph ClusterA[ノードクラスタA]
-    A1[ノードA1] --- A2[ノードA2]
-    A2 --- A3[ノードA3]
-  end
-  subgraph ClusterB[ノードクラスタB]
-    B1[ノードB1] --- B2[ノードB2]
-  end
-  A1 -- P2P通信 --> B1
-  A2 -- P2P通信 --> B2
-  A3 -- 障害発生 --> F[自動切断/復旧試行]
-  F -- フェイルオーバー通知 --> A1
-  F -- ノード削除通知 --> ClusterA
-  C[新ノードC1] -- 追加/再参加 --> ClusterA
-```
-
-### P2P運用Tips
-- ノードは複数台・複数クラスタで構成し、障害時は自動で切断/復旧/フェイルオーバー
-- 新ノードの追加・障害ノードの自動削除は全てP2Pネットワーク内で自律的に処理
-- 死活監視・Prometheus・障害通知hookでノード健全性を常時監視
-- ノード追加/削除/障害時のイベントは全て監査証跡・通知hookに記録
-- スケールアウト/フェイルオーバーも全自動化可能
 
 ## 運用FAQ・トラブルシュート・運用Tips
 
@@ -352,12 +325,11 @@ flowchart LR
 ---
 
 ### 一人運用のための具体的な自動化コマンド例
-- サービス起動・監視: `npm start` または `pm2 start src/api/server.js --watch`
-- 監査証跡/Prometheusサーバ起動: `npm run start:prometheus`
+- サービス起動・監視: `npm start`（死活監視・監査・Prometheusメトリクスは同一プロセス内で動作）
 - テスト自動実行: `npm test`（CI/CDでは自動）
 - 障害通知hookの手動テスト: `curl -X POST $SLACK_WEBHOOK_URL -d '{"text":"テスト通知"}'`
-- ノード死活監視: `npm run monitor:nodes`
-- 監査証跡/障害ログ確認: `cat logs/audit-*.log`
+- メトリクス確認: `curl -H "Authorization: Bearer $METRICS_AUTH_TOKEN" http://localhost:3000/metrics`
+- 監査証跡/障害ログ確認: `cat logs/audit.log`
 
 ### AI活用Tips（FAQ/README自動生成・障害分析）
 - READMEやFAQの自動生成・更新にAIアシスタントを活用
@@ -742,9 +714,6 @@ flowchart LR
 - テスト・デモ用のダミーアカウントで動作確認可能
 
 ---
-
-## API仕様・Swagger UI
-
 
 ---
 

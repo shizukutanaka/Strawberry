@@ -99,18 +99,18 @@ describe('notifier: AXIOS_SAFE_CONFIG applied to all axios calls', () => {
 
 // ─── 42c-1/42c-2: review time window enforcement ─────────────────────────
 describe('review handlers: 30-day window enforced', () => {
-  it('order/index.js: /review checks completedAt + 30-day window', () => {
+  it('order/disputes.js: /review checks completedAt + 30-day window', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     expect(src).toMatch(/completedAt/);
     expect(src).toMatch(/daysSinceCompletion.*>.*30|30.*daysSinceCompletion/s);
     expect(src).toMatch(/within 30 days/);
   });
 
-  it('order/index.js: /renter-review also checks 30-day window', () => {
+  it('order/disputes.js: /renter-review also checks 30-day window', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     // Count occurrences: both review handlers must have the 30-day check
     const count = (src.match(/within 30 days/g) || []).length;

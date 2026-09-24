@@ -19,17 +19,17 @@ afterAll(() => {
 
 // ─── 43g: completedAt now set at order completion ─────────────────────────
 describe('/stop handler: completedAt set alongside stoppedAt', () => {
-  it('order/index.js: /stop sets completedAt in updateData', () => {
+  it('order/runtime.js: /stop sets completedAt in updateData', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/runtime.js'), 'utf-8'
     );
     // updateData must include completedAt
     expect(src).toMatch(/updateData\s*=\s*\{[^}]*completedAt[^}]*stoppedAt|updateData\s*=\s*\{[^}]*stoppedAt[^}]*completedAt/s);
   });
 
-  it('order/index.js: dispute uphold sets completedAt alongside stoppedAt', () => {
+  it('order/disputes.js: dispute uphold sets completedAt alongside stoppedAt', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     // The uphold CAS block must have completedAt: resolvedAt
     expect(src).toMatch(/completedAt:\s*resolvedAt/);
@@ -38,16 +38,16 @@ describe('/stop handler: completedAt set alongside stoppedAt', () => {
 });
 
 describe('review handlers: 30-day window uses stoppedAt fallback', () => {
-  it('order/index.js: /review window checks completedAt || stoppedAt', () => {
+  it('order/disputes.js: /review window checks completedAt || stoppedAt', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     expect(src).toMatch(/completedAt.*\|\|.*stoppedAt|reviewWindowAnchor/s);
   });
 
-  it('order/index.js: /renter-review window also uses fallback anchor', () => {
+  it('order/disputes.js: /renter-review window also uses fallback anchor', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     // Count how many times the fallback anchor pattern appears (both handlers)
     const count = (src.match(/renterReviewWindowAnchor|completedAt \|\| order\.stoppedAt/g) || []).length;

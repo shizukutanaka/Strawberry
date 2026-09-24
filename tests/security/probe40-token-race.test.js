@@ -51,9 +51,9 @@ describe('DELETE /orders/:id cancel: withLock prevents double escrow cancel', ()
 
 // ─── 40a-1: Dispute lock key is per-order ────────────────────────────────────
 describe('POST /orders/:id/dispute: withLock key is per-order', () => {
-  it('order/index.js: dispute withLock uses order.id not req.user.id', () => {
+  it('order/disputes.js: dispute withLock uses order.id not req.user.id', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     expect(src).toMatch(/withLock\(`order:\$\{order\.id\}:dispute`/);
     expect(src).not.toMatch(/withLock\(`user:\$\{req\.user\.id\}:dispute-raise`/);

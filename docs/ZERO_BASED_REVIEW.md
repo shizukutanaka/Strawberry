@@ -1315,10 +1315,40 @@ src/ 全ファイルの export 名を総当たり:
   「probe テストが index.js 直読み」の制約を解く（正規表現の対象ファイルを
   変更する=テスト変更を伴う）かどうかの判断待ち — 本ラウンドでは止める。
 
+### 第103ラウンド（ソクラテス式問答 — 「ハンドラ分割は probe テストの参照パス更新だけで済むか？」）
+
+- 第102の制約を解く: probe テストのアサーションは**正規表現の中身**であり、
+  対象ファイルのパスはアサーションではない — コードが正当に移動したなら参照先を
+  追従させるのはテスト改ざんではなくリファクタ追随。各 probe が検証する
+  パターンの所在を個別に洗い出して移動先へ向け直すだけで済む。
+- **抽出（2ファイル）**:
+  - `src/api/routes/order/runtime.js`（287行）— 実行系ハンドラ:
+    `POST /:id/heartbeat`・`POST /:id/start`・`POST /:id/stop`。
+    `./sessions` の共有マップと OrderUsageSession を継続使用。
+  - `src/api/routes/order/disputes.js`（401行）— 紛争系ハンドラ:
+    `POST /:id/dispute`・`POST /:id/dispute/resolve`・`POST /:id/review`・
+    `POST /:id/renter-review`。
+- **マウント方式**: `router.use(require('./runtime'))` / `router.use(require('./disputes'))`
+  を抽出元ハンドラの在った位置に挿入。ルート重複解析（GET /:id と /stats の
+  順序のみ有意、他パスは衝突しない）で登録順の意味論は不変と確認。
+- **index.js に残すもの**: 読み取り系（GET /・/stats・/provider/earnings・/:id・
+  /:id/payment）+ ライフサイクル（POST /・PUT /:id・DELETE /:id・/reject・/accept）
+  + 共有ヘルパー（rate-limit・SWEEP 状態・BLOCKING_ORDER_STATUSES）+ テストフック
+  re-export。移動済みの import（providerUptime・GpuRoutes・requireService・
+  UserRepository・heartbeatTimestamps・_deleteHeartbeatsForOrder）は除去。
+- **probe テスト参照更新（アサーション不変、パスのみ）**: probe25→disputes.js、
+  probe37→runtime.js、probe42→disputes.js、probe43→runtime.js(/stop)+disputes.js(他3件)、
+  probe40→disputes.js(dispute件)。probe25 の共有ロックキー計数は disputes+runtime の
+  連結ソースで検証（「resolve が /start・/stop と同一 `order:${orderId}` キー」の
+  意図を保持）。残る index.js 直読み（probe29/31/32/36/41/44/76）は対象コードが
+  index.js 残留のため不変。
+- **結果**: index.js 1,619 → 985行（−39%）、order/ は4ファイル構成
+  （index.js 985 + runtime.js 287 + disputes.js 401 + sessions.js 211）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。
-- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、53 秒** を確認（第99ラウンド後）。
+- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト（+1 skip）、67 秒** を確認（第103ラウンド後）。
 - `npm start` 起動確認 + `/health` `/ready` 応答確認（両者 200、SPA 配信 200）。
 - npm 依存（lockfile node_modules エントリ）: **1,036 → 732（-29%）**。
 - src/ の到達不能ファイル: 38 → 2（残りは意図的温存: ln-adapter のテスト用モック
@@ -1331,4 +1361,4 @@ src/ 全ファイルの export 名を総当たり:
   動かすには「プロバイダの payout インボイス/アドレス収集」の機能追加が必要 — 第一原理的には
   「実 LND ノードを運用する」前提が先。env 未配備の現状では価値密度が低いため今回は結線まで。
 - JSON 層のクロスプロセス lost-update（単一プロセス運用では非問題 — ARCHITECTURE.md 既述）。
-- `routes/order/index.js` の分割（動作中・大改修の価値密度が現状低い）。
+- ~~`routes/order/index.js` の分割~~ — 第102・103ラウンドで実施済み（sessions/runtime/disputes へ分割、985行）。

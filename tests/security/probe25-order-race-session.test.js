@@ -211,20 +211,24 @@ describe('POST /orders/:id/dispute: open-dispute count limit enforced', () => {
 
 // ─── 5. dispute/resolve lock key is 'order:${id}' (same as /start, /stop) ────
 describe('dispute/resolve lock: uses order:${id} key (source check)', () => {
-  it('order/index.js uses withLock(`order:${orderId}`) for dispute/resolve', () => {
+  it('order/disputes.js uses withLock(`order:${orderId}`) for dispute/resolve', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     // The dispute-resolve handler must share the same lock key as /start and /stop
-    const lockMatches = [...src.matchAll(/withLock\(`order:\$\{orderId\}`/g)];
+    // (which live in runtime.js — count across both files)
+    const runtimeSrc = require('fs').readFileSync(
+      require.resolve('../../src/api/routes/order/runtime.js'), 'utf-8'
+    );
+    const lockMatches = [...(src + runtimeSrc).matchAll(/withLock\(`order:\$\{orderId\}`/g)];
     expect(lockMatches.length).toBeGreaterThanOrEqual(2); // dispute-resolve + at least one other
   });
 
-  it('order/index.js uses withLock for dispute-raise per order (not per user)', () => {
+  it('order/disputes.js uses withLock for dispute-raise per order (not per user)', () => {
     // The lock must be per-order so renter+provider concurrent disputes are serialized.
     // A per-user key would allow them to race each other on the same order.
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/disputes.js'), 'utf-8'
     );
     expect(src).toMatch(/withLock\(`order:\$\{order\.id\}:dispute`/);
     expect(src).not.toMatch(/withLock\(`user:\$\{req\.user\.id\}:dispute-raise`/);

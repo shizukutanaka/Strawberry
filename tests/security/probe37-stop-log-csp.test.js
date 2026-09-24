@@ -15,27 +15,27 @@ afterAll(() => {
 
 // ─── 37a: /stop wall-clock elapsed time fallback ─────────────────────────────
 describe('/stop: wall-clock elapsed time is used when usageStats absent', () => {
-  it('order/index.js: elapsedSeconds is calculated from order.startedAt before escrow settle', () => {
+  it('order/runtime.js: elapsedSeconds is calculated from order.startedAt before escrow settle', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/runtime.js'), 'utf-8'
     );
     // Must compute elapsed from startedAt
     expect(src).toMatch(/elapsedSeconds.*startedAt/);
     expect(src).toMatch(/Date\.now\(\).*new Date\(order\.startedAt\)/);
   });
 
-  it('order/index.js: measured falls back to elapsedSeconds/durationMinutes (not 0) when no usageStats', () => {
+  it('order/runtime.js: measured falls back to elapsedSeconds/durationMinutes (not 0) when no usageStats', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/runtime.js'), 'utf-8'
     );
     // The fallback path must use elapsedSeconds, not a bare `: 0`
     expect(src).toMatch(/elapsedSeconds.*durationMinutes/);
     expect(src).toMatch(/elapsedSeconds \/ \(order\.durationMinutes \* 60\)/);
   });
 
-  it('order/index.js: measured is still 0 when durationMinutes is absent', () => {
+  it('order/runtime.js: measured is still 0 when durationMinutes is absent', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
+      require.resolve('../../src/api/routes/order/runtime.js'), 'utf-8'
     );
     // Safety valve: if durationMinutes is missing, default to 0 (not divide-by-zero)
     expect(src).toMatch(/order\.durationMinutes[\s\S]{1,100}Math\.max\(0, Math\.min\(1, elapsedSeconds/);

@@ -1838,6 +1838,22 @@ src/ 全ファイルの export 名を総当たり:
 - **CSS 重複ルール**: `.field-row` が2箇所に見えたが `.field-row > .field` との
   別セレクタ混同 — 同一ルールの複写なし。
 
+### 第133ラウンド（ソクラテス式問答 — 「この複写は本当にdedupできるか？」）
+
+- **問い**: disputes.js の /review・/renter-review に同一形ガードが2組ある
+  （30日レビュー期限・支払い確認）— dedup してよいか？
+- **答え**: **断念・温存** — probe51 と同型で「複写そのものが契約」。
+  `assertReviewWindow`/`assertPaidOrder` ヘルパー抽出を適用したが、
+  probe42 が `within 30 days` の**両ハンドラ内**インライン存在（≥2回）を、
+  probe43 が `renterReviewWindowAnchor|completedAt \|\| order\.stoppedAt`
+  の ≥2回出現をそれぞれソース検証しており失敗。適用→jest赤→**全量 revert**。
+- **教訓**: probe テストのソース読みアサーションには3類型ある —
+  識別子存在（probe34）、コード形状・順序（probe25/31/40）、
+  **インライン複写の両側存在**（probe42/43/51）。dedup 判断前に対象パターンが
+  probe の match/count 式に含まれていないか確認必須。
+- **並走監査（死面ゼロ）**: routes/ 横断の内部関数名に他の複写なし
+  （daysSinceCompletion の2件のみが嫌疑、上記）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

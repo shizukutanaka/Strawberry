@@ -1502,6 +1502,20 @@ src/ 全ファイルの export 名を総当たり:
 - ドキュメント参照は stale なし（routes パス記述を保持確認）。
 - **結果**: escrow 配線が1箇所に集約 — LN アダプタ変更時の修正点が一意化。
 
+### 第112ラウンド（ソクラテス式問答 — 「notification-settings.json の読み方は3つあるべきか？」）
+
+- 問い: 同一ファイルを notifier・user-notify・API がそれぞれ読む — 重複か？
+  → 意味が異なる2系統だった: API は corrupt で throw（書込経路の厳格検証・
+  意図的）、notifier と user-notify は破損→{} の寛容リード（通知は
+  best-effort）。共有は寛容版2箇所のみ正しい。
+- **集約**: `notifier.js` に `loadNotificationSettings()`（寛容版）を置き、
+  `sendNotification('user_*')` 経路と `user-notify.js` の双方が使用。
+  user-notify の `loadAllSettings`/`SETTINGS_PATH` と fs/path require を削除
+  （`loadAllSettings = loadNotificationSettings` のエイリアスで呼出し変更不要）。
+  API の `loadSettings`（throw 版）は異なる契約のため温存。
+- **結果**: 寛容リーダー1箇所・厳格リーダー1箇所 — 意味の違いを維持しつつ
+  真の重複のみ消去。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

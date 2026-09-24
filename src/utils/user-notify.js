@@ -2,22 +2,10 @@
 // notification-settings API でユーザーが登録した通知チャネル（LINE/Discord/Slack/
 // Telegram/Email/汎用 Webhook・イベント別 Webhook）へイベントを配送する。
 // プロバイダへの「あなたの GPU に注文が入った」等のマーケットプレイスイベントに使用。
-const fs = require('fs');
-const path = require('path');
-const { sendNotification, NotifyType } = require('./notifier');
+const { sendNotification, NotifyType, loadNotificationSettings } = require('./notifier');
 const { logger } = require('./logger');
 
-const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
-
-function loadAllSettings() {
-  try {
-    return fs.existsSync(SETTINGS_PATH)
-      ? JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'))
-      : {};
-  } catch (_) {
-    return {};
-  }
-}
+const loadAllSettings = loadNotificationSettings;
 
 /**
  * 設定オブジェクトから送信すべきチャネル一覧を解決する（純関数・テスト可能）。

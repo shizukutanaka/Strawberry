@@ -39,18 +39,27 @@ const { sendEmailNotification } = require('./email');
 const fs = require('fs');
 const path = require('path');
 
+const NOTIFICATION_SETTINGS_PATH = path.resolve(__dirname, '../../data/notification-settings.json');
+
+// 通知設定ファイルの寛容リーダー。通知は best-effort のため、不在・破損は
+// 全ユーザー未設定（{}）として扱う。厳格な検証が必要な書き込み経路
+// （notification-settings API）は独自の loadSettings を持つ。
+function loadNotificationSettings() {
+  try {
+    return fs.existsSync(NOTIFICATION_SETTINGS_PATH)
+      ? JSON.parse(fs.readFileSync(NOTIFICATION_SETTINGS_PATH, 'utf-8'))
+      : {};
+  } catch (_) {
+    return {};
+  }
+}
+
 async function sendNotification(typeOrUserId, message, options = {}) {
   // typeOrUserIdがユーザーIDの場合、多段通知
   if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
     // 設定ファイルから通知設定を取得
     const userId = typeOrUserId;
-    const settingsPath = path.resolve(__dirname, '../../data/notification-settings.json');
-    let settings = {};
-    try {
-      if (fs.existsSync(settingsPath)) {
-        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))[userId] || {};
-      }
-    } catch {}
+    const settings = loadNotificationSettings()[userId] || {};
     const enabled = settings.enabled || {};
     const tasks = [];
     if (enabled.line && settings.lineToken) {
@@ -212,4 +221,5 @@ module.exports = {
   sendNotification,
   NotifyType,
   withRetry,
+  loadNotificationSettings,
 };

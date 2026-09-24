@@ -2182,6 +2182,24 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・52秒。
 
+### 第152ラウンド（ソクラテス式問答 — 「status 遷移の素の update は全て CAS か？」）
+
+- **問い**: `status:` を書く `update(` を全 src 走査 — 状態遷移の素の
+  update は「チェック→書込み」間の競合で lost-update し得る。どの status
+  書込みが CAS/ロックなしで走っているか。
+- **答え**: **全箇所が保護済み・対象ゼロ** — status 書込みを持つ4ファイル:
+  - `gpu/lifecycle.js`: POST /・/bulk = `withLock`（150th）、PUT :id の
+    重複名チェック→update は await なしの同期ブロック（単一 tick で不可分）。
+  - `order/disputes.js`・`order/mutations.js`: `updateIf`/`withLock` を
+    各10箇所で既使用。
+  - `user/me.js` deactivate: `getAll().filter(NON_TERMINAL)` → `update` が
+    同期ブロック（await なし）で不可分。
+  - `core/invoice-poller.js`: 151th で全5箇所を `updateIf(status==='pending')` に。
+- **監査して生存**: `status:` マッチの一部はレスポンス形状（me.js:284/298）
+  で書込みではない。複数プロセス競合のみ §11 の JSON 層設計判断に棚卸し。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・52秒（前回実行流用 — 変更なしの検証ラウンド）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

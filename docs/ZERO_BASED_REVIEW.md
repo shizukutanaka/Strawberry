@@ -2162,6 +2162,26 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・53秒。
 
+### 第151ラウンド（ソクラテス式問答 — 「ポーラーの status 書き込みは CAS か？」）
+
+- **問い**: routes 以外へ拡張した read→await→write 走査で残った唯一の面 —
+  invoice-poller の payment.status 書込み。注文側は既に `updateIf` CAS（
+  cancel/reject/expire との競合を防ぐコメント付き）なのに、payment 側の
+  5箇所は素の `update` — `checkInvoice` await 中に別経路が status を遷移
+  した場合、ポーラーが上書きするのではないか。
+- **答え**: **全5箇所を CAS 化して修正** — 各 `PaymentRepository.update` →
+  `updateIf(id, p => p.status === 'pending', {...})`:
+  - underpayment-mark・order_not_payable・already_paid_via_other_method・
+    invoice_expired: 別経路（手動承認等）で確定した支払いを failed で
+    巻き戻さないよう pending 限定に。
+  - mark-paid: pending 限定にし、`paidWrite.ok === false` なら audit/
+    注文前進もスキップ（遅延 settle 通知による paid 再書込みを抑止）。
+- **監査して生存**: `_running` フラグでポーラー同士の重畳防止は既存、
+  注文前進の `updateIf(status==='pending')` CAS は既存 — 本件は payment
+  側の未 CAS 面のみだった。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・52秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

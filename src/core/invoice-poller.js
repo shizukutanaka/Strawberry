@@ -39,7 +39,10 @@ async function pollOnce() {
           const expectedSats = Number(payment.amount);
           if (Number.isFinite(expectedSats) && expectedSats > 0 &&
               Number.isFinite(paidSats) && paidSats < expectedSats) {
-            PaymentRepository.update(payment.id, {
+            // CAS: checkInvoice await 中に別経路（手動承認・別ポーラー）で status が
+            // 遷移した場合に備え、pending のままのときだけ上書きする — 支払い確定を
+            // failed で巻き戻したり failed を paid で起こしたりしない。
+            PaymentRepository.updateIf(payment.id, (p) => p.status === 'pending', {
               status: 'failed',
               failedAt: new Date().toISOString(),
               failReason: 'underpayment',
@@ -62,7 +65,7 @@ async function pollOnce() {
             const currentOrder = OrderRepository.getById(payment.orderId);
             const PAYABLE = new Set(['pending', 'matched']);
             if (!currentOrder || !PAYABLE.has(currentOrder.status)) {
-              PaymentRepository.update(payment.id, {
+              PaymentRepository.updateIf(payment.id, (p) => p.status === 'pending', {
                 status: 'failed',
                 failedAt: new Date().toISOString(),
                 failReason: 'order_not_payable',
@@ -80,7 +83,7 @@ async function pollOnce() {
             const alreadyPaid = (PaymentRepository.getByOrderId(payment.orderId) || [])
               .filter(p => p.status === 'paid' && p.method !== 'lightning');
             if (alreadyPaid.length > 0) {
-              PaymentRepository.update(payment.id, {
+              PaymentRepository.updateIf(payment.id, (p) => p.status === 'pending', {
                 status: 'failed',
                 failedAt: new Date().toISOString(),
                 failReason: 'already_paid_via_other_method',
@@ -93,13 +96,22 @@ async function pollOnce() {
             }
           }
 
-          // Mark payment paid
-          PaymentRepository.update(payment.id, {
-            status: 'paid',
-            paidAt: new Date().toISOString(),
-            settledAt: invoiceStatus.settleDate || new Date().toISOString(),
-            ...(Number.isFinite(paidSats) ? { amountPaid: paidSats } : {})
-          });
+          // Mark payment paid — CAS: 別経路で既に failed/paid へ遷移した
+          // 場合は上書きしない（遅延 settle 通知による paid 再書き込みを抑止）。
+          const paidWrite = PaymentRepository.updateIf(
+            payment.id,
+            (p) => p.status === 'pending',
+            {
+              status: 'paid',
+              paidAt: new Date().toISOString(),
+              settledAt: invoiceStatus.settleDate || new Date().toISOString(),
+              ...(Number.isFinite(paidSats) ? { amountPaid: paidSats } : {})
+            }
+          );
+          if (!paidWrite || !paidWrite.ok) {
+            logger.warn(`Invoice settled but payment already transitioned (paymentId=${payment.id}); skipping paid mark`);
+            continue;
+          }
           appendAuditLog('payment_confirmed', {
             paymentId: payment.id,
             orderId: payment.orderId,
@@ -131,8 +143,8 @@ async function pollOnce() {
             }
           }
         } else if (_isExpired(payment)) {
-          // Invoice expired without payment — mark failed
-          PaymentRepository.update(payment.id, {
+          // Invoice expired without payment — mark failed (CAS: pending のみ対象)
+          PaymentRepository.updateIf(payment.id, (p) => p.status === 'pending', {
             status: 'failed',
             failedAt: new Date().toISOString(),
             failReason: 'invoice_expired'

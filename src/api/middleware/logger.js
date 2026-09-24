@@ -76,9 +76,6 @@ const responseTime = (req, res, next) => {
     if (duration > 1000) {
       logger.warn(`Slow response: ${req.method} ${req.originalUrl} - ${duration}ms`);
     }
-    
-    // メトリクス収集（将来的に拡張）
-    // TODO: Prometheusなどのメトリクス収集システムと連携
   });
   
   next();

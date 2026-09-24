@@ -36,7 +36,6 @@ function isSSRFUrl(url) {
   if (!/^https?:\/\//i.test(url)) return true;
   return PRIVATE_IP_PATTERNS.some(re => re.test(url));
 }
-// エクスポートして notifier.js の送信時にも再検証できるようにする
 
 // Joi カスタムバリデータ（URI形式 + SSRF禁止）
 const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)

@@ -1149,10 +1149,37 @@ src/ 全ファイルの export 名を総当たり:
   一度も実行されていない死テスト。Mocha API (`this.timeout`) 使用・実外部 API を
   叩く・同対象の正当な jest テスト `exchange-rate-swr.test.js` が存在。削除。
 
+### 第93ラウンド（ソクラテス式問答 — 「同じ役割を担う文書が二箇所に存在しないか？」）
+
+- リポジトリ直下の `SPECIFICATION.md`（235行・2026-06 版）は `docs/SPECIFICATION.md`
+  の古い二重コピー。canonical は ARCHITECTURE.md:93（「API 参照は docs/SPECIFICATION.md」）
+  と src/ 8ファイルのコメントが指す docs 側であり、root 側を参照する文書・コードはゼロ。
+- root 側は削除済みブランチ名・削除済み peerid/joi-to-swagger/libp2p 等を実在として
+  語り、テスト数も 830 件と stale。git rm。
+- `improvement_checklist2.md` は scripts/feedback-to-checklist.js・checklist-kpi-report.js
+  のデータソースとして稼働中（冒頭に実態乖離の免責済み）のため温存。
+
+### 第94ラウンド（ソクラテス式問答 — 「文書中の定量主張は実測と一致するか？」）
+
+- ARCHITECTURE.md のテスト数 2箇所が stale（136/138・1,213 テスト・112 秒）→
+  実測 115/115・1,045 テスト・約 60 秒へ同期。ファイル削除履歴の記述は正確で変更不要。
+
+### 第95ラウンド（ソクラテス式問答 — 「『実装済み』とされる TODO/将来拡張コメントが残っていないか？」）
+
+- `middleware/logger.js` の `TODO: Prometheus 連携` — prom-client `/metrics` として
+  既に結線済み。stale TODO 2行を削除。
+- `notification-settings.js` の「isSSRFUrl をエクスポートして再検証」コメント —
+  実際は `module.exports = { router }` で非エクスポート、notifier は ssrf-guard の
+  `assertPublicUrl` を使用。虚偽コメントを削除。
+- **削除断念（正直な記録）**: `schemas.lightningNode/lightningChannel`（validator.js）は
+  src/ 配下 grep では消費者ゼロに見えたが、リポジトリ直下の `lightning-service.js`
+  （:408, :618 で LND RPC 応答を検証）が消費者だった。適用→jest 3スイート赤→即 revert。
+  教訓: 消費者監査は src/ に限定せずリポジトリルートの大型モジュールも対象に。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。
-- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、63 秒** を確認（第85–87ラウンド後）。
+- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、65 秒** を確認（第93–95ラウンド後）。
 - `npm start` 起動確認 + `/health` `/ready` 応答確認（両者 200、SPA 配信 200）。
 - npm 依存（lockfile node_modules エントリ）: **1,036 → 732（-29%）**。
 - src/ の到達不能ファイル: 38 → 2（残りは意図的温存: ln-adapter のテスト用モック

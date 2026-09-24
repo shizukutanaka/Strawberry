@@ -1902,6 +1902,20 @@ src/ 全ファイルの export 名を総当たり:
 - **並走監査**: logs/ の combined1-4.log は winston maxsize ローテーションの
   正常生成物（gitignore 済・削除対象外）。
 
+### 第137ラウンド（ソクラテス式問答 — 「SPA ルート表と登録ハンドラは一致するか？」）
+
+- **問い**: app.js のルート登録に未配線ページ・死リンクは残るか？
+- **答え**: ゼロ — SPA 全配線を双方向で確認。
+  - pages/ 全11ファイルが app.js で import・ルート登録済み
+  - 登録ハッシュ10件 + setNotFound・`#/` 既定 — 全リンク（`#/market`・`#/orders/:id`
+    等）が実ルート解決
+  - `navigate` も logout ボタン（app.js:69）で実使用
+  - `router.js` 内部（route/parseHash/renderCurrent/cleanup契約/escapeText/
+    navigate）も全消費 — タイマーリーク防止のクリーンアップ契約が実装済み
+- **並走監査（死面ゼロ）**: routes/index.js の6マウント配線（marketplace・
+  notification-settings・profit-addresses 等）全て実モジュール、
+  `/marketplace/stats` の特別扱い（stats は :id より先に照合済）も順序保証済。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

@@ -60,6 +60,7 @@ class LightningService {
         this._stopped = false;
         this._reconnectTimers = new Set();
         this._streams = new Set();
+        this._periodicTimers = [];
     }
 
     async initialize() {
@@ -828,14 +829,18 @@ class LightningService {
 
 
     startPeriodicTasks() {
+        if (this._stopped) return;
+        // 起動する周期タイマーは _periodicTimers に保持し shutdown で全て止める
+        // （unref だけではシャットダウン後も周期発火して状態を変え続ける）。
+        const keep = (t) => { if (t.unref) t.unref(); this._periodicTimers.push(t); return t; };
         // チャネルバランス更新（5分ごと）
-        setInterval(() => {
+        keep(setInterval(() => {
             this.updateChannels().catch(error => {
                 logger.error('Failed to update channels:', error);
             });
-        }, 5 * 60 * 1000);
+        }, 5 * 60 * 1000));
         // 期限切れ請求書のクリーンアップ（10分ごと）＋Map自動クリーニング
-        setInterval(() => {
+        keep(setInterval(() => {
             const now = Date.now();
             // 期限切れ請求書
             for (const [hash, invoice] of this.invoices) {
@@ -845,13 +850,13 @@ class LightningService {
             }
             // Map件数・期間クリーニング
             this.cleanMaps();
-        }, 10 * 60 * 1000);
+        }, 10 * 60 * 1000));
         // ノード情報更新（30分ごと）
-        setInterval(() => {
+        keep(setInterval(() => {
             this.updateNodeInfo().catch(error => {
                 logger.error('Failed to update node info:', error);
             });
-        }, 30 * 60 * 1000);
+        }, 30 * 60 * 1000));
     }
 
     // Map自動クリーニング（LRU/最大件数/期間ベース）
@@ -865,10 +870,12 @@ class LightningService {
                 this.invoices.delete(hash);
             }
         }
-        // 最大件数
+        // 最大件数（超過分の全件を削除する。ループ条件に this.X.size を使うと
+        // 削除するたび境界が縮み、超過の約半分しか掃かれない）
         if (this.invoices.size > this.maxInvoices) {
             const sorted = invoicesArr.sort((a, b) => (a[1].createdAt || 0) - (b[1].createdAt || 0));
-            for (let i = 0; i < this.invoices.size - this.maxInvoices; i++) {
+            const excess = this.invoices.size - this.maxInvoices;
+            for (let i = 0; i < excess; i++) {
                 this.invoices.delete(sorted[i][0]);
             }
         }
@@ -881,7 +888,8 @@ class LightningService {
         }
         if (this.payments.size > this.maxPayments) {
             const sorted = paymentsArr.sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
-            for (let i = 0; i < this.payments.size - this.maxPayments; i++) {
+            const excess = this.payments.size - this.maxPayments;
+            for (let i = 0; i < excess; i++) {
                 this.payments.delete(sorted[i][0]);
             }
         }
@@ -889,7 +897,8 @@ class LightningService {
         if (this.channels.size > this.maxChannels) {
             const channelsArr = Array.from(this.channels.entries());
             const sorted = channelsArr.sort((a, b) => (a[1].openedAt || 0) - (b[1].openedAt || 0));
-            for (let i = 0; i < this.channels.size - this.maxChannels; i++) {
+            const excess = this.channels.size - this.maxChannels;
+            for (let i = 0; i < excess; i++) {
                 this.channels.delete(sorted[i][0]);
             }
         }
@@ -964,6 +973,8 @@ class LightningService {
                 } catch (_) { /* ストリーム停止失敗は黙殺 — シャットダウンは続行する */ }
             }
             this._streams.clear();
+            for (const t of this._periodicTimers) clearInterval(t);
+            this._periodicTimers.length = 0;
 
             logger.info('Lightning service shutdown complete');
             

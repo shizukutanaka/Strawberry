@@ -1961,6 +1961,23 @@ src/ 全ファイルの export 名を総当たり:
   shutdown も同じ罠（モジュールに `.shutdown` は無い）を踏みかけていた。
 - `npx jest --forceExit` 全緑: 115/115・1,045・64秒。
 
+### 第140ラウンド（ソクラテス式問答 — 「保持上限は実際に保持を強制するか？」）
+
+- **問い**: `maxInvoices`/`maxPayments`/`maxChannels`/`retentionMs` の保持 config は
+  実際に Map を剪定しているか？ `startPeriodicTasks` の周期タイマーは止められるか？
+- **答え**: **2件の実欠陥を修正**。
+  - `cleanMaps` の剪定ループ3箇所は `for (i = 0; i < this.X.size - max; i++)` —
+    削除ごとに `this.X.size` が縮み境界も縮むため、超過分の**約半分**しか削除
+    しない（S=1100,M=1000 で50件しか掃かない）。`excess` を先に算出して全超過
+    分を削除するよう修正（invoices/payments/channels 全3箇所）
+  - `startPeriodicTasks` の3個の setInterval は unref もハンドル保持もなく
+    shutdown 対象外 — `_periodicTimers` に保持して unref、`shutdown()` で
+    clearInterval、`startPeriodicTasks` 冒頭に `_stopped` ガード
+- **監査して生存**: `usageSessions`/`heartbeatTimestamps`（30秒 SLA 掃討 + reap
+  で寿命管理済）、invoice-poller/service-monitor/server メトリクス（139 で
+  gracefulShutdown 結線済）、LN 再接続タイマー（138 で管理済）。
+- `npx jest --forceExit` 全緑: 115/115・1,045・57秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

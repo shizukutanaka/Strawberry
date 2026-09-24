@@ -10,26 +10,22 @@ const { masterSession } = require('../middleware/master-session');
 
 const router = express.Router();
 
+const { createSlidingWindowLimiter } = require('../../utils/sliding-window-limit');
+
 // メール認証コードの有効期限（10分）
 const MAIL_CODE_TTL_MS = 10 * 60 * 1000;
 
 // TOTP ブルートフォース対策: セッションスコープのカウンタは新セッション開始で
 // リセットできる（バイパス可能）。プロセスレベルの IP ベースカウンタで補完する。
 // 15分ウィンドウで最大10回。セッション側（5回）と合わせて2重防御。
-const _totpIpMap = new Map(); // IP -> { count, windowStart }
 const TOTP_IP_WINDOW_MS = 15 * 60 * 1000;
 const TOTP_IP_MAX = 10;
+const _totpIpLimiter = createSlidingWindowLimiter({ windowMs: TOTP_IP_WINDOW_MS, max: TOTP_IP_MAX });
+const _totpIpMap = _totpIpLimiter.state; // IP -> { count, windowStart }
 
 function _checkTotpIpLimit(ip) {
-  const now = Date.now();
-  const rec = _totpIpMap.get(ip);
-  if (!rec || now - rec.windowStart > TOTP_IP_WINDOW_MS) {
-    _totpIpMap.set(ip, { count: 1, windowStart: now });
-    return false; // not rate-limited
-  }
-  rec.count += 1;
-  if (rec.count > TOTP_IP_MAX) return true; // rate-limited
-  return false;
+  // hit() は呼び出しごとにカウントを進める — TOTP_IP_MAX 回目まで許可、それを超えると true。
+  return _totpIpLimiter.hit(ip) > TOTP_IP_MAX;
 }
 
 // タイミング攻撃耐性のある文字列比較。

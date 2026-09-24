@@ -18,6 +18,7 @@ const { sanitizeUser } = require('../../utils/sanitize-user');
 const { authLimiter } = require('../../middleware/rate-limit');
 const { isSessionInvalidated } = require('../../utils/session-invalidation');
 const { isRevoked, revoke } = require('../../middleware/token-denylist');
+const { createSlidingWindowLimiter } = require('../../../utils/sliding-window-limit');
 const { signAccessToken, signRefreshToken } = require('../../utils/tokens');
 const UserRepository = require('../../../db/json/UserRepository');
 
@@ -32,26 +33,13 @@ const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', config.security.b
 
 // アカウント単位のブルートフォース抑制（IPを迂回した辞書攻撃対策）。
 // スライディングウィンドウ: 15分以内に10回失敗 → 429。成功でリセット。
-const _loginFailures = new Map(); // email → { count, windowStart }
-const _LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const _LOGIN_MAX_FAILURES = 10;
+const _loginLimiter = createSlidingWindowLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
 function _recordLoginFailure(email) {
-  const now = Date.now();
-  const entry = _loginFailures.get(email) || { count: 0, windowStart: now };
-  if (now - entry.windowStart > _LOGIN_WINDOW_MS) {
-    entry.count = 0;
-    entry.windowStart = now;
-  }
-  entry.count += 1;
-  _loginFailures.set(email, entry);
-  return entry.count;
+  return _loginLimiter.hit(email);
 }
-function _resetLoginFailures(email) { _loginFailures.delete(email); }
+function _resetLoginFailures(email) { _loginLimiter.reset(email); }
 function _isLoginLocked(email) {
-  const entry = _loginFailures.get(email);
-  if (!entry) return false;
-  if (Date.now() - entry.windowStart > _LOGIN_WINDOW_MS) { _loginFailures.delete(email); return false; }
-  return entry.count >= _LOGIN_MAX_FAILURES;
+  return _loginLimiter.isLimited(email);
 }
 
 // ユーザー登録

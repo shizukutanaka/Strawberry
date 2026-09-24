@@ -22,6 +22,7 @@ const { isValidOrderTransition } = require('../../../utils/state-checker');
 const { expireStaleOrders, expireStaleMatchedOrders } = require('../../../utils/order-expiry');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { invalidateUserCache } = require('../../middleware/cache');
+const { createSlidingWindowLimiter } = require('../../../utils/sliding-window-limit');
 
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
@@ -43,22 +44,17 @@ const MAX_ORDER_SCHEDULE_AHEAD_DAYS = resolvePositiveIntEnv('MAX_ORDER_SCHEDULE_
 // グローバル IP リミットだけでは：同一ユーザーが異なる IP (Tor/VPN) から来た場合に効果がなく、
 // また共有 IP (NAT) では無関係ユーザーを巻き込んでしまう。
 // ここでは id ベースの滑動ウィンドウで「ユーザー単位」の短時間爆発を抑制する。
-const _orderCreateRateState = new Map(); // userId → { count, windowStart }
 const ORDER_CREATE_RATE_LIMIT = Number(process.env.ORDER_CREATE_RATE_LIMIT) || 10;  // per window
 const ORDER_CREATE_RATE_WINDOW_MS = 60_000; // 1 minute sliding window
+const _orderCreateRateLimiter = createSlidingWindowLimiter({
+  windowMs: ORDER_CREATE_RATE_WINDOW_MS,
+  max: ORDER_CREATE_RATE_LIMIT,
+});
 function _checkOrderCreateRateLimit(userId) {
-  const now = Date.now();
-  let s = _orderCreateRateState.get(userId);
-  if (!s || now - s.windowStart >= ORDER_CREATE_RATE_WINDOW_MS) {
-    _orderCreateRateState.set(userId, { count: 1, windowStart: now });
-    return true;
-  }
-  if (s.count >= ORDER_CREATE_RATE_LIMIT) return false;
-  s.count++;
-  return true;
+  return _orderCreateRateLimiter.hit(userId) <= ORDER_CREATE_RATE_LIMIT;
 }
 // 単体テストが Map を直接リセットできるよう公開（プロセス再起動が不要）
-_checkOrderCreateRateLimit._state = _orderCreateRateState;
+_checkOrderCreateRateLimit._state = _orderCreateRateLimiter.state;
 
 router.put('/:id',
   authenticateJWT,

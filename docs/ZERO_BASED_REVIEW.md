@@ -1464,6 +1464,28 @@ src/ 全ファイルの export 名を総当たり:
   （`require` 部分一致・エイリアス名の取り違え）と確認、実体は全消費。
 - 判定: 分割作業は完了。残る routes/ の各 index.js は mount 層のみと統一。
 
+### 第110ラウンド（ソクラテス式問答 — 「{count, windowStart} 実装はなぜ3つある？」）
+
+- 問い: order作成・login失敗・TOTP IP の3箇所が同一のスライドウィンドウ
+  カウンタを個別実装 — 「3回目の実装は共通化すべきでは？」→ 共通 util へ。
+- **新設**: `src/utils/sliding-window-limit.js` —
+  `createSlidingWindowLimiter({windowMs, max})` が
+  `{hit(key), isLimited(key), reset(key), state}` を返す
+  （hit=カウント加算、isLimited=失効掃除付きpeek、state=テスト用Map公開）。
+- **接続（3サイト、意味保存）**:
+  - `order/mutations.js`: `_orderCreateRateState` → limiter。
+    `_checkOrderCreateRateLimit` は `hit<=LIMIT` のラッパーとして温存し
+    `._state` も `limiter.state` を指す — probe64 の実行フック互換。
+  - `user/auth.js`: `_loginFailures` 3関数 → limiter の薄いラッパー
+    （record=hit・reset=reset・isLocked=isLimited — 呼出し側変更不要）。
+  - `master-auth.js`: `_totpIpMap` 手書き実装 → limiter。
+    probe34 が `/_totpIpMap/`・`/_checkTotpIpLimit/`・`/TOTP_IP_WINDOW_MS/`
+    をソース検証するため、定数名・`_totpIpMap`（=`limiter.state`）を保持
+    （一度 probe34 赤 → 識別子維持で緑。テストは不変）。
+- **残した面**: express-rate-limit の IP リミッタ（別物・共有化対象外）、
+  セッションスコープの TOTP/mail カウンタ（意図的にスコープ分離）。
+- **結果**: 3 実装 → 1 util + 各サイト ≤6行の設定。意味変更ゼロ。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

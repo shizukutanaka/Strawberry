@@ -1794,6 +1794,20 @@ src/ 全ファイルの export 名を総当たり:
   `tests/helpers/`（mock-ln-adapter のみ）と `tests/utils/`（src/utils の
   テスト置き場）は別用途で重複なし、globalSetup.js は data/ 初期化の中核。
 
+### 第130ラウンド（ソクラテス式問答 — 「export したが import されない関数はないか？」）
+
+- **問い**: public/js の ES module export 30件に import 消費者がないものはないか？
+- **答え**: 全30 export を走査。嫌疑3件（`clear`・`setSession`・`statusLabel`）を
+  精査したが全て生存 — `clear` は app.js が import、`setSession`/`statusLabel` は
+  定義ファイル内で使用（同一ファイル内呼出しは import 不要）。
+  **export だが他ファイルから未使用の関数: ゼロ**。
+- **並走監査（死面ゼロ）**: btc-payment 全6 export（btc-onchain 経路で消費）、
+  分割ファイル全10本の未使用 const ゼロ、scripts 全16本が package.json scripts または
+  兄弟 require で消費（line-notify は service-monitor の LINE チャネル経由＋probe57）、
+  yaml/compose 残留ファイルゼロ、docker-compose 設定不在（Dockerfile.api のみ）。
+- **備考**: 削除系監査面の完全収束を継続確認 — 4 連続検証ラウンド（127–130）で
+  削除対象ゼロ。残るは §11 の設計判断2件（実装領域）のみ。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

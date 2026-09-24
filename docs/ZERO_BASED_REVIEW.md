@@ -2063,6 +2063,21 @@ src/ 全ファイルの export 名を総当たり:
 - **監査して生存（契約強制済み）**: 全 fire-and-forget 経路（notifyUser × 22、
   price-watch setImmediate × 3、interval コールバック × 4、process guards）。
 
+### 第146ラウンド（ソクラテス式問答 — 「文書化された設定は読まれているか？」）
+
+- **問い**: `.env.example` の `KEY=` 行全23件 — `process.env.KEY` の直参照が
+  ないものは「文書化されたが読まれない」stale 設定か。
+- **答え**: **全て参照済み、stale 設定ゼロ** — `safeInt()`/`requireSecret()`/
+  `config.server.port` 経由の間接参照を確認したところ、直参照ゼロの3件も全て
+  消費されている: `BCRYPT_ROUNDS`（safeInt, config.js:111）、`SESSION_SECRET`
+  （requireSecret, master-session.js:18）、`PORT`（safeInt → config.server.port,
+  server.js:76）。コメント行の名詞（API/GPU/POST/E2E/MAILGUN_*/SENDGRID_*/
+  EMAIL_FROM）は実 KEY= 行ではなく文書言及でした。
+- **監査して生存**: GPU 一覧クエリフィルタ（features/minMemoryGB/maxPrice/
+  vendor/country/apiType/search/available/minRating）は全フィールドが読込→
+  フィルタ適用（reads.js:46-184）で、バリデーション済みだが無視される
+  パラメータなし。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

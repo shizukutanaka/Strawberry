@@ -1,13 +1,11 @@
 // src/api/middleware/cache.js - LRUキャッシュミドルウェア
 // lru-cache v10 では名前付きエクスポート(LRUCache)を使用する
 const { LRUCache } = require('lru-cache');
-const { logger } = require('../../utils/logger');
 const client = require('prom-client');
 
 // Prometheusメトリクス
 const cacheHitCounter = new client.Counter({ name: 'api_cache_hit_total', help: 'Total API cache hits' });
 const cacheMissCounter = new client.Counter({ name: 'api_cache_miss_total', help: 'Total API cache misses' });
-const cachePurgeCounter = new client.Counter({ name: 'api_cache_purge_total', help: 'Total API cache purges' });
 
 // キャッシュ容量・TTLは要件に応じて調整
 const cache = new LRUCache({
@@ -47,13 +45,6 @@ function cacheMiddleware(options = {}) {
   };
 }
 
-// キャッシュ全体パージ関数（管理API等で利用可）
-function purgeCache() {
-  cache.clear();
-  cachePurgeCounter.inc();
-  logger.info('Cache purged');
-}
-
 // ユーザー固有キャッシュの無効化。注文作成・更新後に呼ぶことで
 // 60 秒の TTL を待たずに最新データが返るようにする。
 function invalidateUserCache(userId) {
@@ -66,5 +57,5 @@ function invalidateUserCache(userId) {
   }
 }
 
-module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, cacheHitCounter, cacheMissCounter };
+module.exports = { cacheMiddleware, cache, invalidateUserCache, cacheHitCounter, cacheMissCounter };
 

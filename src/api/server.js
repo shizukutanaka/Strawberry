@@ -140,7 +140,7 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   next();
 }, async (req, res) => {
   await updateLightningMetrics();
-  // cacheHitCounter, cacheMissCounter, cachePurgeCounterはprom-clientに自動登録されている
+  // cacheHitCounter, cacheMissCounter はprom-clientに自動登録されている
   res.set('Content-Type', client.register.contentType);
   res.end(await client.register.metrics());
 });

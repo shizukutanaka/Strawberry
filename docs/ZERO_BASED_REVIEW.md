@@ -1657,6 +1657,24 @@ src/ 全ファイルの export 名を総当たり:
   → 全て使用。instrumentation.js は server.js:5 の副作用 require で生存。
 - **判定**: 削除対象ゼロ — 検証のみの収束ラウンド（死面を作らない正直な記録）。
 
+### 第122ラウンド（ソクラテス式問答 — 「このエンドポイントは誰が呼ぶのか？」）
+
+- 問い: 未文書化で呼出しゼロの薄いラッパーエンドポイントは残っていないか？
+  → admin.js の各ルート消費者を再走査した結果 `POST /admin/cache/purge`
+  のみ全リポジトリ・ドキュメント・テストで参照ゼロを検出。
+  「キャッシュを全パージする」操作は全 mutation で `invalidateUserCache`
+  が自動実行されるため手動全パージは実用価値もなく、内部関数
+  `purgeCache()` への薄いラッパーに過ぎなかった。
+- **削除**: `/admin/cache/purge` ルート、`purgeCache` 関数+export、
+  `cachePurgeCounter`（purgeCache 内でしか inc されない恒久0メトリクス）、
+  cache.js の未使用 logger import、server.js の stale メトリクスコメント。
+- **監査して生存**: 残り admin ルート全8本（/node-info・/channels・/admin/
+  stats・/admin/verifications・/admin/escrow・/admin/expire-orders・
+  /system/info — public/js・tests で参照あり）、NotifyType 全6種
+  （LINE/DISCORD/SLACK/TELEGRAM/EMAIL/WEBHOOK — resolveChannels で使用）、
+  tests/helpers/mock-ln-adapter.js（2 テストが使用）、
+  invalidateUserCache（13サイト）、cacheHitCounter/MissCounter。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

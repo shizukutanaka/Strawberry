@@ -8,7 +8,7 @@ const rbac = require('../middleware/rbac');
 const { lightning, requireService } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
 const { parsePagination } = require('../../utils/pagination');
-const { cacheMiddleware, purgeCache } = require('../middleware/cache');
+const { cacheMiddleware } = require('../middleware/cache');
 const UserRepository = require('../../db/json/UserRepository');
 const GpuRepository = require('../../db/json/GpuRepository');
 const OrderRepository = require('../../db/json/OrderRepository');
@@ -37,16 +37,6 @@ router.get('/channels', jwtAuth, rbac('admin'), cacheMiddleware(), async (req, r
     res.json(channels);
   } catch (e) {
     res.status(500).json({ error: 'Failed to get channels' });
-  }
-});
-
-// キャッシュ全体パージAPI（管理者のみ）
-router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {
-  try {
-    purgeCache();
-    res.status(200).json({ message: 'Cache purged' });
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to purge cache' });
   }
 });
 

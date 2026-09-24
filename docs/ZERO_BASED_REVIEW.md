@@ -2046,6 +2046,23 @@ src/ 全ファイルの export 名を総当たり:
 - **監査して生存（契約強制済み）**: audit-log `_hashCache`（logPath でキー付き、
   プロセス内定数個）、order-expiry/attestation-verifier（タイマー・Map なし）。
 
+### 第145ラウンド（ソクラテス式問答 — 「非 await の非同期呼出しは rejection を食らうか？」）
+
+- **問い**: `notifyUser(...)` 等を await せずに発火する22箇所と、setImmediate/
+  setInterval 駆動の非同期コールバック — unhandled rejection でプロセスが
+  落ちる面はないか。
+- **答え**: **全て内部 catch で契約強制済み、削除対象ゼロ** —
+  - `notifyUser`: チャネルごとに `sendNotification(...).catch(...)` 処理済み。
+    非 await は意図的（応答をブロックしない fire-and-forget）。
+  - `notifyPriceWatchers`/`notifyWatchJustCreated`（setImmediate 経由）: 同期関数で
+    内部 try/catch — リジェクションを生成しない。
+  - `setInterval` コールバック全て（pollOnce/monitorServices/sweep+reap）:
+    内部 try/catch で包まれている。
+  - `registerProcessGuards`: `unhandledRejection`（ログのみ継続）と
+    `uncaughtException`（閉じて exit）を server.js の main 経路で配線済み。
+- **監査して生存（契約強制済み）**: 全 fire-and-forget 経路（notifyUser × 22、
+  price-watch setImmediate × 3、interval コールバック × 4、process guards）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

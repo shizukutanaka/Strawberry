@@ -25,6 +25,9 @@ const {
   responseTime,
   errorLogger
 } = require('./middleware/logger');
+const GpuRepository = require('../db/json/GpuRepository');
+const OrderRepository = require('../db/json/OrderRepository');
+const coreServices = require('../core/services');
 
 // Prometheusメトリクス
 const client = require('prom-client');
@@ -39,11 +42,9 @@ try {
   // LightningServiceが存在しない場合はスキップ
 }
 
-// チャネル数・容量・失敗数などのカスタムメトリクス
+// チャネル数・容量のカスタムメトリクス
 const channelCountGauge = new client.Gauge({ name: 'lightning_channel_count', help: 'Number of Lightning channels' });
 const channelCapacityGauge = new client.Gauge({ name: 'lightning_channel_total_capacity', help: 'Total capacity of Lightning channels (sats)' });
-const paymentFailureCounter = new client.Counter({ name: 'lightning_payment_failure_total', help: 'Total number of payment failures' });
-const reconnectCounter = new client.Counter({ name: 'lightning_reconnect_total', help: 'Total number of Lightning gRPC reconnects' });
 
 // メトリクス更新関数
 async function updateLightningMetrics() {
@@ -55,7 +56,6 @@ async function updateLightningMetrics() {
     }
     channelCapacityGauge.set(totalCapacity);
   }
-  // 支払い失敗数・再接続回数はLightningService側からインクリメント呼び出しを想定
 }
 // 10秒ごとに更新（unref: テスト等でプロセス終了を妨げないように）
 // NODE_ENV==='test' では起動しない。Jest はテストファイルごとにモジュール
@@ -85,7 +85,7 @@ app.use('/api/exchange-rate', exchangeRateRouter);
 
 // コアサービス参照のセットと監視起動
 try {
-  const { lightning, vgpuManager } = require('../core/services');
+  const { lightning, vgpuManager } = coreServices;
   const svcRefs = {};
   if (lightning) svcRefs.LightningService = lightning;
   if (vgpuManager) svcRefs.VirtualGPUManager = vgpuManager;
@@ -112,7 +112,7 @@ try {
 // pollOnce() を直接叩くテストが「poller not started」で動かなくなるため）。
 try {
   const invoicePoller = require('../core/invoice-poller');
-  const { lightning: lightningForPoller } = require('../core/services');
+  const { lightning: lightningForPoller } = coreServices;
   invoicePoller.start(lightningForPoller);
 } catch (e) {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
@@ -163,6 +163,7 @@ app.get('/health', (req, res) => {
 // 併記するが readiness のゲートには含めない（未導入でも API 本体は機能するため）。
 // 同期 I/O を含むため専用レート制限を設ける（グローバル apiLimiter より前にマウントされるが
 // このエンドポイント単体には 30 req/min のガードを掛ける）。
+const fs = require('fs');
 const { rateLimit: readyRateLimit } = require('express-rate-limit');
 const readyLimiter = readyRateLimit({
   windowMs: 60 * 1000,
@@ -171,7 +172,6 @@ const readyLimiter = readyRateLimit({
   legacyHeaders: false,
 });
 app.get('/ready', readyLimiter, (req, res) => {
-  const fs = require('fs');
   const checks = {};
   let ready = true;
 
@@ -189,8 +189,8 @@ app.get('/ready', readyLimiter, (req, res) => {
 
   // 2) リポジトリ読込が例外を投げないこと（破損 JSON 等の早期検知）
   try {
-    require('../db/json/GpuRepository').getAll();
-    require('../db/json/OrderRepository').getAll();
+    GpuRepository.getAll();
+    OrderRepository.getAll();
     checks.repositoriesReadable = 'ok';
   } catch (e) {
     ready = false;
@@ -200,7 +200,7 @@ app.get('/ready', readyLimiter, (req, res) => {
   // オプショナルサービス（情報のみ。readiness をブロックしない）
   let optional = {};
   try {
-    const { lightning } = require('../core/services');
+    const { lightning } = coreServices;
     optional = { lightning: lightning ? 'available' : 'disabled' };
   } catch (_) { /* services 未解決時は省略 */ }
 
@@ -224,7 +224,7 @@ app.use(requestId);
 // された pending 時点のレスポンスをそのまま返し、UI が古い状態を表示し続けた。
 // public/ 配下の静的アセット（JS/CSS）は意図的なキャッシュ対象のため対象外にする。
 app.use((req, res, next) => {
-  if (!req.path.startsWith('/js/') && !req.path.startsWith('/css/') && !req.path.startsWith('/vendor/')
+  if (!req.path.startsWith('/js/') && !req.path.startsWith('/css/')
     && req.path !== '/' && !req.path.endsWith('.html') && !req.path.endsWith('.ico')) {
     res.setHeader('Cache-Control', 'no-store');
   }

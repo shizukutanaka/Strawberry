@@ -1176,10 +1176,30 @@ src/ 全ファイルの export 名を総当たり:
   （:408, :618 で LND RPC 応答を検証）が消費者だった。適用→jest 3スイート赤→即 revert。
   教訓: 消費者監査は src/ に限定せずリポジトリルートの大型モジュールも対象に。
 
+### 第96ラウンド（ソクラテス式問答 — 「起動パスの起点 server.js に死面・虚偽計装はないか？」）
+
+- **削除**: `paymentFailureCounter` / `reconnectCounter`（prom-client 登録済みだが
+  全コード中インクリメント呼び出しゼロ — 恒久的に 0 を返す死メトリクス。
+  「LightningService側から呼ぶ想定」は実在しなかった。ゼロ値メトリクスは
+  誤った可観測性を与えるため削除）。
+- **削除**: no-store ミドルウェアの `/vendor/` 例外条件（`public/vendor/` は
+  存在しない — 死分岐）。
+- **簡素化**: `/ready` ハンドラ内のインライン require 4件（fs/GpuRepository/
+  OrderRepository/core/services）を冒頭へ。一度中盤の const に置いて TDZ 自己撞着
+  （"Cannot access 'coreServices' before initialization" が try/catch で飲まれ
+  monitor/poller が静かに未起動になる劣化を検出）→ 冒頭 import ブロックへ正規移動。
+- **監査して残した面**: lightning-service.js 全23メソッド（公開 LND API 面・
+  内部ヘルパー・モック完全性テスト対象）、virtual-gpu-manager.js 全メソッド、
+  gpu-detector-extended の `detectIntelGPUsWindows`（ベンダー検出の公開API面として
+  対称性あり — 削除すると AMD/ROCm のみの非対称 API になるため温存）、
+  telemetry/instrumentation.js（server.js が冒頭で読込）、public/js/pages/ 11枚
+  全て（app.js が全 import）、全ルートファイル（server.js/routes/index.js で
+  マウント済み）、data/（.gitignore 済み・未追跡）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。
-- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、65 秒** を確認（第93–95ラウンド後）。
+- 削除後: 同コマンドで **115/115 スイート PASS、1,045 テスト、53 秒** を確認（第96ラウンド後）。
 - `npm start` 起動確認 + `/health` `/ready` 応答確認（両者 200、SPA 配信 200）。
 - npm 依存（lockfile node_modules エントリ）: **1,036 → 732（-29%）**。
 - src/ の到達不能ファイル: 38 → 2（残りは意図的温存: ln-adapter のテスト用モック

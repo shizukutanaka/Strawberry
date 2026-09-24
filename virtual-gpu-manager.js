@@ -268,8 +268,11 @@ class VirtualGPUManager {
         allocation.endTime = Date.now();
         vgpu.status = 'available';
         delete vgpu.allocationId;
-        
-        
+        // released エントリは active フィルタでも get でも二度と読まれず、永続化
+        // もされない（監査複製は order.allocationDetails）— Map から除かないと
+        // アロケーションごとにメモリが無制限に成長する。
+        this.allocations.delete(allocationId);
+
         return allocation;
     }
 
@@ -289,6 +292,10 @@ class VirtualGPUManager {
         
         // レコード削除
         this.virtualGPUs.delete(vgpuId);
+        // この vGPU の残存アロケーション（released 残骸等）も除去する。
+        for (const [id, a] of this.allocations) {
+            if (a.vgpuId === vgpuId) this.allocations.delete(id);
+        }
         await this.deleteVirtualGPUConfig(vgpuId);
         
         

@@ -2010,6 +2010,22 @@ src/ 全ファイルの export 名を総当たり:
   drop 方式が正しい）。
 - `npx jest --forceExit` 全緑: 115/115・1,045・63秒。
 
+### 第143ラウンド（ソクラテス式問答 — 「解放されたアロケーションはどこへ行くか？」）
+
+- **問い**: `virtual-gpu-manager` の `allocations` Map — `releaseVirtualGPU` が
+  `status='released'` に更新するだけで Map から削除しない。released エントリは
+  誰かが読むのか？
+- **答え**: **滞留蓄積を削除** — released エントリは active フィルタ（228/462行の
+  2箇所の検索）でも `get(allocationId)` でも二度と読まれず、ディスクへも
+  永続化されない（監査複製は `order.allocationDetails` に既存）。アロケーション
+  ごとに Map が無制限成長していた → `releaseVirtualGPU` でエントリ削除
+  （返却オブジェクトには status/endTime が残る）、`destroyVirtualGPU` で
+  vgpuId 一致の残存アロケーションを一掃。
+- **監査して生存**: `virtualGPUs`（destroy で削除済）、exchange-rate キャッシュ
+  （単一スロット {rate,timestamp} で境界化）、express-rate-limit MemoryStore
+  （窓ごとにリセット）。
+- `npx jest --forceExit` 全緑: 115/115・1,045・55秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

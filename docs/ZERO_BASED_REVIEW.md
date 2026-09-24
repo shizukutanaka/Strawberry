@@ -1675,6 +1675,25 @@ src/ 全ファイルの export 名を総当たり:
   tests/helpers/mock-ln-adapter.js（2 テストが使用）、
   invalidateUserCache（13サイト）、cacheHitCounter/MissCounter。
 
+### 第123ラウンド（ソクラテス式問答 — 「この重複は悪か、probe が主張する契約か？」）
+
+- **問い**: Joi パスワードポリシー（min8/max72/4種パターン/messages、13行）が
+  `validator.js` の `schemas.user.register` と `user/me.js` の PUT /me/password に
+  逐語複写されている — 単一真実源 `passwordSchema` へ集約すべきでは？
+- **答え**: 適用したところ `probe51-bcrypt-72-cap` が両サイトで
+  `password: Joi.string()...max(72)` / `newPassword: Joi.string()` の
+  **インライン存在**をソーステキスト検証しており失敗。probe34 の識別子温存
+  （第110ラウンド教訓）と同型で、重複そのものが「各サイトが独立に bcrypt 72バイト
+  キャップを持つ」ことを probe が監査している — 片方が shared import だと
+  その監査が宙に浮く。**意図的に温存**し、デデュープは全量 revert。
+- **並走監査（死面ゼロ）**: proto/ 不在は mock LND の意図的フォールバック、
+  ルート virtual-gpu-manager.js は唯一の正本（services.js 経由で生存）、
+  docker/Dockerfile.api はデプロイ基盤（参照なしだが削除対象ではない）、
+  process.env 全58名は .env.example または config.js で文書化済み、
+  docs の全参照が実在ファイルを指す。
+- **手順記録**: 重複ブロックスキャナ（8行窓・空白除去）が誤位置を報告したため
+  実窓を再表示して真の重複を特定 — 監査スクリプトの偽陽性対策として再記録。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

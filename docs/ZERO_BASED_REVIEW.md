@@ -1645,6 +1645,18 @@ src/ 全ファイルの export 名を総当たり:
   order.paymentRequest 全て読出しあり。`order.usageMinutes`/`order.escrowId`/
   `user.totpSecret` は誤検出（存在しないフィールド／blocklist 文字列）。
 
+### 第121ラウンド（ソクラテス式問答 — 「内部関数・依存に死面は残っていないか？」）
+
+- 問い: export 以外の内部関数・内部変数に消費者ゼロは残っていないか？
+  package.json の依存は分割後も全て参照されているか？
+- **機械走査で収束確認**: src/ + ルート .js 全ファイルの内部関数宣言を走査し、
+  同一ファイル内での参照数=1（宣言のみ）かつ未 export のものを列挙 → **ゼロ**。
+- payments/marketplace/verification/core/service 層の全 export 消費者再走査
+  → 全て生存（isTerminal/initial は escrow-service + state-machine テストが使用）。
+- package.json 依存全19件 + OTel 4件 + dev 3件の require/import 実在確認
+  → 全て使用。instrumentation.js は server.js:5 の副作用 require で生存。
+- **判定**: 削除対象ゼロ — 検証のみの収束ラウンド（死面を作らない正直な記録）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

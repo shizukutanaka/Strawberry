@@ -1597,6 +1597,21 @@ src/ 全ファイルの export 名を総当たり:
 - 並走監査: `req.user.role !== 'admin'` 約30サイト・`sanitizeString().slice(0,N)`
   6サイトは「バグを生む式」でなく単純比較/合成一貫のため統合価値なし・温存判定。
 
+### 第118ラウンド（ソクラテス式問答 — 「escrow.expire は誰が呼ぶのか？」）
+
+- 問い: サービスの公開メソッドに「呼出しゼロ」はないか？ → `escrowService`
+  メソッド全走査で `expire` のみ全リポジトリ（src・tests・scripts・ルート）
+  消費者ゼロ。DEADLINE イベントは state-machine 層テストのみで、サービス経路
+  （deadlineAt スイープ）は未配線 — §11 の払い出し配線と同じ「設計判断領域」。
+- **削除**: `expire: (escrowId) => apply(escrowId, 'DEADLINE')` 除去。
+  DEADLINE 遷移自体は escrow-state-machine.js に残存（削除せず —
+  将来の deadline スイープ実装時に `apply(id,'DEADLINE')` で復帰可能）。
+- **監査して生存**: Joi schemas 全キー（idParam/gpu.register・update/
+  order.create/payment.createInvoice・pay/user.register・login +
+  lightningNode/lightningChannel — ルート lightning-service.js で使用中、
+  第95教訓の再適用）、escrow サービスの create/markPaid/cancel/resolveDispute/
+  evaluate/settle/apply/get 全て消費者あり（get は marketplace-service 経由）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

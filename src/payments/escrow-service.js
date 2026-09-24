@@ -162,9 +162,6 @@ function createEscrowService({ repository, lnAdapter } = {}) {
     /** 借り手都合のキャンセル。 */
     cancel: (escrowId) => apply(escrowId, 'CANCEL'),
 
-    /** 期限到来。 */
-    expire: (escrowId) => apply(escrowId, 'DEADLINE'),
-
     /** 係争の解決（'settle' で確定 / 'refund' で返金＋slash）。 */
     resolveDispute: (escrowId, decision) => {
       const event =

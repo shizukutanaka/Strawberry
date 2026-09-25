@@ -2614,6 +2614,23 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第175ラウンド（ソクラテス式問答 — 「資金系入力検証・キャッシュキー生成は？」）
+
+- **問い**: 運営受取アドレス（資金フロー直結）の入力検証、
+  レスポンスキャッシュのキー生成（認可バイパス・ポイズニング面）は
+  十分か。
+- **答え**: **全て強制済み（修正対象ゼロ）** —
+  - `profit-addresses`: ルートは JWT+admin+masterAuth の三重ゲート、
+    `isValidBtcAddress` は長さ 14–100 境界＋ネットワーク別パターン照合、
+    書込みパスも `filter(isValidBtcAddress)` で無効値を保存しない。
+  - `cacheMiddleware`: perUser キーは `userId:role:originalUrl`
+    （同一 userId のロール降格後 replay を防ぐ）、GET のみ・2xx のみ
+    キャッシュ、ミューテーション後は `invalidateUserCache` で TTL を
+    待たず即時無効化 — 認可リーク・stale 配信の両方が設計で塞がれている。
+  - LRUCache は max 1,000・TTL 60s で境界済み。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

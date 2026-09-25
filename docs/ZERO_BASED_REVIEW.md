@@ -2346,6 +2346,33 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・62秒。
 
+### 第161ラウンド（ソクラテス式問答 — 「調査駆動の横断監査で残存面はあるか？」）
+
+- **問い**: OWASP/Node ベストプラクティスを横断照合したとき、
+  第154–160ラウンドの修正群（gRPC デッドライン・HTTP タイムアウト・
+  keep-alive 整合・closeIdleConnections・TRUST_PROXY・定数時間比較・
+  lock リーク）以外に未監査の実欠陥は残っているか。
+- **答え**: **検証収束（削除・修正対象ゼロ）** — 以下を全件監査し適合を確認:
+  - **HTTP/Express 面**: requestTimeout=300s(Node 既定)・headersTimeout=65s・
+    keepAliveTimeout=61s の三重境界が slow-loris（ヘッダ/ボディ/アイドル）を
+    全てカバー、`maxRequestsPerSocket` 無制限は直接クライアント下で適切。
+  - **ライフサイクル面**: invoice-poller `_running` は finally で解放
+    （154th の gRPC タイムアウト後も次ポーラーが走る）、全 stop/shutdown 結線済。
+  - **I/O 面**: GPU 一覧のレイティング集約は TTL キャッシュ + 単一 getAll 派生、
+    reads.js の失効スイープは SWEEP_THROTTLE で 30 秒毎に制限済。
+    mutations の POST 内 getAll×3 は await 境界・expire 書込み・フィルタ差で
+    意味的に必要（統合すると expire 前の stale pending が洪水計上・
+    二重予約判定が expire 済み集合を見ない等の弱体化になる）。
+  - **require/ロード面**: 動的 require・ユーザー入力由来のモジュールロードなし。
+    safeLoad の loader は全て固定リテラル。
+  - **プロセス面**: requestId は charset whitelist 検証済・traceparent は
+    W3C 形式検証、fetch 未使用（axios のみ・全て bounded）。
+- **結論**: 削除面・契約強制面・調査駆動の堅牢化面ともに収束。
+  残存項目は §11 の設計判断2件（プロバイダ払い出し配線・JSON 層複数プロセス
+  lost-update — いずれも削除ではなく設計・実装判断の領域）のみ。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・62秒（直近実行流用）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

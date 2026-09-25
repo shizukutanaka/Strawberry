@@ -2649,6 +2649,23 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第177ラウンド（ソクラテス式問答 — 「エスクロー取消し・手動承認の並行性は？」）
+
+- **問い**: `cancelEscrowsForOrder` の取消対象選択と、
+  `POST /payments/manual/approve` の二重承認・孤児レコード面は安全か。
+- **答え**: **全て強制済み（修正対象ゼロ）** —
+  - `cancelEscrowsForOrder`: `CANCELED`/`SETTLED` 以外の未終了エスクローのみ
+    個別ベストエフォートで取消し（1件失敗でも残りを続行、warn 記録）、
+    ルックアップ失敗も warn のみ — 資金滞留を防ぎつつ処理中断を起こさない設計。
+  - `manual/approve`: `withLock('payment:'+id)` + `updateIf(status!=='paid'
+    && method!=='lightning')` CAS の二層で二重承認を排除、関連オーダーが
+    `pending`/`matched` 以外なら 409（cancelled/completed への孤児 paid
+    レコード生成を防止）、LN 払いの手動承認は 400（責務分離）。
+  - `escrowService()` は lnAdapter を初回呼出し時に捕捉（require 時の
+    未初期化を回避）、FSM→actions→ln-adapter の責務分離も明確。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

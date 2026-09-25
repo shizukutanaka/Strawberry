@@ -2751,6 +2751,26 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第183ラウンド（ソクラテス式問答 — 「エスクロー FSM に抜け道はないか？」）
+
+- **問い**: `escrow-state-machine` の遷移表 — 無効遷移・終端状態からの脱出・
+  DISPUTED の永久ロックは起きないか。
+- **答え**: **全て正しく強制済み（修正対象ゼロ）** —
+  - 遷移表は宣言的 `state → event → {to, actions}` で無効遷移は
+    `transition` が throw・`tryTransition` が `ok:false` の二系統を提供。
+    SETTLED/CANCELED からの脱出経路なし（終端保証）。
+  - DISPUTED に `DEADLINE` 安全出口あり（既定は借り手保護の refund 側へ）—
+    係争の永久ロックと order-expiry 側の生 update 迂回（状態 desync の
+    温床）を同時に防ぐ設計。
+  - `decideSettlement`: verified/suspectedZeroLoad の判定済み
+    （verified=false か zero-load なら DELIVER_FAIL）、deadline 未到来は
+    `WAIT` で状態を変えない（applyDecision は WAIT 時に no-op）。
+  - actions は文字列宣言 → `action-executor` が ln-adapter へ写像
+    （reveal_preimage/cancel_invoice/refund_renter 等）— FSM と副作用の
+    責務分離。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

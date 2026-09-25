@@ -2438,6 +2438,26 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 対象テスト緑: service-monitor/probe57 等 7 件。
 
+### 第165ラウンド（ソクラテス式問答 — 「セッションストアは境界化されているか？」）
+
+- **問い**: express-session 既定の MemoryStore は失効 sid を能動退去せず、
+  ユニーク sid の連続生成（bot が /master-auth/* を叩く等）で
+  無制限に成長する — セッションストアは境界化されているか。
+- **答え**: **未境界 → `BoundedSessionStore` を新設** —
+  `src/api/middleware/bounded-session-store.js`: express-session Store の
+  get/set/destroy/touch 契約を Map+TTL で実装。`maxEntries`（既定 10,000、
+  `SESSION_MAX_ENTRIES` で調整可）を超える新規挿入時に失効分を全削除→
+  最古エントリを追い出し。cookie.expires 由来の TTL、無期限セッションは
+  既定 24h。master-session.js に配線（単一共有の契約は維持）。
+  sliding-window レートリミッターの maxKeys（141th）と同じクラスの対策。
+- **監査して生存**:
+  - master-auth セッションは OAuth 多段チェーンの最小状態のみ
+    （googleAuth/totpAuth/masterAuth フラグ）で saveUninitialized:false。
+  - 実証: 失効 get→null+削除、maxEntries=3 で最古追い出し・size 3 維持、
+    全量スイート（master-auth 系4スイート含む）に回帰なし。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・111秒（昇格後全量検証）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

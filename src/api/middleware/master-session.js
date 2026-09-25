@@ -13,9 +13,13 @@
 // 正しく検証できるようにする。
 const session = require('express-session');
 const { requireSecret } = require('../../utils/config');
+const { BoundedSessionStore } = require('./bounded-session-store');
 
 const masterSession = session({
   secret: requireSecret('SESSION_SECRET'),
+  // 既定の MemoryStore は失効エントリを能動退去せず無制限に成長するため、
+  // 件数上限+TTL で境界化したストアを使う（同一プロセス内共有は維持）。
+  store: new BoundedSessionStore(),
   resave: false,
   saveUninitialized: false,
   cookie: {

@@ -2509,6 +2509,23 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第169ラウンド（ソクラテス式問答 — 「プロセスガード・無界ループ・ソートキーは？」）
+
+- **問い**: プロセスレベルの防衛（unhandledRejection/uncaughtException）、
+  while 系無界ループ、`?sort=` 系のソートキー検証 — 残存面はあるか。
+- **答え**: **全て適切に強制済み（修正対象ゼロ）** —
+  - `registerProcessGuards`: unhandledRejection は `_describe` で記録して
+    継続（1件の不具合で API 全体を落とさない意図的設計）、
+    uncaughtException は `handling` 冪等化＋`srv.close()` 優雅終了＋
+    `forceExitMs` デッドライン — Node 運用の教科書形。
+  - `while` ループは新設 `BoundedSessionStore` の追い出しのみで上限境界済、
+    その他の while 検出なし（外部入力由来の無界ループゼロ）。
+  - ソートキー: order は `SORTABLE_FIELDS` ホワイトリスト集合、
+    gpu は `rating|memory|reliability|availability` の固定分岐 —
+    両所とも任意フィールド注入不可。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

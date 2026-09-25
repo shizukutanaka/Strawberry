@@ -2458,6 +2458,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・111秒（昇格後全量検証）。
 
+### 第166ラウンド（ソクラテス式問答 — 「非同期例外・メトリクス・ログの境界は？」）
+
+- **問い**: Express 4 は async ハンドラの throw を自動捕捉しない（リクエスト宙吊り）、
+  Prometheus ラベルはユーザー入力由来だとカーディナリティ爆発、
+  ロガーは回転なしだとディスク枯渇 — 各境界は強制されているか。
+- **答え**: **全て強制済み（削除・修正対象ゼロ）** —
+  - async ハンドラ: routes/middleware 全76件が `asyncHandler` ラップか
+    try/catch 済み（裸 async+no-try のファイル0、機械走査）。
+  - GraphQL: コードベースに存在しない（probe34 の命名は履歴名残のみ）。
+  - Prometheus ラベル値: `service` ラベルの値はサービス名の固定集合、
+    ゲージ/カウンタともユーザー入力由来の値なし（カーディナリティ爆発なし）。
+  - winston: File トランスポートに maxsize 10MB×maxFiles 5 で回転済み
+    （access/db/gpu-events 追記は 142th の bounded-append で別途境界化）。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

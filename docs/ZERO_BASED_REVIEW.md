@@ -2563,6 +2563,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第172ラウンド（ソクラテス式問答 — 「依存は全て使われているか？」）
+
+- **問い**: package.json の全依存が require/使用されているか、
+  devDeps・allowScripts 等のメタ設定は現行バージョンと整合しているか。
+- **答え**: **依存は全使用済み（26件・孤立ゼロ）だが `allowScripts` が stale**
+  — 162th で bcrypt を ^6.0.0 へ昇格したのに `allowScripts` が
+  `bcrypt@5.1.1` のまま → `bcrypt@6.0.0` に追従させた
+  （実 install は 6.0.0・`npm ls` で整合確認）。
+- **監査して生存**:
+  - 全26依存に require/import 消費者あり（機械照合）、devDeps 3件
+    （jest/supertest/@playwright/test）も全てテストで使用。
+  - optionalDependencies（@grpc/grpc-js・proto-loader）は LN gRPC 系の
+    宣言どおり。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

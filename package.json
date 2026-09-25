@@ -63,6 +63,6 @@
     "supertest": "^6.3.3"
   },
   "allowScripts": {
-    "bcrypt@5.1.1": true
+    "bcrypt@6.0.0": true
   }
 }

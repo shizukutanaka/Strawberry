@@ -2373,6 +2373,33 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・62秒（直近実行流用）。
 
+### 第162ラウンド（ソクラテス式問答 — 「依存パッケージの既知脆弱性は残っていないか？」）
+
+- **問い**: コード面は固くても、依存が既知の GHSA/CVE を抱えていれば
+  攻撃面は残る — `npm audit --omit=dev` で本番依存を棚卸しすると何が出るか。
+- **答え**: **18件検出 → 17件解消、1件は非適用で温存**:
+  - `npm audit fix`（非破壊）で 13 件を解消 — axios 10 GHSA（プロトタイプ
+    汚染・DoS・proxy 継承）、form-data critical（unsafe random・CRLF）、
+    jsonpath-plus critical（RCE）、body-parser/qs/joi/js-yaml/morgan/
+    protobufjs/brace-expansion の DoS・汚染系。
+  - `nodemailer ^6.9.14 → ^9.1.1` — 12 GHSA（SMTP コマンド注入・
+    IDN/コメント解析の宛先偽装・addressparser DoS・disableFileAccess
+    バイパス SSRF/任意ファイル読取）。利用面は createTransport+sendMail
+    の最小 API のみで互換。9.1.1 は公開 23 日・全 GHSA の修正版範囲外。
+  - `bcrypt ^5 → ^6.0.0` — ネストした @mapbox/node-pre-gyp の tar critical
+    （hardlink/symlink パストラバーサル系 12 GHSA）を解消。API
+    （genSalt/hash/compare/hashSync）は同一で互換、公開 1 年超。
+  - **温存（非適用）**: `uuid <11.1.1` moderate — GHSA-w5hq は v3/v5/v6 で
+    buf 引数使用時のバッファ境界問題。全使用箇所（27箇所）が v4 のみで
+    buf 不使用 → 当コードベースでは悪用不能。修正版 14.x は ESM 移行の
+    破壊的変更かつ dockerode のネストした uuid は別コピーで残るため、
+    昇格でも監査警告は消えない（§11 へ移さず、採用面の事実として記録）。
+- **監査して生存**: child_process は全て固定リテラル（rocm-smi の
+  deviceIndex は hex サニタイズ済）、動的 require/ユーザー入力由来の
+  モジュールロードなし。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・128秒（昇格後全量検証）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

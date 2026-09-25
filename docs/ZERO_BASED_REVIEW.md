@@ -2400,6 +2400,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・128秒（昇格後全量検証）。
 
+### 第163ラウンド（ソクラテス式問答 — 「Node バージョン要件は宣言されているか？」）
+
+- **問い**: `server.closeIdleConnections()`（157th）は Node ≥18.2 が前提、
+  `crypto.randomInt`・structuredClone 等も新 API 依存 — 必須 Node バージョンは
+  package.json で宣言されているか。
+- **答え**: **未宣言 → `engines` 追加** — `"engines": {"node": ">=18.2.0"}` を
+  package.json に追加（closeIdleConnections の導入版に合わせる）。
+  README にはバージョン指定がなく、engines が唯一の正本になった。
+- **監査して生存**:
+  - deprecated `request`/`dockerode` はコード・package.json・lock の実
+    依存ツリーに存在しない（`npm ls` が empty、lock には孤児のネスト
+    uuid コピーのみ — コードは参照せず次回 install で自然浄化）。
+  - dev 含む全監査の残存は uuid 1 件のみ（162th で非適用を記録済）。
+
+- `npx jest --forceExit` 対象テスト緑: api.integration 239 件。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

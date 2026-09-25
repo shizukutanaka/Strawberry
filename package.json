@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "P2P GPU Marketplace OSS (BTC Lightning対応/分散型/自動監視/多段通知/3重認証/Swagger UI対応)",
   "main": "src/api/server.js",
+  "engines": {
+    "node": ">=18.2.0"
+  },
   "scripts": {
     "start": "node src/api/server.js",
     "test": "jest --forceExit",

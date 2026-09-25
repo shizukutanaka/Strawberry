@@ -288,6 +288,14 @@ if (require.main === module) {
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
+  // keep-alive タイムアウトを上流プロキシのアイドル切断（ALB/nginx の既定 60s）より
+  // 長くする。Node 既定は keepAliveTimeout=5s・headersTimeout=60s で、プロキシが
+  // 再利用しようとしたコネクションをサーバーが先に閉じてしまい、間欠的な 502 を
+  // 引き起こす。headersTimeout は keepAliveTimeout より常に大きく保つこと
+  // （headersTimeout <= keepAliveTimeout は Node が警告する誤設定）。
+  server.keepAliveTimeout = 61_000;
+  server.headersTimeout = 65_000;
+
   // グレースフルシャットダウン（30秒でタイムアウト — ハングしたハンドラで無限待機しない）。
   // SIGTERM(オーケストレータ)と SIGINT(Ctrl-C/開発・一部環境) の両方を扱う。未処理シグナルでの
   // ハード終了は進行中レスポンス・ファイル書込みを切断するため。二重受信に備え冪等化する。

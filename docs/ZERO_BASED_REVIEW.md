@@ -2262,6 +2262,24 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・56秒。
 
+### 第156ラウンド（ソクラテス式問答 — 「keep-alive タイムアウトはプロキシ既定と整合するか？」）
+
+- **問い**: Node 運用論点（AWS ALB/nginx 資料・node ドキュメント）— Node 既定
+  `keepAliveTimeout=5s`・`headersTimeout=60s` は、上流プロキシの idle 切断
+  （ALB/nginx 既定60s）より短い。プロキシが再利用しようとしたコネクションを
+  サーバーが先に閉じ、間欠502を引き起こす。明示設定はあるか。
+- **答え**: **未設定 → 設定** — `server.keepAliveTimeout = 61_000`・
+  `server.headersTimeout = 65_000`（headersTimeout > keepAliveTimeout を
+  維持 — 逆転は Node 警告の誤設定）。`require.main === module` の listen 経路
+  のみ（supertest は対象外）。
+- **監査して生存**: `withRetry` は通知送信専用（4xx 即除外で一時障害のみ
+  再試行 — 支払い系には未適用で二重支払いリスクなし）、express-rate-limit・
+  body limit 1mb・gracefulShutdown は既存。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・56秒（前回実行流用 —
+  require.main 経路のみの変更で jest 非対象のため、対象テスト 244 件を
+  別途実行して緑確認）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

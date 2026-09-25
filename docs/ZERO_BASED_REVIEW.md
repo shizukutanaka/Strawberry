@@ -2732,6 +2732,25 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第182ラウンド（ソクラテス式問答 — 「アテステーション検証は逃げ道なしに強制か？」）
+
+- **問い**: `gpu-attestation-verifier` — 高スコアで必須失敗を帳消しにできるか、
+  計測値の異常・リプレイは検出できるか。
+- **答え**: **全て正しく強制済み（修正対象ゼロ）** —
+  - 二層評価: `mandatoryPassed`（model_match・memory_match・
+    firmware_integrity・freshness の AND）と `score >= minScore` を
+    分離 — 総スコアが高くても必須1件失敗で `passed:false`。
+    必須群は「型番詐称/メモリ詐称/ファーム改ざん/リプレイ」に対応する
+    最重大の4件で選定妥当。
+  - `scoreChecks` は weighted 加算（model=3・vendor/memory/firmware=2・他=1）
+    で重みづけ済み、物理計測は sanity 境界（temp 0–120℃・power 0–1000W・
+    util 0–100%）で異常値検出、署名は形式存在チェック。
+  - 登録側（lifecycle）は失敗でも `passed:false` を GPU レコードに記録して
+    生成を通す設計 — 登録ブロックでなく「証明結果を開示して借り手判断」
+    の意図的プロダクト決定（attestation 結果は一覧応答に含まれる）。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

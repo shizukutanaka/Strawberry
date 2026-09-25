@@ -2544,6 +2544,25 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第171ラウンド（ソクラテス式問答 — 「ドキュメント drift・静的参照・probe 衝突は？」）
+
+- **問い**: ARCHITECTURE.md のモジュール記述、README のコマンド参照、
+  index.html の静的アセット参照、tests/ が Dockerfile/api をソース検証
+  していないか — 残存 drift・衝突はあるか。
+- **答え**: **全て整合（修正対象ゼロ）** —
+  - ARCHITECTURE.md の `src/core/database.js`/`security.js`/Electron 断片
+    （`public/preload.js`/`electron.js`/`src/web/`）はいずれも既に
+    「削除済み（2026-07/09）」として正確に記録済みで、実ファイルの不在と整合。
+  - README の `npm run benchmark`/`report:monthly` は「自動化例・拡張
+    ロードマップ」節内の将来例（存在しないコマンドを現行機能として
+    記述していない）— 時点分析の温存と同型で生存。
+  - index.html の参照（`/css/tokens.css`/`app.css`/`/js/app.js`）は全て実在、
+    `#/market` は登録済みルート（137th）。
+  - tests/ に Dockerfile.api/`node:XX-slim` を読む probe なし
+    （170th のベース変更は probe 契約と衝突しない）。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

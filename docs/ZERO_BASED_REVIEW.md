@@ -2579,6 +2579,23 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第173ラウンド（ソクラテス式問答 — 「非推奨 API・スクリプト整合・gitignore は？」）
+
+- **問い**: Node/Express 非推奨 API の残存、package.json スクリプトの
+  実ファイル整合、`.gitignore` の生成物網羅 — 残存面はあるか。
+- **答え**: **全て整合（修正対象ゼロ）** —
+  - 非推奨 API ゼロ: `url.parse`・`new Buffer`・`util.is*`・`domain`・
+    `fs.exists()`・`crypto.createCipher`/`createDecipher` の検出なし
+    （'domain' ヒットは action-executor の kind タグのみ）。
+  - Express 非推奨形ゼロ: `res.send(status, body)`・`res.json(status, obj)`・
+    `req.param()` の検出なし。
+  - package.json 全19スクリプトが実在ファイル/バイナリを指す
+    （`node scripts/*.js` 14件照合、`setup`=`npm ci && npm test` 等も正）。
+  - `.gitignore` は `.env*`・`data/`・`logs/`・`coverage/`・
+    `playwright-report/`・生成ドキュメント全般を網羅。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

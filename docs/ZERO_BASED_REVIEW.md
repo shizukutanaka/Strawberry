@@ -2631,6 +2631,24 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第176ラウンド（ソクラテス式問答 — 「ハートビートの認可は完全か？」）
+
+- **問い**: `POST /orders/:id/heartbeat` は他人セッションへの心拍注入を防げるか
+  （認可バイパス・usageSeconds 捏造・認証済み DoS の各面）。
+- **答え**: **全て強制済み（修正対象ゼロ）** —
+  - `authenticateJWT` 必須＋role↔user 束縛（`lender` は `req.user.id ===
+    order.providerId`、`renter` は `=== order.userId` でなければ 403）—
+    他人セッションへの心拍注入は不可能。
+  - `active` オーダーのみ受付（pending/matched での usage 積み上げ捏造と
+    completed/cancelled 後のリークを同時に塞ぐ）。
+  - `(orderId,userId)` ごとの最小心拍間隔で 429（認証済み DoS の境界化、
+    `HEARTBEAT_MIN_INTERVAL_MS` で調整可・148th で env 強制確認済）。
+  - `heartbeatTimestamps` キーはオーダー終了時に一掃（ライフサイクル完備）。
+  - lender 心拍のみ providerUptime 実績として永続化（renter 心拍は
+    信頼性スコア母数に混入しない設計）。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

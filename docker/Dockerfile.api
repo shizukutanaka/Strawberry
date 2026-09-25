@@ -1,13 +1,17 @@
 # APIサーバー用（マルチステージビルド・セキュリティ強化）
-FROM node:20-slim AS build
+# Node 20 は 2026-04 に EOL のため、メンテナンス LTS の 22 系を使用
+# （engines.node >=18.2 との互換は維持）。
+FROM node:22-slim AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 
-FROM node:20-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
-COPY --from=build /app /app
+# node ユーザーで起動するため、コピー時点で所有権を付与する
+# （JSON データ層が data/ へ書き込むため /app への書き込み権限が必要）。
+COPY --from=build --chown=node:node /app /app
 # 開発用不要ファイル除外（.dockerignore で大半は既にビルドコンテキストから除外済みだが、
 # 万一 .dockerignore なしでビルドされた場合のフォールバックとして残す）
 RUN rm -rf tests/ .github/ .vscode/ docs/ improvement_checklist* md/
@@ -22,6 +26,11 @@ ENV NODE_ENV=production
 # explicit override, scoped to this container image only.
 ENV HOST=0.0.0.0
 EXPOSE 3000
+# root 実行を避け公式 node ユーザーで起動する（Node Docker ベストプラクティス）。
+USER node
+# slim イメージに curl/wget は無いが Node 22 組込みの fetch で死活監視できる。
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 CMD ["node", "src/api/server.js"]
 
 # セキュリティスキャン例（CIで実行推奨）

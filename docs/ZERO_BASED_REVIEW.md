@@ -2526,6 +2526,24 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第170ラウンド（ソクラテス式問答 — 「コンテナは本番適格か？」）
+
+- **問い**: `docker/Dockerfile.api` は Node Docker ベストプラクティス
+  （非 root 実行・EOL 外のベース・ヘルスチェック）に適合しているか。
+- **答え**: **3件の実欠陥を修正** —
+  - `USER node` 未指定で root 実行 → 公式 `node` ユーザーへ変更し、
+    `COPY --chown=node:node` で JSON データ層の `data/` 書込み権限を確保。
+  - ベース `node:20-slim` は 2026-04 EOL → メンテナンス LTS の
+    `node:22-slim` へ昇格（両ステージ、engines >=18.2 と整合）。
+  - `HEALTHCHECK` 未設定 → `node -e "fetch('http://localhost:3000/health')..."`
+    で組込み fetch を使う死活監視を追加（slim に curl/wget は無いため）。
+- **監査して生存**:
+  - `HOST=0.0.0.0` のコンテナ向け上書き・`.dockerignore` の除外網羅は適合。
+  - README/ドキュメントに Node 20 への言及なし（drift 修正不要）。
+  - npm scripts/main/Dockerfile CMD の整合は継続確認済。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

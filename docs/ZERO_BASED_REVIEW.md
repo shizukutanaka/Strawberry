@@ -2716,6 +2716,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第181ラウンド（ソクラテス式問答 — 「一覧 API のページネーションは強制か？」）
+
+- **問い**: GPU/注文/レビュー/管理一覧に無制限返却・巨大 limit・
+  機密フィールド混入の面はないか。
+- **答え**: **全て強制済み（修正対象ゼロ）** —
+  - `parsePagination`（`utils/pagination.js`）が limit を `1..maxLimit`
+    （既定200、レビュー/注文は100）にクランプ、offset も上限付き —
+    全一覧エンドポイントで一貫適用。
+  - GPU 公開一覧は `apiKey`/`providerId`/`manualBlocks` を明示除外
+    （destructuring で秘密フィールドを剥がす）、自分の GPU 一覧も apiKey 除外 —
+    一覧経由の認証情報漏洩なし。
+  - クエリパラメータは長さ境界（features 512字・vendor 64字・country 4字・
+    search 128字）で DoS 防止。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

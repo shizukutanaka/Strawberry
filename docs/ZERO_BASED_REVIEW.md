@@ -2221,6 +2221,29 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・52秒（前回実行流用 — 変更なしの検証ラウンド）。
 
+### 第154ラウンド（ソクラテス式問答 — 「外部サービス呼出しは全てデッドライン付きか？」）
+
+- **問い**: Lightning hold-invoice 実践調査（buildonln/lnd#2022）で持ち出した
+  論点 — HTLC 資金のロック時間はグリーフィング面になるため「LND 呼出しが
+  永久に返らない」自体がライブネス攻撃面。本コードの gRPC 呼出しに
+  デッドラインはあるか。
+- **答え**: **全12箇所にデッドラインなし → 全て `withGrpcDeadline` で境界化** —
+  `lookupInvoice`/`sendPaymentSync`/`addInvoice`/`getInfo`/`decodePayReq`/
+  `listChannels`/`channelBalance`/`settleInvoice`/`cancelInvoice`/
+  `openChannelSync`/`pendingChannels` が LND のコールバック不返で永久待機
+  し得た。最悪は `lookupInvoice`：ポーラーの `_running` が永久スタックし
+  **全 Lightning 決済確認が静かに停止**（外部観察は「支払いが一向に
+  matched にならない」のみ）。`Promise.race` で 30 秒後に reject +
+  `unref` タイマー（永続化非阻止）— ポーラーの try/catch が次周期で回復。
+- **注記**: sendPaymentSync/settleInvoice 等の決済実行系は LND 側処理が
+  継続し得る（タイムアウト≠未実行）— 呼出し側は冪等・lookup で整合を
+  取る経路のみから呼ぶ前提をヘルパーコメントに明記。
+- **監査して生存**: subscribeInvoices/subscribeChannelEvents は長寿命
+  ストリームで対象外（error/end の再接続は 138th 配線済）、atomicWrite は
+  fsync 永続化済み（同じ調査論点の耐久性側は適合）。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・55秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

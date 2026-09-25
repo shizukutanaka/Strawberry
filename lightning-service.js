@@ -9,6 +9,23 @@ const { logger } = require('./src/utils/logger');
 const { appendAuditLog } = require('./src/utils/audit-log');
 const { schemas } = require('./src/utils/validator');
 
+// gRPC 単一呼出しのデッドライン。LND がコールバックを返さない停止に備え、
+// 呼出し側で一定時間後に拒否する。これがないと lookupInvoice の応答停止で
+// ポーラーの _running フラグが永久スタックし、全 Lightning 決済確認が止まる
+// （同様にロック保持中のハンドラも固死する）。LND 側の処理は継続し得るため
+// 決済実行系は呼出し側で冪等・再試行可能な経路のみから呼ぶ前提。
+const GRPC_CALL_TIMEOUT_MS = 30000;
+function withGrpcDeadline(promise, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(
+            new Error(`gRPC call timed out after ${GRPC_CALL_TIMEOUT_MS}ms: ${label}`)
+        ), GRPC_CALL_TIMEOUT_MS);
+        if (timer.unref) timer.unref();
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 class LightningService {
     /**
      * サービス死活判定: gRPC接続状態・イベントストリーム・initializedを総合判定
@@ -21,12 +38,12 @@ class LightningService {
         if (!this.lnd || typeof this.lnd.getInfo !== 'function') return false;
         try {
             // getInfoで正常応答があるか
-            const info = await new Promise((resolve, reject) => {
+            const info = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.getInfo({}, (err, response) => {
                     if (err) return reject(err);
                     resolve(response);
                 });
-            });
+            }), 'getInfo');
             if (!info || !info.identity_pubkey) return false;
         } catch (e) {
             return false;
@@ -389,12 +406,12 @@ class LightningService {
     }
 
     async getInfo() {
-        return new Promise((resolve, reject) => {
+        return withGrpcDeadline(new Promise((resolve, reject) => {
             this.lnd.getInfo({}, (error, response) => {
                 if (error) reject(error);
                 else resolve(response);
             });
-        });
+        }), 'getInfo');
     }
 
     async updateNodeInfo() {
@@ -459,7 +476,7 @@ class LightningService {
             }
             const expirySeconds = Number.isFinite(Number(expiry)) && Number(expiry) > 0 ? Number(expiry) : 3600;
 
-            const invoice = await new Promise((resolve, reject) => {
+            const invoice = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.addInvoice({
                     value: amountSats.toString(),
                     memo: memo,
@@ -469,7 +486,7 @@ class LightningService {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'addInvoice');
 
             const paymentHash = invoice.r_hash.toString('hex');
             const invoiceData = {
@@ -512,12 +529,12 @@ class LightningService {
             if (!this.lnd) {
                 throw new Error('Lightning client not yet connected; retry on next poll cycle');
             }
-            const response = await new Promise((resolve, reject) => {
+            const response = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.lookupInvoice({ r_hash: Buffer.from(paymentHash, 'hex') }, (error, resp) => {
                     if (error) reject(error);
                     else resolve(resp);
                 });
-            });
+            }), 'lookupInvoice');
             return {
                 settled: !!response.settled,
                 amountPaid: response.amt_paid_sat != null ? parseInt(response.amt_paid_sat, 10) : undefined,
@@ -544,7 +561,7 @@ class LightningService {
                 : 1;
             const maxFeeSats = Math.ceil(decodedInvoice.num_satoshis * (feePercent / 100));
             
-            const payment = await new Promise((resolve, reject) => {
+            const payment = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.sendPaymentSync({
                     payment_request: paymentRequest,
                     fee_limit: { fixed: maxFeeSats }
@@ -553,7 +570,7 @@ class LightningService {
                     else if (response.payment_error) reject(new Error(response.payment_error));
                     else resolve(response);
                 });
-            });
+            }), 'sendPaymentSync');
             
             const paymentData = {
                 paymentHash: decodedInvoice.payment_hash,
@@ -579,22 +596,22 @@ class LightningService {
     }
 
     async decodePaymentRequest(paymentRequest) {
-        return new Promise((resolve, reject) => {
+        return withGrpcDeadline(new Promise((resolve, reject) => {
             this.lnd.decodePayReq({ pay_req: paymentRequest }, (error, response) => {
                 if (error) reject(error);
                 else resolve(response);
             });
-        });
+        }), 'decodePayReq');
     }
 
     async updateChannels() {
         try {
-            const channelList = await new Promise((resolve, reject) => {
+            const channelList = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.listChannels({}, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'listChannels');
             this.channels.clear();
             let invalidCount = 0;
             channelList.channels.forEach(channel => {
@@ -715,12 +732,12 @@ class LightningService {
 
     async getChannelBalance() {
         try {
-            const balance = await new Promise((resolve, reject) => {
+            const balance = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.channelBalance({}, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'channelBalance');
             
             return {
                 balance: parseInt(balance.balance),
@@ -751,12 +768,12 @@ class LightningService {
     async settleHoldInvoice(preimage) {
         // HODL請求書決済
         try {
-            await new Promise((resolve, reject) => {
+            await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.settleInvoice({ preimage: preimage }, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'settleInvoice');
             
             const paymentHash = crypto.createHash('sha256').update(preimage).digest('hex');
             const invoice = this.invoices.get(paymentHash);
@@ -777,12 +794,12 @@ class LightningService {
     async cancelHoldInvoice(paymentHash) {
         // HODL請求書キャンセル
         try {
-            await new Promise((resolve, reject) => {
+            await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.cancelInvoice({ payment_hash: paymentHash }, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'cancelInvoice');
             
             const invoice = this.invoices.get(paymentHash);
             
@@ -801,7 +818,7 @@ class LightningService {
     async openChannel(nodePubkey, localAmount, pushAmount = 0) {
         // チャネル開設
         try {
-            const result = await new Promise((resolve, reject) => {
+            const result = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.openChannelSync({
                     node_pubkey_string: nodePubkey,
                     local_funding_amount: localAmount,
@@ -812,7 +829,7 @@ class LightningService {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'openChannelSync');
             
             logger.info(`Channel opened with ${nodePubkey.substring(0, 16)}...`);
             
@@ -919,12 +936,12 @@ class LightningService {
         
         // 保留中のチャネル取得
         try {
-            const pendingChannels = await new Promise((resolve, reject) => {
+            const pendingChannels = await withGrpcDeadline(new Promise((resolve, reject) => {
                 this.lnd.pendingChannels({}, (error, response) => {
                     if (error) reject(error);
                     else resolve(response);
                 });
-            });
+            }), 'pendingChannels');
             
             pending = pendingChannels.total_limbo_balance || 0;
             

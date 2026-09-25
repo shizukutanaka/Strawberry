@@ -327,6 +327,10 @@ if (require.main === module) {
           process.exit(0);
         });
     });
+    // close() はアイドルの keep-alive ソケットも満了まで待つため、61s の
+    // keepAliveTimeout と組み合わせるとドレインが滞留して force-exit まで延びる。
+    // 応答待ちの接続は残し、アイドル接続だけ即時解放する。
+    if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
   };
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));

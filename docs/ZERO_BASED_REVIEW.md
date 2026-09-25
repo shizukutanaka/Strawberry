@@ -2294,6 +2294,22 @@ src/ 全ファイルの export 名を総当たり:
 - `npx jest --forceExit` 全緑: 115/115・1,045・56秒（前回実行流用 —
   require.main 経路のみ、対象テスト245件を別途実行して緑確認）。
 
+### 第158ラウンド（ソクラテス式問答 — 「TRUST_PROXY は Express 側にも配線されているか？」）
+
+- **問い**: `.env.example` に宣言された `TRUST_PROXY` は ip-key.js で解釈される
+  が、`app.set('trust proxy', N)` が一度も呼ばれていなければ、Express の
+  `req.ip` は常に実 TCP ピアを返す — プロキシ配下で全クライアントが
+  プロキシ IP に潰れ、レート制限が1つの共有バケットになるのではないか。
+- **答え**: **未配線 → 配線 + 解析を単一ソース化** — `parseTrustProxyHops()`
+  を ip-key.js へ export 化し（probe34 の「解析は ip-key.js に集約」契約を
+  保持）、server.js が同じ解釈で `app.set('trust proxy', hops)` を適用。
+  整数 hop のみ・'true' 系は両者で拒否（XFF 左端偽装を許さない）。
+- **監査して生存**: TRUST_PROXY 未設定なら req.ip=socket peer で両者一致して
+  安全、probe34 の assert も保持（`parseInt(process.env.TRUST_PROXY`・
+  `Number.isInteger(hopCount) && hopCount > 0` は parseTrustProxyHops 内に残存）。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・57秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

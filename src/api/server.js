@@ -35,6 +35,7 @@ const { registerProcessGuards } = require('../utils/process-guards');
 const { cacheHitCounter, cacheMissCounter } = require('./middleware/cache');
 const { setServices, startMonitor, stopMonitor } = require('../core/service-monitor');
 const { stopSessionSweep } = require('./routes/order/sessions');
+const ipKey = require('./middleware/ip-key');
 
 // Prometheusメトリクス
 const client = require('prom-client');
@@ -74,6 +75,19 @@ if (metricsInterval && metricsInterval.unref) metricsInterval.unref();
 // Expressアプリケーション初期化
 const app = express();
 const PORT = config.server.port || 3000;
+
+// TRUST_PROXY を Express へも反映する。middleware/ip-key.js は正の整数のとき
+// req.ip（プロキシ解決済みクライアント）を信頼する設計だが、Express の
+// trust proxy が未設定なら req.ip は常に実 TCP ピアを返す — プロキシ配下では
+// 全クライアントがプロキシ IP に潰れ、レート制限が1つの共有バケットになる。
+// 整数 hop のみ適用し、'true' 系の全 hop 信頼（XFF 左端偽装を許す）は ip-key.js
+// と同じく拒否する。未設定なら既定のまま req.ip=socket peer で両者一致して安全。
+{
+  const trustProxyHops = ipKey.parseTrustProxyHops();
+  if (trustProxyHops > 0) {
+    app.set('trust proxy', trustProxyHops);
+  }
+}
 
 // 新規為替レートAPIルート
 app.use('/api/exchange-rate', exchangeRateRouter);

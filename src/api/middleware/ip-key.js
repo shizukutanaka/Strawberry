@@ -39,9 +39,14 @@ function normalizeIpKey(ip) {
 //   Express app.set('trust proxy', true) は全 hop を信頼するため、X-Forwarded-For の
 //   左端（完全に攻撃者制御）が req.ip になり、送信元 IP を偽装してバイパスできてしまう。
 // 整数 hop 数のときのみ req.ip（プロキシ解決済み）を信頼し、それ以外は実 TCP ピアを使う。
-function rawClientIp(req) {
+// 解析はここに集約する（Express の app.set('trust proxy', N) へ渡す値も同じ解釈）。
+function parseTrustProxyHops() {
   const hopCount = parseInt(process.env.TRUST_PROXY, 10);
-  if (Number.isInteger(hopCount) && hopCount > 0) {
+  return Number.isInteger(hopCount) && hopCount > 0 ? hopCount : 0;
+}
+
+function rawClientIp(req) {
+  if (parseTrustProxyHops() > 0) {
     return req.ip || req.socket.remoteAddress || 'unknown';
   }
   return req.socket.remoteAddress || req.ip || 'unknown';
@@ -52,4 +57,4 @@ function rateLimitKeyGenerator(req) {
   return normalizeIpKey(rawClientIp(req));
 }
 
-module.exports = { normalizeIpKey, rawClientIp, rateLimitKeyGenerator };
+module.exports = { normalizeIpKey, rawClientIp, rateLimitKeyGenerator, parseTrustProxyHops };

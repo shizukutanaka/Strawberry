@@ -25,7 +25,11 @@ async function sendEmailNotification({ to, subject, text, html }, config = proce
         html ? { type: 'text/html', value: html } : { type: 'text/plain', value: text }
       ]
     }, {
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      // notifier.js の AXIOS_SAFE_CONFIG と同規約: 呼出しプロバイダの応答停止で
+      // 送信 promise が永久 pending にならないようタイムアウト・リダイレクト境界。
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      timeout: 10_000,
+      maxRedirects: 0
     });
   } else if (provider === 'mailgun') {
     const apiKey = config.MAILGUN_API_KEY;
@@ -35,7 +39,7 @@ async function sendEmailNotification({ to, subject, text, html }, config = proce
     const auth = Buffer.from(`api:${apiKey}`).toString('base64');
     await axios.post(`https://api.mailgun.net/v3/${domain}/messages`,
       new URLSearchParams({ from, to, subject, text, html }),
-      { headers: { Authorization: `Basic ${auth}` } }
+      { headers: { Authorization: `Basic ${auth}` }, timeout: 10_000, maxRedirects: 0 }
     );
   } else {
     throw new Error('Unknown EMAIL_PROVIDER');

@@ -18,7 +18,11 @@ async function sendPaymentOpenNode(dest, amountBTC) {
       amount: amountSats
     },
     {
-      headers: { 'Authorization': API_KEY }
+      // notifier.js の AXIOS_SAFE_CONFIG と同規約: プロバイダ応答停止で
+      // 支払い promise が永久 pending にならないようタイムアウト・リダイレクト境界。
+      headers: { 'Authorization': API_KEY },
+      timeout: 10_000,
+      maxRedirects: 0
     }
   );
   return res.data;
@@ -36,7 +40,9 @@ async function sendPaymentLNbits(dest, amountBTC) {
       amount: amountSats
     },
     {
-      headers: { 'X-Api-Key': API_KEY }
+      headers: { 'X-Api-Key': API_KEY },
+      timeout: 10_000,
+      maxRedirects: 0
     }
   );
   return res.data;

@@ -2244,6 +2244,24 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・55秒。
 
+### 第155ラウンド（ソクラテス式問答 — 「HTTP 外部呼出しも全てタイムアウト付きか？」）
+
+- **問い**: gRPC 側を境界化（154th）したので HTTP 側を照合 — 全 axios
+  呼出しにタイムアウトがあるか。notifier.js の AXIOS_SAFE_CONFIG
+  （10秒・maxRedirects:0・SSRF リダイレクト迂回防止）は既存規約。
+- **答え**: **4箇所が無境界 → 同規約で境界化**:
+  - `utils/email.js` SendGrid + Mailgun: 応答停止で送信 promise が永久
+    pending（notifyUser の .catch も発火せずリーク）。`timeout:10_000`・
+    `maxRedirects:0` を付与。
+  - `api/utils/lightning-api.js` OpenNode + LNbits: **支払い経路**で
+    無境界 — 出金 API 応答停止は「支払い済みか不明」の曖昧状態を作る
+    （gRPC 154th と同型）。同規約を付与。
+- **監査して生存**: exchange-rate.js の全4ソース（axios `timeout` 既定値
+  設定済み）、notifier.js 全6送信（AXIOS_SAFE_CONFIG + withRetry）、
+  LINE Notify も同 config 経由。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・56秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

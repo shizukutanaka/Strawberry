@@ -2681,6 +2681,25 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第179ラウンド（ソクラテス式問答 — 「信頼性スコア・適格判定の数学は正しいか？」）
+
+- **問い**: provider-uptime のスコア算出（ゼロ除算・未計測扱い・範囲境界）と
+  renter-eligibility の評価フロア強制 — 数学的に正しく強制されているか。
+- **答え**: **全て正しく強制済み（修正対象ゼロ）** —
+  - `provider-uptime`: `beats > 0` ガード付き disruptionRate（ゼロ除算なし）、
+    `MIN_BEATS_FOR_SCORE` 未満は `score=null`/`measuring=true`（早産スコアを
+    出さない設計）、`_clamp01` で範囲境界、env 由来閾値は `Math.max`/`min` で
+    バリデーション済（148th で env 強制確認済）。
+  - `renter-eligibility`: 評価は `Math.min(5, Math.max(1, …))` でクランプ
+    （異形 rating の極値混入を防止）、事前チェックと強制ゲートで同一関数を
+    共有する「単一の真実源」設計（片側だけ OK/NG になるドリフトを防ぐ）、
+    self_trade（ウォッシュトレード）・no_rating_history・below_floor・
+    not_available の明確な reason コード返却。
+  - 並走監査で GPU/eligibility 用の `rejectUnratedRenters`/`minRenterRating`
+    保存側も Joi 検証済み。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

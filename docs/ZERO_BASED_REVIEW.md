@@ -2700,6 +2700,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第180ラウンド（ソクラテス式問答 — 「検証数学の境界は正しいか？」）
+
+- **問い**: `work-verifier` の拜占庭多数決・ゼロ負荷検出、及び利用レート算出の
+  入力バリデーション — 数値異形で誤判定しないか。
+- **答え**: **全て正しく強制済み（修正対象ゼロ）** —
+  - `ternaryConsensus`: 3出力必須・過半数 `> n/2`・dissenters は
+    同意時のみ返却 — 冗長レプリカ一致検証の正しい形（arXiv:2501.05374 系）。
+  - `detectZeroLoad`: `typeof u === 'number'` で非数値サンプルを除外
+    （NaN/文字列が activeRatio を歪めない）、空配列 throw、
+    activeRatio 閾値で「課金されたが実仕事なし」を検出。
+  - `verification-service` は utilSamples 有無でゼロ負荷判定を分岐
+    （サンプルなし＝判定不能で suspiciousZeroLoad を立てない）。
+  - `shouldAudit`/`outputsMatch` は利用率/精度オプションで一致判定を分岐。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

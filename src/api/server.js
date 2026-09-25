@@ -142,7 +142,8 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   }
   const authHeader = req.headers.authorization || '';
   const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!provided || provided !== metricsToken) {
+  // 秘密値の比較は定数時間で行う（素の !== は先頭一致までの時間で正解を漏らす）。
+  if (!provided || !masterAuthRouter._timingSafeStrEqual(provided, metricsToken)) {
     return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
   }
   next();

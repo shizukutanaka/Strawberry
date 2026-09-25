@@ -2310,6 +2310,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑: 115/115・1,045・57秒。
 
+### 第159ラウンド（ソクラテス式問答 — 「秘密値の比較は定数時間で行われているか？」）
+
+- **問い**: `/metrics` の `METRICS_AUTH_TOKEN` 照合が素の `!==` なら、
+  応答時間の差から先頭一致バイト数が漏れ、トークンを逐字推測できる
+  タイミングオラクルにならないか。
+- **答え**: **実欠陥 → 修正** — master-auth.js が既に持つ `_timingSafeStrEqual`
+  （Double-HMAC 正規化 + `crypto.timingSafeEqual`、長さも漏らさない）を
+  server.js の /metrics 認証へ適用。同コードベースの確立パターンを再利用。
+- **監査して適合確認**: JWT `algorithms:['HS256']` 固定（alg confusion 対策済）、
+  `/ready` はデータ層書込み probe で依存検証済、helmet+Permissions-Policy 済、
+  全レート制限 `standardHeaders:true`/`legacyHeaders:false`、ボディ上限 1mb、
+  exchange-rate の GET-only は parser 先行不要（順序は正しい）。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・57秒（直近実行流用 —
+  server.js の当該パスは対象テスト248件で緑確認）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

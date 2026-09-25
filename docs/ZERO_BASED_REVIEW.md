@@ -2491,6 +2491,24 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第168ラウンド（ソクラテス式問答 — 「支払い境界・ログ衛生・CSRF は？」）
+
+- **問い**: LN 支払い側の fee 上限・`payment_error` 拒否、秘密値のログ
+  流出、cookie セッションの CSRF、`.env` の誤コミット — 残存面はあるか。
+- **答え**: **全て境界済み（修正対象ゼロ）** —
+  - `sendPayment`: `fee_limit.fixed` をインボイス額の 1%（検証済み最大 10%）
+    で送出し、`payment_error` は必ず reject。decodePayReq は支払い額を
+    インボイス自身から取得（過少・過大支払いの整合リスクなし）。
+  - ログ: token/secret/preimage/password を値として出力する経路ゼロ
+    （全ヒットはイベント名+ユーザー id のメタデータのみ、probe52 の
+    メタデータ redaction と整合）。
+  - CSRF: master-auth セッション cookie は `sameSite: 'strict'` +
+    httpOnly で、API 本体は Bearer JWT — cookie 単独で書き換え可能な
+    権限を持たない設計。
+  - `.env` は .gitignore 済（追跡ファイルは .env.example のみ）。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

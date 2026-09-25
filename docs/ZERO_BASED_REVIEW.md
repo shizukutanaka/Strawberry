@@ -2771,6 +2771,22 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第184ラウンド（ソクラテス式問答 — 「エスクロー永続化の競合は CAS 済みか？」）
+
+- **問い**: `escrow-service` の `persist`/settlement 書込み — 並行遷移で
+  先に確定した状態を上書きする面はないか。
+- **答え**: **全て CAS 強制済み（修正対象ゼロ）** —
+  - `persist()`: `updateIf(escrow.id, (e) => e.state === escrow.state, …)`
+    — 遷移計算時の現在状態を述語に固定し、並行遷移が先に確定した場合は
+    書込み自体が拒否される（CAS 失敗は呼出し側へ伝播）。
+  - settlement 書込み: `!['SETTLED','CANCELED'].includes(e.state) && !e.settlement`
+    の述語で二重決済を排除 —「並行経路が先に確定した settlement を
+    上書きしない」の意図コメント付き。
+  - actions→アダプタ写像で帳簿専用エスクロー（preimage なし）と
+    LN エスクローを同一層で扱うため action 名→フィールド名の明示対応。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

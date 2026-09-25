@@ -2326,6 +2326,26 @@ src/ 全ファイルの export 名を総当たり:
 - `npx jest --forceExit` 全緑: 115/115・1,045・57秒（直近実行流用 —
   server.js の当該パスは対象テスト248件で緑確認）。
 
+### 第160ラウンド（ソクラテス式問答 — 「ロックのキュー Map は解放されるか？」）
+
+- **問い**: `withLock` の `_queues` Map — `order:${orderId}:cancel` や
+  `refresh:${jti}` のようなユニークキーが無限に増えるとき、使い終わった
+  エントリは本当に Map から削除されるのか。
+- **答え**: **実欠陥 → 修正** — クリーンアップが
+  `if (_queues.get(key) === lock)` だったが、Map に格納されるのは
+  `prev.then(() => lock)` の chain promise で `lock` 自体ではない。比較が
+  常に false となり全ユニークキーが永続滞留（orderId/userId/jti ベースの
+  キーは無制限に増える）→ 格納した `chain` と比較するよう修正。
+  検証: 5ユニークキーで size 5→0、同一キー10並行で maxActive=1（直列化維持）。
+- **監査して適合確認**: ログ注入（Joi `.email()` が CR/LF 拒否・file 出力は
+  JSON エスケープ済）、refresh rotation（single-use・reuse検知全セッション
+  失効・ati ペア失効・per-jti ロック）、CORS（credentials↔wildcard 排他）、
+  セッション cookie（httpOnly+secure+sameSite:strict）、CSP 完備、
+  `Cache-Control: no-store`、Joi `stripUnknown:true`、bcrypt 10–31 境界、
+  乱数は全て crypto/uuidv4、body-parser 400 変換、OAuth `state:true`。
+
+- `npx jest --forceExit` 全緑: 115/115・1,045・62秒。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

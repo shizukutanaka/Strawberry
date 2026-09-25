@@ -8,15 +8,19 @@ async function withLock(key, fn) {
   const prev = _queues.get(key) ?? Promise.resolve();
   let release;
   const lock = new Promise(resolve => { release = resolve; });
-  // Chain: next caller waits for lock to release before running
-  _queues.set(key, prev.then(() => lock));
+  // Chain: next caller waits for lock to release before running.
+  // 後続が連結するのは chain（thenable）。lock 自体は Map に入らないため、
+  // クリーンアップ判定は格納した chain との一致で行う — lock と比較すると
+  // 常に false になり、ユニークキーごとにエントリが残り続けるリークになる。
+  const chain = prev.then(() => lock);
+  _queues.set(key, chain);
   try {
     await prev;
     return await fn();
   } finally {
     release();
     // Clean up entry once no waiters remain
-    if (_queues.get(key) === lock) _queues.delete(key);
+    if (_queues.get(key) === chain) _queues.delete(key);
   }
 }
 

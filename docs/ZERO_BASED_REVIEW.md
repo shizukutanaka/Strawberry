@@ -2416,6 +2416,28 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 対象テスト緑: api.integration 239 件。
 
+### 第164ラウンド（ソクラテス式問答 — 「境界はどこで抜けているか？」）
+
+- **問い**: SPA 側の XSS 面・トークン保管方針・scripts/ の外部呼出し —
+  「宣言された境界」が各所で抜けていないか。
+- **答え**: **scripts/ の3通知経路でタイムアウト未設定を修正** —
+  `scripts/line-notify.js`（axios.post）と `scripts/slack-notify.js`・
+  `scripts/slack-feedback-bot.js`（生 https.request）が service-monitor
+  経由でサーバープロセスから await 呼出しされるのに応答停止境界なし。
+  axios 側は AXIOS_SAFE_CONFIG 規約どおり `timeout: 10_000`、
+  https.request 側は `req.setTimeout(10_000, destroy)` で境界化
+  （CLI 実行でも応答停止ソケットがイベントループを握りプロセスが
+  終了しない面を塞ぐ）。
+- **監査して生存**:
+  - SPA XSS 面は完備 — `el()` の `html:` エスケープハッチは未使用、
+    router.js の innerHTML は静的文字列のみ（動的挿入は escapeText
+    エンコード経由）、動的 href は `lightning:` スキーム固定生成のみ。
+  - localStorage トークン保管は厳格 CSP（script-src 'self'・インライン
+    禁止）との設計トレードオフとして auth.js 冒頭に文書化済、
+    refresh token は SPA 側に保持しない（アクセストークン短命の設計）。
+
+- `npx jest --forceExit` 対象テスト緑: service-monitor/probe57 等 7 件。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

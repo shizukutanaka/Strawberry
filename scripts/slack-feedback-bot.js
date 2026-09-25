@@ -24,6 +24,9 @@ function sendSlackMessage(text) {
       console.error('Slack通知失敗:', res.statusCode);
     }
   });
+  // slack-notify.js と同規約: 応答停止したソケットがイベントループを
+  // 握ってプロセスが終了しないのを防ぐ。
+  req.setTimeout(10_000, () => req.destroy(new Error('Slack通知タイムアウト')));
   req.on('error', err => console.error('Slack通知エラー:', err));
   req.write(data);
   req.end();

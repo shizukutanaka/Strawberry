@@ -11,7 +11,10 @@ async function sendLineNotification(event, data) {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Authorization': `Bearer ${process.env.LINE_TOKEN}`
-        }
+        },
+        // notifier.js の AXIOS_SAFE_CONFIG と同規約: LINE API の応答停止で
+        // サーバープロセス内の await が永久 pending になるのを防ぐ。
+        timeout: 10_000,
       }
     );
   } catch (e) {

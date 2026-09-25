@@ -27,6 +27,9 @@ function sendSlackMessage(text) {
       console.error('Slack通知失敗:', res.statusCode);
     }
   });
+  // 応答停止した接続を抱えたままソケットが残らないよう境界化する
+  // （service-monitor 経由でサーバープロセスからも呼ばれる）。
+  req.setTimeout(10_000, () => req.destroy(new Error('Slack通知タイムアウト')));
   req.on('error', err => console.error('Slack通知エラー:', err));
   req.write(data);
   req.end();

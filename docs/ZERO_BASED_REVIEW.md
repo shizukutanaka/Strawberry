@@ -2474,6 +2474,23 @@ src/ 全ファイルの export 名を総当たり:
 
 - `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
 
+### 第167ラウンド（ソクラテス式問答 — 「秘密値比較・静的配信・依存 CVE の残存は？」）
+
+- **問い**: 秘密値の素比較（タイミングオラクル）、sendFile/express.static の
+  パストラバーサル、Express 周辺依存の既知脆弱性 — 残存面はあるか。
+- **答え**: **全て閉塞済み（修正対象ゼロ）** —
+  - インバウンド秘密値比較は2箇所のみ（/metrics Bearer・master-auth
+    mailCode）で、両方とも 159th 以降 `_timingSafeStrEqual` 経由。
+    外向き API キー（LN/SendGrid/Mailgun）はヘッダ送出しで比較なし。
+  - 静的配信は `express.static(public)` + SPA フォールバックの
+    固定 index.html のみ — ユーザー入力由来のパス解決なし。
+  - Express 4.22.3・path-to-regexp 0.1.13・send/serve-static/qs/cookie/
+    body-parser 全て現行パッチ済みバージョン。`npm audit` の残存は
+    162th で非適用と記録済の uuid 1件のみ（全呼出し v4・buf 不使用、
+    修正版14系は ESM 破壊＋dockerode 孤児コピーも残るため採用せず）。
+
+- `npx jest --forceExit` 全緑（165th 直近: 115/115・1,045・111秒）。
+
 ## 10. 検証（測定 — 推測しない）
 
 - 削除前: `npx jest --forceExit` → **136/138 スイート PASS、1,213 テスト、112 秒**。

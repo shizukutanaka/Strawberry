@@ -73,6 +73,8 @@
 2. (短期) 当面は §1 の監査と組み合わせ、`payment_partial_settlement` 監査ログ（実装済）から手動照合 + 自動リトライキューを整備。
 3. 既存の `FEE_RATE` 控除はエスクロー settle 時に確定させる。
 
+**実装済（部分、続）**: `escrow-expiry-poller` を追加 — `deadlineAt` 超過の PENDING エスクローを 60s スイープで自動 DEADLINE→CANCELED（`cancel_invoice` アクション発火）。これまで `deadlineAt` は保持されるのみで未払い hold invoice が滞留し続ける状態だった。HELD は対象外（入金済みを機械的 DISPUTED へ倒すと実行中ジョブの正当決済を巻き込むため、係争フロー側に委譲）。
+
 優先度: **高（資金安全に直結）**
 
 ---

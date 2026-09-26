@@ -5,7 +5,7 @@ const { google } = require('googleapis');
 const { logger } = require('./logger');
 
 // 必要な認証情報は環境変数または設定ファイルから取得
-defaultConfig = {
+const defaultConfig = {
   clientId: process.env.GCAL_CLIENT_ID,
   clientSecret: process.env.GCAL_CLIENT_SECRET,
   redirectUri: process.env.GCAL_REDIRECT_URI,

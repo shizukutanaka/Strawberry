@@ -425,3 +425,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- SLA トラッカーの配線 + 滞留防止（reliability）: `sla-tracker.js` の `startSLATracker` が誰からも呼ばれておらず sla.json が一切書かれず `GET /api/sla` は常に既定値を返していた。server.js へ配線（タイマー抑止はモジュール側の NODE_ENV ガード）。加えて 3 つの運用欠陥を修正: ①`checkAlive` の fetch にタイムアウトが無く応答滞留で以後の全周期が停止 ②updateSLA に再入ガードが無く checkAlive 滞留中の周期重複で load→save の RMW 競合 ③通知失敗が updateSLA へ伝播するのを catch。unref+stop も追加。

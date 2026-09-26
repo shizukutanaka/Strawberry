@@ -20,8 +20,11 @@ function getPendingPayments() {
 // 対象ユーザーへのリマインド送信
 async function remindPendingPayments() {
   const pendingPayments = getPendingPayments();
+  // getById は呼ぶたび users.json を全量読み込み+パースするため、
+  // 支払い件数ぶんの N+1 ファイル I/O を Map 化で抑止する。
+  const userById = new Map((UserRepository.getAll() || []).map(u => [u.id, u]));
   for (const payment of pendingPayments) {
-    const user = UserRepository.getById(payment.userId);
+    const user = payment.userId ? userById.get(payment.userId) : null;
     if (!user) continue;
     // 通知先（例: LINE）
     if (process.env.LINE_TOKEN && user.notifyByLine !== false) {

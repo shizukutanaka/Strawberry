@@ -117,6 +117,10 @@ function expireStaleDisputedOrders() {
   const cutoff = Date.now() - timeoutMs;
   const decision = (process.env.AUTO_DISPUTE_DECISION === 'uphold') ? 'uphold' : 'refund';
   let resolved = 0;
+  // 解決が実際に走った注文ごとに escrows.json を全量読み込みしないよう、
+  // 初回の解決時にだけ orderId でグルーピングした Map を構築して使い回す。
+  // 各注文のエスクローは1回しか遷移されないため、スナップショットの陳腐化は無害。
+  let heldEscrowsByOrder = null;
 
   for (const order of OrderRepository.getAll()) {
     if (order.status !== 'disputed') continue;
@@ -161,7 +165,16 @@ function expireStaleDisputedOrders() {
       const EscrowRepository = require('../db/json/EscrowRepository');
       const { createEscrowService } = require('../payments/escrow-service');
       const escrowSvc = createEscrowService();
-      const escrows = EscrowRepository.getAll().filter(e => e.orderId === order.id && e.state === 'HELD');
+      if (!heldEscrowsByOrder) {
+        heldEscrowsByOrder = new Map();
+        for (const e of EscrowRepository.getAll()) {
+          if (e.state !== 'HELD') continue;
+          const list = heldEscrowsByOrder.get(e.orderId) || [];
+          list.push(e);
+          heldEscrowsByOrder.set(e.orderId, list);
+        }
+      }
+      const escrows = heldEscrowsByOrder.get(order.id) || [];
       for (const esc of escrows) {
         try {
           if (decision === 'refund') {

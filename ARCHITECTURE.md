@@ -80,13 +80,10 @@ src/api/server.js
 
 ## テスト状況（正直版）
 
-`npm test`（Jest）は完走する。**約半数のスイートが green**（`tests/security/*` 全件、
-API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）。
-残りの失敗は**本ブランチの回帰ではなく**、以下いずれかの既存（aspirational）テスト：
-
-- 未実装エンドポイントを叩く（`/notification/create` 等。JWT で 401 になる）。
-- 実装と異なる旧 API/スキーマを参照（`validator`・`logger`・`jwt-auth` 等）。
-- 実 DB/Prisma 前提（`prisma-basic`・`migration-rollback` は未提供時スキップ化済み）。
+`npm test`（Jest, `--forceExit`）は **137/139 スイート全件 green**（1219 テスト、2 スイート
+は環境依存で skip）。当初あった aspirational な失敗群（未実装エンドポイント・旧スキーマ
+参照）は逐ー是正済み。`--forceExit` が必要なのは起動時のサービス初期化タイマー類が
+イベントループに残るためで、テストの成否とは無関係。
 
 実行: `npm install` → `npm test`。サーバ起動確認: `npm start`（`http://localhost:3000` で
 実際に動くマーケットプレイスUIが表示される。`/metrics` はPrometheusメトリクス、
@@ -98,11 +95,11 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
 2. データ層を一本化（当面 JSON 維持、将来 Prisma へ。`prisma/schema.prisma` は User/Feedback/Task
    のみで GPU/Order/Payment/Escrow 等の実ドメインモデルを欠いており、移行には未着手のスキーマ
    設計から必要）。
-3. サービスの DI/シングルトン統一、孤立 `*-fixed.js` の削除。
+3. サービスの DI/シングルトン統一（`*-fixed.js` 孤立ファイルは削除済）。
 4. ~~Electron の本実装 or 撤去判断~~ → **解決済み（2026-07）**: Electron 断片は削除し、
    代わりに `public/` の実フロントエンド（上記）を新規実装。デスクトップアプリが必要になれば
    このWeb版とは別に `ipcMain`/`ipcRenderer` から設計すること。
-5. 既存テストの実装整合化（未実装エンドポイント実装 or テスト是正）。
+5. ~~既存テストの実装整合化~~ → **解決済み（2026-09）**: 全スイート green（上記）。
 6. `.github/workflows/ci.yml` のデプロイ手順を Docker ビルド+`/health` スモークテストへ置換
    （2026-07、diff はコミット履歴に用意済みだが `workflows` 権限が無い環境からはプッシュ不可
    だったため未適用。`workflows` 権限を持つ人が手動適用する必要あり）。旧手順は存在しない
@@ -111,14 +108,14 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
 
 ### 既知の重大ギャップ（要対応・資金フロー）
 
-- **エスクロー action の未配線（money-movement gap）**: `escrow-state-machine` は
-  `DELIVER_OK`/`RESOLVE_SETTLE` 等で `reveal_preimage`/`payout_provider`/`collect_fee` の
-  「副作用の意図」を返すが、`action-executor.executeActions()` は本番コードのどこからも
-  呼ばれていない（テストのみ）。さらに `settle()` が算出する `providerPayoutSats` は
-  状態遷移パス（`evaluate`/`verifyAndSettle`）に渡されない。結果、エスクローは
-  `SETTLED` でも実際の LN 払い出しが実行されず資金が滞留しうる。LND/CLN アダプタ実装と
-  合わせて `evaluate`→`settle`→`executeActions(ctx.payoutSats=settlement.providerPayoutSats)`
-  を結線すること。**LN 実機統合を伴う大改修のため本ブランチでは未着手**。
+- **エスクローの実 LN 結線（money-movement gap の残り）**: `escrow-state-machine` が
+  返す `reveal_preimage`/`payout_provider`/`collect_fee` 等の actions は
+  `escrow-service.runActions` → `action-executor.executeActions` へ DI 経由で接続済。
+  ただし本番の呼び出し側（order ルート・order-expiry・marketplace/default）は
+  `createEscrowService()` を **`lnAdapter` 未指定**で呼ぶため runActions は no-op。
+  `settle()` の `providerPayoutSats` は `ctx.payoutSats` へ渡される実装済。
+  結果、エスクロー状態遷移・精算計算・永続化は動作するが、実 LN 払い出しは
+  adapter を注入するまで実行されない。**残作業は実 LND/CLN アダプタと呼出側への注入**。
 - **JSON 層のクロスプロセス lost-update**: `createJsonRepository` の書き込みは
   temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
   flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で

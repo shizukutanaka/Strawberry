@@ -61,7 +61,7 @@ describe('renter-profile: ratingAverage clamped to [1, 5]', () => {
     // applied only to Number.isFinite-validated ratings (invalid ratings excluded, not
     // defaulted to 1). Averaging already-clamped [1,5] values can never leave [1,5], so an
     // additional outer clamp on the final average is redundant and was removed.
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
+    const idx = src.indexOf("renterOrders = allOrders.filter(o => o.userId === userId && o.renterReview)");
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 700);
     expect(block).toMatch(/Math\.min\(5,\s*Math\.max\(1,\s*r\)\)/);

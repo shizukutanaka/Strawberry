@@ -357,9 +357,7 @@ router.delete('/me',
     try {
       const WatchRepository = require('../../../db/json/WatchRepository');
       const userWatches = WatchRepository.getByUser(user.id) || [];
-      for (const w of userWatches) {
-        try { WatchRepository.delete(w.id); } catch (_) {}
-      }
+      WatchRepository.deleteMany(userWatches.map(w => w.id));
     } catch (_) { /* ウォッチ後始末の失敗で退会レスポンスを妨げない */ }
 
     logger.info(`User self-deactivated account: ${user.id}`);
@@ -713,7 +711,10 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
 
   // 当該プロバイダのオーダーからレビュー★と取引実績を集計
   const OrderRepository = require('../../../db/json/OrderRepository');
-  const orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
+  // getAll() は呼ぶ度に orders.json 全量読み込み — このハンドラで使う2種の
+  // フィルタは1回のスナップショットから派生させる。
+  const allOrders = OrderRepository.getAll();
+  const orders = allOrders.filter(o => o.providerId === providerId);
   const reviewed = orders.filter(o => o.review);
 
   // 同一借り手が5分注文を量産して同一プロバイダに ★1 を撃ち込み続けて
@@ -739,7 +740,7 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
 
   // 借り手としての受領評価（プロバイダ→借り手レビューの集計）。同様に reviewerId(providerId)
   // 単位で dedup し、同一プロバイダが量産した低評価で借り手を不当に落とすのを防ぐ。
-  const asRenter = OrderRepository.getAll().filter(o => o.userId === providerId && o.renterReview);
+  const asRenter = allOrders.filter(o => o.userId === providerId && o.renterReview);
   const renterByReviewer = new Map();
   for (const o of asRenter) {
     const rid = (o.renterReview && o.renterReview.reviewerId) || o.providerId;
@@ -799,7 +800,10 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
   }
 
   const OrderRepository = require('../../../db/json/OrderRepository');
-  const renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview);
+  // getAll() は呼ぶ度に orders.json 全量読み込み — レビュー集計と完了件数は
+  // 1回のスナップショットから派生させる。
+  const allOrders = OrderRepository.getAll();
+  const renterOrders = allOrders.filter(o => o.userId === userId && o.renterReview);
   // 不正な rating（null/非数値）は `|| 1` で 1 に丸めず件数から除外する。旧実装は
   // 不正データを 1 点として合算に含めてしまい、レガシー破損レコードが平均を
   // 不当に押し下げていた（reputation-service の同種計算と同じ Number.isFinite 方式に統一）。
@@ -820,7 +824,7 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
     // GPU IDs, exposing rental patterns without any authentication.
     .map(o => ({ rating: o.renterReview.rating, comment: o.renterReview.comment || null, reviewedAt: o.renterReview.reviewedAt }));
 
-  const completedOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.status === 'completed').length;
+  const completedOrders = allOrders.filter(o => o.userId === userId && o.status === 'completed').length;
 
   const profileData = {
     userId,

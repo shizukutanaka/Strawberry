@@ -31,14 +31,14 @@ describe('renter-profile: invalid ratings excluded from average (source assertio
   });
 
   it('uses Number.isFinite to validate renter-profile ratings before averaging', () => {
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
+    const idx = src.indexOf("renterOrders = allOrders.filter(o => o.userId === userId && o.renterReview)");
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 700);
     expect(block).toMatch(/Number\.isFinite\(r\)/);
   });
 
   it('reviewCount is derived from the valid-ratings array, not raw renterOrders.length', () => {
-    const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
+    const idx = src.indexOf("renterOrders = allOrders.filter(o => o.userId === userId && o.renterReview)");
     const block = src.slice(idx, idx + 700);
     expect(block).toMatch(/reviewCount\s*=\s*validRatings\.length/);
   });

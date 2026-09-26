@@ -425,3 +425,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（リポジトリのバッチプリミティブ）
+- `create`/`delete` のループ内呼び出しは反復ごとに JSON ファイル全量を読み直し+書き込みする（書き込み側の N+1）。`createJsonRepository` に `createMany`/`deleteMany`（単一 load+atomicWrite、all-or-nothing）を追加し、GPU バルク登録・GPU 削除時/退会時の孤児ウォッチ掃除をバッチ化。併せて provider/renter プロフィールで同一リクエスト内に重複していた `OrderRepository.getAll()` を単一スナップショット化。

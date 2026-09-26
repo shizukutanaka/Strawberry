@@ -679,6 +679,10 @@ router.post('/bulk',
     const { schemas: { gpu: gpuSchemas } } = require('../../../utils/validator');
     const results = [];
     const batchKeys = new Set();
+    // 検証/アテステーションを通ったエントリを溜めて最後に一括 create する。
+    // ループ内で毎件 GpuRepository.create すると反復ごとに gpus.json 全量を
+    // 読み直し+書き込みする（N+1 I/O）ため、単一書き込みの createMany に畳む。
+    const pendingCreates = [];
     for (const entry of entries) {
       const { error: valErr, value } = gpuSchemas.register.validate(entry, { abortEarly: false, stripUnknown: true });
       if (valErr) {
@@ -735,9 +739,15 @@ router.post('/bulk',
       } else {
         gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
       }
-      const registered = GpuRepository.create(gpuInfo);
-      const { apiKey: _k, ...safe } = registered;
-      results.push({ success: true, gpu: safe });
+      pendingCreates.push({ resultIndex: results.length, gpuInfo });
+      results.push(null);
+    }
+    if (pendingCreates.length > 0) {
+      const createdRows = GpuRepository.createMany(pendingCreates.map(p => p.gpuInfo));
+      pendingCreates.forEach((p, i) => {
+        const { apiKey: _k, ...safe } = createdRows[i];
+        results[p.resultIndex] = { success: true, gpu: safe };
+      });
     }
     const successCount = results.filter(r => r.success).length;
     res.status(successCount > 0 ? 201 : 400).json({ registered: successCount, total: entries.length, results });
@@ -848,9 +858,7 @@ router.delete('/:id',
     // 永久に残るストレージリークになる。削除と同時に孤児ウォッチを除去する。
     try {
       const orphaned = WatchRepository.getByGpu(gpuId) || [];
-      for (const w of orphaned) {
-        try { WatchRepository.delete(w.id); } catch (_) {}
-      }
+      WatchRepository.deleteMany(orphaned.map(w => w.id));
     } catch (_) { /* ウォッチ後始末の失敗で GPU 削除レスポンスを妨げない */ }
     // GPUイベントをログに記録
     logger.gpuEvent('gpu_removed', {

@@ -106,6 +106,21 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       audit('create', { id: row.id });
       return row;
     },
+    // バッチ挿入: 呼び出し側がループ内で create を回すと反復ごとにファイル全量を
+    // 読み直し+全量書き込みする（N+1 I/O）。1回の load+atomicWrite でまとめて入れる。
+    // 途中で投げた場合は全件未適用（atomicWrite の all-or-nothing に揃える）。
+    createMany: (recs) => {
+      if (!Array.isArray(recs) || recs.length === 0) return [];
+      const rows = load();
+      const created = recs.map((rec) => {
+        const safeRec = stripDangerousKeys(rec);
+        return { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
+      });
+      rows.push(...created);
+      atomicWriteJSON(filePath, rows);
+      audit('createMany', { count: created.length });
+      return created;
+    },
     update: (id, updates) => {
       const rows = load();
       const idx = rows.findIndex((r) => r.id === id);
@@ -143,6 +158,18 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       const deleted = remaining.length < rows.length;
       atomicWriteJSON(filePath, remaining);
       audit('delete', { id, deleted });
+      return deleted;
+    },
+    // バッチ削除: delete のループ内呼び出しと同じく N+1 I/O を避けるため
+    // 1回の load+atomicWrite で処理。一致が無ければ書き込み自体を省略する。
+    deleteMany: (ids) => {
+      if (!Array.isArray(ids) || ids.length === 0) return 0;
+      const idSet = new Set(ids);
+      const rows = load();
+      const remaining = rows.filter((r) => !idSet.has(r.id));
+      const deleted = rows.length - remaining.length;
+      if (deleted > 0) atomicWriteJSON(filePath, remaining);
+      audit('deleteMany', { count: deleted });
       return deleted;
     },
   };

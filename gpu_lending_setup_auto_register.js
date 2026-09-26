@@ -1,6 +1,12 @@
 // gpu_lending_setup_auto_register.js
 // クロスベンダー対応 Strawberry GPU自動登録スクリプト例（Node.js）
 // Windows/Linux/Mac対応
+//
+// 使い方:
+//   STRAWBERRY_API_URL=http://localhost:3000 STRAWBERRY_TOKEN=<JWT> node gpu_lending_setup_auto_register.js
+// STRAWBERRY_TOKEN は /api/v1/users/login で取得したアクセストークン。
+// 登録エンドポイントは POST /api/v1/gpus（schemas.gpu.register の Joi 検証を通る
+// フィールドのみ送信すること。unknown キーは 400 で拒否される）。
 
 const os = require('os');
 const axios = require('axios');
@@ -14,6 +20,11 @@ function detectPlatform() {
   else if (platform === 'linux') osName = 'Linux';
   else if (platform === 'darwin') osName = 'macOS';
   return { os: osName, arch };
+}
+
+// Node の os.arch() 値 → スキーマ許容値 ('x86_64'|'arm64'|'aarch64'|'x86'|'arm')
+function mapArch(arch) {
+  return { x64: 'x86_64', ia32: 'x86', arm: 'arm', arm64: 'arm64', aarch64: 'aarch64' }[arch] || 'x86_64';
 }
 
 function detectGPU() {
@@ -36,8 +47,8 @@ function detectGPU() {
       const lines = wmic.split('\n').filter(x => x.trim());
       if (lines.length > 1) {
         const parts = lines[1].split(',');
-        model = parts[1] || 'Unknown';
-        driverVersion = parts[2] || 'Unknown';
+        model = (parts[1] || 'Unknown').trim();
+        driverVersion = (parts[2] || 'Unknown').trim();
       }
     } else if (platform === 'linux') {
       const lspci = execSync('lspci | grep VGA').toString();
@@ -51,8 +62,8 @@ function detectGPU() {
         vendor = 'Intel';
         apiType = 'oneAPI';
       }
-      model = lspci.split(':')[2] || 'Unknown';
-      // ドライババージョンは省略可
+      model = (lspci.split(':')[2] || 'Unknown').trim();
+      // ドライババージョンは省略可（Unknown でもスキーマ上 valid）
     }
   } catch (e) {}
   return { vendor, model, apiType, driverVersion };
@@ -61,31 +72,37 @@ function detectGPU() {
 async function autoRegisterGPU() {
   const { os: osName, arch } = detectPlatform();
   const gpu = detectGPU();
-  // サンプル値（実際は自動検出/ユーザー入力で拡張）
+  if (!['NVIDIA', 'AMD', 'Intel'].includes(gpu.vendor)) {
+    console.error('[ERROR] 対応 GPU を検出できませんでした（NVIDIA/AMD/Intel のみ登録可）:', gpu.vendor);
+    return;
+  }
+  // schemas.gpu.register に合わせる。id はサーバーが UUID v4 を生成するため送信しない。
+  // memoryGB/clockMHz/powerWatt/pricePerHour は必須 — 実値は環境変数で上書き推奨。
   const gpuInfo = {
-    id: 'auto-' + Math.random().toString(36).slice(2),
-    name: `${gpu.vendor} ${gpu.model}`,
+    name: `${gpu.vendor} ${gpu.model}`.slice(0, 128),
     vendor: gpu.vendor,
-    model: gpu.model,
+    model: gpu.model.slice(0, 128),
     apiType: gpu.apiType,
-    driverVersion: gpu.driverVersion,
+    driverVersion: String(gpu.driverVersion).slice(0, 64),
     os: osName,
-    arch,
-    memoryGB: 8, // 仮値: 実際は検出
-    clockMHz: 1500, // 仮値
-    powerWatt: 120, // 仮値
-    pricePerHour: 0.10, // 仮値
+    arch: mapArch(arch),
+    memoryGB: Number(process.env.GPU_MEMORY_GB) || 8,
+    clockMHz: Number(process.env.GPU_CLOCK_MHZ) || 1500,
+    powerWatt: Number(process.env.GPU_POWER_WATT) || 120,
+    pricePerHour: Number(process.env.GPU_PRICE_PER_HOUR) || 0.10,
     availability: { hoursPerDay: 24, daysAvailable: [0,1,2,3,4,5,6] },
     features: { cudaSupport: gpu.apiType==='CUDA', openCLSupport: true, rocmSupport: gpu.apiType==='ROCm', oneAPISupport: gpu.apiType==='oneAPI' },
     capabilities: { cuda: gpu.apiType==='CUDA', opencl: true, rocm: gpu.apiType==='ROCm', oneapi: gpu.apiType==='oneAPI' },
-    location: { country: '', region: '', city: '' },
     performance: { benchmarkScore: 0 }
   };
-  // 実際のAPIエンドポイント・認証トークンに置換
-  const API_URL = 'http://localhost:3000/api/gpu';
-  const TOKEN = 'YOUR_JWT_TOKEN';
+  const API_URL = process.env.STRAWBERRY_API_URL || 'http://localhost:3000';
+  const TOKEN = process.env.STRAWBERRY_TOKEN;
+  if (!TOKEN) {
+    console.error('[ERROR] STRAWBERRY_TOKEN が未設定です（/api/v1/users/login で取得）');
+    return;
+  }
   try {
-    const res = await axios.post(API_URL, gpuInfo, { headers: { Authorization: `Bearer ${TOKEN}` } });
+    const res = await axios.post(`${API_URL}/api/v1/gpus`, gpuInfo, { headers: { Authorization: `Bearer ${TOKEN}` } });
     console.log('[SUCCESS] GPU登録:', res.data);
   } catch (e) {
     console.error('[ERROR] GPU登録失敗:', e.response?.data || e.message);

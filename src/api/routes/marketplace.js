@@ -236,4 +236,61 @@ router.get('/stats', (req, res) => {
   }
 });
 
+// --- プロバイダ担保ステーク（§5 Sybil 耐性 + アンボンディング出金） ---
+const { createReputationService } = require('../../reputation/reputation-service');
+const reputationService = createReputationService();
+const MAX_STAKE_SATS = 1e12;
+
+// POST /marketplace/stake — 担保預け入れ（ledger 記録; 実際の LN ロックは残件）
+router.post('/stake', (req, res) => {
+  const amountSats = Math.floor(Number((req.body || {}).amountSats));
+  if (!Number.isFinite(amountSats) || amountSats <= 0) return res.status(400).json({ error: 'amountSats must be a positive integer' });
+  if (amountSats > MAX_STAKE_SATS) return res.status(400).json({ error: 'amountSats too large' });
+  try {
+    reputationService.addStake(req.user.id, amountSats);
+    return res.status(201).json({ providerId: req.user.id, stats: reputationService.getStats(req.user.id) });
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
+  }
+});
+
+// GET /marketplace/stake — 自分の担保状況（stake/pendingWithdrawals/slashCount）
+router.get('/stake', (req, res) => {
+  try {
+    const stats = reputationService.getStats(req.user.id);
+    return res.json({
+      providerId: req.user.id, stake: stats.stake, slashCount: stats.slashCount,
+      pendingWithdrawals: stats.pendingWithdrawals || [],
+      unbondMs: Number(process.env.STAKE_UNBOND_MS || 72 * 3600 * 1000),
+    });
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
+  }
+});
+
+// POST /marketplace/stake/withdraw — 出金申請（アンボンディング開始）。即時払い出しはしない。
+router.post('/stake/withdraw', (req, res) => {
+  const amountSats = (req.body || {}).amountSats;
+  try {
+    const result = reputationService.requestStakeWithdrawal(req.user.id, amountSats);
+    if (!result.ok) {
+      const code = result.reason === 'invalid_amount' ? 400 : 409;
+      return res.status(code).json({ error: result.reason, stake: result.stake, pendingTotal: result.pendingTotal });
+    }
+    return res.status(202).json({ withdrawal: result.withdrawal });
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
+  }
+});
+
+// POST /marketplace/stake/claim — unbond 経過分の受取。猶予中のスラッシュ分は出金不可。
+router.post('/stake/claim', (req, res) => {
+  try {
+    const result = reputationService.claimStakeWithdrawals(req.user.id);
+    return res.json(result);
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
+  }
+});
+
 module.exports = router;

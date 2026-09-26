@@ -5,6 +5,13 @@
 // escrow-service の slash_provider / work-verifier の監査結果から呼ばれる想定。
 // repository は DI 可能（既定 JSON、テストはインメモリ fake）。
 const { computeReputation, rankProviders } = require('./reputation-scorer');
+const crypto = require('crypto');
+
+// ステーク出金のアンボンディング期間（既定 72h、EigenLayer/Cosmos 型）。
+// 出金申請から支払可能までの猶予中も担保はスラッシュ対象のまま残り、
+// 「違反 → スラッシュ前に担保を引き出す」 hit-and-run を防ぐ。
+const DEFAULT_STAKE_UNBOND_MS = 72 * 3600 * 1000;
+const stakeUnbondMs = () => Number(process.env.STAKE_UNBOND_MS || DEFAULT_STAKE_UNBOND_MS);
 
 function defaultStats() {
   return {
@@ -55,6 +62,57 @@ function createReputationService({ repository } = {}) {
       mutate(providerId, (s) => ({ stake: Math.max(0, s.stake + amount) })),
     setStake: (providerId, amount) =>
       mutate(providerId, () => ({ stake: Math.max(0, amount) })),
+
+    /**
+     * ステーク出金申請（アンボンディング）。
+     * 申請時点では stake を減らさず pendingWithdrawals に記録するだけ — 猶予期間中も
+     * 担保はスラッシュ可能なまま残る。claim 時に初めて控除される。
+     * @returns {{ok:boolean, reason?:string, withdrawal?:object}}
+     */
+    requestStakeWithdrawal: (providerId, amountSats, opts = {}) => {
+      const amount = Math.floor(Number(amountSats));
+      if (!Number.isFinite(amount) || amount <= 0) return { ok: false, reason: 'invalid_amount' };
+      const unbondMs = Number.isFinite(opts.unbondMs) ? opts.unbondMs : stakeUnbondMs();
+      const now = opts.now || Date.now();
+      let result = null;
+      mutate(providerId, (s) => {
+        const pending = Array.isArray(s.pendingWithdrawals) ? s.pendingWithdrawals : [];
+        const pendingTotal = pending.reduce((t, w) => t + (w.amountSats || 0), 0);
+        // stake は申請時に減らないため、既存 pending も合わせた総額が stake 以下であることを要求
+        if (amount + pendingTotal > s.stake) { result = { ok: false, reason: 'insufficient_stake', stake: s.stake, pendingTotal }; return {}; }
+        const withdrawal = {
+          id: `wd_${crypto.randomBytes(8).toString('hex')}`,
+          amountSats: amount,
+          requestedAt: new Date(now).toISOString(),
+          eligibleAt: new Date(now + unbondMs).toISOString(),
+        };
+        result = { ok: true, withdrawal };
+        return { pendingWithdrawals: [...pending, withdrawal] };
+      });
+      return result;
+    },
+
+    /**
+     * 出金申請の受取（unbond 期間経過分のみ）。eligible 分を stake から控除して返す。
+     * 猶予期間中のスラッシュで stake が目減りしていれば、受取額は残存 stake までに丸まる。
+     */
+    claimStakeWithdrawals: (providerId, opts = {}) => {
+      const now = opts.now || Date.now();
+      let result = null;
+      mutate(providerId, (s) => {
+        const pending = Array.isArray(s.pendingWithdrawals) ? s.pendingWithdrawals : [];
+        const eligible = pending.filter((w) => new Date(w.eligibleAt).getTime() <= now);
+        const remaining = pending.filter((w) => new Date(w.eligibleAt).getTime() > now);
+        const requested = eligible.reduce((t, w) => t + (w.amountSats || 0), 0);
+        const released = Math.min(requested, s.stake); // スラッシュ済み分は出金不可
+        result = {
+          ok: true, releasedSats: released, requestedSats: requested,
+          claimed: eligible, pendingWithdrawals: remaining, stake: s.stake - released,
+        };
+        return { pendingWithdrawals: remaining, stake: s.stake - released };
+      });
+      return result;
+    },
 
     /**
      * GPU アテステーション合否を記録。

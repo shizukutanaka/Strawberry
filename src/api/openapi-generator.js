@@ -30,7 +30,79 @@ const OPENAPI_PATH = path.join(__dirname, '../../openapi.json');
 // persist=true は CLI（require.main === module の起動）でのみ true にする。
 // 旧実装はサーバープロセスから呼ばれても atomicWriteJSON で disk へ書き込んでおり、
 // 未認証 /openapi.json リクエストの cold cache でディスク IO が発生していた。
-function generateOpenAPISpec({ persist = false } = {}) {
+// Express 4 のルータスタックを走査し、実在する (method, path, auth) を列挙する。
+// 旧実装は Joi スキーマ名からパスを推測しており、存在しない幻影パスや
+// 公開 GET に誤って BearerAuth を要求する spec を /openapi.json で公開していた。
+function _mountPrefix(layer) {
+  const src = layer.regexp && layer.regexp.source;
+  if (!src) return '';
+  // Express 4 のマウント正規表現: '^\\/api\\/v1\\/?(?=\\/|$)' → '/api/v1'
+  const m = src.match(/^\^((?:\\\/|[^\\?(])+)/);
+  if (!m) return '';
+  const cleaned = m[1].replace(/\\(.)/g, '$1');
+  return cleaned === '/' ? '' : cleaned;
+}
+
+// Express の ':param' を OpenAPI の '{param}' に変換
+function _toOpenAPIPath(p) {
+  return p.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, '{$1}');
+}
+
+function _joinPaths(prefix, p) {
+  const joined = (prefix + p).replace(/\/{2,}/g, '/');
+  return joined === '' ? '/' : joined;
+}
+
+// ルートハンドラ列から認証・ロール要件を推定（関数名ベースのベストエフォート）
+function _routeGuards(routeLayers) {
+  let requiresAuth = false;
+  let requiredRole = null;
+  for (const l of routeLayers) {
+    const name = (l && l.name) || '';
+    if (/^(authenticateJWT|jwtAuth|adminOnly|checkRole|optionalAuth)$/.test(name)) requiresAuth = true;
+    if (name === 'adminOnly') requiredRole = 'admin';
+    if (name === 'checkRole') {
+      requiresAuth = true;
+      const match = String(l.handle).match(/checkRole\(\s*\[?\s*'([a-zA-Z]+)'/);
+      if (match) requiredRole = match[1];
+    }
+  }
+  return { requiresAuth, requiredRole };
+}
+
+function _walkLayers(stack, prefix, out) {
+  for (const layer of stack) {
+    if (layer.route) {
+      const { requiresAuth, requiredRole } = _routeGuards(layer.route.stack || []);
+      const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+      for (const rp of paths) {
+        for (const method of Object.keys(layer.route.methods || {})) {
+          if (method === '_all' || method === 'head') continue;
+          out.push({
+            method,
+            path: _toOpenAPIPath(_joinPaths(prefix, String(rp))),
+            requiresAuth,
+            requiredRole,
+          });
+        }
+      }
+    } else if (layer.name === 'router' && layer.handle && Array.isArray(layer.handle.stack)) {
+      _walkLayers(layer.handle.stack, _joinPaths(prefix, _mountPrefix(layer)), out);
+    }
+    // 'bound dispatch' 等のミドルウェアレイヤはルートではないのでスキップ
+  }
+}
+
+function listExpressRoutes(app) {
+  const out = [];
+  const router = app && (app._router || app.router);
+  if (!router || !Array.isArray(router.stack)) return out;
+  _walkLayers(router.stack, '', out);
+  // openapi.json 自身や静的アセット用ミドルウェアは route を持たず除外済み
+  return out;
+}
+
+function generateOpenAPISpec({ persist = false, app = null } = {}) {
   // 基本情報
   const openapi = {
     openapi: '3.0.3',
@@ -65,6 +137,9 @@ function generateOpenAPISpec({ persist = false } = {}) {
   }
 
   // schemas構造から主要pathsを自動生成（CRUD, 検索, 認証, 支払い等）
+  // app が渡された場合は実ルート走査による正確な paths に置き換えるため、
+  // このスキーマ駆動の推測生成は app 未指定（CLI 等）のフォールバックとしてのみ走る。
+  if (!app) {
   for (const [group, groupValue] of Object.entries(schemas)) {
     for (const [name, joiSchema] of Object.entries(normalizeGroup(group, groupValue))) {
       let path = `/` + group + (name !== 'register' && name !== 'create' && name !== 'search' ? `/${name}` : '');
@@ -116,6 +191,19 @@ function generateOpenAPISpec({ persist = false } = {}) {
       responses: { 200: { description: 'OK' }, 403: { description: 'Forbidden' } },
     },
   };
+  } else {
+    // 実ルートから paths を生成（実装と spec のドリフト防止）
+    for (const r of listExpressRoutes(app)) {
+      const p = r.path;
+      if (!openapi.paths[p]) openapi.paths[p] = {};
+      openapi.paths[p][r.method] = {
+        summary: `${r.method.toUpperCase()} ${p}`,
+        security: r.requiresAuth ? [{ BearerAuth: [] }] : [],
+        ...(r.requiredRole ? { 'x-required-role': r.requiredRole } : {}),
+        responses: { 200: { description: 'OK' } },
+      };
+    }
+  }
 
   if (persist) {
     atomicWriteJSON(OPENAPI_PATH, openapi);
@@ -128,4 +216,4 @@ if (require.main === module) {
   generateOpenAPISpec({ persist: true });
 }
 
-module.exports = { generateOpenAPISpec };
+module.exports = { generateOpenAPISpec, listExpressRoutes };

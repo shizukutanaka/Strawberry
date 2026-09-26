@@ -219,7 +219,8 @@ app.get('/openapi.json', apiLimiter, (req, res) => {
   if (!openapiSpecCache) {
     try {
       const { generateOpenAPISpec } = require('./openapi-generator');
-      openapiSpecCache = generateOpenAPISpec();
+      // app を渡すと実ルート走査で正確な paths を生成（未指定はスキーマ駆動の従来版）
+      openapiSpecCache = generateOpenAPISpec({ app });
     } catch (e) {
       logger.error('OpenAPI spec generation failed:', e);
       return res.status(500).json({ error: 'Failed to generate OpenAPI spec' });

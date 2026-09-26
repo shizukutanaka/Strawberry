@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（OpenAPI 精度）
+
+- `/openapi.json` は Joi スキーマ名からパスを推測生成しており、存在しない幻影パス（`/gpu/register` 等）や公開 GET への誤った BearerAuth 要件を公開していた。`generateOpenAPISpec({app})` に Express 4 ルータスタック走査を追加し、実在する (method, path) のみを出力、`:param`→`{param}` 変換、ルートスタックの `authenticateJWT`/`adminOnly`/`checkRole` を関数名検出して `security`/`x-required-role` に反映。`app` 未指定の CLI（`npm run openapi-gen`）は従来モードを維持。

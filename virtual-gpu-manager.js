@@ -331,6 +331,11 @@ class VirtualGPUManager extends EventEmitter {
                 }
             },
             spec: {
+                // §7: テナント Pod が k8s API を呼ぶ必要はない — SA トークンを注入しない。
+                automountServiceAccountToken: false,
+                ...(config.hardening === false ? {} : {
+                    securityContext: { seccompProfile: { type: 'RuntimeDefault' } }
+                }),
                 containers: [{
                     name: 'gpu-worker',
                     image: 'strawberry/gpu-worker:latest',
@@ -346,17 +351,37 @@ class VirtualGPUManager extends EventEmitter {
                         { name: 'PHYSICAL_GPU_ID', value: physicalGPU.id },
                         { name: 'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', value: String(config.computePercentage || 50) }
                     ],
-                    volumeMounts: [{
-                        name: 'gpu-config',
-                        mountPath: '/etc/strawberry/gpu'
-                    }]
+                    // §7: Pod Security Standards (restricted) 相当の既定コンテキスト。
+                    ...(config.hardening === false ? {} : {
+                        securityContext: {
+                            allowPrivilegeEscalation: false,
+                            readOnlyRootFilesystem: true,
+                            capabilities: { drop: ['ALL'] }
+                        },
+                        volumeMounts: [{
+                            name: 'gpu-config',
+                            mountPath: '/etc/strawberry/gpu'
+                        }, {
+                            name: 'tmp',
+                            mountPath: '/tmp'
+                        }]
+                    }),
+                    ...(config.hardening === false ? {
+                        volumeMounts: [{
+                            name: 'gpu-config',
+                            mountPath: '/etc/strawberry/gpu'
+                        }]
+                    } : {})
                 }],
                 volumes: [{
                     name: 'gpu-config',
                     configMap: {
                         name: `vgpu-config-${vgpuId}`
                     }
-                }],
+                }, ...(config.hardening === false ? [] : [{
+                    name: 'tmp',
+                    emptyDir: { sizeLimit: '1Gi' }
+                }])],
                 nodeSelector: {
                     'strawberry.network/gpu-node': 'true',
                     'nvidia.com/gpu.product': physicalGPU.model.series
@@ -413,7 +438,18 @@ class VirtualGPUManager extends EventEmitter {
                     Type: 'bind',
                     Source: `/var/lib/strawberry/vgpu/${vgpuId}`,
                     Target: '/data'
-                }]
+                }],
+                // §7: テナント隔離の既定ハードニング（CIS Docker Benchmark 準拠）。
+                // テナントコードを走らせるコンテナは rootfs 読み取り専用・権能全放棄・
+                // 特権昇格禁止が既定。特殊用途は config.hardening=false で opt-out。
+                ...(config.hardening === false ? {} : {
+                    Privileged: false,
+                    CapDrop: ['ALL'],
+                    SecurityOpt: ['no-new-privileges:true'],
+                    ReadonlyRootfs: true,
+                    Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=1g' },
+                    PidsLimit: 512,
+                })
             },
             Labels: {
                 'strawberry.vgpu': vgpuId,

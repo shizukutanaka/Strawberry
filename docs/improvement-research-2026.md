@@ -144,6 +144,8 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 
 **推奨アクション**: (中期) k8s ＋ 機密コンテナ／CC モードで、借り手のコード・データをプロバイダから秘匿（§2 の GPU TEE と統合）。
 
+> **実装済（部分）**: テナントコンテナの既定ハードニング（CIS Docker Benchmark / k8s Pod Security Standards restricted 相当）— Docker `HostConfig` に `CapDrop:ALL`・`no-new-privileges`・`ReadonlyRootfs`・`PidsLimit`・tmpfs `/tmp`（noexec）、k8s pod に `automountServiceAccountToken:false`・`seccompProfile:RuntimeDefault`・コンテナ securityContext（特権昇格禁止・RO rootfs・cap drop）を既定付与。`config.hardening=false` で opt-out。CC/機密コンテナ層は残件（PR #27）。
+
 優先度: **中**
 
 ---

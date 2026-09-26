@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const crypto = require('crypto');
 const { appendAuditLog } = require('../utils/audit-log');
 const { assertPublicUrl } = require('../utils/ssrf-guard');
 const { logger } = require('../utils/logger');
@@ -10,6 +11,20 @@ const Joi = require('joi');
 
 // Webhook送信先設定（環境変数またはDBで管理も可）
 const WEBHOOK_URLS = (process.env.GENERIC_WEBHOOK || '').split(',').filter(Boolean);
+
+// Stripe 流 HMAC 署名: 受信側が body の送信者正当性と鮮度（リプレイ耐性）を
+// 検証できるよう `X-Strawberry-Signature: t=<unixsec>,v1=<hex>` を付与する。
+// HMAC 対象は `t + '.' + rawBody` — timestamp を署名対象に含めることで
+// 署名済みペイロードの切り貼りリプレイを防ぐ（受信側は ±5min 窓で検証する想定）。
+// WEBHOOK_SIGNING_SECRET 未設定時は署名なし（後方互換 — 受信側は署名有無で検証有無を選べる）。
+const WEBHOOK_SIGNING_SECRET = process.env.WEBHOOK_SIGNING_SECRET || '';
+function signWebhookBody(rawBody, nowSec = Math.floor(Date.now() / 1000)) {
+  const t = String(nowSec);
+  const v1 = crypto.createHmac('sha256', WEBHOOK_SIGNING_SECRET)
+    .update(`${t}.${rawBody}`)
+    .digest('hex');
+  return `t=${t},v1=${v1}`;
+}
 
 // Webhook送信関数
 async function sendWebhook(event, payload) {
@@ -23,10 +38,18 @@ async function sendWebhook(event, payload) {
       appendAuditLog('webhook_ssrf_blocked', { url, event, error: ssrfErr.message });
       continue;
     }
+    const rawBody = JSON.stringify(body);
+    const headers = WEBHOOK_SIGNING_SECRET
+      ? { 'Content-Type': 'application/json', 'X-Strawberry-Signature': signWebhookBody(rawBody) }
+      : { 'Content-Type': 'application/json' };
+    if (!WEBHOOK_SIGNING_SECRET) {
+      // 本番で署名無しは受信側が改ざん検知できないため、起動時ではなく送信時に1回警告
+      logger.warn('WEBHOOK_SIGNING_SECRET unset; sending unsigned webhook');
+    }
     try {
-      await axios.post(url, body);
+      await axios.post(url, rawBody, { headers });
       logger.info('Webhook送信成功', { url, event });
-      appendAuditLog('webhook_sent', { url, event });
+      appendAuditLog('webhook_sent', { url, event, signed: !!WEBHOOK_SIGNING_SECRET });
       success = true;
     } catch (e) {
       logger.warn('Webhook送信失敗', { url, event, error: e.message });
@@ -59,4 +82,4 @@ async function notifyPaymentCompleted(payment) {
   await sendWebhook('payment_completed', { paymentId: payment.id, orderId: payment.orderId, amount: payment.amount, userId: payment.userId, time: new Date().toISOString() });
 }
 
-module.exports = { router, sendWebhook, notifyOrderCreated, notifyPaymentCompleted };
+module.exports = { router, sendWebhook, notifyOrderCreated, notifyPaymentCompleted, signWebhookBody };

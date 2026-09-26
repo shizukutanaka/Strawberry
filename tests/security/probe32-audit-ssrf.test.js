@@ -94,9 +94,10 @@ describe('SSRF guards: env-configured notification URLs are validated', () => {
     );
     expect(src).toMatch(/assertPublicUrl/);
     expect(src).toMatch(/ssrf-guard/);
-    // The SSRF check must come BEFORE the axios.post call
+    // The SSRF check must come BEFORE the axios.post call.
+    // （送信は署名対象の rawBody 文字列化へ移行したため、呼び出し形状は `axios.post(url, rawBody,`）
     const ssrfIdx = src.indexOf('assertPublicUrl(url)');
-    const axiosIdx = src.indexOf('axios.post(url, body)');
+    const axiosIdx = src.indexOf('axios.post(url, rawBody');
     expect(ssrfIdx).toBeGreaterThan(-1);
     expect(axiosIdx).toBeGreaterThan(-1);
     expect(ssrfIdx).toBeLessThan(axiosIdx);

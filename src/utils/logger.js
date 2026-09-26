@@ -3,6 +3,7 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 const { sanitizeSensitiveFields } = require('./sanitize');
+const { appendRotated } = require('./log-rotate');
 const { getRequestId, getTraceId } = require('./request-context');
 
 // ログディレクトリ
@@ -168,7 +169,7 @@ logger.gpuEvent = (event, data) => {
     event,
     data: sanitizeSensitiveFields(data),
   };
-  fs.appendFileSync(gpuLogPath, JSON.stringify(logEntry) + '\n');
+  appendRotated(gpuLogPath, JSON.stringify(logEntry) + '\n');
   // winston のメタデータは format filter が message を object のときしかサニタイズ
   // しないため、ここで先にサニタイズしてから渡す。旧実装は同じイベントを 2 回 info
   // し、2 回目は data を生で渡していたため将来 apiKey 等を含む caller が

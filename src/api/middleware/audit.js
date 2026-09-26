@@ -1,7 +1,7 @@
 // src/api/middleware/audit.js - 監査ログミドルウェア
-const fs = require('fs');
 const path = require('path');
 const { sanitizeSensitiveFields } = require('../../utils/sanitize');
+const { appendRotated, ensureLogDir } = require('../../utils/log-rotate');
 // HTTP リクエスト監査の出力先。
 // 重要: 改ざん検知ハッシュチェーン(src/utils/audit-log.js)が管理する logs/audit.log とは
 // 別ファイルにする。同一ファイルへ追記すると、ハッシュチェーンに含まれない本ミドルウェアの
@@ -48,10 +48,12 @@ function auditLogger(req, res, next) {
   next();
 }
 
+// mkdirSync は初回のみ（リクエスト毎に mkdir syscall を打つ必要はない）。
+// 追記は appendRotated 経由でサイズ上限管理（ディスク枯渇防止）。
 function writeAuditLog(entry) {
   try {
-    fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    fs.appendFileSync(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
+    ensureLogDir(AUDIT_LOG_PATH);
+    appendRotated(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
   } catch (e) {
     // ログ失敗時はサイレント
   }

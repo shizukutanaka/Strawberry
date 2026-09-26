@@ -119,6 +119,13 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// 部分決済の自動リトライ・スイープ（§3。テスト環境では poller 側でタイマー抑止）
+try {
+  require('../core/settlement-retry-poller').start();
+} catch (e) {
+  logger.warn(`settlement-retry-poller: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

@@ -179,6 +179,14 @@ router.post('/', authenticateJWT, async (req, res) => {
         orderId, operatorWallet, lenderWallet, total, payout,
         txBorrowerToOperator: tx1Txid, escrowId: escrow.id, error: err.message,
       });
+      // §3: 自動リトライキューへ登録（失敗しても応答は変えない — 監査ログが最後の証跡）
+      try {
+        require('../../../payments/settlement-retry').enqueue(escrow.id, {
+          orderId, operatorWallet, lenderWallet, payout, total, error: err.message,
+        });
+      } catch (e) {
+        logger.warn(`[btc-onchain] settlement-retry enqueue failed for escrow ${escrow.id}: ${e.message}`);
+      }
       logger.error('[CRITICAL] Partial settlement: operator received funds but lender payout failed. Retry the same request to resume from tx2.', {
         orderId, escrowId: escrow.id, tx1Txid,
       });

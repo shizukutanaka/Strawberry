@@ -513,4 +513,29 @@ router.post('/manual/approve/:id',
   })
 );
 
+// ── 部分決済リトライキュー（admin 専用）────────────────────────────────
+// btc-onchain で tx2(運営→貸し手)が失敗した滞留資金の自動リトライ状態を
+// 監視・強制再試行する。資金フロー直結のため admin 限定（marketplace.js と同型）。
+const settlementRetry = require('../../../payments/settlement-retry');
+
+router.get('/settlement-retries',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    res.json({ retries: settlementRetry.list() });
+  })
+);
+
+router.post('/settlement-retries/:escrowId/retry',
+  authenticateJWT,
+  checkRole(['admin']),
+  asyncHandler(async (req, res) => {
+    const result = await settlementRetry.forceRetry(req.params.escrowId, {});
+    if (!result.retried && result.reason === 'not_queued') {
+      throw new APIError(ErrorTypes.NOT_FOUND || ErrorTypes.VALIDATION, 'Escrow is not in the retry queue', 404);
+    }
+    res.json({ message: 'Retry attempted', escrowId: req.params.escrowId, result });
+  })
+);
+
 module.exports = router;

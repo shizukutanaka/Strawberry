@@ -73,6 +73,8 @@
 2. (短期) 当面は §1 の監査と組み合わせ、`payment_partial_settlement` 監査ログ（実装済）から手動照合 + 自動リトライキューを整備。
 3. 既存の `FEE_RATE` 控除はエスクロー settle 時に確定させる。
 
+**実装済（2026-09）**: アクション2 — `src/payments/settlement-retry.js` が tx2 失敗時にエスクロー行へ `settlementRetry`/`settlementPayload` を記録し、指数バックオフ（30s→30min、上限20回）で tx2 のみ自動再試行（tx1 済みなので二重請求なし）。クレームは `updateIf` の原子的 inFlight フラグで手動再送・poller・強制リトライの競合を排除。成功時は HELD→SETTLED + paid レコード補完（直送パスと同一不変条件）。上限到達で `dead` + `settlement_retry_exhausted` 監査イベント（人手照合対象）。`settlement-retry-poller`（60s 周期、テスト環境ではタイマー抑止）+ admin API `GET/POST /payments/settlement-retries[/:escrowId/retry]`。アクション1（hold invoice 前払いロック）は残件。
+
 優先度: **高（資金安全に直結）**
 
 ---

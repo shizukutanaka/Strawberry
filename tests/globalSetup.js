@@ -7,7 +7,7 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '../data');
 
 module.exports = async function globalSetup() {
-  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'uptime'];
+  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'uptime', 'bids'];
   const objectFiles = ['revoked-tokens', 'notification-settings'];
 
   // CI のクリーンチェックアウトには data/ ディレクトリ自体が存在しない

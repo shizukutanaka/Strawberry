@@ -72,6 +72,16 @@ router.post('/auction', (req, res) => {
   }
 });
 
+// 談合・シール入札の検出結果（蓄積入札履歴の横断分析）。
+// admin 限定: プロバイダ別の疑念スコアはセンシティブな運用情報のため。
+router.get('/auction/suspicions', adminOnly, (req, res) => {
+  try {
+    return res.json(marketplace.getAuctionSuspicions());
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
+  }
+});
+
 // --- エスクロー・ライフサイクル（admin 限定）---
 
 // 注文に価格を確定し hold-invoice エスクローを開く（PENDING）

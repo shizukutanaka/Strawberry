@@ -25,6 +25,14 @@ ENV NODE_ENV=production
 # explicit override, scoped to this container image only.
 ENV HOST=0.0.0.0
 EXPOSE 3000
+# CIS Docker Benchmark 4.1: コンテナは root で実行しない。
+# node:20-slim には uid 1000 の node ユーザーが同梱される。アプリ本体は
+# root 所有のまま（読み取り専用で十分）にして、実行時に書き込む
+# data/（JSON リポジトリ）・backups/・logs/（winston + audit log）のみ
+# node 所有にする — 書き込み可能領域を最小化するのがポイント。
+RUN mkdir -p /app/data /app/backups /app/logs \
+    && chown -R node:node /app/data /app/backups /app/logs
+USER node
 CMD ["node", "src/api/server.js"]
 
 # セキュリティスキャン例（CIで実行推奨）

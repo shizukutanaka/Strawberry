@@ -96,6 +96,7 @@ router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
+router.use('/audit', require('./audit-anchor'));
 router.use('/auth', authRoutes);
 // 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
 router.use(require('../notification-settings').router);

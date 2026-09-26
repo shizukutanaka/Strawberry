@@ -61,7 +61,9 @@ function verifyEntryInclusion(entry, proof, rootHex) {
  * @param {object} opts { logPath, anchorPath, now }
  * @returns {object|null} 追記したアンカー
  */
-function anchorAuditLogFile({ logPath = AUDIT_LOG_PATH, anchorPath = ANCHOR_PATH, now } = {}) {
+// logPath の既定は呼び出し毎に解決し、src/utils/audit-log.js と同じ
+// AUDIT_LOG_PATH 環境変数オーバーライドを尊重する。
+function anchorAuditLogFile({ logPath = process.env.AUDIT_LOG_PATH || AUDIT_LOG_PATH, anchorPath = ANCHOR_PATH, now } = {}) {
   if (!fs.existsSync(logPath)) return null;
   const entries = parseEntries(fs.readFileSync(logPath, 'utf-8'));
   if (entries.length === 0) return null;
@@ -78,11 +80,35 @@ function readAnchors(anchorPath = ANCHOR_PATH) {
   return parseEntries(fs.readFileSync(anchorPath, 'utf-8'));
 }
 
+/**
+ * 増分アンカー: 直近アンカーの toIndex 以降に追加されたエントリのみをアンカーする。
+ * 定期実行で毎回全量を再アンカーするのを防ぐ（§18 の定期ダイジェスト前提）。
+ * ログがローテーション/縮小して直近 toIndex を下回った場合は全量を fromIndex=0 で
+ * 再アンカー（チェーンの連続性より「現ログ全体が anchor 済み」であることを優先）。
+ * @returns {object|null} 新規エントリが無ければ null
+ */
+function anchorNewEntries({ logPath = process.env.AUDIT_LOG_PATH || AUDIT_LOG_PATH, anchorPath = ANCHOR_PATH, now } = {}) {
+  if (!fs.existsSync(logPath)) return null;
+  const entries = parseEntries(fs.readFileSync(logPath, 'utf-8'));
+  if (entries.length === 0) return null;
+
+  const last = readAnchors(anchorPath).pop();
+  const fromIndex = last && entries.length > last.toIndex ? last.toIndex + 1 : 0;
+  const newEntries = entries.slice(fromIndex);
+  if (newEntries.length === 0) return null;
+
+  const anchor = buildAuditAnchor(newEntries, { now, fromIndex });
+  fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+  fs.appendFileSync(anchorPath, JSON.stringify(anchor) + '\n');
+  return anchor;
+}
+
 module.exports = {
   buildAuditAnchor,
   proveEntry,
   verifyEntryInclusion,
   anchorAuditLogFile,
+  anchorNewEntries,
   readAnchors,
   parseEntries,
   merkleRoot, // 再エクスポート（呼び出し側の利便）

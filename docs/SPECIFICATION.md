@@ -41,6 +41,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
 | POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
 | `/api/v1/marketplace/escrow/*` (open/pay/verify/resolve) | エスクロー駆動 | JWT+admin | 🟡(LN実機未) |
+| `/api/v1/audit/anchors` (GET/POST), `/upgrade`, `/verify` | 監査ログ OTS アンカリング | JWT+admin | ✅ |
 | `/api/profit-addresses` | 運営受取先 | JWT+admin | ✅ |
 | GET `/metrics` | Prometheus | none | ✅ |
 | GET `/api/v1/node-info`,`/channels` | LN 情報 | JWT | 🟡(LN実機要) |
@@ -68,7 +69,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - ステーク/スラッシング/レピュテーション: 🟡 `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）実装済。**ルート配線は未**。
 
 ### F4. 運用・可観測性
-- Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **外部アンカリング(Merkle root)**: 🟡 `src/security/merkle-anchor.js`(root/証明/検証/digest) ＋ `src/security/audit-anchor.js`（audit.log を読みアンカー生成・永続化・包含証明、audit-log 結線済）。**残るは OTS への root 実提出のみ** / **OTel トレース**: ❌ / **カーボン配置**: ❌
+- Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **外部アンカリング(Merkle root)**: ✅ `src/security/merkle-anchor.js`(root/証明/検証/digest) ＋ `src/security/audit-anchor.js`（audit.log 読込・増分アンカー・包含証明）＋ `src/security/ots-submitter.js`（OpenTimestamps カレンダーへの root 提出・レシート台帳・Bitcoin 確定アップグレード）。定期実行は `src/core/audit-anchor-poller.js`（既定6h、test では抑止）＋ admin API `/api/v1/audit/anchors*` / **OTel トレース**: ❌ / **カーボン配置**: ❌
 
 ## 5. 非機能要件
 
@@ -94,7 +95,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
    既存 order/payment ルートからの呼び出し、実ジョブの出力/利用率収集**。← 次の山
 3. **永続化エンティティは全て実装済**（Escrow / Provider reputation / Verification record）。将来 Prisma へ移行。
 4. GPU アテステーション（nvtrust）、libp2p ESM 対応、OTel トレース、カーボン配置。
-   監査ログ Merkle アンカリングは `merkle-anchor.js` 実装済（残るは OTS への実提出と audit.js 結線）。
+   監査ログ Merkle アンカリング実装済（`merkle-anchor.js` + `audit-anchor.js` + `ots-submitter.js`、OTS 実提出・増分アンカー・包含証明 API まで結線済）。
 
 ---
 
@@ -113,4 +114,5 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）
+- `src/security/ots-submitter.js` ＋ `src/core/audit-anchor-poller.js` ＋ `src/api/routes/audit-anchor.js` — Merkle root の OpenTimestamps 提出・receipt 台帳・BTC 確定確認・定期実行・admin API（12テスト）
 - `src/security/gpu-attestation-verifier.js` — GPU アテステーション検証（申告 vs 計測, 8チェック, Mock 付き, 20テスト）

@@ -119,6 +119,16 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// 監査ログの定期 Merkle アンカー + OTS 提出（§18）。test では起動しない — 上記
+// metricsInterval / service-monitor と同じ理由（スイート毎のタイマー積み上がり防止）。
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    require('../core/audit-anchor-poller').start();
+  } catch (e) {
+    logger.warn(`audit-anchor-poller: failed to start: ${e.message}`);
+  }
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

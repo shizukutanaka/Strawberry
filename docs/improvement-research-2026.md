@@ -397,6 +397,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 優先度: **中**
 
+**実装済（2026-09）**: `src/security/ots-submitter.js` — Merkle root を複数の OTS 公開カレンダー（alice/bob/finney）へ `POST /digest` として提出し receipts を `logs/ots-receipts.jsonl` に記録、`GET /timestamp/{hex}` で Bitcoin 確定を回収（`upgradePending`）。失敗は per-calendar に畳み込み上位へ投げない。`audit-anchor.js` に増分アンカー `anchorNewEntries` を追加し `src/core/audit-anchor-poller.js` が既定 6h 周期で anchor→submit→upgrade を回す（test 抑止、`AUDIT_ANCHOR_INTERVAL_MS` / `OTS_ENABLED` / `OTS_ADAPTER` で制御、本番は HTTP・test は Mock アダプタ）。Admin API: `POST/GET /api/v1/audit/anchors`、`POST /anchors/upgrade`、`POST /anchors/verify`（包含証明）。
+
 ---
 
 ## 追補（第3弾）・優先度まとめ
@@ -404,7 +406,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 | # | 改善領域 | 優先度 | 根拠（代表） |
 |---|---------|--------|-------------|
 | 17 | オークション談合/シル入札検知 | 中（§4の対） | arXiv:1812.10868, 2506.00282 |
-| 18 | 監査ログの対外アンカリング | 中 | arXiv:2506.00282; OpenTimestamps |
+| 18 | 監査ログの対外アンカリング | 中（**実装済**） | arXiv:2506.00282; OpenTimestamps |
 | 14 | 推論サービング効率（vLLM系） | 中 | PagedAttention/Orca, arXiv:2510.14392, 2412.03594 |
 | 15 | カーボン対応・地理分散配置 | 中 | arXiv:2505.23554, 2304.07948, 2501.15504 |
 | 16 | ワークロード機密性（secure agg/DP） | 中 | arXiv:2410.11368, 2407.19286, 2604.07125 |

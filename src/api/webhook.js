@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { appendAuditLog } = require('../utils/audit-log');
-const { assertPublicUrl } = require('../utils/ssrf-guard');
+const { assertPublicUrl, SAFE_AXIOS_CONFIG } = require('../utils/ssrf-guard');
 const { logger } = require('../utils/logger');
 const { authenticateJWT, checkRole } = require('./middleware/security');
 const Joi = require('joi');
@@ -24,7 +24,7 @@ async function sendWebhook(event, payload) {
       continue;
     }
     try {
-      await axios.post(url, body);
+      await axios.post(url, body, SAFE_AXIOS_CONFIG);
       logger.info('Webhook送信成功', { url, event });
       appendAuditLog('webhook_sent', { url, event });
       success = true;

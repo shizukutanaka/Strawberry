@@ -115,4 +115,18 @@ async function assertPublicUrl(url, resolver) {
   return true;
 }
 
-module.exports = { isPrivateIp, assertPublicUrl };
+// assertPublicUrl() で検証した URL へ送る axios の共通安全設定。
+// maxRedirects:0 が本ガード成立の前提条件: 検証は「最初の URL」のホスト名だけを
+// 解決するため、axios 既定（maxRedirects:5）でリダイレクト追従を許すと、
+// 検証を通過した公開 URL が 30x で 127.0.0.1 や 169.254.169.254（クラウド
+// メタデータ）へ誘導でき、ガードを完全に迂回される。timeout/サイズ上限は
+// 攻撃者管理エンドポイントの無限レスポンスによる DoS 防止。
+// assertPublicUrl を通した呼び出しは必ずこの設定を併用すること。
+const SAFE_AXIOS_CONFIG = Object.freeze({
+  timeout: 10_000,               // 10 秒でタイムアウト
+  maxContentLength: 1_048_576,   // レスポンスボディ上限 1 MiB
+  maxBodyLength: 1_048_576,      // リクエストボディ上限 1 MiB
+  maxRedirects: 0,               // リダイレクト追従禁止（SSRF リダイレクト迂回を遮断）
+});
+
+module.exports = { isPrivateIp, assertPublicUrl, SAFE_AXIOS_CONFIG };

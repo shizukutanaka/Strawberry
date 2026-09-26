@@ -425,3 +425,15 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+## 実装済みメモ（ドキュメント外の実測改善）
+
+- **稼働統計の書き込みバッチ化**（本PR）: `recordProviderHeartbeat`/`recordSlaBreach` が
+  呼ばれるたびに `uptime.json` を `getByProviderId` の load + `update` の load+write
+  で計3回全量 I/O していたのを、プロセス内 pending 差分 + `UPTIME_FLUSH_INTERVAL_MS`
+  （既定30s）ごとの一括 `updateMany`（1 load + 1 write）へ変更。読み取り側
+  `getReliability` は pending を上乗せして返すため即時性は維持。落ちた場合の
+  喪失窓は1フラッシュ周期（best-effort 統計として許容）。
+- **リポジトリの `updateMany` プリミティブ**: 複数行の部分更新を 1 load + 1
+  atomicWrite に束ねる。ポーラー・バッチフラッシュ等の N 行更新経路で
+  逐次 update の N+1 書き込み増幅を潰す。

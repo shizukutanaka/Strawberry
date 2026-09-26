@@ -118,6 +118,26 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       audit('update', { id, updates });
       return rows[idx];
     },
+    // 複数レコードの部分更新を 1 load + 1 write に束ねる。ポーラーやハートビート
+    // 集計の定期フラッシュのように、一度に複数行を直す経路で呼ぶと
+    // 逐次 update の N 回 write が 1 回になる。見つからない id はスキップする
+    // （全部外れても write は走らせない）。
+    updateMany: (entries) => {
+      if (!Array.isArray(entries) || entries.length === 0) return { updated: 0, rows: [] };
+      const rows = load();
+      const indexById = new Map(rows.map((r, i) => [r.id, i]));
+      const updatedRows = [];
+      for (const entry of entries) {
+        if (!entry || entry.id === undefined) continue;
+        const idx = indexById.get(entry.id);
+        if (idx === undefined) continue;
+        rows[idx] = { ...rows[idx], ...stripDangerousKeys(entry.updates) };
+        updatedRows.push(rows[idx]);
+      }
+      if (updatedRows.length > 0) atomicWriteJSON(filePath, rows);
+      audit('updateMany', { count: updatedRows.length });
+      return { updated: updatedRows.length, rows: updatedRows };
+    },
     // Atomic compare-and-swap: loads, checks predicate, and writes in one synchronous
     // section (no await between load and write), preventing TOCTOU race conditions.
     // Returns { ok: true, row } on success or { ok: false, reason, current } on failure.

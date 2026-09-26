@@ -18,6 +18,85 @@
 const UptimeRepository = require('../db/json/UptimeRepository');
 const { logger } = require('../core/logger');
 
+// ハートビートは最頻パスのため、1ビート毎に uptime.json を読み書き（getByProviderId
+// の load + create/update の load+write = 計3回の全量 I/O）すると増幅する。
+// そこで差分をプロセス内の pending に溜め、UPTIME_FLUSH_INTERVAL_MS ごとに一括で
+// 反映する（getAll + updateMany = 2 I/O）。落ちた場合の喪失窓は1フラッシュ周期で、
+// best-effort 稼働統計として許容する。読み取り側は pending を上乗せして返すため
+// API から見える値は常に最新。
+const FLUSH_INTERVAL_MS = Math.max(1000, Number(process.env.UPTIME_FLUSH_INTERVAL_MS) || 30000);
+const _pending = new Map(); // providerId → { beats, gapEvents, sessions, breaches, lastBeatAt, lastBreachAt }
+const _knownProviders = new Set(); // uptime.json にレコードが存在すると確認済みの providerId
+let _lastFlushAt = 0;
+
+function _pendingFor(providerId) {
+  let d = _pending.get(providerId);
+  if (!d) {
+    d = { beats: 0, gapEvents: 0, sessions: 0, breaches: 0, lastBeatAt: null, lastBreachAt: null };
+    _pending.set(providerId, d);
+  }
+  return d;
+}
+
+// pending に溜めた差分を uptime.json へ一括反映する。テストから直接呼べるよう export する。
+function _flushPending(nowMs = Date.now()) {
+  if (_pending.size === 0) return;
+  const nowIso = new Date(nowMs).toISOString();
+  try {
+    const all = UptimeRepository.getAll();
+    const recByProvider = new Map(all.map((r) => [r.providerId, r]));
+    const updates = [];
+    for (const [providerId, d] of _pending) {
+      const rec = recByProvider.get(providerId);
+      if (!rec) {
+        // 集計中にレコードが消えた（手動削除等）— 差分を新規レコードとして救済する。
+        UptimeRepository.create({
+          providerId,
+          beats: d.beats,
+          gapEvents: d.gapEvents,
+          sessions: d.sessions,
+          breaches: d.breaches,
+          lastBeatAt: d.lastBeatAt,
+          lastBreachAt: d.lastBreachAt,
+          updatedAt: nowIso,
+        });
+        continue;
+      }
+      updates.push({
+        id: rec.id,
+        updates: {
+          beats: (Number(rec.beats) || 0) + d.beats,
+          gapEvents: (Number(rec.gapEvents) || 0) + d.gapEvents,
+          sessions: (Number(rec.sessions) || 0) + d.sessions,
+          breaches: (Number(rec.breaches) || 0) + d.breaches,
+          ...(d.lastBeatAt ? { lastBeatAt: d.lastBeatAt } : {}),
+          ...(d.lastBreachAt ? { lastBreachAt: d.lastBreachAt } : {}),
+          updatedAt: nowIso,
+        },
+      });
+    }
+    if (updates.length > 0) UptimeRepository.updateMany(updates);
+    for (const providerId of _pending.keys()) _knownProviders.add(providerId);
+  } catch (e) {
+    // best-effort: フラッシュ失敗は pending を保持したまま次回に回す。
+    logger.warn(`[provider-uptime] flush failed (kept ${_pending.size} pending): ${e.message}`);
+    return;
+  }
+  _pending.clear();
+  _lastFlushAt = nowMs;
+}
+
+function _maybeFlush(nowMs) {
+  if (nowMs - _lastFlushAt >= FLUSH_INTERVAL_MS) _flushPending(nowMs);
+}
+
+// ハートビートが途絶した期間に溜まった差分も取りこぼさないよう、無音期間を
+// カバーする unref タイマーを張る（unref のため単体ではプロセスを延命しない）。
+const _flushTimer = setInterval(() => {
+  try { _flushPending(Date.now()); } catch (_) { /* best-effort */ }
+}, FLUSH_INTERVAL_MS);
+if (typeof _flushTimer.unref === 'function') _flushTimer.unref();
+
 // 前回ビートからこの時間を超えて次のビートが来たら「切断イベント」1回とみなす。
 // heartbeat の最小間隔は既定 10s。その 6 倍（60s）を超える空白は、
 // 単なる送信タイミングのブレではなく実際のダウン/復帰と判断する。
@@ -62,25 +141,31 @@ function recordProviderHeartbeat(providerId, orderId, nowMs = Date.now()) {
     if (isNewSession) countedOrders.add(orderId);
 
     const nowIso = new Date(nowMs).toISOString();
-    const existing = UptimeRepository.getByProviderId(providerId);
-    if (!existing) {
-      UptimeRepository.create({
-        providerId,
-        beats: 1,
-        gapEvents: gapEvent ? 1 : 0,
-        sessions: 1,
-        lastBeatAt: nowIso,
-        updatedAt: nowIso,
-      });
+    if (!_knownProviders.has(providerId)) {
+      // 初見プロバイダーだけ同期で upsert: 「最初の1ビートでレコードが見える」
+      // という既存契約（初回稼働プロバイダーの可視性）を維持する。
+      const existing = UptimeRepository.getByProviderId(providerId);
+      if (!existing) {
+        UptimeRepository.create({
+          providerId,
+          beats: 1,
+          gapEvents: gapEvent ? 1 : 0,
+          sessions: 1,
+          lastBeatAt: nowIso,
+          updatedAt: nowIso,
+        });
+      }
+      _knownProviders.add(providerId);
+      _maybeFlush(nowMs);
       return;
     }
-    UptimeRepository.update(existing.id, {
-      beats: (Number(existing.beats) || 0) + 1,
-      gapEvents: (Number(existing.gapEvents) || 0) + (gapEvent ? 1 : 0),
-      sessions: (Number(existing.sessions) || 0) + (isNewSession ? 1 : 0),
-      lastBeatAt: nowIso,
-      updatedAt: nowIso,
-    });
+    // 既知プロバイダーは pending に差分のみ積み、書き込みはフラッシュに任せる。
+    const d = _pendingFor(providerId);
+    d.beats += 1;
+    if (gapEvent) d.gapEvents += 1;
+    if (isNewSession) d.sessions += 1;
+    d.lastBeatAt = nowIso;
+    _maybeFlush(nowMs);
   } catch (e) {
     // 稼働統計は best-effort。ハートビート本処理を巻き込まないよう握り潰す。
     logger.warn(`[provider-uptime] failed to record heartbeat for ${providerId}: ${e.message}`);
@@ -94,19 +179,22 @@ function recordSlaBreach(providerId, nowMs = Date.now()) {
   if (!providerId) return;
   try {
     const nowIso = new Date(nowMs).toISOString();
-    const existing = UptimeRepository.getByProviderId(providerId);
-    if (!existing) {
-      UptimeRepository.create({
-        providerId, beats: 0, gapEvents: 0, sessions: 0, breaches: 1,
-        lastBeatAt: null, lastBreachAt: nowIso, updatedAt: nowIso,
-      });
+    if (!_knownProviders.has(providerId)) {
+      const existing = UptimeRepository.getByProviderId(providerId);
+      if (!existing) {
+        UptimeRepository.create({
+          providerId, beats: 0, gapEvents: 0, sessions: 0, breaches: 1,
+          lastBeatAt: null, lastBreachAt: nowIso, updatedAt: nowIso,
+        });
+      }
+      _knownProviders.add(providerId);
+      _maybeFlush(nowMs);
       return;
     }
-    UptimeRepository.update(existing.id, {
-      breaches: (Number(existing.breaches) || 0) + 1,
-      lastBreachAt: nowIso,
-      updatedAt: nowIso,
-    });
+    const d = _pendingFor(providerId);
+    d.breaches += 1;
+    d.lastBreachAt = nowIso;
+    _maybeFlush(nowMs);
   } catch (e) {
     logger.warn(`[provider-uptime] failed to record SLA breach for ${providerId}: ${e.message}`);
   }
@@ -125,12 +213,21 @@ function getReliability(providerId) {
     logger.warn(`[provider-uptime] failed to read uptime for ${providerId}: ${e.message}`);
     return empty;
   }
-  if (!rec) return empty;
+  const d = _pending.get(providerId);
+  // レコード削除直後の窓では pending だけ残りうる — その分だけでも返す。
+  if (!rec && !d) return empty;
 
-  const beats = Number(rec.beats) || 0;
-  const gapEvents = Number(rec.gapEvents) || 0;
-  const sessions = Number(rec.sessions) || 0;
-  const breaches = Number(rec.breaches) || 0;
+  let beats = rec ? (Number(rec.beats) || 0) : 0;
+  let gapEvents = rec ? (Number(rec.gapEvents) || 0) : 0;
+  let sessions = rec ? (Number(rec.sessions) || 0) : 0;
+  let breaches = rec ? (Number(rec.breaches) || 0) : 0;
+  // フラッシュ待ちの差分を上乗せして、読み取りでは常に最新値が見えるようにする。
+  if (d) {
+    beats += d.beats;
+    gapEvents += d.gapEvents;
+    sessions += d.sessions;
+    breaches += d.breaches;
+  }
 
   // サンプル不足でも SLA 違反があれば「計測中」で隠さずスコアを出す:
   // ダウン実績を「まだ実績なし」の陰に隠すのは不誠実で、借り手保護にも反する。
@@ -151,10 +248,14 @@ function getReliability(providerId) {
   return { score, tier, beats, gapEvents, sessions, breaches, measuring: false };
 }
 
-// テスト用: 揮発状態のリセット。
+// テスト用: 揮発状態のリセット。pending 差分はディスクへ書き戻さず捨てる
+// （テスト間で uptime.json を直接掃除するので、残差分を残すと幽霊レコードが復活する）。
 function _resetVolatileState() {
   lastProviderBeatByOrder.clear();
   countedOrders.clear();
+  _pending.clear();
+  _knownProviders.clear();
+  _lastFlushAt = 0;
 }
 
 module.exports = {
@@ -163,5 +264,7 @@ module.exports = {
   getReliability,
   GAP_THRESHOLD_MS,
   MIN_BEATS_FOR_SCORE,
+  FLUSH_INTERVAL_MS,
+  _flushPending,
   _resetVolatileState,
 };

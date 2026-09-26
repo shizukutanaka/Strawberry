@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（サプライチェーン監視）
+
+- `security-audit`（npm audit + LINE/Discord/email 通知）は cron CLI で参照ゼロ、かつ実行のたび同一脆弱性を再通知する設計だった。`auditDependencies`（純粋判定: `name:severity` フィンガープリントと `logs/security-audit-state.json` の前回通知を比較し、セット変化時のみ通知）に分離し、`security-audit-poller` で日次実行を配線（既定24時間間隔・起動15分後初回、`SECURITY_AUDIT_INTERVAL_MS`）。
+

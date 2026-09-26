@@ -1,7 +1,10 @@
 // 画像圧縮自動化スクリプト（npm run optimize-images で実行）
-const imagemin = require('imagemin');
-const imageminMozjpeg = require('imagemin-mozjpeg');
-const imageminPngquant = require('imagemin-pngquant');
+// imagemin 系 v10+ は ESM-only。Node 20.19+/22/24 の require(ESM) は
+// { default: fn } 名前空間を返すため default へのフォールバックが必要。
+function esmInterop(mod) { return (mod && mod.default) || mod; }
+const imagemin = esmInterop(require('imagemin'));
+const imageminMozjpeg = esmInterop(require('imagemin-mozjpeg'));
+const imageminPngquant = esmInterop(require('imagemin-pngquant'));
 const path = require('path');
 
 (async () => {

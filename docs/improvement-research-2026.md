@@ -71,6 +71,8 @@
 **推奨アクション**:
 1. (中期) 注文時に借り手が **hold invoice で前払いロック**。`virtual-gpu-manager` の稼働実績（§1 の profiling）または時間経過に応じて段階的に settle、未提供なら cancel（タイムロック失効）。
 2. (短期) 当面は §1 の監査と組み合わせ、`payment_partial_settlement` 監査ログ（実装済）から手動照合 + 自動リトライキューを整備。
+
+> **実装済（付随）**: `POST /orders` に Stripe 流の冪等性キー（`Idempotency-Key` ヘッダ / body `idempotencyKey`）を追加 — 同一ユーザ+同一キーの再送はビジネス検証を挟まず既存注文を 200 で返し、初回同士の同時競合は作成時ロックで直列化（check-then-create TOCTOU 対策）。二重注文・二重課金を防止（PR #26）。
 3. 既存の `FEE_RATE` 控除はエスクロー settle 時に確定させる。
 
 優先度: **高（資金安全に直結）**

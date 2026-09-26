@@ -867,6 +867,28 @@ router.post('/',
     }
     // 入力値サニタイズ
     const orderData = sanitizeObject(req.validatedBody, ['description']);
+    // 冪等性キー: ヘッダ Idempotency-Key 優先、body.idempotencyKey も可。
+    // 決済系 API の標準的な再送対策（Stripe 流）— 同一ユーザ + 同一キーの
+    // 再送は新規作成せず既存注文を返す（二重注文/二重課金の防止）。
+    const headerIdem = req.get('Idempotency-Key');
+    if (typeof headerIdem === 'string' && headerIdem.length > 0 && headerIdem.length <= 128) {
+      orderData.idempotencyKey = headerIdem;
+    }
+    // 冪等リプレイはビジネス検証より先に返す — 再送が来た時点で GPU 状態や
+    // 重複予約条件が変わっていても、初回の受理結果をそのまま返すのが正しい契約。
+    // （初回同士の同時競合は作成時のロックで別途直列化する）
+    if (orderData.idempotencyKey) {
+      const existing = OrderRepository.getAll().find(
+        (o) => o.userId === req.user.id && o.idempotencyKey === orderData.idempotencyKey
+      );
+      if (existing) {
+        return res.status(200).json({
+          message: 'Existing order returned (idempotent replay)',
+          order: existing,
+          idempotentReplay: true
+        });
+      }
+    }
     logger.info('Creating new order');
     // durationMinutes必須・5の倍数・整数のみ許可
     const durationMinutes = Number(orderData.durationMinutes);
@@ -1052,7 +1074,27 @@ router.post('/',
     orderData.pricePerHour = pricePerHour;
     orderData.totalPrice = totalPrice;
     orderData.totalPriceJPY = totalPriceJPY;
-    const createdOrder = OrderRepository.create(orderData);
+    // 冪等性: 同一ユーザ+同一キーの並行/再送リクエストは find+create をロック内で
+    // 直列化し、先に作成された注文をそのまま返す（check-then-create の TOCTOU 対策）。
+    let createdOrder;
+    if (orderData.idempotencyKey) {
+      const idemResult = await withLock(`orderIdem:${req.user.id}:${orderData.idempotencyKey}`, async () => {
+        const dup = OrderRepository.getAll().find(
+          (o) => o.userId === req.user.id && o.idempotencyKey === orderData.idempotencyKey
+        );
+        return dup ? { dup } : { created: OrderRepository.create(orderData) };
+      });
+      if (idemResult.dup) {
+        return res.status(200).json({
+          message: 'Existing order returned (idempotent replay)',
+          order: idemResult.dup,
+          idempotentReplay: true
+        });
+      }
+      createdOrder = idemResult.created;
+    } else {
+      createdOrder = OrderRepository.create(orderData);
+    }
     // 通知サービス呼び出し
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;
     // GPU 提供者（プロバイダ）へ通知（notification-settings で登録したチャネルへ）

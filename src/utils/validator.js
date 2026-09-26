@@ -181,7 +181,10 @@ const schemas = {
       }).optional(),
       priority: Joi.string().valid('price', 'performance', 'availability', 'distance').default('price'),
       // 事前予約: 指定しない場合は即時（now）として扱う
-      scheduledStartAt: Joi.string().isoDate().optional()
+      scheduledStartAt: Joi.string().isoDate().optional(),
+      // 冪等性キー（Stripe 流。Idempotency-Key ヘッダでも可）: ネットワーク再送や
+      // クライアントの二重送信で同じ注文が二重作成・二重課金されるのを防ぐ
+      idempotencyKey: Joi.string().max(128).optional()
     })
   },
   

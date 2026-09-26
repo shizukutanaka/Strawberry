@@ -50,8 +50,8 @@
     "@opentelemetry/sdk-node": "^0.220.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "apollo-server-express": "^3.13.0",
-    "axios": "^1.7.7",
-    "bcrypt": "^5.1.1",
+    "axios": "^1.20.0",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.19.2",
@@ -59,30 +59,27 @@
     "express-session": "^1.18.0",
     "graphql": "^16.9.0",
     "helmet": "^7.1.0",
-    "joi": "^17.13.3",
+    "joi": "^17.13.8",
     "joi-to-swagger": "^6.2.0",
     "jsonwebtoken": "^9.0.2",
     "lru-cache": "^10.2.1",
-    "morgan": "^1.10.0",
-    "nodemailer": "^6.9.14",
+    "morgan": "^1.12.0",
+    "nodemailer": "^10.0.10",
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "passport-google-oauth20": "^2.0.0",
     "prom-client": "^15.1.0",
     "speakeasy": "^2.0.0",
-    "uuid": "^9.0.1",
+    "uuid": "^11.1.1",
     "winston": "^3.14.2",
     "winston-daily-rotate-file": "^5.0.0"
   },
   "optionalDependencies": {
     "@grpc/grpc-js": "^1.11.1",
     "@grpc/proto-loader": "^0.7.13",
-    "@kubernetes/client-node": "^0.21.0",
+    "@kubernetes/client-node": "^2.0.0",
     "aws-sdk": "^2.1691.0",
-    "dockerode": "^4.0.2",
-    "imagemin": "^8.0.1",
-    "imagemin-mozjpeg": "^10.0.0",
-    "imagemin-pngquant": "^9.0.2"
+    "dockerode": "^4.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
@@ -91,5 +88,9 @@
   },
   "allowScripts": {
     "bcrypt@5.1.1": true
+  },
+  "overrides": {
+    "qs": "^6.16.0",
+    "uuid": "^11.1.1"
   }
 }

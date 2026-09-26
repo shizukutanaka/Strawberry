@@ -80,6 +80,13 @@ const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./midd
 // サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
 const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
 
+// レスポンス圧縮（gzip/deflate）。チェーン最上流に置くことで /metrics・/health・
+// /openapi.json など早期登録ルートも圧縮対象に含める（Express は登録順にミドル
+// ウェアを適用するため、後半に置くと手前のルートだけ無圧縮になる）。
+// Accept-Encoding 交渉は compression が処理し、非対応クライアントには無圧縮を返す。
+// 1KB 未満は圧縮オーバーヘッドが利得を上回るため既定の閾値のまま。
+app.use(require('compression')());
+
 // 新規為替レートAPIルート
 app.use('/api/exchange-rate', exchangeRateRouter);
 

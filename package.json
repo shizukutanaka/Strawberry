@@ -52,6 +52,7 @@
     "apollo-server-express": "^3.13.0",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.19.2",

@@ -34,6 +34,14 @@ describe('token-denylist', () => {
     expect(isRevoked('external-jti')).toBe(true);
   });
 
+  it('keeps enforcing cached revocations when the file becomes unparseable', () => {
+    // 破損した更新が既存の失効キャッシュを捨てないこと（Devin Review #70 指摘回帰）
+    revoke('kept-jti', Date.now() + 60_000);
+    expect(isRevoked('kept-jti')).toBe(true);
+    fs.writeFileSync(DENYLIST, '{ not valid json');
+    expect(isRevoked('kept-jti')).toBe(true);
+  });
+
   it('does not reload while the file is unchanged', () => {
     revoke('cached-jti', Date.now() + 60_000); // load + persist → ファイル更新
     isRevoked('cached-jti'); // persist による変更を拾う再読込（指紋が確定する）

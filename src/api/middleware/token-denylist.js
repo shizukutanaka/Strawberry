@@ -34,20 +34,23 @@ function load() {
   // stat できない（ファイル未作成）場合でも、既にロード済みのマップを維持する
   // — 不在を「全失効無し」と読み替えると revoke→isRevoked の即時整合が壊れる。
   if (denylist && (stamp === null || stamp === denylistStamp)) return denylist;
-  denylist = new Map();
+  const fresh = new Map();
   try {
     if (stamp !== null) {
       const raw = JSON.parse(fs.readFileSync(DENYLIST_PATH, 'utf-8'));
       for (const [jti, expiryMs] of Object.entries(raw)) {
-        if (typeof expiryMs === 'number') denylist.set(jti, expiryMs);
+        if (typeof expiryMs === 'number') fresh.set(jti, expiryMs);
       }
     }
+    denylist = fresh;
   } catch (err) {
-    // 破損ファイル読み込み失敗 — 空マップで起動継続するが必ず警告する。
-    // 失効済みトークンが一時的に有効扱いになるリスクをオペレーターが把握できるよう記録する。
+    // 破損ファイル読み込み失敗 — 必ず警告する。既ロード済みマップは維持する:
+    // キャッシュを破棄すると過去の失効トークンを再受理してしまう（Devin Review 指摘）。
+    // 初回ロード失敗時のみ空マップで起動継続する。
     // eslint-disable-next-line no-console
     console.error(`[token-denylist] WARN: Failed to load revoked-tokens.json (all prior revocations may be temporarily invalid): ${err.message}`);
     try { require('../../utils/audit-log').appendAuditLog('denylist_load_failure', { error: err.message }); } catch (_) {}
+    if (!denylist) denylist = fresh;
   }
   // 破損時も指紋は記録する — 同じ壊れたファイルの再パースを繰り返さないため。
   // 修復（ファイル置換）すれば指紋が変わり次回ロードで再試行される。

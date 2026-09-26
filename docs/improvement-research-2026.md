@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- 空スタブだった `docker/docker-compose.yml`・`kubernetes/{deployment,service}.yaml` を実マニフェスト化: compose は Dockerfile.api ビルド+data/logs ボリューム永続化、deployment は /health probes・Secret 参照・readOnlyRootFilesystem・replicas=1（JSON 単一ライター前提）とした。

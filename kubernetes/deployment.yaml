@@ -1,1 +1,92 @@
-# K8sデプロイメント
+# K8sデプロイメント — Strawberry API (docker/Dockerfile.api のイメージをデプロイ)
+# 前提: strawberry-secrets Secret に JWT_SECRET 等の必須環境変数を登録しておく
+#   kubectl create secret generic strawberry-secrets --from-env-file=.env.production
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: strawberry-api
+  labels:
+    app: strawberry-api
+spec:
+  replicas: 1 # JSON ファイルリポジトリは単一ライター前提のため水平スケール不可
+  selector:
+    matchLabels:
+      app: strawberry-api
+  template:
+    metadata:
+      labels:
+        app: strawberry-api
+    spec:
+      securityContext:
+        # Dockerfile.api は非 root 化される前提 (#52)。fsGroup は共有ボリューム書き込み用。
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: strawberry-api:latest # 運用時は不変タグへ固定すること
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: strawberry-secrets
+                  key: JWT_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: strawberry-secrets
+                  key: JWT_REFRESH_SECRET
+                  optional: true # 未設定時は JWT_SECRET でフォールバック (config.js)
+            - name: METRICS_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: strawberry-secrets
+                  key: METRICS_AUTH_TOKEN
+                  optional: true # 未設定時 /metrics は 503 fail-closed
+          envFrom:
+            - secretRef:
+                name: strawberry-secrets
+                optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true # data/logs はボリューム経由で書き込み
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: strawberry-data
+        - name: logs
+          emptyDir: {}

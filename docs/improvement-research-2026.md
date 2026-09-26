@@ -425,3 +425,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（CSP connect-src 縮小）
+- CSP `connect-src` から `wss://*` を除去。フロントエンドは WebSocket を使わないため、注入 JS が任意ホストへ双方向チャネルを開いてデータを持ち出す経路を遮断（`'self'` は同一オリジン ws/wss を含む）。

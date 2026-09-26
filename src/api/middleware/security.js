@@ -24,7 +24,10 @@ const securityHeaders = helmet({
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'", 'wss://*'],
+      // フロントエンドは WebSocket を使わない。wss://* を残すと注入された JS が
+      // 任意ホストへ双方向チャネルを開いてデータを持ち出せるため 'self' のみ。
+      // （CSP 仕様上 'self' は同一オリジンの ws:/wss: を含む）
+      connectSrc: ["'self'"],
       // object-src 'none': レガシープラグイン（Flash/<object>/<embed>）経由の
       // スクリプト実行・データ持ち出しを禁止。OWASP CSP 推奨の基本ハードニング。
       objectSrc: ["'none'"],

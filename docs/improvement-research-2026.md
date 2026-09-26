@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- `CONTRIBUTING.md` を実態へ同期: 「main または develop からブランチ作成」→ develop は不在（main のみ）、「CI で lint/test/openapi をチェック」の記述を実ワークフローへ具体化（build-test の lint は non-blocking、coverage 閾値70、openapi-autogen の対象パス、optimize-images、ci-cd は main push のみで Deploy はスタブ）。日英両セクション。

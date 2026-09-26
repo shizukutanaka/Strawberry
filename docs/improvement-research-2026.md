@@ -425,3 +425,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（withLock リーク修正）
+- `src/utils/async-lock.js` のロックマップ掃除条件を修正。`prev.then(() => lock)` の派生 Promise を保存する一方で削除判定が内部 `lock` と比較され常に偽 → ユニークキーごとのエントリが永久蓄積するメモリリークだった。tail Promise を退避して正しく解放。

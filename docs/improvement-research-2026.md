@@ -425,3 +425,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- 認証パスの users.json 全量読み込み解消（perf）: jwt-auth / security / GraphQL context の3箇所が認証済みリクエスト毎に `UserRepository.getById`（全量 readFileSync+parse）を踏んでいた → `auth-user-lookup.js` 新設。users.json の (mtimeMs,size) を statSync でゲートし変更時のみ再パース、`id → {status,passwordChangedAt,sessionsRevokedAt}` の `Object.freeze` 済み最小レコードを返す。行オブジェクトを共有しないためミューテーション漏洩なし、stat 失敗時はリポジトリへフォールバック（フェイルオープンしない）。

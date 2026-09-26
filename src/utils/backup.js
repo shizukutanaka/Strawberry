@@ -3,10 +3,23 @@
 
 const path = require('path');
 const fs = require('fs');
-const { uploadToS3, uploadToGoogleDrive, uploadToDropbox } = require('./cloud-storage');
+// cloud-storage は任意依存（aws-sdk/googleapis/dropbox）を抱えるため、
+// トップレベル require だと未導入環境で本モジュール全体が MODULE_NOT_FOUND に
+// なり、ローカル世代バックアップまで死んでしまう。クラウド連携だけ遅延読み込みし、
+// 未導入時はローカルバックアップのみで動作する。
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
 const { appendAuditLog } = require('./audit-log');
+
+let _cloudStorage = null;
+let _cloudStorageTried = false;
+function cloudStorage() {
+  if (!_cloudStorageTried) {
+    _cloudStorageTried = true;
+    try { _cloudStorage = require('./cloud-storage'); } catch (_) { _cloudStorage = null; }
+  }
+  return _cloudStorage;
+}
 
 // バックアップ対象ファイルリスト（実データは data/ に格納）
 const DATA_DIR = path.resolve(__dirname, '../../data');
@@ -65,32 +78,39 @@ async function backupAll() {
     try {
       let success = false;
       const errors = [];
-      if (process.env.AWS_S3_BUCKET) {
+      const cs = cloudStorage();
+      if (process.env.AWS_S3_BUCKET && cs) {
         try {
-          await uploadToS3(filePath, `backup/${file}`);
+          await cs.uploadToS3(filePath, `backup/${file}`);
           success = true;
         } catch (e) {
           errors.push({ type: 'S3', error: e.message });
           logger.warn('S3バックアップ失敗', { error: e.message });
         }
       }
-      if (process.env.DROPBOX_ACCESS_TOKEN) {
+      if (process.env.DROPBOX_ACCESS_TOKEN && cs) {
         try {
-          await uploadToDropbox(filePath, `/backup/${file}`);
+          await cs.uploadToDropbox(filePath, `/backup/${file}`);
           success = true;
         } catch (e) {
           errors.push({ type: 'Dropbox', error: e.message });
           logger.warn('Dropboxバックアップ失敗', { error: e.message });
         }
       }
-      if (process.env.GDRIVE_OAUTH_TOKEN) {
+      if (process.env.GDRIVE_OAUTH_TOKEN && cs) {
         try {
-          await uploadToGoogleDrive(filePath, `backup/${file}`);
+          await cs.uploadToGoogleDrive(filePath, `backup/${file}`);
           success = true;
         } catch (e) {
           errors.push({ type: 'GDrive', error: e.message });
           logger.warn('GDriveバックアップ失敗', { error: e.message });
         }
+      }
+      // クラウド宛先が未設定でもローカル世代バックアップは既に成功している。
+      // 「全クラウドバックアップ失敗」として誤警報しないため宛是否有無を分ける。
+      const anyCloudConfigured = !!(process.env.AWS_S3_BUCKET || process.env.DROPBOX_ACCESS_TOKEN || process.env.GDRIVE_OAUTH_TOKEN);
+      if (!anyCloudConfigured) {
+        success = true; // ローカルバックアップのみ運用
       }
       if (success) {
         logger.info('バックアップ成功', { file });
@@ -129,4 +149,5 @@ if (require.main === module) {
 module.exports = {
   backupAll,
   restoreFromLatestBackup,
+  backupLocalWithGeneration,
 };

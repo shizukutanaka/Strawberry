@@ -23,6 +23,39 @@ const { atomicWriteJSON } = require('./atomicWrite');
 // 読み戻し後の別経路（bracket 代入・deep merge 等）で汚染の起点になりうる。
 // 上流の Joi 検証に依存せず、書き込み直前で確実に弾く。
 const DANGEROUS_KEYS = ['__proto__', 'constructor', 'prototype'];
+
+/**
+ * 破損した JSON ストアを世代バックアップから自動復元する。
+ * 復元できた場合は行配列を返し、できない・失敗した場合は null を返す
+ * （呼び出し側は従来通り fail-closed で throw する）。
+ * 破損ファイルは <file>.corrupt-<ts> へ退避して証跡を残す。
+ */
+function tryRestoreFromBackup(filePath, fileName) {
+  try {
+    const { restoreFromLatestBackup } = require('../../utils/backup');
+    const { appendAuditLog } = require('../../utils/audit-log');
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 15);
+    const corruptPath = `${filePath}.corrupt-${stamp}`;
+    // 破損ファイルを退避（証跡保全）してから最新バックアップを復元
+    fs.renameSync(filePath, corruptPath);
+    const restored = restoreFromLatestBackup(filePath);
+    if (!restored) {
+      // バックアップなし — 破損ファイルを元に戻して fail-closed へ
+      try { fs.renameSync(corruptPath, filePath); } catch (_) {}
+      return null;
+    }
+    // 復元内容が読めるか検証（バックアップ自体の破損に備える）
+    const reparsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    if (!Array.isArray(reparsed)) throw new Error('restored backup is not an array');
+    try {
+      appendAuditLog('json_repo_auto_restore', { file: fileName, restoredFrom: 'local-generation-backup', corruptAside: corruptPath });
+    } catch (_) {}
+    return reparsed;
+  } catch (_) {
+    return null;
+  }
+}
+
 function stripDangerousKeys(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
   let cleaned = obj;
@@ -78,6 +111,12 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       // （escrows.json / payments.json で資金記録が消える）。
       // fail-closed: 破損ファイルは温存（rename しない＝次回 load が [] を返して
       // 上書きするのを防ぐ）し、明示的に throw して運用者に検知させる。
+      //
+      // 世代バックアップ（utils/backup.js）が存在する場合は自動復元を試みる。
+      // 破損ファイルは証跡として .corrupt-<ts> に退避し、復元不能なら従来通り
+      // fail-closed で throw する（2重破損やバックアップ無しの場合）。
+      const recovered = tryRestoreFromBackup(filePath, fileName);
+      if (recovered) return recovered;
       throw new Error(
         `[json-repo] ${fileName} is corrupt and could not be parsed (${e.message}). ` +
         `Refusing to read to avoid overwriting recoverable data. ` +

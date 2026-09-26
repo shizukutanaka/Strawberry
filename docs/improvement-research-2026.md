@@ -425,3 +425,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（災害復旧）
+
+- `backup.js` のトップレベル `require('./cloud-storage')` は googleapis/dropbox 等の未導入依存経由で MODULE_NOT_FOUND になり、ローカル世代バックアップまで死んでいた。クラウド連携を遅延読み込み化し、未導入/宛先未設定環境ではローカルバックアップのみで動作（誤警報も防止）。
+- `createJsonRepository` の破損検知に自動復元を配線: パース失敗時に破損ファイルを `.corrupt-<ts>` へ退避→最新世代バックアップを復元→復元内容を再検証（バックアップ自体の破損は fail-closed 維持）。復元不能なら従来通り throw。
+

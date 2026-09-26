@@ -8,6 +8,26 @@ const { sanitizeSensitiveFields } = require('../../utils/sanitize');
 // エントリが間に挟まり、verifyAuditLogIntegrity / audit-anchor の検証が常に失敗していた。
 const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH || path.join(__dirname, '../../../logs/access-audit.log');
 
+// 巨大な body/query/response（一覧取得やファイル内容等）を全文記録すると
+// 監査ログが急膨張し、JSON.stringify + 再帰マスキング自体もリクエスト処理の
+// ボトルネックになるため、記録するフィールドサイズに上限を設ける。
+const MAX_LOGGED_FIELD_BYTES = 2048;
+
+// 上限内ならマスク済みオブジェクト、超過なら内容を捨ててサイズのみ記録する。
+function capForLog(value) {
+  let raw;
+  try {
+    raw = JSON.stringify(value);
+  } catch (e) {
+    return '[unserializable]';
+  }
+  if (raw === undefined) return undefined;
+  if (raw.length > MAX_LOGGED_FIELD_BYTES) {
+    return { _truncated: true, bytes: raw.length };
+  }
+  return sanitizeSensitiveFields(value);
+}
+
 function auditLogger(req, res, next) {
   const start = Date.now();
   const user = req.user || {};
@@ -20,8 +40,8 @@ function auditLogger(req, res, next) {
     peerId,
     ip: req.ip,
     // 機密情報はマスキング（query も token/apiKey 等が混入し得るためマスクする）
-    body: req.method !== 'GET' ? sanitizeSensitiveFields(req.body) : undefined,
-    query: sanitizeSensitiveFields(req.query),
+    body: req.method !== 'GET' ? capForLog(req.body) : undefined,
+    query: capForLog(req.query),
     status: null,
     durationMs: null,
     error: null
@@ -32,7 +52,7 @@ function auditLogger(req, res, next) {
     logEntry.status = res.statusCode;
     logEntry.durationMs = Date.now() - start;
     // レスポンスもマスキング
-    logEntry.response = sanitizeSensitiveFields(data);
+    logEntry.response = capForLog(data);
     writeAuditLog(logEntry);
     return originalJson.apply(this, arguments);
   };
@@ -48,9 +68,14 @@ function auditLogger(req, res, next) {
   next();
 }
 
+// mkdirSync は初回のみ（リクエスト毎に mkdir syscall を打つ必要はない）。
+let _logDirReady = false;
 function writeAuditLog(entry) {
   try {
-    fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
+    if (!_logDirReady) {
+      fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
+      _logDirReady = true;
+    }
     fs.appendFileSync(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
   } catch (e) {
     // ログ失敗時はサイレント

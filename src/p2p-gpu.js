@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('./db/json/atomicWrite');
 
-const GPUS_FILE = path.join(__dirname, 'gpus.json');
+// 実行時生成物は src/ 配下に置かない（非 root コンテナでは src/ が読み取り専用）。
+const GPUS_FILE = process.env.P2P_GPUS_FILE
+  || path.join(__dirname, '../data/p2p-gpus.json');
 
 function saveGpus(gpus) {
   atomicWriteJSON(GPUS_FILE, gpus);

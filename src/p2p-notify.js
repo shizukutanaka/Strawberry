@@ -5,7 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 
-const HEALTH_FILE = path.join(__dirname, 'health.json');
+// p2p-health.js と同じパスを参照する。実行時生成物のため src/ ではなく data/ 側。
+const HEALTH_FILE = process.env.P2P_HEALTH_FILE
+  || path.join(__dirname, '../data/health.json');
 // 死活監視アラートの記録先。改ざん検知ハッシュチェーンが管理する logs/audit.log とは
 // 分離する（混在させると verifyAuditLogIntegrity / audit-anchor が常に失敗する）。
 const LOG_PATH = process.env.MONITOR_LOG_PATH || path.join(__dirname, '../logs/monitor-audit.log');

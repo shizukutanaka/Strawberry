@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('./db/json/atomicWrite');
 
-const HEALTH_FILE = path.join(__dirname, 'health.json');
+// 実行時生成物は src/ 配下に置かない（非 root コンテナでは src/ が読み取り専用）。
+const HEALTH_FILE = process.env.P2P_HEALTH_FILE
+  || path.join(__dirname, '../data/health.json');
 
 function saveHealth(health) {
   atomicWriteJSON(HEALTH_FILE, health);

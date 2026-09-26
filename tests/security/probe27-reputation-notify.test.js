@@ -50,9 +50,11 @@ describe('POST /marketplace/rank: user-supplied opts are ignored', () => {
     // Must NOT pass user-supplied opts into the ranking/auction functions
     expect(src).not.toMatch(/rankCandidates\(providerIds,\s*opts/);
     expect(src).not.toMatch(/selectProvider\(bids,\s*opts/);
-    // Must use empty opts literal
+    // /rank still uses an empty opts literal. /auction accepts opts only through
+    // the key-whitelisted parser (finite numbers / bounded weights only) — raw
+    // user opts must still never reach the service layer.
     expect(src).toMatch(/rankCandidates\(providerIds,\s*\{\}/);
-    expect(src).toMatch(/selectProvider\(bids,\s*\{\}/);
+    expect(src).toMatch(/selectProvider\(bids,\s*parseAuctionOpts\(opts\)\)/);
   });
 
   it('returns 400 when providerIds is missing', async () => {

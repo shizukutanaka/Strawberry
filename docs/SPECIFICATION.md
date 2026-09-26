@@ -39,7 +39,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
 | POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |
 | POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
-| POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
+| POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション×カーボン、借り手 opts: reservePrice/minReputation/maxCarbonIntensity/weights） | JWT | ✅ |
 | `/api/v1/marketplace/escrow/*` (open/pay/verify/resolve) | エスクロー駆動 | JWT+admin | 🟡(LN実機未) |
 | `/api/profit-addresses` | 運営受取先 | JWT+admin | ✅ |
 | GET `/metrics` | Prometheus | none | ✅ |
@@ -54,7 +54,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … ✅ だが **真正性検証なし** ❌（カテゴリ3）
 2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は未配線**（`feature-pricer` 実装済・未配線）
-3. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
+3. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）＋**カーボン対応配置実装済**（§15。`location.carbonIntensity` 自己申告値、weights.carbon/maxCarbonIntensity/green フラグ。GPU 検索 `?green=true`/`?maxCarbonIntensity`/`?sort=carbon`）
 4. 決済: 直接二段送金 `btc-payment.sendBTC` … ❌ **エスクロー無し**（本書で実装）
 5. 稼働: `virtual-gpu-manager` でコンテナ割当 … 🟡（要 Docker/k8s 実機）
 6. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
@@ -68,7 +68,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - ステーク/スラッシング/レピュテーション: 🟡 `src/reputation/reputation-scorer.js`（算出）＋ `src/reputation/reputation-service.js`（イベント記録）＋ `src/db/json/ReputationRepository.js`（永続化）実装済。**ルート配線は未**。
 
 ### F4. 運用・可観測性
-- Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **外部アンカリング(Merkle root)**: 🟡 `src/security/merkle-anchor.js`(root/証明/検証/digest) ＋ `src/security/audit-anchor.js`（audit.log を読みアンカー生成・永続化・包含証明、audit-log 結線済）。**残るは OTS への root 実提出のみ** / **OTel トレース**: ❌ / **カーボン配置**: ❌
+- Prometheus `/metrics`: ✅ / 監査ログ HMAC: ✅ / **外部アンカリング(Merkle root)**: 🟡 `src/security/merkle-anchor.js`(root/証明/検証/digest) ＋ `src/security/audit-anchor.js`（audit.log を読みアンカー生成・永続化・包含証明、audit-log 結線済）。**残るは OTS への root 実提出のみ** / **OTel トレース**: ❌ / **カーボン配置**: ✅（オークション carbon スコア＋GPU 検索 green フィルタ/ソート、§15）
 
 ## 5. 非機能要件
 
@@ -109,7 +109,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 - `src/payments/escrow-service.js` ＋ `src/db/json/EscrowRepository.js` — エスクロー永続化/オーケストレーション（9テスト）
 - `src/payments/settlement-calculator.js` — 従量・SLA 連動の精算分割（payout/refund/fee、最低課金/SLA ペナルティ、整数 sats 保存則, 12テスト）
 - `src/marketplace/marketplace-service.js` — 全サービスを束ねるドメイン合成層（6テスト, 正常系/不正系/オークション統合）
-- `src/marketplace/auction-engine.js` — 逆オークション・マッチング（価格×レピュ×SLA×アテステーション、price-ratio 正規化、reserve/minReputation/requireAttestation フィルタ, 13テスト）
+- `src/marketplace/auction-engine.js` — 逆オークション・マッチング（価格×レピュ×SLA×アテステーション×カーボン、price-ratio 正規化、reserve/minReputation/requireAttestation/maxCarbonIntensity フィルタ、green フラグ, 19テスト）
 - `src/payments/action-executor.js` ＋ `src/payments/ln-adapter.js` — escrow actions→LN 操作の変換層＋MockLnAdapter（7テスト）
 - `src/security/merkle-anchor.js` — 監査ログ Merkle アンカリング（root/包含証明/検証/digest, 6テスト）
 - `src/security/audit-anchor.js` — audit.log → Merkle アンカー生成・永続化・包含証明（audit-log 結線、増分 fromIndex/toIndex, 12テスト）

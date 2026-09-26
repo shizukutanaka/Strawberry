@@ -73,7 +73,10 @@ const schemas = {
     region: Joi.string(),
     city: Joi.string(),
     latitude: Joi.number().min(-90).max(90),
-    longitude: Joi.number().min(-180).max(180)
+    longitude: Joi.number().min(-180).max(180),
+    // 系統カーボン強度 gCO2eq/kWh（任意）。実系統は ~10〜1200。検索/オークションの
+    // green 判定に使う自己申告値。過大・負値は拒否。
+    carbonIntensity: Joi.number().min(0).max(2000)
   }),
   performance: Joi.object({
     // 上限値: プロバイダが自己申告スコアを架空に水増しして検索順位を操作するのを防ぐ。
@@ -119,6 +122,15 @@ const schemas = {
       }).unknown(false).optional(),
       minRenterRating: Joi.number().min(1).max(5).optional(),
       rejectUnratedRenters: Joi.boolean().optional(),
+      // 所在地・カーボン強度の更新（register の location と同形・任意）
+      location: Joi.object({
+        country: Joi.string(),
+        region: Joi.string(),
+        city: Joi.string(),
+        latitude: Joi.number().min(-90).max(90),
+        longitude: Joi.number().min(-180).max(180),
+        carbonIntensity: Joi.number().min(0).max(2000)
+      }).optional(),
       available: Joi.boolean().optional()
     }),
 

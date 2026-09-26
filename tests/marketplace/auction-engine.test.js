@@ -134,4 +134,69 @@ describe('auction-engine', () => {
     expect(components.priceScore).toBe(1); // cheapest → full price score
     expect(score).toBeGreaterThan(0);
   });
+
+  describe('carbon-aware placement (§15)', () => {
+    const carbonBids = [
+      { providerId: 'dirty-cheap', pricePerHour: 100, reputationScore: 0.8, carbonIntensity: 800 },
+      { providerId: 'green-pricier', pricePerHour: 130, reputationScore: 0.8, carbonIntensity: 30 },
+      { providerId: 'undisclosed', pricePerHour: 90, reputationScore: 0.8 },
+    ];
+
+    it('is opt-in: identical outcome when carbon weight is absent', () => {
+      const a = runAuction(carbonBids);
+      const b = runAuction(carbonBids, { weights: { price: 1, reputation: 1, sla: 1, attestation: 1 } });
+      expect(a.winner.providerId).toBe(b.winner.providerId);
+      // carbon 重み未指定（0）なら carbonScore は勝敗に影響しない
+      expect(a.ranked[0].components.carbonScore).toBeDefined();
+    });
+
+    it('carbon weight shifts the winner toward the low-carbon bid', () => {
+      const { winner } = runAuction(carbonBids, {
+        weights: { price: 0, reputation: 0, sla: 0, attestation: 0, carbon: 1 },
+      });
+      expect(winner.providerId).toBe('green-pricier');
+    });
+
+    it('maxCarbonIntensity rejects dirty and undisclosed bids', () => {
+      const { ranked, rejected } = runAuction(carbonBids, { maxCarbonIntensity: 200 });
+      expect(ranked.map((r) => r.providerId)).toEqual(['green-pricier']);
+      expect(rejected.find((r) => r.providerId === 'dirty-cheap').reasons).toContain('over max carbon intensity');
+      // 未開示は unknown 仮定値（480）で評価 → 上限 200 を超えて除外（開示インセンティブ）
+      expect(rejected.find((r) => r.providerId === 'undisclosed').reasons).toContain('over max carbon intensity');
+    });
+
+    it('marks green rows only for disclosed bids at or below the threshold', () => {
+      const { ranked } = runAuction(carbonBids);
+      const byId = Object.fromEntries(ranked.map((r) => [r.providerId, r]));
+      expect(byId['green-pricier'].green).toBe(true);
+      expect(byId['green-pricier'].carbonIntensity).toBe(30);
+      expect(byId['dirty-cheap'].green).toBe(false);
+      expect(byId['undisclosed'].green).toBe(false);
+      expect(byId['undisclosed'].carbonIntensity).toBeNull();
+    });
+
+    it('undisclosed bids lose to an equally-priced disclosed low-carbon bid', () => {
+      const pair = [
+        { providerId: 'green', pricePerHour: 100, reputationScore: 0.5, carbonIntensity: 50 },
+        { providerId: 'opaque', pricePerHour: 100, reputationScore: 0.5 },
+      ];
+      const { winner } = runAuction(pair, {
+        weights: { price: 0.5, reputation: 0, sla: 0, attestation: 0, carbon: 0.5 },
+      });
+      expect(winner.providerId).toBe('green');
+    });
+
+    it('zero-carbon bids are honored (minCarbon=0 edge case)', () => {
+      const zero = [
+        { providerId: 'renewable', pricePerHour: 100, reputationScore: 0.5, carbonIntensity: 0 },
+        { providerId: 'gas', pricePerHour: 100, reputationScore: 0.5, carbonIntensity: 400 },
+      ];
+      const { winner, ranked } = runAuction(zero, {
+        weights: { price: 0, reputation: 0, sla: 0, attestation: 0, carbon: 1 },
+      });
+      expect(winner.providerId).toBe('renewable');
+      expect(ranked.find((r) => r.providerId === 'renewable').components.carbonScore).toBe(1);
+      expect(ranked.find((r) => r.providerId === 'gas').components.carbonScore).toBe(0);
+    });
+  });
 });

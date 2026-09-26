@@ -23,6 +23,14 @@ const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
 // 価格ウォッチ（値下げアラート）
 const WatchRepository = require('../../../db/json/WatchRepository');
+// カーボン対応配置（§15）— green 判定閾値はオークションエンジンと共通
+const { DEFAULT_GREEN_THRESHOLD } = require('../../../marketplace/auction-engine');
+
+// GPU レコードの開示カーボン強度（gCO2eq/kWh）。未開示/不正値は Infinity（末尾側）
+function carbonOf(gpu) {
+  const c = gpu.location && gpu.location.carbonIntensity;
+  return Number.isFinite(c) && c >= 0 ? c : Infinity;
+}
 const { notifyPriceWatchers, notifyWatchJustCreated } = require('../../../services/price-watch');
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
@@ -99,7 +107,18 @@ router.get('/', asyncHandler(async (req, res) => {
       return res.status(400).json({ error: 'maxPrice must be a positive number' });
     }
   }
+  // maxCarbonIntensity: 0 以上の有限数（gCO2eq/kWh 上限）。0 は「実質ゼロ排出のみ」を
+  // 意味し有効な指定なので >0 チェックはしない。負値はあり得ないので拒否。
+  let _maxCarbon = null;
+  if (req.query.maxCarbonIntensity !== undefined) {
+    _maxCarbon = parseFloat(req.query.maxCarbonIntensity);
+    if (!Number.isFinite(_maxCarbon) || _maxCarbon < 0) {
+      return res.status(400).json({ error: 'maxCarbonIntensity must be a non-negative number' });
+    }
+  }
   const filters = {
+    green: req.query.green === 'true',
+    maxCarbonIntensity: _maxCarbon,
     minMemoryGB: _minMemGB,
     vendor: req.query.vendor ? String(req.query.vendor).slice(0, 64) : null,
     maxPrice: _maxPrice,
@@ -144,6 +163,16 @@ router.get('/', asyncHandler(async (req, res) => {
   if (filters.country) {
     gpus = gpus.filter(gpu => gpu.location && gpu.location.country &&
       gpu.location.country.toUpperCase() === filters.country);
+  }
+  // カーボン強度フィルタ（§15）。未開示（location.carbonIntensity 無し）は除外 —
+  // 開示しなければ制約を回避できる抜け道を塞ぐ。
+  if (filters.maxCarbonIntensity !== null) {
+    gpus = gpus.filter(gpu => gpu.location && Number.isFinite(gpu.location.carbonIntensity) &&
+      gpu.location.carbonIntensity >= 0 && gpu.location.carbonIntensity <= filters.maxCarbonIntensity);
+  }
+  if (filters.green) {
+    gpus = gpus.filter(gpu => gpu.location && Number.isFinite(gpu.location.carbonIntensity) &&
+      gpu.location.carbonIntensity >= 0 && gpu.location.carbonIntensity <= DEFAULT_GREEN_THRESHOLD);
   }
   if (filters.apiType) {
     const api = filters.apiType.toUpperCase();
@@ -227,7 +256,10 @@ router.get('/', asyncHandler(async (req, res) => {
     if (!_relCache.has(pid)) _relCache.set(pid, providerUptime.getReliability(pid));
     return _relCache.get(pid);
   };
-  if (sort === 'rating') {
+  if (sort === 'carbon') {
+    // カーボン強度の低い順（§15 green 配置）。未開示は末尾。常に昇順。
+    gpus.sort((a, b) => carbonOf(a) - carbonOf(b));
+  } else if (sort === 'rating') {
     gpus.sort((a, b) => {
       const ra = reviewMap.get(a.id);
       const rb = reviewMap.get(b.id);
@@ -287,6 +319,9 @@ router.get('/', asyncHandler(async (req, res) => {
           : { average: null, count: 0 },
         // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
         reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
+        // 低炭素系統で開示済みなら green フラグ（§15）。閾値はオークションエンジンと共通。
+        green: !!(gpu.location && Number.isFinite(gpu.location.carbonIntensity) &&
+          gpu.location.carbonIntensity >= 0 && gpu.location.carbonIntensity <= DEFAULT_GREEN_THRESHOLD),
       };
     }),
     timestamp: new Date().toISOString()
@@ -763,7 +798,7 @@ router.put('/:id',
     // 旧 allowlist に含まれておらずサニタイズで無言に剥落し、機能が完全に
     // 死んでいた（gpu.rejectUnratedRenters は常に undefined → 注文時チェックが
     // 素通り）。allowlist に追加して機能を正常化する。
-    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available', 'rejectUnratedRenters']);
+    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available', 'rejectUnratedRenters', 'location']);
     // available は boolean のみ許可（任意の型汚染を防ぐ）
     if ('available' in sanitized && typeof sanitized.available !== 'boolean') {
       return res.status(400).json({ error: '"available" must be a boolean' });

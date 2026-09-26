@@ -56,9 +56,30 @@ router.post('/rank', (req, res) => {
 
 // 逆オークションでプロバイダを選定（Akash/Golem 型マッチング）
 // bid に reputationScore が無ければ reputationService から自動補完される
-// opts は /rank と同様に呼び出し元から受け付けない。
+// opts は借り手自身のマッチング制約/嗜好のみ受け付ける（他者のレピュテーションや
+// 第三者に影響し得るパラメータは渡さない）。
+const AUCTION_OPT_NUMBERS = ['reservePrice', 'minReputation', 'maxCarbonIntensity', 'greenThreshold', 'unknownCarbonIntensity'];
+const AUCTION_WEIGHT_KEYS = ['price', 'reputation', 'sla', 'attestation', 'carbon'];
+function parseAuctionOpts(opts) {
+  const out = {};
+  if (!opts || typeof opts !== 'object' || Array.isArray(opts)) return out;
+  for (const k of AUCTION_OPT_NUMBERS) {
+    if (Number.isFinite(opts[k])) out[k] = opts[k];
+  }
+  if (opts.requireAttestation === true) out.requireAttestation = true;
+  if (opts.weights && typeof opts.weights === 'object' && !Array.isArray(opts.weights)) {
+    const w = {};
+    for (const k of AUCTION_WEIGHT_KEYS) {
+      const v = Number(opts.weights[k]);
+      if (Number.isFinite(v) && v >= 0 && v <= 1) w[k] = v;
+    }
+    if (Object.keys(w).length > 0) out.weights = w;
+  }
+  return out;
+}
+
 router.post('/auction', (req, res) => {
-  const { bids } = req.body || {};
+  const { bids, opts } = req.body || {};
   if (!Array.isArray(bids)) {
     return res.status(400).json({ error: 'bids array is required' });
   }
@@ -66,7 +87,7 @@ router.post('/auction', (req, res) => {
     return res.status(400).json({ error: `bids may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
-    return res.json(marketplace.selectProvider(bids, {}));
+    return res.json(marketplace.selectProvider(bids, parseAuctionOpts(opts)));
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });
   }

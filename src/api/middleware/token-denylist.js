@@ -11,12 +11,32 @@ const DENYLIST_PATH = path.resolve(__dirname, '../../../data/revoked-tokens.json
 
 // jti -> expiryMs（エポックミリ秒）
 let denylist = null;
+// 最後に読み込んだファイルの指紋 `${mtimeMs}:${size}`。
+// denylist は初回ロード後プロセス内に固定されていたため、別プロセス
+// （CLI・別ワーカー）が revoked-tokens.json に追記してもこのプロセスの
+// isRevoked は古いマップを見続け、失効トークンを受理し続けた。
+// stat ゲートで「ファイルが変わった時だけ再読込」にし、クロスプロセスの
+// 失効を次回検証から拾えるようにする。書き込みは atomicWriteJSON（rename）
+// のため mtime で確実に検知できる。
+let denylistStamp = null;
+
+function _fileStamp() {
+  try {
+    const s = fs.statSync(DENYLIST_PATH);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null; // ファイル不在/stat 失敗
+  }
+}
 
 function load() {
-  if (denylist) return denylist;
+  const stamp = _fileStamp();
+  // stat できない（ファイル未作成）場合でも、既にロード済みのマップを維持する
+  // — 不在を「全失効無し」と読み替えると revoke→isRevoked の即時整合が壊れる。
+  if (denylist && (stamp === null || stamp === denylistStamp)) return denylist;
   denylist = new Map();
   try {
-    if (fs.existsSync(DENYLIST_PATH)) {
+    if (stamp !== null) {
       const raw = JSON.parse(fs.readFileSync(DENYLIST_PATH, 'utf-8'));
       for (const [jti, expiryMs] of Object.entries(raw)) {
         if (typeof expiryMs === 'number') denylist.set(jti, expiryMs);
@@ -29,6 +49,9 @@ function load() {
     console.error(`[token-denylist] WARN: Failed to load revoked-tokens.json (all prior revocations may be temporarily invalid): ${err.message}`);
     try { require('../../utils/audit-log').appendAuditLog('denylist_load_failure', { error: err.message }); } catch (_) {}
   }
+  // 破損時も指紋は記録する — 同じ壊れたファイルの再パースを繰り返さないため。
+  // 修復（ファイル置換）すれば指紋が変わり次回ロードで再試行される。
+  denylistStamp = stamp;
   return denylist;
 }
 

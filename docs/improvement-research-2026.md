@@ -425,3 +425,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。

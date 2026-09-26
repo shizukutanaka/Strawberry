@@ -427,6 +427,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
 ### その他実装済（依存脆弱性対応）
 
-- `npm audit` 49件（critical 6・high 19）→ 3件まで削減。axios ^1.20.0（prototype pollution 3件）・joi ^17.13.8・morgan ^1.12.0（log forging）・nodemailer ^10.0.10（SMTP injection 等）・uuid ^11.1.1・bcrypt ^6.0.0（@mapbox/node-pre-gyp→tar 連鎖解消）・@kubernetes/client-node ^2.0.0（request+jsonpath-plus RCE critical 解消）。imagemin 系3件は optionalDependencies から除外（scripts/optimize-images.js 専用・実行時不要、使う場合は `npm i --no-save`）。transitive の qs は overrides で ^6.16.0 に固定。
-- 残存3件: apollo-server-express v3 は upstream EOL で XS-Search（moderate・読み取り専用 CSRF）に修正版なし → @apollo/server v4+ への移行が必要（別途検討）。aws-sdk v2（low）は cloud-storage.js 経由のみで使用（別 PR で同ファイル削除対象のため、削除後に aws-sdk も除去可能）。
+- `npm audit` 49件（critical 6・high 19）→ 2件まで削減。axios ^1.20.0（prototype pollution 3件）・joi ^17.13.8・morgan ^1.12.0（log forging）・nodemailer ^10.0.10（SMTP injection 等）・uuid ^11.1.1・bcrypt ^6.0.0（@mapbox/node-pre-gyp→tar 連鎖解消）・@kubernetes/client-node ^2.0.0（request+jsonpath-plus RCE critical 解消）。imagemin 系3件は optionalDependencies から除外（scripts/optimize-images.js 専用・実行時不要、使う場合は `npm i --no-save`）。transitive の qs は overrides で ^6.16.0 に固定。
+- aws-sdk v2 + cloud-storage.js も削除済み（参照ゼロ・未導入依存で require 不可だった唯一の利用者）。残存2件は apollo-server 系のみ — upstream EOL のため @apollo/server v5 への移行で対応（別 PR）。
 

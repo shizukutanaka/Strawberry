@@ -182,7 +182,8 @@ async function setupGraphQL(app) {
         if (payload.jti && isRevoked(payload.jti)) return { user: null };
         // passwordChangedAt check (same as REST middleware): reject tokens issued at or
         // before the password change so that GraphQL is covered by session invalidation.
-        const tokenUser = UserRepository.getById(payload.id);
+        const { getAuthUser } = require('./utils/auth-user-lookup');
+        const tokenUser = getAuthUser(payload.id);
         if (!tokenUser || tokenUser.status === 'deactivated') return { user: null };
         const { isSessionInvalidated } = require('./utils/session-invalidation');
         if (isSessionInvalidated(tokenUser, payload.iat)) {

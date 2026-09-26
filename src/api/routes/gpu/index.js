@@ -539,6 +539,26 @@ router.post('/',
       gpuInfo.attestation = { passed: false, score: 0, findings: ['no attestation report provided'], verifiedAt: null };
     }
 
+    // §2: 署名付きベンチマーク実測と申告スペックの乖離スコア（スペック詐称対策）。
+    // attestation 層とは独立に、実測値の方向性乖離で兆候を掴む（過申告=詐称方向を重罰）。
+    const benchmarkReport = (req.validatedBody || {}).benchmarkReport;
+    if (benchmarkReport) {
+      try {
+        const { scoreSpecConsistency } = require('../../../security/spec-consistency');
+        const spec = scoreSpecConsistency(gpuInfo, benchmarkReport);
+        if (spec) {
+          gpuInfo.specConsistency = { ...spec, scoredAt: new Date().toISOString() };
+          // suspicious はアテステーション失敗相当として reputation へ記録
+          if (spec.label === 'suspicious') {
+            try { createReputationService().recordAttestation(req.user.id, false); } catch (_) {}
+            logger.warn(`[GPU登録] スペック乖離 suspicious: providerId=${req.user.id} score=${spec.score} findings=${spec.findings.join('; ')}`);
+          }
+        }
+      } catch (e) {
+        logger.warn(`[GPU登録] spec consistency scoring failed: ${e.message}`);
+      }
+    }
+
     // P2Pネットワークへアナウンス
     if (p2pNetwork && typeof p2pNetwork.announceGPU === 'function') {
       try { await p2pNetwork.announceGPU(gpuInfo); } catch (_) { /* P2P は optional */ }

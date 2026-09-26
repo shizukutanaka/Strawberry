@@ -48,6 +48,10 @@
 
 **推奨アクション**:
 1. (短期) 出品登録時に署名付きベンチマーク（`src/utils/ai-benchmark.js` 基盤あり）を要求し、申告スペックとの乖離をスコア化。
+   → **実装済（部分）**: `benchmarkReport` 任意フィールド追加（validator 限定）。`spec-consistency.js` が
+   申告値と実測値の乖離を方向付き重みでスコア化（過申告=詐称方向を重罰、控えめ申告は軽罰）、
+   `consistent/divergent/suspicious` ラベルを GPU へ記録、suspicious は reputation へ attestation fail 記録。
+   ※ 「要求」化（必須化）は未対応 — 任意フィールド。残: リモートアテステーション必須化・peerID 紐付け。
 2. (中期) 対応 GPU では **リモート・アテステーション・レポート**を出品の必須証跡にし、GPU 真正性を検証してからマッチング。
 3. P2P 層の Ed25519 peerID（README 記載）と GPU アテステーションを紐づけ、ハード単位の身元を確立。
 

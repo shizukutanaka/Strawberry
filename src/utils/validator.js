@@ -105,6 +105,18 @@ const schemas = {
       utilizationPct: Joi.number().min(0).max(100).optional(),
     }).unknown(false).optional(),
   }).unknown(false).optional(),
+  // 署名付きベンチマーク実測レポート（任意, §2 アクション1）。申告スペックとの
+  // 乖離を specConsistency として記録する。measured が自己申告と大きく逸脱する
+  // 出品はスペック詐称の兆候。
+  benchmarkReport: Joi.object({
+    model: Joi.string().max(128).optional(),
+    memoryGB: Joi.number().min(0).max(8192).optional(),
+    teraflops: Joi.number().min(0).max(100000).optional(),
+    benchmarkScore: Joi.number().min(0).max(10000000).optional(),
+    clockMHz: Joi.number().min(0).max(20000).optional(),
+    timestamp: Joi.string().isoDate().optional(),
+    signature: Joi.string().max(2048).optional(),
+  }).unknown(false).optional(),
 }),
 
     // GPU更新用スキーマ（全フィールドオプション — 部分更新）

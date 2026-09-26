@@ -425,6 +425,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- 通知設定の読み込み N+1 解消（perf）: `user-notify.js` の `notifyUser` が通知送信のたびに notification-settings.json を全量読み込み+パースしていた（price-watch のウォッチャー通知等で件数ぶんの I/O）。auth-user-lookup と同じ stat(mtimeMs,size) ゲートで「ファイル変更時のみ再パース」に変更。設定保存は atomicWriteJSON（rename）のため mtime で確実に検知。
+||||||| 5c3f4ed
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。

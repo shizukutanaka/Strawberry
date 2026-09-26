@@ -50,3 +50,26 @@ describe('user-notify resolveChannels', () => {
     expect(notifyUser(undefined, 'order_created', 'msg')).toBe(0);
   });
 });
+
+// loadAllSettings の stat ゲートキャッシュ: 通知ごとに全量パースしない
+describe('notifyUser settings cache', () => {
+  const fs = require('fs');
+  const { _resetSettingsCache } = require('../../src/utils/user-notify');
+  beforeEach(() => _resetSettingsCache());
+  afterEach(() => _resetSettingsCache());
+
+  it('repeated notifyUser calls parse the settings file at most once per change', () => {
+    const realRead = fs.readFileSync;
+    const spy = jest.spyOn(fs, 'readFileSync');
+    try {
+      notifyUser('u1', 'order_created', 'm');
+      notifyUser('u2', 'order_created', 'm');
+      notifyUser('u3', 'order_created', 'm');
+      const settingsReads = spy.mock.calls.filter(c => String(c[0]).includes('notification-settings.json'));
+      // ファイルが存在する場合は1回のみパース、存在しなければ 0 回
+      expect(settingsReads.length).toBeLessThanOrEqual(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

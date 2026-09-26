@@ -36,66 +36,13 @@ const NotifyType = {
 
 // メイン通知送信関数（type, message, options）
 const { sendEmailNotification } = require('./email');
-const fs = require('fs');
-const path = require('path');
 
+// ユーザー個別の多段通知は src/utils/user-notify.js の notifyUser が担う。
+// （旧実装は 'user_*' プレフィックス判定でこの関数内に多段経路を持っていたが、
+// 実際のユーザーIDは UUID v4 で 'user_' 始まりにならないため到達不能だった。
+// 通知設定の読み込み・チャネル解決・イベント別 webhook 選択は user-notify.js 側が
+// resolveChannels で行い、ここはチャネル種別への直送のみを担当する。）
 async function sendNotification(typeOrUserId, message, options = {}) {
-  // typeOrUserIdがユーザーIDの場合、多段通知
-  if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
-    // 設定ファイルから通知設定を取得
-    const userId = typeOrUserId;
-    const settingsPath = path.resolve(__dirname, '../../data/notification-settings.json');
-    let settings = {};
-    try {
-      if (fs.existsSync(settingsPath)) {
-        settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))[userId] || {};
-      }
-    } catch {}
-    const enabled = settings.enabled || {};
-    const tasks = [];
-    if (enabled.line && settings.lineToken) {
-      tasks.push(sendNotification(NotifyType.LINE, message, { token: settings.lineToken }));
-    }
-    if (enabled.discord && settings.discordWebhook) {
-      tasks.push(sendNotification(NotifyType.DISCORD, message, { webhookUrl: settings.discordWebhook }));
-    }
-    if (enabled.slack && settings.slackWebhook) {
-      tasks.push(sendNotification(NotifyType.SLACK, message, { webhookUrl: settings.slackWebhook }));
-    }
-    if (enabled.telegram && settings.telegramBotToken && settings.telegramChatId) {
-      tasks.push(sendNotification(NotifyType.TELEGRAM, message, { botToken: settings.telegramBotToken, chatId: settings.telegramChatId }));
-    }
-    if (enabled.email && settings.email) {
-      tasks.push(sendNotification(NotifyType.EMAIL, message, { to: settings.email }));
-    }
-    if (enabled.webhook && settings.genericWebhook) {
-      tasks.push(sendNotification(NotifyType.WEBHOOK, message, { webhookUrl: settings.genericWebhook }));
-    }
-    // 柔軟Webhook拡張: webhooks配列
-    if (Array.isArray(settings.webhooks)) {
-      const event = options.event || null;
-      for (const wh of settings.webhooks) {
-        if (wh.enabled !== false && (!event || wh.event === event) && wh.url) {
-          // payloadテンプレートがあれば適用、なければデフォルト
-          let payload = { message };
-          if (wh.payloadTemplate) {
-            try {
-              // テンプレートは ${message} 置換のみサポート。
-              // JSON.stringify でエスケープして注入攻撃・不正 JSON を防ぐ。
-              const safeMsg = JSON.stringify(String(message)).slice(1, -1);
-              payload = JSON.parse(wh.payloadTemplate.replace(/\$\{message\}/g, safeMsg));
-            } catch (e) {
-              logger.warn(`Webhook payloadTemplate parse failed (url=${wh.url}): ${e.message}`);
-              payload = { message };
-            }
-          }
-          tasks.push(sendNotification(NotifyType.WEBHOOK, message, { webhookUrl: wh.url, payload }));
-        }
-      }
-    }
-    return Promise.all(tasks);
-  }
-  // 既存のtype/message/options送信
   try {
     switch (typeOrUserId) {
       case NotifyType.LINE:

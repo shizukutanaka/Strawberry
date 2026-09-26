@@ -172,8 +172,16 @@ router.get('/', asyncHandler(async (req, res) => {
       return slotStart <= nowMs && slotEnd > nowMs;
     }).map(o => o.gpuId)
   );
+  // 出品鮮度: プロバイダ断線後も出品が残り続けると借り手が死んだ GPU に注文して
+  // 失敗する。最終生存アンカー（lastProviderHeartbeat → updatedAt/createdAt）が
+  // GPU_HEARTBEAT_TTL_MS を超えた GPU は stale として available=false 扱い。
+  const GPU_HB_TTL_MS = Number(process.env.GPU_HEARTBEAT_TTL_MS) || 10 * 60 * 1000;
+  const isStale = (g) => {
+    const anchor = Date.parse(g.lastProviderHeartbeat || g.updatedAt || g.createdAt || 0);
+    return !Number.isFinite(anchor) || nowMs - anchor > GPU_HB_TTL_MS;
+  };
   // available: プロバイダが手動で false に設定している場合はそれを優先し、
-  // そうでなければ現在時刻に手動ブロック or 重複注文がない場合は true とする。
+  // そうでなければ現在時刻に手動ブロック or 重複注文がなく、かつ鮮度が有効なら true。
   gpus = gpus.map(gpu => {
     if (gpu.available === false) return { ...gpu, available: false };
     const manuallyBlocked = Array.isArray(gpu.manualBlocks) && gpu.manualBlocks.some(b => {
@@ -181,7 +189,8 @@ router.get('/', asyncHandler(async (req, res) => {
       const be = new Date(b.to).getTime();
       return bs <= nowMs && be > nowMs;
     });
-    return { ...gpu, available: !manuallyBlocked && !occupiedGpuIds.has(gpu.id) };
+    const stale = isStale(gpu);
+    return { ...gpu, available: !stale && !manuallyBlocked && !occupiedGpuIds.has(gpu.id), stale };
   });
   // ?available=true で空き GPU のみに絞り込み
   if (req.query.available === 'true') {
@@ -277,7 +286,8 @@ router.get('/', asyncHandler(async (req, res) => {
     limit,
     offset,
     summary: { totalRegistered, totalAvailable, totalOccupied },
-    gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, ...gpu }) => {
+    // lastProviderHeartbeat は公開面から剥がす（プロバイダ活動時刻の漏洩防止）。
+    gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, lastProviderHeartbeat: _lh, ...gpu }) => {
       const r = reviewMap.get(gpu.id);
       const rel = relFor(_pid);
       return {
@@ -292,6 +302,24 @@ router.get('/', asyncHandler(async (req, res) => {
     timestamp: new Date().toISOString()
   };
   res.json(response);
+}));
+
+// プロバイダ生存確認 heartbeat: 自身の全出品の lastProviderHeartbeat を更新する。
+// 一覧側で TTL 超過の出品を stale→available=false 扱いするため、プロバイダ側デーモンは
+// 定期的（TTL の半分以下間隔推奨）に呼ぶ。ボディ不要。
+router.post('/heartbeat', authenticateJWT, checkRole(['provider', 'admin']), asyncHandler(async (req, res) => {
+  const providerId = req.user.id;
+  const nowIso = new Date().toISOString();
+  let updated = 0;
+  await withLock(`gpu-hb:${providerId}`, async () => {
+    for (const g of GpuRepository.getAll()) {
+      if (g.providerId === providerId) {
+        GpuRepository.update(g.id, { lastProviderHeartbeat: nowIso });
+        updated++;
+      }
+    }
+  });
+  res.json({ updated, at: nowIso });
 }));
 
 // プロバイダ自身のGPU一覧（認証必須 — ページネーションと available フラグを含む）

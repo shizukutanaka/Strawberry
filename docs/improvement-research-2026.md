@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（デッドコード整理③）
+
+- `src/utils/gpu-price-compare.js`（Azure 取得は TODO 未実装・参照ゼロ）、`src/api/sandbox-apikey.js`（どこにもマウントされない dev 用 API ルーター）、`src/core/market-pricing-engine.js`（581行の価格決定エンジン、機能は feature-pricer + auction-engine が担う）を削除。cron 設計の `security-audit.js` / `payment-reminder.js` は温存。
+

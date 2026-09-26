@@ -2,10 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { resolveDataDir } = require('../db/json/data-dir');
 const { logger } = require('./logger');
 const { resilientNotify } = require('./resilient-notify');
 
-const SLA_PATH = path.join(__dirname, '../../data/sla.json');
+const SLA_PATH = path.join(resolveDataDir(), 'sla.json');
 const CHECK_INTERVAL = 60 * 1000; // 1分
 
 function loadSLA() {

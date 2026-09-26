@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- Jest ワーカー別データ分離でテスト並列化: `src/db/json/data-dir.js` の `resolveDataDir()` を新設し data/ 解決を一元化（Jest ワーカー内では `data-test/worker-N` を返却）。jest.config にあった「正しい長期修正は JEST_WORKER_ID によるワーカー別データ分離」という既知課題を解消し、`maxWorkers: 1` → `'50%'` で全スイートが約 86s → 約 30s（ローカル実測）に短縮。`STRAWBERRY_DATA_DIR` env によるデータ dir 上書きも同時に提供（運用面の副次効果）。globalSetup の単一プロセス制約に対応するため、ワーカー別シードは `setupFiles` (tests/setupWorkerData.js) で実施。

@@ -7,9 +7,10 @@ const { uploadToS3, uploadToGoogleDrive, uploadToDropbox } = require('./cloud-st
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
 const { appendAuditLog } = require('./audit-log');
+const { resolveDataDir } = require('../db/json/data-dir');
 
 // バックアップ対象ファイルリスト（実データは data/ に格納）
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = resolveDataDir();
 // ローカルバックアップは data/ と同じディレクトリに置かず専用フォルダに隔離する。
 // data/ に .bak-* ファイルが混在すると、他エンドポイントの path-traversal やディレクトリ
 // リスティングで平文の取引データ・資格情報が読み取られるリスクがある。

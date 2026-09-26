@@ -114,6 +114,8 @@
 2. (短期) 完了ジョブ・検証結果・SLA（`src/utils/sla-tracker.js`, `src/api/sla.js` 基盤あり）から**レピュテーション・スコア**を算出しマッチングの重み付けに使用。
 3. (中期) 紛争解決フロー（証跡＝§1 監査ログ＋アテステーション）を「製品」として明文化。
 
+**実装済（2026-09）**: アクション1・2 — `slash(providerId, count, penaltySats)` が担保ステークを実際に没収（`PROVIDER_SLASH_PENALTY_SATS` 既定、没収累計 `slashedSats` を記録）。verification `failed` verdict → 自動 slash（これまでは auditFail 記録のみで経済的抑止が無かった）。係争 refund 敗訴・アテステーション失敗の slash も没収対象に自動拡張。ステーク台帳 API `POST/GET /marketplace/stake`（自己デポジット、没収累計・出品可否を返す）。出品ゲート `MIN_PROVIDER_STAKE_SATS`（既定0=off、admin 免除）。実担保の LN ロック化（§3 hold-invoice 連携）と撤回制限は残件。
+
 優先度: **中〜高**
 
 ---

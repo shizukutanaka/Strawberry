@@ -46,9 +46,23 @@ function createReputationService({ repository } = {}) {
     recordAudit: (providerId, pass) =>
       mutate(providerId, (s) => (pass ? { auditPasses: s.auditPasses + 1 } : { auditFails: s.auditFails + 1 })),
 
-    /** スラッシング（検証不一致/SLA違反/紛争 refund 時）。 */
-    slash: (providerId, count = 1) =>
-      mutate(providerId, (s) => ({ slashCount: s.slashCount + Math.max(0, count) })),
+    /**
+     * スラッシング（検証不一致/SLA違反/紛争 refund 時）。
+     * slashCount を加算し、penaltySats 分の担保ステークを没収する
+     * （省略時は環境変数 PROVIDER_SLASH_PENALTY_SATS、既定0=評判のみ）。
+     * §5: ステークが無い時代は slash が記号だったが、担保没収で経済的ペナルティを持つ。
+     */
+    slash: (providerId, count = 1, penaltySats) => {
+      const envPenalty = parseFloat(process.env.PROVIDER_SLASH_PENALTY_SATS || '0');
+      const penalty = typeof penaltySats === 'number' && Number.isFinite(penaltySats)
+        ? Math.max(0, penaltySats)
+        : (Number.isFinite(envPenalty) && envPenalty > 0 ? envPenalty : 0);
+      return mutate(providerId, (s) => ({
+        slashCount: s.slashCount + Math.max(0, count),
+        stake: Math.max(0, s.stake - penalty),
+        slashedSats: (s.slashedSats || 0) + penalty,
+      }));
+    },
 
     /** 担保ステークの増減/設定。 */
     addStake: (providerId, amount) =>

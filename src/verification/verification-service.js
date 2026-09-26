@@ -97,6 +97,10 @@ function createVerificationService({
 
       if (reputationService && rec.providerId && (verdict === 'verified' || verdict === 'failed')) {
         reputationService.recordAudit(rec.providerId, verdict === 'verified');
+        // §5: 検証不一致はスラッシング対象（監査失敗の記録だけでは経済的抑止にならない）。
+        if (verdict === 'failed' && typeof reputationService.slash === 'function') {
+          try { reputationService.slash(rec.providerId); } catch (_) {}
+        }
       }
 
       return {

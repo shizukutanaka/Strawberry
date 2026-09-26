@@ -493,6 +493,25 @@ router.post('/',
       }
     }
 
+    // §5: 担保ステーク要件（opt-in）。MIN_PROVIDER_STAKE_SATS>0 のとき、
+    // ステーク不足のプロバイダは出品不可 — Sybil/申告詐称の再登録コストを担保する。
+    // admin は除外（運用登録）。既定0で既存挙動は不変。
+    const minStake = parseFloat(process.env.MIN_PROVIDER_STAKE_SATS || '0');
+    if (req.user.role !== 'admin' && Number.isFinite(minStake) && minStake > 0) {
+      try {
+        const repStats = createReputationService().getStats(req.user.id);
+        if ((repStats.stake || 0) < minStake) {
+          return res.status(403).json({
+            error: `insufficient provider stake: ${repStats.stake || 0} < ${minStake} sats required`,
+            stakeRequired: minStake,
+            stake: repStats.stake || 0,
+          });
+        }
+      } catch (e) {
+        logger.warn(`[GPU登録] stake check failed for ${req.user.id}: ${e.message}`);
+      }
+    }
+
     // 重複登録チェック（model, vendor, providerId, memoryGB）
     const duplicate = allGpus.find(g =>
       g.name === gpuInfo.name &&

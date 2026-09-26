@@ -7,6 +7,10 @@ const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 const { withLock } = require('../../utils/async-lock');
+const { createReputationService } = require('../../reputation/reputation-service');
+const { appendAuditLog } = require('../../utils/audit-log');
+
+const reputationService = createReputationService();
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -69,6 +73,45 @@ router.post('/auction', (req, res) => {
     return res.json(marketplace.selectProvider(bids, {}));
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });
+  }
+});
+
+// --- プロバイダ担保ステーク（§5 Sybil 耐性）---
+// POST /marketplace/stake { amountSats } — プロバイダ自身が担保を積む（台帳記録;
+// 実担保の LN ロックは hold-invoice 化の長期項目）。不正・検証不一致・係争敗訴で
+// reputation の slash が stake を没収するため、Sybil の再登録コストになる。
+router.post('/stake', (req, res) => {
+  const { amountSats } = req.body || {};
+  if (typeof amountSats !== 'number' || !Number.isFinite(amountSats) || amountSats <= 0) {
+    return res.status(400).json({ error: 'amountSats must be a positive number' });
+  }
+  if (amountSats > 1e12) {
+    return res.status(400).json({ error: 'amountSats exceeds maximum' });
+  }
+  try {
+    const rec = reputationService.addStake(req.user.id, amountSats);
+    appendAuditLog('provider_stake_deposited', { providerId: req.user.id, amountSats, stake: rec.stats.stake });
+    return res.status(201).json({ providerId: req.user.id, stake: rec.stats.stake, added: amountSats });
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
+  }
+});
+
+// GET /marketplace/stake — 自分のステーク残高・没収累計・出品必要量
+router.get('/stake', (req, res) => {
+  try {
+    const stats = reputationService.getStats(req.user.id);
+    const minStake = parseFloat(process.env.MIN_PROVIDER_STAKE_SATS || '0');
+    return res.json({
+      providerId: req.user.id,
+      stake: stats.stake,
+      slashedSats: stats.slashedSats || 0,
+      slashCount: stats.slashCount,
+      requiredForListing: Number.isFinite(minStake) && minStake > 0 ? minStake : 0,
+      canList: !(Number.isFinite(minStake) && minStake > 0) || stats.stake >= minStake,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: internalError(e) });
   }
 });
 

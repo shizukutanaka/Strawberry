@@ -1,14 +1,14 @@
 // コンプライアンス・法令遵守・監査証跡ユーティリティ
-const fs = require('fs');
 const path = require('path');
+const { appendRotated, ensureLogDir } = require('../utils/log-rotate');
 
 const AUDIT_LOG_PATH = path.resolve(__dirname, '../../logs/compliance-audit.log');
 
 function recordComplianceEvent(event, detail) {
   try {
-    fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
+    ensureLogDir(AUDIT_LOG_PATH);
     const entry = { timestamp: new Date().toISOString(), event, detail };
-    fs.appendFileSync(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
+    appendRotated(AUDIT_LOG_PATH, JSON.stringify(entry) + '\n');
   } catch (e) {/* ログ失敗時はサイレント */}
 }
 

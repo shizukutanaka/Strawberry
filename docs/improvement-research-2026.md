@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（デッドコード整理）
+
+- GPU 監視系の未配線モジュールを整理: `src/utils/gpu-monitor.js`（存在しない `OrderRepository.updateStatus` / `PaymentRepository.refundPayment` を呼ぶ壊れたコードで、呼ばれていれば初回 active 注文でクラッシュ）と `src/gpu/gpu-liveness-monitor.js`（インスタンス化されておらず、機能は order ルートの `sweepHeartbeatSlaBreaches` — ハートビート途絶→自動終了・按分返金・通知・信頼性減点 — と完全重複）を削除。`gpu-auto-recovery.js` はテスト済み公開 API として温存。

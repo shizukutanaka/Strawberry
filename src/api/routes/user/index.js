@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { asyncHandler } = require('../../../utils/error-handler');
@@ -507,6 +508,101 @@ router.put('/me/password',
     logger.info(`Password changed for user: ${req.user.id}`);
     appendAuditLog('user_password_changed', { userId: req.user.id }, req.user.id);
     res.json({ message: 'Password changed successfully' });
+  })
+);
+
+// パスワードリセット要求（公開）。
+// ユーザー存在の有無を応答内容・所要時間ともに区別させない（アカウント列挙防止）。
+// トークンは sha256 ハッシュのみ保存し、平文はメール経路以外に出さない。
+// 15分の短い有効期限・単回使用（検証成功時にフィールド消去）。
+const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
+router.post('/forgot-password',
+  authLimiter,
+  validateMiddleware(Joi.object({ email: Joi.string().email().required() }), 'body'),
+  asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    const user = UserRepository.getAll().find(u => u.email === email);
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      UserRepository.update(user.id, {
+        passwordResetTokenHash: tokenHash,
+        passwordResetExpiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString(),
+      });
+      appendAuditLog('password_reset_requested', { userId: user.id }, user.id);
+      if (process.env.SMTP_HOST) {
+        try {
+          const { sendMail } = require('../../utils/mailer');
+          const base = process.env.APP_BASE_URL || '';
+          await sendMail(email, 'パスワードリセット',
+            `<p>パスワードリセットのリクエストを受け付けました。15分以内に以下のリンクから新しいパスワードを設定してください。</p>` +
+            `<p><a href="${base}/reset-password?token=${token}">パスワードをリセット</a></p>` +
+            `<p>心当たりがない場合はこのメールを無視してください。</p>`);
+        } catch (e) {
+          logger.warn(`Password reset mail send failed: ${e.message}`);
+        }
+      } else {
+        logger.warn(`Password reset requested for a registered email, but SMTP_HOST is not set; no mail sent`);
+      }
+    }
+    // 応答は常に同一文言。不在ユーザーでも等しい遅延（ダミー bcrypt）を入れて
+    // タイミング列挙を潰す（register/login の _DUMMY_HASH と同一方針）。
+    await bcrypt.compare('timing-guard', _DUMMY_HASH);
+    res.json({ message: 'If that email is registered, a reset link has been sent' });
+  })
+);
+
+// パスワードリセット実行（トークン検証 + 新パスワード設定）。
+// 成功時は passwordChangedAt/sessionsRevokedAt を立てて全既存セッションを無効化する
+// （リセットが盗難対応で行われた場合に旧トークンが無効になることが必須）。
+router.post('/reset-password',
+  authLimiter,
+  validateMiddleware(Joi.object({
+    token: Joi.string().hex().length(64).required(),
+    newPassword: Joi.string()
+      .min(8)
+      // bcrypt の 72 バイト切り詰め対策（register/me/password と同一ポリシー）。
+      .max(72)
+      .pattern(/[a-z]/, 'lowercase')
+      .pattern(/[A-Z]/, 'uppercase')
+      .pattern(/[0-9]/, 'number')
+      .pattern(/[^a-zA-Z0-9]/, 'symbol')
+      .required()
+      .messages({
+        'string.pattern.name': 'Password must include at least one {#name} character',
+        'string.min': 'Password must be at least 8 characters long',
+        'string.max': 'Password must be at most 72 characters long'
+      })
+  }), 'body'),
+  asyncHandler(async (req, res) => {
+    const { token, newPassword } = req.body;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const tokenHashBuf = Buffer.from(tokenHash);
+    // timingSafeEqual でトークンハッシュを比較（部分一致のタイミングリーク防止）
+    const user = UserRepository.getAll().find(u =>
+      typeof u.passwordResetTokenHash === 'string' &&
+      u.passwordResetTokenHash.length === tokenHash.length &&
+      crypto.timingSafeEqual(Buffer.from(u.passwordResetTokenHash), tokenHashBuf));
+    const valid = user && user.passwordResetExpiresAt &&
+      new Date(user.passwordResetExpiresAt).getTime() > Date.now();
+    if (!valid) {
+      await bcrypt.compare('timing-guard', _DUMMY_HASH);
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+    const salt = await bcrypt.genSalt(config.security.bcryptRounds);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    const changedAt = new Date().toISOString();
+    UserRepository.update(user.id, {
+      password: hashedPassword,
+      updatedAt: changedAt,
+      passwordChangedAt: changedAt,
+      sessionsRevokedAt: changedAt,
+      // 単回使用: 検証済みトークンを即座に無効化
+      passwordResetTokenHash: null,
+      passwordResetExpiresAt: null,
+    });
+    appendAuditLog('password_reset_completed', { userId: user.id }, user.id);
+    res.json({ message: 'Password has been reset' });
   })
 );
 

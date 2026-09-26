@@ -14,6 +14,8 @@ const SENSITIVE_USER_FIELDS = Object.freeze([
   'mfaSecret',
   'resetToken',
   'passwordResetToken',
+  'passwordResetTokenHash',
+  'passwordResetExpiresAt',
   // セキュリティ監査フィールド: ユーザーに返すと「いつ管理者がセッションを強制失効させたか」
   // 「いつパスワードが変更されたか」を攻撃者が確認できてしまう（侵害後の検知タイミングを把握される）。
   'sessionsRevokedAt',

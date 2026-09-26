@@ -65,6 +65,8 @@ const PUBLIC_PATHS = new Set([
   '/users/register',   // 新規登録（公開）
   '/users/login',      // ログイン（公開, トークン発行元）
   '/users/refresh',    // アクセストークン更新（アクセストークン失効時に使うため公開。本体でリフレッシュトークンを検証）
+  '/users/forgot-password', // パスワードリセット要求（公開 — ログイン不能なユーザーが使うので JWT 前提にできない）
+  '/users/reset-password',  // パスワードリセット実行（同上。本体がトークンを検証する）
   '/gpus',             // GPU一覧は認証なしで閲覧可能（マーケットプレイスブラウジング）
 ]);
 // /auth/* と /gpus/* は GET のみトークン不要（マーケット閲覧用途）。

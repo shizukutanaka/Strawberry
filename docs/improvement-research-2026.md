@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（アカウント回復）
+
+- パスワードリセット導線: `POST /users/forgot-password`（同一応答+ダミーbcryptで列挙防止、sha256 ハッシュ保管・15分 TTL、SMTP_HOST 設定時のみメール送信）+ `POST /users/reset-password`（timingSafeEqual 照合、単回使用、passwordChangedAt/sessionsRevokedAt で全セッション失効）。グローバル jwtAuth の PUBLIC_PATHS に追加（ログイン不能ユーザーの鶏卵問題を解消）。

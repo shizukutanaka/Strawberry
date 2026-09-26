@@ -5,6 +5,9 @@ const axios = require('axios');
 const PROVIDER = process.env.LN_PROVIDER || 'opennode'; // 'opennode', 'lnbits', 'btcpay'
 const API_KEY = process.env.LN_API_KEY || '';
 const BASE_URL = process.env.LN_BASE_URL || '';
+// LN プロバイダ障害時に決済呼び出しが無期限ハングしないよう上限を設ける
+// （決済系は応答が遅い場合があるため通知系より長めの 30s）。
+const TIMEOUT_MS = Number(process.env.LN_API_TIMEOUT_MS) || 30_000;
 
 // --- OpenNode例 ---
 async function sendPaymentOpenNode(dest, amountBTC) {
@@ -18,7 +21,8 @@ async function sendPaymentOpenNode(dest, amountBTC) {
       amount: amountSats
     },
     {
-      headers: { 'Authorization': API_KEY }
+      headers: { 'Authorization': API_KEY },
+      timeout: TIMEOUT_MS
     }
   );
   return res.data;
@@ -36,7 +40,8 @@ async function sendPaymentLNbits(dest, amountBTC) {
       amount: amountSats
     },
     {
-      headers: { 'X-Api-Key': API_KEY }
+      headers: { 'X-Api-Key': API_KEY },
+      timeout: TIMEOUT_MS
     }
   );
   return res.data;

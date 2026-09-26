@@ -8,7 +8,12 @@ const { logger } = require('./logger');
 async function fetchAWSEC2GPUPrices(region = 'ap-northeast-1') {
   try {
     // 実際のAPIやスクレイピング先に応じて調整
-    const res = await axios.get(`https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/${region}/index.json`);
+    // 価格 API の応答は巨大（数百MB級）になり得るためタイムアウトは長めに取り、
+    // 下流障害時に無期限ハングしないよう上限を設ける
+    const res = await axios.get(
+      `https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/${region}/index.json`,
+      { timeout: Number(process.env.PRICE_API_TIMEOUT_MS) || 60_000 }
+    );
     // 必要なGPUインスタンス情報を抽出
     const gpuInstances = Object.values(res.data.products).filter(p => p.attributes && p.attributes.acceleratorType);
     logger.info('AWS EC2 GPU価格取得成功', { count: gpuInstances.length });

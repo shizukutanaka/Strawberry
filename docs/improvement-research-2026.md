@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（回復性）
+
+- 外向き HTTP 呼び出しのタイムアウト欠落を修復: axios 既定は timeout=0（無制限）のため、下流障害時に呼び出しが無期限ハングし worker スレッドを枯渇させ得た。`lightning-api.js`（LN 決済、30s・`LN_API_TIMEOUT_MS`）、`email.js`（SendGrid/Mailgun、10s）、`gpu-price-compare.js`（AWS 価格 API、60s・`PRICE_API_TIMEOUT_MS`）へ適用。
+

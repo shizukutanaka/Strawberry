@@ -153,6 +153,7 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 **現状**: 実稼働は `src/db/json/*`（**並行書込み保護・トランザクション無し**）。Prisma/pg/knex は未配線（三重化）。
 
 **推奨アクション**: 単一の永続化層（当面 JSON、将来 Prisma/Postgres）へ統一し、注文・決済・残高に整合性制約を導入。`ARCHITECTURE.md` のフォローアップ参照。
+→ **実装済（部分）**: `createJsonRepository` に `updateWhere`（load→compute→write を一つの同期区間で行う原子的 read-modify-write）と `createIfAbsent`（重複キー競合を塞ぐ atomic insert）を追加。`reputation-service` の ensure/mutate が利用し、レピュテーション残高・ステーク更新の TOCTOU 競合を解消。残: 他リポジトリ呼び出し側の移行、Prisma/Postgres 化。
 
 優先度: **中**
 

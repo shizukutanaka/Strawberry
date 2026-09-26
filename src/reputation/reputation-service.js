@@ -26,11 +26,29 @@ function createReputationService({ repository } = {}) {
     if (!providerId) throw new Error('providerId required');
     const rec = repo.getByProviderId(providerId);
     if (rec) return rec;
+    // createIfAbsent があれば原子的に「無ければ作成」し、同時実行での
+    // providerId 重複行を防ぐ（§8 整合性）。fake repo では従来の create。
+    if (typeof repo.createIfAbsent === 'function') {
+      const res = repo.createIfAbsent((r) => r.providerId === providerId, { providerId, stats: defaultStats() });
+      return res.ok ? res.row : res.current;
+    }
     return repo.create({ providerId, stats: defaultStats() });
   }
 
-  // 現在の stats に patch(stats)->部分stats を適用して保存
+  // 現在の stats に patch(stats)->部分stats を適用して保存。
+  // updateWhere 対応 repo では load→compute→write を一つの同期区間で行い、
+  // 「finder で読む → update で書く」の間に他者が割り込む TOCTOU を塞ぐ（§8）。
   function mutate(providerId, patchFn) {
+    if (typeof repo.updateWhere === 'function') {
+      ensure(providerId);
+      let row = null;
+      repo.updateWhere((r) => r.providerId === providerId, (current) => {
+        const stats = { ...defaultStats(), ...current.stats };
+        row = { ...current, stats: { ...stats, ...patchFn(stats) } };
+        return { stats: row.stats, updatedAt: new Date().toISOString() };
+      });
+      return row;
+    }
     const rec = ensure(providerId);
     const stats = { ...defaultStats(), ...rec.stats };
     const next = { ...stats, ...patchFn(stats) };

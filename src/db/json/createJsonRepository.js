@@ -137,6 +137,45 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       audit('updateIf', { id, updates });
       return { ok: true, row: rows[idx] };
     },
+    // Atomic read-modify-write: loads, finds by predicate, computes updates from the
+    // CURRENT row, and writes — all in one synchronous section. Closes the TOCTOU
+    // window of "read via finder → update" (e.g. reputation mutate, balance changes).
+    // compute(row) → updates object; returning null/undefined aborts the write.
+    // Returns { ok: true, row } or { ok: false, reason: 'not_found'|'aborted', current? }.
+    updateWhere: (predicate, compute) => {
+      const rows = load();
+      const idx = rows.findIndex(predicate);
+      if (idx === -1) {
+        audit('updateWhere', { result: 'not_found' });
+        return { ok: false, reason: 'not_found' };
+      }
+      const updates = compute({ ...rows[idx] });
+      if (updates == null || typeof updates !== 'object') {
+        audit('updateWhere', { result: 'aborted' });
+        return { ok: false, reason: 'aborted', current: rows[idx] };
+      }
+      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+      atomicWriteJSON(filePath, rows);
+      audit('updateWhere', { id: rows[idx].id });
+      return { ok: true, row: rows[idx] };
+    },
+    // Atomic insert-if-absent: checks predicate and appends in one synchronous section,
+    // preventing duplicate-key races (e.g. concurrent ensure() creating two rows for the
+    // same providerId). Returns { ok: true, row } or { ok: false, reason: 'exists', current }.
+    createIfAbsent: (predicate, rec) => {
+      const rows = load();
+      const existing = rows.find(predicate);
+      if (existing) {
+        audit('createIfAbsent', { result: 'exists', id: existing.id });
+        return { ok: false, reason: 'exists', current: existing };
+      }
+      const safeRec = stripDangerousKeys(rec);
+      const row = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
+      rows.push(row);
+      atomicWriteJSON(filePath, rows);
+      audit('createIfAbsent', { id: row.id });
+      return { ok: true, row };
+    },
     delete: (id) => {
       const rows = load();
       const remaining = rows.filter((r) => r.id !== id);

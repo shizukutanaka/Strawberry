@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- Slack Webhook 送信の耐障害化: `scripts/slack-feedback-bot.js` の `sendSlackMessage`（gpu-failure-monitor・alert-* 等の共有通知経路）に 10 秒タイムアウト（`SLACK_WEBHOOK_TIMEOUT_MS` で調整可）・不正 URL/非 https の拒否・レスポンスのドレイン（ソケット解放）を追加。`slack-notify.js` の重複 HTTP 実装は共有実装に集約。

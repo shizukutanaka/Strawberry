@@ -11,6 +11,7 @@ const profitAddressesRouter = require('./routes/profit-addresses');
 const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
+const { safeTokenEqual } = require('../utils/safe-compare');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
 const {
   securityHeaders,
@@ -135,7 +136,8 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   }
   const authHeader = req.headers.authorization || '';
   const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!provided || provided !== metricsToken) {
+  // 定数時間比較: `!==` では応答時間でトークン内容の推測を許すタイミングオラクルになる
+  if (!safeTokenEqual(provided, metricsToken)) {
     return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
   }
   next();

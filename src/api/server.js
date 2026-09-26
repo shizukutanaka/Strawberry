@@ -119,6 +119,14 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// SLA 稼働率トラッカー（1分間隔で /health を叩き uptime を集計。GET /api/sla の供給源）
+// テスト環境でのタイマー抑止は startSLATracker 側で行う（invoice-poller と同じ方針）。
+try {
+  require('../utils/sla-tracker').startSLATracker();
+} catch (e) {
+  logger.warn(`sla-tracker: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

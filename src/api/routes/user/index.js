@@ -1001,8 +1001,11 @@ router.get('/me/watches',
     const WatchRepository = require('../../../db/json/WatchRepository');
     const GpuRepository = require('../../../db/json/GpuRepository');
     const watches = WatchRepository.getByUser(req.user.id) || [];
+    // getById は毎回ファイル全量読み込みするため、ウォッチ件数ぶんの
+    // N+1 ファイル I/O を避けるため Map 化して照会する。
+    const gpuById = new Map((GpuRepository.getAll() || []).map(g => [g.id, g]));
     const enriched = watches.map(w => {
-      const raw = GpuRepository.getById(w.gpuId);
+      const raw = gpuById.get(w.gpuId);
       // apiKey・providerId など機密/内部フィールドを除外し、表示に必要な公開フィールドのみ返す
       const gpu = raw ? {
         id: raw.id,

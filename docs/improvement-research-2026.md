@@ -425,3 +425,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（N+1 ファイル I/O の解消）
+- JSON リポジトリの `getById` は毎回ファイル全量読み込み+パースするため、ループ内参照は N+1 の I/O 増幅になる。`/marketplace/stats`（公開・gpuId 毎）、プロバイダ収益サマリ、`/admin/pending`（orders+users 両方）、`/me/watches` を 1回の getAll + Map 照会へ置き換え、`/marketplace/stats` に 60s レスポンスキャッシュを追加して公開パスの全量スキャンを間引いた。

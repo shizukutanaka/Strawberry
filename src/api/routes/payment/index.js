@@ -440,9 +440,13 @@ router.get('/admin/pending',
     const all = PaymentRepository.getAll() || [];
     const pending = all.filter(p => p.status === 'pending' && p.method !== 'lightning');
     const sorted = [...pending].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    // getById は毎回ファイル全量読み込みするため、支払い件数ぶんの
+    // N+1 ファイル I/O を避けるため両リポジトリを Map 化して照会する。
+    const orderById = new Map((OrderRepository.getAll() || []).map(o => [o.id, o]));
+    const userById = new Map((UserRepository.getAll() || []).map(u => [u.id, u]));
     const enriched = sorted.map(p => {
-      const order = p.orderId ? OrderRepository.getById(p.orderId) : null;
-      const renter = p.userId ? UserRepository.getById(p.userId) : null;
+      const order = p.orderId ? orderById.get(p.orderId) : null;
+      const renter = p.userId ? userById.get(p.userId) : null;
       return {
         id: p.id,
         orderId: p.orderId,

@@ -7,6 +7,7 @@ const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 const { withLock } = require('../../utils/async-lock');
+const { cacheMiddleware } = require('../middleware/cache');
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -174,7 +175,9 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
 
 // パブリック市場統計（認証不要 — マーケットブラウジング用）
 // GET /marketplace/stats — GPU 供給・需要・価格帯の概要
-router.get('/stats', (req, res) => {
+// 公開パスのため全量スキャンは 60s キャッシュで間引く（orders.json/gpus.json の
+// 毎リクエスト読み直しを抑止）。
+router.get('/stats', cacheMiddleware(), (req, res) => {
   try {
     const GpuRepository = require('../../db/json/GpuRepository');
     const OrderRepository = require('../../db/json/OrderRepository');
@@ -207,9 +210,12 @@ router.get('/stats', (req, res) => {
       gpuStats[o.gpuId].completedOrders++;
       gpuStats[o.gpuId].totalSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
     }
+    // gpuId ごとの getById は毎回ファイル全量読み込み+パース（N+1 I/O）になるため、
+    // 取得済みの一覧から Map を作って照会する。公開エンドポイントでは特に重要。
+    const gpuById = new Map(allGpus.map(g => [g.id, g]));
     const topGpus = Object.entries(gpuStats)
       .map(([gpuId, s]) => {
-        const gpu = GpuRepository.getById(gpuId);
+        const gpu = gpuById.get(gpuId);
         // 累積収益は非公開財務情報 — 未認証レスポンスから除外する
         return { gpuId, gpuName: gpu ? gpu.name : null, vendor: gpu ? gpu.vendor : null, completedOrders: s.completedOrders };
       })

@@ -495,8 +495,11 @@ router.get('/provider/earnings',
       byGpu[gid].completedSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
       byGpu[gid].completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
     }
+    // getById は毎回ファイル全量読み込みするため、gpuId ごとのループ参照は
+    // 1回の getAll で Map を作って照会する（N+1 ファイル I/O の抑止）。
+    const gpuById = new Map((GpuRepository.getAll() || []).map(g => [g.id, g]));
     for (const entry of Object.values(byGpu)) {
-      const gpu = GpuRepository.getById(entry.gpuId);
+      const gpu = gpuById.get(entry.gpuId);
       entry.gpuName = gpu ? gpu.name : null;
     }
     summary.byGpu = Object.values(byGpu).sort((a, b) => b.completedSats - a.completedSats);

@@ -1,5 +1,6 @@
 // p2p-notify.js - 死活監視・異常自動通知の多チャネル＆多監視対象自動化
-const { main: healthMain } = require('./p2p-health');
+// ./p2p-health は libp2p 系（未導入環境では require 失敗）に依存するため、
+// 外部ターゲット監視だけを使う用途でモジュール自体が読み込めるよう遅延 require。
 const { sendNotification, NotifyType } = require('./utils/notifier');
 const fs = require('fs');
 const path = require('path');
@@ -20,13 +21,28 @@ const CHANNELS = [
 ].filter(Boolean);
 
 // 監視対象API/外部サービス
-const MONITOR_TARGETS = (process.env.MONITOR_TARGETS || 'http://localhost:3000/api/system/info').split(',');
+// 既定値は公開 liveness の /health。/api/system/info は admin 専用で、既定のままだと
+// 認証なしポーリングが常に 401 を受けて「API_DOWN」アラートを誤発報し続ける。
+const MONITOR_TARGETS = (process.env.MONITOR_TARGETS || 'http://localhost:3000/health').split(',');
 
 function logAudit(event) {
   try {
     fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
     fs.appendFileSync(LOG_PATH, JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n');
   } catch (e) {}
+}
+
+// 監視対象ごとの直近状態。通知は状態遷移時のみ（up→down で1回、down→up で復帰1回）。
+// 15 秒ポーリングで連続ダウン中に毎回通知するとチャネルがスパム化するため。
+const _targetState = new Map();
+
+async function _notifyOnTransition(key, isDown, downMsg) {
+  const prev = _targetState.get(key) || 'up';
+  const next = isDown ? 'down' : 'up';
+  if (prev === next) return;
+  _targetState.set(key, next);
+  if (isDown) await notifyAll(downMsg, 'DOWN');
+  else await notifyAll(`【復帰】${key} が正常応答に復帰しました`, 'RECOVERY');
 }
 
 async function checkHealthFile() {
@@ -37,21 +53,18 @@ async function checkHealthFile() {
   } catch (_) {
     return;
   }
-  if (health.peerCount === 0) {
-    const msg = `【P2Pノード障害検知】\nピア接続がありません（${health.peerId}）\n${new Date(health.timestamp).toLocaleString()}`;
-    await notifyAll(msg, 'NODE_DOWN');
-  }
+  const down = health.peerCount === 0;
+  const downMsg = `【P2Pノード障害検知】\nピア接続がありません（${health.peerId}）\n${new Date(health.timestamp).toLocaleString()}`;
+  await _notifyOnTransition('p2p-node', down, downMsg);
 }
 
 async function checkExternalTargets() {
   for (const url of MONITOR_TARGETS) {
     try {
       const res = await axios.get(url, { timeout: 7000 });
-      if (res.status !== 200) {
-        await notifyAll(`【API死活監視】${url} が異常応答: ${res.status}`, 'API_DOWN');
-      }
+      await _notifyOnTransition(url, res.status !== 200, `【API死活監視】${url} が異常応答: ${res.status}`);
     } catch (e) {
-      await notifyAll(`【API死活監視】${url} にアクセスできません: ${e.message}`, 'API_DOWN');
+      await _notifyOnTransition(url, true, `【API死活監視】${url} にアクセスできません: ${e.message}`);
     }
   }
 }
@@ -73,13 +86,17 @@ function startNotifyLoop() {
 }
 
 if (require.main === module) {
-  healthMain();
+  require('./p2p-health').main(); // libp2p 依存はここでのみ
   startNotifyLoop();
 }
+
+// テスト用: 状態遷移キャッシュのリセット。
+function _resetTargetState() { _targetState.clear(); }
 
 module.exports = {
   startNotifyLoop,
   checkHealthFile,
   checkExternalTargets,
   notifyAll,
+  _resetTargetState,
 };

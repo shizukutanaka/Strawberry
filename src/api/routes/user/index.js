@@ -292,6 +292,21 @@ router.get('/me',
   })
 );
 
+// 高権度操作（退会・受取アドレス変更など資金/アカウント存続に関わる変更）の再認証。
+// JWT 所持だけでなく認証要素の再提示を要求する（OWASP: sensitive operations
+// require re-authentication）。パスワード設定済みは bcrypt 照合、
+// パスワードを持たない OAuth 専用ユーザーは登録メール再入力で代替。
+// 戻り値: 確認成功なら null、失敗なら { status, error }（呼び出し側がそのまま返す）。
+async function verifySensitiveConfirmation(user, { password, confirmEmail } = {}) {
+  if (user.password) {
+    const ok = typeof password === 'string' && await bcrypt.compare(password, user.password);
+    return ok ? null : { status: 401, error: 'Password confirmation required' };
+  }
+  const ok = typeof confirmEmail === 'string' &&
+    confirmEmail.toLowerCase() === String(user.email || '').toLowerCase();
+  return ok ? null : { status: 403, error: 'Confirm with your account email' };
+}
+
 // アカウント自己退会（ソフト無効化。認証必須）
 // ハード削除はしない: 注文履歴・係争・監査証跡を保全しつつ、本人を確実にロックアウトする。
 // メール/ユーザー名を匿名化して再ログイン・再利用を防ぎ、現在のアクセストークンを失効させる。
@@ -310,23 +325,11 @@ router.delete('/me',
     if (user.status === 'deactivated') {
       return res.status(409).json({ error: 'Account is already deactivated' });
     }
-    // 退会は PII 匿名化 + 全セッション失効を伴う不可逆の高権度操作のため、
-    // JWT 所持だけでなく認証要素の再提示を求める（OWASP: sensitive operations
-    // には re-authentication）。盗難・漏洩トークンだけでアカウントを抹消される
-    // 経路を塞ぐ。パスワード設定済みユーザーは password を照合し、
-    // パスワードを持たない OAuth 専用ユーザーは登録メールの再入力で代替する。
-    const { password, confirmEmail } = req.body || {};
-    if (user.password) {
-      const ok = typeof password === 'string' && await bcrypt.compare(password, user.password);
-      if (!ok) {
-        return res.status(401).json({ error: 'Password confirmation required for account deactivation' });
-      }
-    } else {
-      const ok = typeof confirmEmail === 'string' &&
-        confirmEmail.toLowerCase() === String(user.email || '').toLowerCase();
-      if (!ok) {
-        return res.status(403).json({ error: 'Confirm deactivation with your account email' });
-      }
+    // PII 匿名化 + 全セッション失効を伴う不可逆操作。盗難・漏洩トークンだけで
+    // アカウントを抹消される経路を塞ぐため再認証を要求する。
+    const denied = await verifySensitiveConfirmation(user, req.body);
+    if (denied) {
+      return res.status(denied.status).json({ error: denied.error });
     }
     // 最後の管理者は自己退会できない（管理不能化の防止。ロール変更と同一ポリシー）
     if (user.role === 'admin') {
@@ -449,6 +452,15 @@ router.put('/me',
     }
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ error: `No updatable fields provided. Allowed: ${Object.keys(ALLOWED_PROFILE_FIELDS).join(', ')}` });
+    }
+    // payoutAddress はプロバイダの受取アドレス＝資金ルーティング情報。JWT 所持のみで
+    // 差し替えられると次回決済が攻撃者宛に流れるため、DELETE /me と同じ再認証を
+    // 要求する（他プロフィール項目の変更には不要 — 資金への直結度が違う）。
+    if ('payoutAddress' in updateData) {
+      const denied = await verifySensitiveConfirmation(user, req.body);
+      if (denied) {
+        return res.status(denied.status).json({ error: denied.error });
+      }
     }
     // ユーザー名の重複チェック
     if (updateData.username) {

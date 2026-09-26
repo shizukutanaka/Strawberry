@@ -1,1 +1,15 @@
-# K8sサービス
+# K8sサービス — strawberry-api Deployment の ClusterIP 露出
+apiVersion: v1
+kind: Service
+metadata:
+  name: strawberry-api
+  labels:
+    app: strawberry-api
+spec:
+  type: ClusterIP # 外部公開は Ingress/LoadBalancer 側の責務
+  selector:
+    app: strawberry-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000

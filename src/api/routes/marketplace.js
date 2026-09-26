@@ -55,8 +55,18 @@ router.post('/rank', (req, res) => {
 });
 
 // 逆オークションでプロバイダを選定（Akash/Golem 型マッチング）
-// bid に reputationScore が無ければ reputationService から自動補完される
 // opts は /rank と同様に呼び出し元から受け付けない。
+// さらに bid の権威フィールドも除去する: reputationScore は reputationService が
+// providerId から引く権威値であり、eligible/attestationScore/attestationPassed/
+// slaUptimePct も同様にプラットフォーム側状態を表す。クライアント値を通すと、
+// 任意の認証済みユーザーが自陣プロバイダに reputationScore:1 を付けて優勝させたり
+// 競合を eligible:false で排除したりでき、マッチングの完全性が失われる。
+// ルートが通すのは入札者自身の提示値（providerId / pricePerHour）のみ。
+// selectProvider 側の reputationScore 優先経路は DI/テスト呼出用として残す。
+const sanitizeBid = (b) => ({
+  providerId: b && typeof b === 'object' ? b.providerId : undefined,
+  pricePerHour: b && typeof b === 'object' ? b.pricePerHour : undefined,
+});
 router.post('/auction', (req, res) => {
   const { bids } = req.body || {};
   if (!Array.isArray(bids)) {
@@ -66,7 +76,7 @@ router.post('/auction', (req, res) => {
     return res.status(400).json({ error: `bids may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
-    return res.json(marketplace.selectProvider(bids, {}));
+    return res.json(marketplace.selectProvider(bids.map(sanitizeBid), {}));
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });
   }

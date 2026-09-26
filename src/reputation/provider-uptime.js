@@ -41,6 +41,25 @@ const lastProviderBeatByOrder = new Map();
 // 再起動後や sessions 集計のため、既に集計済みのオーダーを記録（プロセス揮発）。
 const countedOrders = new Set();
 
+// 上記2つの揮発エントリは注文が終端に達しても残り続けるため、最終ビートから
+// STALE_ENTRY_AGE_MS 以上無音の注文エントリを定期的に除去する。
+// これがないと再起動無しの長時間運転で Map が全注文数ぶん増大し続ける。
+// 24h 無音の注文が再びビートを送った場合は新セッションとして数え直すのが自然。
+const STALE_ENTRY_AGE_MS = 24 * 60 * 60 * 1000;
+const PRUNE_INTERVAL_MS = 60 * 1000;
+let _lastPruneAt = 0;
+
+function _pruneStaleOrderEntries(nowMs) {
+  if (nowMs - _lastPruneAt < PRUNE_INTERVAL_MS) return;
+  _lastPruneAt = nowMs;
+  for (const [orderId, lastBeat] of lastProviderBeatByOrder) {
+    if (nowMs - lastBeat > STALE_ENTRY_AGE_MS) {
+      lastProviderBeatByOrder.delete(orderId);
+      countedOrders.delete(orderId);
+    }
+  }
+}
+
 function _clamp01(n) {
   if (!Number.isFinite(n)) return 0;
   return n < 0 ? 0 : n > 1 ? 1 : n;
@@ -51,6 +70,7 @@ function _clamp01(n) {
 function recordProviderHeartbeat(providerId, orderId, nowMs = Date.now()) {
   if (!providerId || !orderId) return;
   try {
+    _pruneStaleOrderEntries(nowMs);
     const prev = lastProviderBeatByOrder.get(orderId);
     let gapEvent = false;
     if (prev !== undefined && nowMs - prev > GAP_THRESHOLD_MS) {
@@ -155,6 +175,12 @@ function getReliability(providerId) {
 function _resetVolatileState() {
   lastProviderBeatByOrder.clear();
   countedOrders.clear();
+  _lastPruneAt = 0;
+}
+
+// テスト/診断用: 滞留中の orderId 揮発エントリ数。
+function _pendingOrderEntryCount() {
+  return lastProviderBeatByOrder.size;
 }
 
 module.exports = {
@@ -163,5 +189,6 @@ module.exports = {
   getReliability,
   GAP_THRESHOLD_MS,
   MIN_BEATS_FOR_SCORE,
+  _pendingOrderEntryCount,
   _resetVolatileState,
 };

@@ -73,6 +73,17 @@ describe('provider-uptime scoring (unit)', () => {
     expect(rel.tier).toBe('unrated');
     expect(rel.beats).toBe(0);
   });
+
+  it('prunes volatile per-order entries whose last beat is older than the stale horizon', () => {
+    const pid = `unit-prune-${Date.now()}`;
+    const t0 = 50_000_000;
+    // stale order: last beat 25h ago. A beat on another order >60s later triggers the prune.
+    providerUptime.recordProviderHeartbeat(pid, 'stale-order', t0 - 25 * 60 * 60 * 1000);
+    providerUptime.recordProviderHeartbeat(pid, 'live-order', t0 - 60 * 1000);
+    providerUptime.recordProviderHeartbeat(pid, 'live-order', t0);
+    expect(providerUptime._pendingOrderEntryCount()).toBe(1); // stale-order 除去, live-order 残存
+    cleanupProvider(pid);
+  });
 });
 
 describe('provider reliability surfaces via the GPU API (integration)', () => {

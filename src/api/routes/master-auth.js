@@ -19,9 +19,20 @@ const MAIL_CODE_TTL_MS = 10 * 60 * 1000;
 const _totpIpMap = new Map(); // IP -> { count, windowStart }
 const TOTP_IP_WINDOW_MS = 15 * 60 * 1000;
 const TOTP_IP_MAX = 10;
+// IP ローテーションでユニークキーを増やすとエントリが永久蓄積するため、
+// ウィンドウ切れの古いエントリを最大1分毎に掃除する（メモリ上界の担保）。
+let _totpMapLastPrune = 0;
+function _pruneTotpIpMap(now) {
+  if (now - _totpMapLastPrune < 60 * 1000) return;
+  _totpMapLastPrune = now;
+  for (const [ip, rec] of _totpIpMap) {
+    if (now - rec.windowStart > TOTP_IP_WINDOW_MS) _totpIpMap.delete(ip);
+  }
+}
 
 function _checkTotpIpLimit(ip) {
   const now = Date.now();
+  _pruneTotpIpMap(now);
   const rec = _totpIpMap.get(ip);
   if (!rec || now - rec.windowStart > TOTP_IP_WINDOW_MS) {
     _totpIpMap.set(ip, { count: 1, windowStart: now });

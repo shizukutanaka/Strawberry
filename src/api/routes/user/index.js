@@ -46,8 +46,19 @@ const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', config.security.b
 const _loginFailures = new Map(); // email → { count, windowStart }
 const _LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const _LOGIN_MAX_FAILURES = 10;
+// 存在しないアドレスへの連続失敗試行でユニークキーが永久蓄積するため、
+// ウィンドウ切れの古いエントリを最大1分毎に掃除する。
+let _loginMapLastPrune = 0;
+function _pruneLoginFailures(now) {
+  if (now - _loginMapLastPrune < 60 * 1000) return;
+  _loginMapLastPrune = now;
+  for (const [email, entry] of _loginFailures) {
+    if (now - entry.windowStart > _LOGIN_WINDOW_MS) _loginFailures.delete(email);
+  }
+}
 function _recordLoginFailure(email) {
   const now = Date.now();
+  _pruneLoginFailures(now);
   const entry = _loginFailures.get(email) || { count: 0, windowStart: now };
   if (now - entry.windowStart > _LOGIN_WINDOW_MS) {
     entry.count = 0;

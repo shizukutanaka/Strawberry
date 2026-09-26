@@ -425,3 +425,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（揮発 Map の蓄積修正）
+- `src/reputation/provider-uptime.js` の `lastProviderBeatByOrder`/`countedOrders`、TOTP IP レート制限マップ、ログイン失敗マップが「終端・ウィンドウ切れ後もエントリが残る」同一パターンだったため、最終ビートから 24h 無音の注文エントリ / ウィンドウ切れの失敗カウンタを最大 1 分毎に掃除する amortized prune を追加（再起動無しの長時間運転での線形増大を抑止）。

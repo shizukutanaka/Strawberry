@@ -27,21 +27,28 @@ function tryRecovery() {
   exec('echo GPUリカバリ処理(例)');
 }
 
+// exec コールバックの完了を呼出側が待てるよう Promise を返す。
+// fire-and-forget だと呼出元（テスト・上位スクリプト）が非同期通知の完了を待てず、
+// プロセス終了後にログ/通知が走る。
 function monitor() {
-  exec(CHECK_CMD, (err, stdout, stderr) => {
-    if (err) {
-      sendSlackMessage('【GPU監視エラー】nvidia-smi実行失敗: ' + err.message);
-      return;
-    }
-    try {
-      const status = parseStatus(stdout);
-      if (isFailure(status)) {
-        sendSlackMessage(`【GPU障害検知】\n温度:${status.temp}℃\n状態:${status.pstate}\n利用率:${status.util}%\nファン:${status.fan}%\n→自動リカバリ試行`);
-        tryRecovery();
+  return new Promise(resolve => {
+    exec(CHECK_CMD, (err, stdout, stderr) => {
+      if (err) {
+        sendSlackMessage('【GPU監視エラー】nvidia-smi実行失敗: ' + err.message);
+        resolve();
+        return;
       }
-    } catch (e) {
-      sendSlackMessage('【GPU監視パースエラー】' + e.message);
-    }
+      try {
+        const status = parseStatus(stdout);
+        if (isFailure(status)) {
+          sendSlackMessage(`【GPU障害検知】\n温度:${status.temp}℃\n状態:${status.pstate}\n利用率:${status.util}%\nファン:${status.fan}%\n→自動リカバリ試行`);
+          tryRecovery();
+        }
+      } catch (e) {
+        sendSlackMessage('【GPU監視パースエラー】' + e.message);
+      }
+      resolve();
+    });
   });
 }
 

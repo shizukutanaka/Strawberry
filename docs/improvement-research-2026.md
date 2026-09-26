@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（開発ツール）
+
+- `npm run lint`（`eslint .`）は eslint が devDependencies に無く常時失敗し、CI は `|| true` で握り潰していた。eslint@9.39.5 + flat config（`eslint.config.mjs`）を導入し、`eslint:recommended` のバグ検出系ルールを error、ノイズ系は warn に分類（269 warnings / 0 errors、exit 0 で実運用可能）。導入初回で実バグを検出: `src/utils/google-calendar.js` の `defaultConfig` 未宣言グローバル代入（strict では ReferenceError）を `const` 化して修正。
+

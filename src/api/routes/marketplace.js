@@ -9,6 +9,7 @@ const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 const { withLock } = require('../../utils/async-lock');
+const { registerPurgeHook } = require('../middleware/cache');
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -177,33 +178,39 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
 // パブリック市場統計（認証不要 — マーケットブラウジング用）
 // GET /marketplace/stats — GPU 供給・需要・価格帯の概要
 //
-// 統計値は gpus.json / orders.json の内容と現在時刻（占有窓の終了）に依存する。
-// URL キャッシュだと GPU/注文の書き込み後も TTL 満了まで古い統計を返し、
-// 一覧 API との不整合が起きるため、入力ファイルの stat 指紋で無効化する専用
-// キャッシュを持つ。指紋一致中でも時刻依存の占有窓が残りうるため TTL で上限化する。
+// 統計値は gpus.json / orders.json の内容と現在時刻（占有窓の開始・終了）に依存する。
+// URL キャッシュだと書き込み後も TTL 満了まで古い統計を返すため、入力ファイルの
+// stat 指紋で無効化する専用キャッシュを持つ。時刻依存の変化は「次の予約境界」
+// （最も近い未来の占有開始/終了）までで期限を切り、TTL はその上限として働く。
 const STATS_CACHE_TTL_MS = 30_000;
 let _statsCache = null;
 let _statsStamp = null;
-let _statsAt = 0;
+let _statsExpiresAt = 0;
 const DATA_DIR = path.resolve(__dirname, '../../../data');
+
+// 管理パージ（/admin/cache/purge）でもこのモジュール内キャッシュを捨てる。
+registerPurgeHook(() => { _statsCache = null; _statsStamp = null; _statsExpiresAt = 0; });
+
 function _statsInputStamp() {
-  try {
-    const fp = [];
-    for (const f of ['gpus.json', 'orders.json']) {
+  // ファイルごとに指紋化。不在は空コレクションとして有効なので 'missing' センチネル
+  // （作成されれば指紋が変わり自動無効化）。stat 自体の失敗だけ全体で未キャッシュにする。
+  const fp = [];
+  for (const f of ['gpus.json', 'orders.json']) {
+    try {
       const s = fs.statSync(path.join(DATA_DIR, f));
       fp.push(`${s.mtimeMs}:${s.size}`);
+    } catch (e) {
+      if (e && e.code === 'ENOENT') fp.push('missing');
+      else return null; // 権限・I/O エラー等はキャッシュを使わない
     }
-    return fp.join('|');
-  } catch (_) {
-    // ファイル不在/stat 失敗時はキャッシュを使わない
-    return null;
   }
+  return fp.join('|');
 }
 
 router.get('/stats', (req, res) => {
   try {
     const stamp = _statsInputStamp();
-    if (_statsCache && stamp !== null && stamp === _statsStamp && (Date.now() - _statsAt) < STATS_CACHE_TTL_MS) {
+    if (_statsCache && stamp !== null && stamp === _statsStamp && Date.now() < _statsExpiresAt) {
       res.set('X-Cache', 'HIT');
       return res.json(_statsCache);
     }
@@ -215,11 +222,16 @@ router.get('/stats', (req, res) => {
     const nowMs = Date.now();
     const BLOCKING = new Set(['pending', 'matched', 'active']);
 
+    // 占有窓の判定は時刻依存: キャッシュの有効期限は「最も近い未来の占有開始/終了」
+    // に合わせる。境界をまたぐと一覧 API と不整合になるため。
+    let nextBoundary = Infinity;
     const occupiedGpuIds = new Set(
       allOrders.filter(o => {
         if (!BLOCKING.has(o.status)) return false;
         const s = new Date(o.scheduledStartAt || o.createdAt).getTime();
         const e = s + (o.durationMinutes || 0) * 60 * 1000;
+        if (s > nowMs) nextBoundary = Math.min(nextBoundary, s);
+        if (e > nowMs) nextBoundary = Math.min(nextBoundary, e);
         return s <= nowMs && e > nowMs;
       }).map(o => o.gpuId)
     );
@@ -268,7 +280,7 @@ router.get('/stats', (req, res) => {
     if (stamp !== null) {
       _statsCache = body;
       _statsStamp = stamp;
-      _statsAt = Date.now();
+      _statsExpiresAt = Math.min(nowMs + STATS_CACHE_TTL_MS, nextBoundary);
     }
     res.set('X-Cache', 'MISS');
     res.json(body);

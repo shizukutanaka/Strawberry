@@ -49,9 +49,19 @@ function cacheMiddleware(options = {}) {
   };
 }
 
+// LRU 以外のモジュールローカルキャッシュ（例: marketplace stats）も管理パージで
+// 一緒に捨てられるよう、パージ時に呼ばれるフックを登録できる。
+const _purgeHooks = new Set();
+function registerPurgeHook(fn) {
+  if (typeof fn === 'function') _purgeHooks.add(fn);
+}
+
 // キャッシュ全体パージ関数（管理API等で利用可）
 function purgeCache() {
   cache.clear();
+  for (const fn of _purgeHooks) {
+    try { fn(); } catch (e) { /* フック失敗は握る */ }
+  }
   cachePurgeCounter.inc();
   logger.info('Cache purged');
 }
@@ -77,5 +87,5 @@ function invalidateByUrlPattern(pattern) {
   }
 }
 
-module.exports = { cacheMiddleware, cache, purgeCache, invalidateUserCache, invalidateByUrlPattern, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
+module.exports = { cacheMiddleware, cache, purgeCache, registerPurgeHook, invalidateUserCache, invalidateByUrlPattern, cacheHitCounter, cacheMissCounter, cachePurgeCounter };
 

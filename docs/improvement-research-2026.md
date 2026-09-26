@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（監視配線）
+
+- `src/utils/perf-auto-optimize.js`（CPU/MEM 高負荷検知→通知）は実装済みだが `startAutoOptimize` がどこからも呼ばれておらず死んでいた。server.js のサービス監視ブロック直後に `NODE_ENV !== 'test'` ガード付きで起動を配線（既存 monitor 系と同一のタイマー積み上がり対策パターン）。
+

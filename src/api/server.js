@@ -107,6 +107,18 @@ try {
   logger.warn('Service monitor could not be started:', e);
 }
 
+// プロセス負荷監視（CPU/MEM が閾値超過で resilientNotify 経由の通知）。
+// utils/perf-auto-optimize は実装済みだが startAutoOptimize がどこからも
+// 呼ばれていなかったため、ここで起動する。テスト環境では service monitor と
+// 同じ理由（Jest 環境破棄後のタイマー積み上がり）で起動しない。
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    require('../utils/perf-auto-optimize').startAutoOptimize();
+  } catch (e) {
+    logger.warn('perf-auto-optimize could not be started:', e);
+  }
+}
+
 // Lightningインボイス入金確認ループ（15秒間隔でポーリング、Lightning未導入時は無効）
 // テスト環境でのタイマー抑止は invoice-poller.start() 側で行う（start() は
 // Lightning サービス参照のバインドも兼ねており、ここで呼び出しごとスキップすると

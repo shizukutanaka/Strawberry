@@ -430,3 +430,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `backup.js` のトップレベル `require('./cloud-storage')` は googleapis/dropbox 等の未導入依存経由で MODULE_NOT_FOUND になり、ローカル世代バックアップまで死んでいた。クラウド連携を遅延読み込み化し、未導入/宛先未設定環境ではローカルバックアップのみで動作（誤警報も防止）。
 - `createJsonRepository` の破損検知に自動復元を配線: パース失敗時に破損ファイルを `.corrupt-<ts>` へ退避→最新世代バックアップを復元→復元内容を再検証（バックアップ自体の破損は fail-closed 維持）。復元不能なら従来通り throw。
 
+- `backup-poller` を追加し server.js 起動時に配線（既定6時間間隔・起動5分後初回、`BACKUP_INTERVAL_MS`/`BACKUP_INITIAL_DELAY_MS` で調整可）。backup.js ロード失敗時は内部で無効化。`.gitignore` に `backups/` を追加（実行時生成物がコミット対象になっていた）。

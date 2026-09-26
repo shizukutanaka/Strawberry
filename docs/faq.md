@@ -32,7 +32,7 @@
 
 ## 障害対応・監視
 - **Q: サービス障害時の一次対応は？**
-  - A: `GET /health`（死活）と `GET /metrics`（`METRICS_AUTH_TOKEN` で Bearer 保護）を確認し、`data/logs/` のログ（`access-audit.log`・`db-access.log`・`gpu-events.log` 等）を点検してください。`service-monitor`（既定 10s 周期）が Lightning/vGPU 等のオプショナルサービスの健全性を監視します。
+  - A: `GET /health`（死活）と `GET /metrics`（`METRICS_AUTH_TOKEN` で Bearer 保護）を確認し、`logs/` のログ（`access-audit.log`・`db-access.log`・`gpu-events.log` 等）を点検してください。`service-monitor`（既定 10s 周期）が Lightning/vGPU 等のオプショナルサービスの健全性を監視します。
 - **Q: 期限切れ注文の手動処理は？**
   - A: `POST /api/v1/admin/expire-orders`（admin JWT、`{types: ['pending','matched','disputed','active']}` 部分実行可）で滞留注文のスイープを手動実行できます。
 

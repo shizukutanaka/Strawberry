@@ -36,7 +36,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | POST `/api/v1/users/register`,`/login`,`/me` | ユーザ登録/認証 | register/login=公開, me=JWT | ✅ |
 | GET `/api/v1/gpus`, `/gpus/:id` | GPU 検索/詳細 | JWT | ✅(JSON層で動作) |
 | POST/PUT `/api/v1/gpus` | 出品登録/更新 | JWT+role | 🟡(アテステーション無し) |
-| GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
+| GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有, 参照価格記録) |
 | POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |
 | POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
 | POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
@@ -53,7 +53,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … ✅ だが **真正性検証なし** ❌（カテゴリ3）
-2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量/需給価格は未配線**（`feature-pricer` 実装済・未配線）
+2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 **特徴量価格は advisory 配線済**（注文へ `referencePrice`/`priceDeviationPct` を記録、実請求は不変）
 3. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
 4. 決済: 直接二段送金 `btc-payment.sendBTC` … ❌ **エスクロー無し**（本書で実装）
 5. 稼働: `virtual-gpu-manager` でコンテナ割当 … 🟡（要 Docker/k8s 実機）

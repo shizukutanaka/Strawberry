@@ -94,6 +94,8 @@
 2. (中期) 逆オークション or ダブルオークションでマッチング（Akash 流, arXiv:1804.09961）。
 3. (中期) 腐敗性財 AMM（arXiv:2511.16357）で空き GPU 時間の動的値下げ・在庫消化。
 
+**実装済（2026-09）**: アクション2の逆オークションは別途実装済み（auction-engine）。アクション1を追加: `feature-pricer`（Agora 型特徴量価格）を注文作成経路に advisory 配線 — `POST /orders` が `referencePrice`（特徴量×需給乗数の参照時給、実際の占有率を使用）と `priceDeviationPct`（プロバイダ flat 価格との乖離率）を注文へ記録。実請求額は不変（後方互換）。併せて `inferGeneration(model)` で機種名→アーキテクチャ世代（hopper/ada/ampere 等）を推定し、GPU レコードに `generation` が無くても世代スコアを反映。残件: 価格決定そのものへの適用（強制ではなくプロバイダ向け提示 + 借り手 UI での乖離警告）。
+
 優先度: **中**
 
 ---

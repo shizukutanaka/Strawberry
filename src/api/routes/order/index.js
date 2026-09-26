@@ -1052,6 +1052,39 @@ router.post('/',
     orderData.pricePerHour = pricePerHour;
     orderData.totalPrice = totalPrice;
     orderData.totalPriceJPY = totalPriceJPY;
+
+    // F1.2: 特徴量価格の参照値を注文へ記録（advisory — 実請求額は変えない）。
+    // プロバイダ flat 価格と feature-pricer 参照値の乖離率を価格妥当性シグナルとして
+    // 借り手/運用に提供する（referencePrice/priceDeviationPct）。
+    try {
+      const featurePricer = require('../../../pricing/feature-pricer');
+      const allGpus = GpuRepository.getAll();
+      const busyGpuIds = new Set(
+        _allOrdersForRating.filter(o => BLOCKING_ORDER_STATUSES.has(o.status)).map(o => o.gpuId)
+      );
+      const utilization = allGpus.length > 0 ? busyGpuIds.size / allGpus.length : 0;
+      const refQuote = featurePricer.computePrice({
+        model: gpu.model,
+        vramGB: gpu.memoryGB,
+        memBandwidthGBs: gpu.memBandwidthGBs || (gpu.performance && gpu.performance.memBandwidthGBs) || 0,
+        benchmarkScore: gpu.performance && gpu.performance.benchmarkScore,
+      }, { utilization });
+      if (Number.isFinite(refQuote.pricePerHour) && refQuote.pricePerHour > 0) {
+        orderData.referencePrice = {
+          pricePerHour: Math.round(refQuote.pricePerHour * 100) / 100,
+          featureMultiplier: Math.round(refQuote.breakdown.featureMultiplier * 1000) / 1000,
+          demandMultiplier: Math.round(refQuote.breakdown.demandMultiplier * 1000) / 1000,
+          utilization: Math.round(utilization * 1000) / 1000,
+        };
+        orderData.priceDeviationPct = Math.round(
+          ((pricePerHour - refQuote.pricePerHour) / refQuote.pricePerHour) * 1000
+        ) / 10;
+      }
+    } catch (e) {
+      // 参照価格は advisory — 失敗しても注文作成は妨げない
+      logger.warn(`reference price computation failed for gpu ${gpu.id}: ${e.message}`);
+    }
+
     const createdOrder = OrderRepository.create(orderData);
     // 通知サービス呼び出し
     const notifyMsg = `新規注文: #${createdOrder.id}\nユーザー: ${req.user.id}\nGPU: ${gpu.name}\n時間: ${durationMinutes}分\n合計: ${totalPrice} sat (${totalPriceJPY}円)`;

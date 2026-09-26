@@ -28,14 +28,29 @@ function clamp(x, lo, hi) {
   return Math.max(lo, Math.min(hi, x));
 }
 
+/**
+ * 機種名からアーキテクチャ世代を推定（GPU レコードに generation フィールドが無いため）。
+ * 未一致は undefined → generationScore の既定 1.0（参照GPU同世代扱い）。
+ */
+function inferGeneration(model) {
+  if (typeof model !== 'string') return undefined;
+  const m = model.toLowerCase();
+  if (/\bb200|\bgb200|rtx[\s-]?50\d\d/.test(m)) return 'blackwell';
+  if (/\bh\d{3}|\bgh200/.test(m)) return 'hopper'; // H100/H200/H800
+  if (/rtx[\s-]?40\d\d|\bl40s?\b|\bl4\b|6000.?ada/.test(m)) return 'ada';
+  if (/rtx[\s-]?30\d\d|\ba100|\ba40|\ba30|\ba10\b|\ba[246]000|\ba2\b/.test(m)) return 'ampere';
+  if (/rtx[\s-]?20\d\d|\bt4\b|quadro[\s-]?rtx/.test(m)) return 'turing';
+  if (/\bv100|\bgv100/.test(m)) return 'volta';
+  if (/gtx[\s-]?10\d\d|\bp100|\bp40|\bp4\b/.test(m)) return 'pascal';
+  return undefined;
+}
+
 function generationScore(gpu) {
   if (typeof gpu.generationScore === 'number' && Number.isFinite(gpu.generationScore)) {
     return gpu.generationScore;
   }
-  if (typeof gpu.generation === 'string') {
-    return GENERATION_SCORES[gpu.generation.toLowerCase()] || 1.0;
-  }
-  return 1.0;
+  const gen = typeof gpu.generation === 'string' ? gpu.generation.toLowerCase() : inferGeneration(gpu.model);
+  return (gen && GENERATION_SCORES[gen]) || 1.0;
 }
 
 /**
@@ -96,4 +111,4 @@ function computePrice(gpu = {}, market = {}, opts = {}) {
   };
 }
 
-module.exports = { computePrice, generationScore, GENERATION_SCORES, DEFAULTS };
+module.exports = { computePrice, generationScore, inferGeneration, GENERATION_SCORES, DEFAULTS };

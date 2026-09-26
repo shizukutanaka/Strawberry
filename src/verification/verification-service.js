@@ -11,8 +11,18 @@ function createVerificationService({
   auditRate = 0.1,
   tolerance = 1e-3,
   zeroLoad = {},
+  // 監査抽出の鍵。無キーだとプロバイダが sha256(jobId) を自前で計算して
+  // 「監査されないジョブ」を予測し選択的にサボれる（work-verifier.js 参照）。
+  // 明示値 → VERIFICATION_AUDIT_SECRET env → それも無ければプロセス生成の
+  // エフェメラル鍵（監査要否は open() 時点で rec.audited に永続化されるため、
+  // 再起動で鍵が変わっても判定は記録済みの値が使われ整合する）。
+  auditSecret,
 } = {}) {
   const repo = repository || require('../db/json/VerificationRepository');
+  const secretKey = auditSecret !== undefined
+    ? auditSecret
+    : (process.env.VERIFICATION_AUDIT_SECRET
+      || require('crypto').randomBytes(32).toString('hex'));
 
   function mustGet(jobId) {
     const rec = repo.getByJobId(jobId);
@@ -24,7 +34,10 @@ function createVerificationService({
     /** ジョブの検証レコードを開設し、監査要否(audited)を決定する。 */
     open(jobId, { providerId = null, escrowId = null, auditRate: ar } = {}) {
       if (!jobId) throw new Error('jobId required');
-      const audited = shouldAudit(jobId, { auditRate: typeof ar === 'number' ? ar : auditRate });
+      const audited = shouldAudit(jobId, {
+        auditRate: typeof ar === 'number' ? ar : auditRate,
+        secretKey,
+      });
       return repo.create({
         jobId,
         providerId,

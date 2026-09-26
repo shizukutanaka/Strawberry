@@ -1,5 +1,6 @@
 // Lightning Network対応の外部決済APIラッパー（例: OpenNode, LNbits, BTCPay Server）
 const axios = require('axios');
+const { SAFE_AXIOS_CONFIG } = require('../../utils/ssrf-guard');
 
 // 環境変数でAPIキーやエンドポイントを管理
 const PROVIDER = process.env.LN_PROVIDER || 'opennode'; // 'opennode', 'lnbits', 'btcpay'
@@ -18,7 +19,8 @@ async function sendPaymentOpenNode(dest, amountBTC) {
       amount: amountSats
     },
     {
-      headers: { 'Authorization': API_KEY }
+      headers: { 'Authorization': API_KEY },
+      ...SAFE_AXIOS_CONFIG,
     }
   );
   return res.data;
@@ -36,7 +38,8 @@ async function sendPaymentLNbits(dest, amountBTC) {
       amount: amountSats
     },
     {
-      headers: { 'X-Api-Key': API_KEY }
+      headers: { 'X-Api-Key': API_KEY },
+      ...SAFE_AXIOS_CONFIG,
     }
   );
   return res.data;

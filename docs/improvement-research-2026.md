@@ -426,3 +426,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
 - プロバイダ向け自動登録スクリプトの実契約化（fix/DX）: `gpu_lending_setup_auto_register.js` が存在しない `POST /api/gpu` を叩き、必須フィールド（memoryGB/clockMHz/powerWatt/pricePerHour）と arch 値（x64→x86_64 等）もスキーマ不一致で、実行しても 404/400 確定だった → `POST /api/v1/gpus` + `schemas.gpu.register` 準拠 payload へ修正、URL/トークンを環境変数化（STRAWBERRY_API_URL/STRAWBERRY_TOKEN）、非対応 GPU は早期エラーで案内。実 Joi スキーマでのドライ検証済み。
+||||||| 5c3f4ed
+
+### その他実装済（運用ドキュメント）
+- `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。

@@ -426,5 +426,18 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
 
+## 実装済みメモ（ドキュメント外の実測改善）
+
+- **稼働統計の書き込みバッチ化**（本PR）: `recordProviderHeartbeat`/`recordSlaBreach` が
+  呼ばれるたびに `uptime.json` を `getByProviderId` の load + `update` の load+write
+  で計3回全量 I/O していたのを、プロセス内 pending 差分 + `UPTIME_FLUSH_INTERVAL_MS`
+  （既定30s）ごとの一括 `updateMany`（1 load + 1 write）へ変更。読み取り側
+  `getReliability` は pending を上乗せして返すため即時性は維持。落ちた場合の
+  喪失窓は1フラッシュ周期（best-effort 統計として許容）。
+- **リポジトリの `updateMany` プリミティブ**: 複数行の部分更新を 1 load + 1
+  atomicWrite に束ねる。ポーラー・バッチフラッシュ等の N 行更新経路で
+  逐次 update の N+1 書き込み増幅を潰す。
+||||||| 5c3f4ed
+
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。

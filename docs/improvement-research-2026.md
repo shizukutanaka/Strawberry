@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- Google OAuth ログインのトークンペア発行: `/auth/google` が access token のみを返し refresh token を発行していなかった（OAuth ユーザーは 1h ごと強制再ログイン・ローテーション/サーバ側失効経路に非対応）。パスワードログインと同じ `signAccessToken`+`signRefreshToken`（ati 紐付け）+`lastLogin` 更新へ揃えた。あわせて `google-auth-library` を dependencies に追加（未収録で require が必ず MODULE_NOT_FOUND→503 となり、設定済みでも実質デッドだった）。

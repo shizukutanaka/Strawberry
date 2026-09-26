@@ -55,8 +55,25 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
     try { onAccess(action, detail); } catch (e) { /* 監査失敗はサイレント */ }
   };
 
-  function load() {
-    if (!fs.existsSync(filePath)) return [];
+  // ファイル内容の stat 指紋キャッシュ。
+  // リクエスト毎に複数の getById/getAll が走るが、書き込みは全て atomicWriteJSON の
+  // temp+rename 経由なので mtime/size の指紋で他プロセス更新も確実に検出できる。
+  // 返却値は必ず複製する: 呼び出し側が取得レコードを書き換えても（update の
+  // rows[idx] 代入、finder 結果のフィールド改変など）キャッシュ本体を汚さないため。
+  let _cache = null;
+  let _cacheStamp = null;
+
+  function fileStamp() {
+    try {
+      const s = fs.statSync(filePath);
+      return `${s.mtimeMs}:${s.size}`;
+    } catch (_) {
+      // ファイル不在・stat 失敗時はキャッシュを使わない（毎回実読み）
+      return null;
+    }
+  }
+
+  function readFromDisk() {
     let raw;
     try {
       raw = fs.readFileSync(filePath, 'utf-8');
@@ -84,6 +101,30 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         `Inspect/restore ${filePath} (or a backup) and retry.`
       );
     }
+  }
+
+  function load() {
+    // stat を read より先に取る: 読み取り中に別プロセスが rename した場合、
+    // 記録する指紋は実内容より古い側に倒れ、次回 load が再読みする（保守側）。
+    const stamp = fileStamp();
+    if (_cache !== null && stamp !== null && stamp === _cacheStamp) {
+      return structuredClone(_cache);
+    }
+    if (!fs.existsSync(filePath)) {
+      // 不在ファイルはキャッシュしない（作成直後の stat を必ず通すため）
+      _cache = null;
+      _cacheStamp = null;
+      return [];
+    }
+    const rows = readFromDisk();
+    if (stamp !== null) {
+      _cache = rows;
+      _cacheStamp = stamp;
+    } else {
+      _cache = null;
+      _cacheStamp = null;
+    }
+    return structuredClone(rows);
   }
 
   const repo = {

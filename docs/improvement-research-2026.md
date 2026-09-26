@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- Web OAuth フロー（GET /auth/google|github）の login-CSRF 対策とログイン完結: `passport.authenticate` に `state: true` を付与（共有 masterSession を web フロー2ルートにのみ適用し passport-oauth2 のステートストアを成立）。コールバックは従来 OAuth プロフィールを echo するだけでトークンを発行していなかったのを、RESTful /auth/google と同一ポリシー（email_verified 必須・同一メール既存アカウントは暗黙リンクせず 409・access+refresh ペア発行+ati 紐付け+lastLogin 更新）でログインを完結させ、`UserRepository.getByGithubId` ファインダを追加。

@@ -5,12 +5,19 @@
 // 側の変更を不要にし、package.json / lockfile も汚染しない）。
 const path = require('path');
 
+// imagemin-mozjpeg@10 等は ESM-only — Node 20.19+ の require(esm) は
+// { default: fn } 名前空間を返すため、関数本体は .default 側にある。
+// CJS/ESM 両形態を正規化する。
+function esmInterop(mod) {
+  return (mod && mod.default) || mod;
+}
+
 function loadImagemin() {
   try {
     return {
-      imagemin: require('imagemin'),
-      imageminMozjpeg: require('imagemin-mozjpeg'),
-      imageminPngquant: require('imagemin-pngquant'),
+      imagemin: esmInterop(require('imagemin')),
+      imageminMozjpeg: esmInterop(require('imagemin-mozjpeg')),
+      imageminPngquant: esmInterop(require('imagemin-pngquant')),
     };
   } catch (e) {
     if (e.code !== 'MODULE_NOT_FOUND') throw e;

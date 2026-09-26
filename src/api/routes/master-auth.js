@@ -126,11 +126,18 @@ router.post('/totp', async (req, res) => {
   if (req.session.lastTotpCounter === currentTotpCounter) {
     return res.status(400).send('このTOTPコードは既に使用済みです。次のウィンドウ（最大30秒後）をお待ちください。');
   }
+  // window:1 は ±30 秒の隣接ウィンドウを受理するため、カウンタ比較だけでは
+  // 「前ウィンドウで受理したコードを次ウィンドウで再提示」するリプレイを防げない。
+  // 受理済みコード値自体を記録して同一値の再提示をウィンドウ跨ぎでも拒否する。
+  if (req.session.lastTotpToken === token) {
+    return res.status(400).send('このTOTPコードは既に使用済みです。次のコードをお待ちください。');
+  }
   const valid = verifyTOTP(process.env.MASTER_TOTP_SECRET, token);
   if (!valid) {
     return res.status(401).send('TOTP認証失敗');
   }
   req.session.lastTotpCounter = currentTotpCounter;
+  req.session.lastTotpToken = token;
   req.session.totpAttempts = 0;
   req.session.totpAuth = true;
   // メール認証コード発行（暗号論的乱数。Math.random は予測可能で不可）

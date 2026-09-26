@@ -46,6 +46,31 @@ describe('appendRotated', () => {
     appendRotated(f, 'short\n', { maxBytes: 1024 });
     expect(fs.existsSync(`${f}.1`)).toBe(false);
   });
+
+  it('skips rotation when the rotate lock is held by another process', () => {
+    const f = path.join(dir, 'a.log');
+    fs.writeFileSync(f, 'x'.repeat(100));
+    // 他プロセスがローテート中を模してロックを保持
+    fs.mkdirSync(`${f}.rotate-lock`);
+    appendRotated(f, 'new\n', { maxBytes: 50 });
+    // ローテートされず追記のみ行われる（次の書き手がローテートする）
+    expect(fs.readFileSync(f, 'utf-8')).toBe('x'.repeat(100) + 'new\n');
+    expect(fs.existsSync(`${f}.1`)).toBe(false);
+    expect(fs.existsSync(`${f}.rotate-lock`)).toBe(true);
+  });
+
+  it('reclaims a stale lock and rotates normally', () => {
+    const f = path.join(dir, 'a.log');
+    fs.writeFileSync(f, 'x'.repeat(100));
+    // クラッシュ残留の古いロックを再現（mtime を 1 分前に偽装）
+    fs.mkdirSync(`${f}.rotate-lock`);
+    const old = Date.now() - 60 * 1000;
+    fs.utimesSync(`${f}.rotate-lock`, new Date(old), new Date(old));
+    appendRotated(f, 'new\n', { maxBytes: 50 });
+    expect(fs.readFileSync(f, 'utf-8')).toBe('new\n');
+    expect(fs.readFileSync(`${f}.1`, 'utf-8')).toBe('x'.repeat(100));
+    expect(fs.existsSync(`${f}.rotate-lock`)).toBe(false);
+  });
 });
 
 describe('ensureLogDir', () => {

@@ -73,7 +73,7 @@ Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP 
 ## データ・ログ管理
 
 - `data/*.json` — JSON ファイルリポジトリの実データ（gitignore 済み）。破損時は fail-closed で起動/読み込みを中断するため、手動で `data/` を点検・復旧する。
-- `data/logs/*.log` — `access-audit.log`・`db-access.log`・`gpu-events.log`・ハッシュチェーン監査ログ（`AUDIT_LOG_PATH`）等、追記型。ローテーション機構はなく、ディスク使用量は外部で監視・退避する（`MAX_AUDIT_LOG_MB` は監査ログの上限）。
+- `logs/*.log` — `access-audit.log`・`db-access.log`・`gpu-events.log`・ハッシュチェーン監査ログ（`AUDIT_LOG_PATH`）等、追記型（`logs/` 直下）。ローテーション機構はなく、ディスク使用量は外部で監視・退避する（`MAX_AUDIT_LOG_MB` は監査ログの上限）。
 - `backups/` — 手動バックアップ出力先。
 
 ## FAQ・トラブルシュート

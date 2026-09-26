@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### §3 実装済（部分、続②）
+
+- 障害時自動対応 `gpu-auto-recovery` が支払いレコードを `refunded` にするだけで、対応するエスクロー（HELD/PENDING）の返金・解放を呼んでいなかったため、資金がロックされたまま残るギャップがあった。`autoHandleGpuFailure` が注文のエスクローを走査し DISPUTED→`resolveDispute('refund')`（refund_renter + slash_provider）、HELD→`cancel`（cancel_invoice + refund_renter）、PENDING→`cancel`（hold invoice 解放）まで接続。

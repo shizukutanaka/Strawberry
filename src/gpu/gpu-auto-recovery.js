@@ -5,6 +5,9 @@ const { sendNotification, NotifyType } = require('../utils/notifier');
 // 分割代入すると undefined になり実行時クラッシュする）。デフォルト import で受ける。
 const OrderRepository = require('../db/json/OrderRepository');
 const PaymentRepository = require('../db/json/PaymentRepository');
+const EscrowRepository = require('../db/json/EscrowRepository');
+const { createEscrowService } = require('../payments/escrow-service');
+const { appendAuditLog } = require('../utils/audit-log');
 
 async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
   // 1. オーダー自動停止
@@ -25,6 +28,35 @@ async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
       logger.info(`[AUTO-RECOVERY] Payment ${payment.id} marked as refunded for order ${orderId}`);
       // TODO: 実際の返金処理（Lightning/銀行API等）は今後拡張
     }
+  }
+  // 2b. エスクローの返金/解放: payment を refunded にしても escrow が HELD/PENDING の
+  // ままだと資金がロックされたまま残る（未決済注文の自動失効とは別経路）。
+  // プロバイダ起因の障害なので RESOLVE_REFUND（refund_renter + slash_provider）で精算し、
+  // PENDING（未入金）は CANCEL で hold invoice を解放する。
+  try {
+    const escrowSvc = createEscrowService({ repository: EscrowRepository });
+    const escrows = (EscrowRepository.getByOrderId && EscrowRepository.getByOrderId(orderId)) || [];
+    for (const esc of escrows) {
+      try {
+        if (esc.state === 'DISPUTED') {
+          escrowSvc.resolveDispute(esc.id, 'refund'); // refund_renter + slash_provider
+          appendAuditLog('escrow_auto_refund_gpu_failure', { orderId, escrowId: esc.id, from: esc.state });
+          logger.info(`[AUTO-RECOVERY] Escrow ${esc.id} refunded for order ${orderId}`);
+        } else if (esc.state === 'HELD') {
+          escrowSvc.cancel(esc.id); // cancel_invoice + refund_renter
+          appendAuditLog('escrow_auto_refund_gpu_failure', { orderId, escrowId: esc.id, from: esc.state });
+          logger.info(`[AUTO-RECOVERY] Held escrow ${esc.id} refunded for order ${orderId}`);
+        } else if (esc.state === 'PENDING') {
+          escrowSvc.cancel(esc.id);
+          appendAuditLog('escrow_auto_cancel_gpu_failure', { orderId, escrowId: esc.id });
+          logger.info(`[AUTO-RECOVERY] Pending escrow ${esc.id} cancelled for order ${orderId}`);
+        }
+      } catch (e) {
+        logger.warn(`[AUTO-RECOVERY] Escrow ${esc.id} refund/cancel failed: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    logger.warn(`[AUTO-RECOVERY] escrow refund wiring failed for order ${orderId}: ${e.message}`);
   }
   // 3. 多段通知
   const msg = `【GPU障害自動対応】\n注文: ${orderId}\nGPU: ${gpuId}\nユーザー: ${userId}\n理由: ${reason}\n\nオーダー停止・返金処理を自動実行しました。`;

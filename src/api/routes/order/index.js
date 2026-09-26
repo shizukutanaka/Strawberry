@@ -1803,7 +1803,8 @@ router.post('/:id/start',
       // "Virtual GPU not found" で失敗していた。GPU レコードを渡し、未登録なら
       // marketplace のスペックから最小限のエントリを遅延登録させる。
       const gpu = GpuRepository.getById(order.gpuId);
-      const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId, gpu);
+      // §11: deterministicExecution 注文はコンテナに再現性 env を注入する
+      const allocation = await vgpuManager.allocateGPU(order.gpuId, orderId, gpu, { deterministic: !!order.deterministicExecution });
       if (!allocation || !allocation.success) {
         throw new APIError(ErrorTypes.INTERNAL, 'Failed to allocate GPU', 500, { details: allocation && allocation.message });
       }

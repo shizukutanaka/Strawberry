@@ -344,7 +344,14 @@ class VirtualGPUManager extends EventEmitter {
                     env: [
                         { name: 'VGPU_ID', value: vgpuId },
                         { name: 'PHYSICAL_GPU_ID', value: physicalGPU.id },
-                        { name: 'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', value: String(config.computePercentage || 50) }
+                        { name: 'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', value: String(config.computePercentage || 50) },
+                        // §11: 決定論的実行モード（検証再現性の前提条件）
+                        ...(config.deterministic ? [
+                            { name: 'STRAWBERRY_DETERMINISTIC', value: '1' },
+                            { name: 'CUBLAS_WORKSPACE_CONFIG', value: ':4096:8' },
+                            { name: 'NVIDIA_TF32_OVERRIDE', value: '0' },
+                            { name: 'PYTHONHASHSEED', value: '0' },
+                        ] : []),
                     ],
                     volumeMounts: [{
                         name: 'gpu-config',
@@ -394,7 +401,15 @@ class VirtualGPUManager extends EventEmitter {
                 `VGPU_ID=${vgpuId}`,
                 `PHYSICAL_GPU_ID=${physicalGPU.id}`,
                 `CUDA_VISIBLE_DEVICES=${this.getGPUIndex(physicalGPU.id)}`,
-                `CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${config.computePercentage || 50}`
+                `CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${config.computePercentage || 50}`,
+                // §11: 決定論的実行（検証の再計算を成立させる前提）。
+                // cuBLAS のワークスペース固定・TF32 無効化・Python hash seed 固定。
+                ...(config.deterministic ? [
+                    'STRAWBERRY_DETERMINISTIC=1',
+                    'CUBLAS_WORKSPACE_CONFIG=:4096:8',
+                    'NVIDIA_TF32_OVERRIDE=0',
+                    'PYTHONHASHSEED=0',
+                ] : []),
             ],
             HostConfig: {
                 Runtime: 'nvidia',
@@ -610,13 +625,13 @@ nvidia-cuda-mps-control -d
     // gpuRecord は呼び出し元（order/index.js の /start）が既に持っている marketplace
     // GPU レコード。省略時（既存呼び出し規約テスト・未知IDの検証等）は遅延登録を行わず、
     // 従来通り未登録 GPU への割り当ては {success:false} で失敗する。
-    async allocateGPU(gpuId, rentalId, gpuRecord = null) {
+    async allocateGPU(gpuId, rentalId, gpuRecord = null, opts = {}) {
         try {
             if (gpuRecord) {
-                this.ensureVirtualGPU(gpuId, gpuRecord);
+                this.ensureVirtualGPU(gpuId, gpuRecord, opts);
             }
             const allocation = await this.allocateVirtualGPU(gpuId, rentalId);
-            return { success: true, allocationId: allocation.id, ...allocation };
+            return { success: true, allocationId: allocation.id, deterministic: !!opts.deterministic, ...allocation };
         } catch (e) {
             return { success: false, message: e.message };
         }
@@ -628,14 +643,21 @@ nvidia-cuda-mps-control -d
     // 伴うため使えない（そのGPUは本ノード上に物理的に存在しない）。
     // ルート互換アダプタ（allocateGPU/releaseGPU 等）は gpuId をそのまま vgpuId として
     // this.virtualGPUs を検索するため、必ず gpuId をキーとして登録する。
-    ensureVirtualGPU(gpuId, gpuRecord) {
-        if (this.virtualGPUs.has(gpuId)) return this.virtualGPUs.get(gpuId);
+    ensureVirtualGPU(gpuId, gpuRecord, opts = {}) {
+        if (this.virtualGPUs.has(gpuId)) {
+            const existing = this.virtualGPUs.get(gpuId);
+            // 遅延登録済みでも、検証前提の deterministic フラグは後から引き上げ可能にする
+            if (opts.deterministic && !existing.config.deterministic) {
+                existing.config = { ...existing.config, deterministic: true };
+            }
+            return existing;
+        }
         const virtualGPU = {
             id: gpuId,
             physicalGPUId: gpuId,
             name: gpuRecord.name || 'Marketplace GPU',
             type: 'marketplace',
-            config: {},
+            config: { deterministic: !!opts.deterministic },
             resources: {
                 vram: typeof gpuRecord.memoryGB === 'number' ? gpuRecord.memoryGB : null,
                 compute: null,

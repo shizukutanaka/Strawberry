@@ -259,6 +259,10 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 **推奨アクション**:
 1. §1 の検証は **PoL 単体に依存しない**。楽観的検証（チャレンジ＋再計算, arXiv:2403.09603）＋ TEE attestation（§2）＋ ウォーターマークを組み合わせる。
 2. 非決定性制御（固定シード・決定論的カーネル）を検証の前提として `virtual-gpu-manager` の実行環境に組み込む。
+   → **実装済（部分）**: 注文に `deterministicExecution` フラグ追加。`allocateGPU` → vGPU config →
+   docker/k8s コンテナ env へ `CUBLAS_WORKSPACE_CONFIG=:4096:8`・`NVIDIA_TF32_OVERRIDE=0`・`PYTHONHASHSEED=0`・
+   `STRAWBERRY_DETERMINISTIC=1` を注入（arXiv:2403.09603 の HW 非決定性制御の前提）。
+   残: ジョブ側のシード固定規約・チャレンジ再計算プロトコル。
 
 優先度: **高（§1 の正しさを担保する前提）**
 

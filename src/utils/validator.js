@@ -181,7 +181,10 @@ const schemas = {
       }).optional(),
       priority: Joi.string().valid('price', 'performance', 'availability', 'distance').default('price'),
       // 事前予約: 指定しない場合は即時（now）として扱う
-      scheduledStartAt: Joi.string().isoDate().optional()
+      scheduledStartAt: Joi.string().isoDate().optional(),
+      // §11: 決定論的実行モード — 検証の再計算を成立させる前提（固定シード等）。
+      // 注文に記録され、GPU 割当時にコンテナ env へ伝播する。
+      deterministicExecution: Joi.boolean().optional()
     })
   },
   

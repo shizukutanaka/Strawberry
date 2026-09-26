@@ -1093,18 +1093,25 @@ router.post('/',
       }).catch(() => {});
     }
     // Googleカレンダー連携（非同期で実行、失敗はログのみ。googleapis は optional）
-    try {
-      const { addEventToCalendar } = require('../../../utils/google-calendar');
-      const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
-      addEventToCalendar({
-        summary: `GPU予約 #${createdOrder.id}`,
-        description: `ユーザー: ${req.user.id}\nGPU: ${gpu.name}\n合計: ${totalPrice} sat (${totalPriceJPY}円)`,
-        start: { dateTime: startDate.toISOString() },
-        end: { dateTime: endDate.toISOString() },
-      }).catch(err => logger.error('Googleカレンダー登録失敗', { error: err.message }));
-    } catch (e) {
-      logger.error('Googleカレンダー連携モジュール読込失敗', { error: e.message });
+    // GCAL_REFRESH_TOKEN 未設定なら連携自体が未構成 — require すら試みない。
+    // googleapis は package.json の依存に含まれないため、未設定環境で無条件に
+    // require すると注文作成のたびに 'Cannot find module' の ERROR ログを吐き、
+    // 本物のエラーが埋もれていた。設定済み環境のみ読み込みを試みる。
+    if (process.env.GCAL_REFRESH_TOKEN) {
+      try {
+        const { addEventToCalendar } = require('../../../utils/google-calendar');
+        const startDate = new Date();
+        const endDate = new Date(startDate.getTime() + durationMinutes * 60000);
+        addEventToCalendar({
+          summary: `GPU予約 #${createdOrder.id}`,
+          description: `ユーザー: ${req.user.id}\nGPU: ${gpu.name}\n合計: ${totalPrice} sat (${totalPriceJPY}円)`,
+          start: { dateTime: startDate.toISOString() },
+          end: { dateTime: endDate.toISOString() },
+        }).catch(err => logger.warn('Googleカレンダー登録失敗', { error: err.message }));
+      } catch (e) {
+        // 設定済みだが googleapis 未導入等 — optional 機能の欠落は warn に留める
+        logger.warn('Googleカレンダー連携モジュール読込失敗', { error: e.message });
+      }
     }
     // オーダーイベントをログに記録
     logger.info(`Order created: ${createdOrder.id}`, {

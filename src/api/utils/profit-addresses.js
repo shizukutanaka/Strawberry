@@ -4,7 +4,20 @@ const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
 const { withLock } = require('../../utils/async-lock');
 const { logger } = require('../../utils/logger');
-const ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
+// 従来 `../../data/...` は src/data/profit-addresses.json を指していた
+// （__dirname = src/api/utils から2階層上は src/）。src/data/ に格納すると
+// git 追跡済みの同梱プレースホルダが出荷され、新規デプロイで例示アドレスが
+// 実送金先として選択され得た（BIP-173 例示アドレスは BTC パターンを通過する）。
+// 他リポジトリ同様、ランタイムデータはリポジトリルートの data/ に置く。
+const ADDR_FILE = path.join(__dirname, '../../../data/profit-addresses.json');
+// 移行元（旧バグパス）。残っている場合のみ内容を引き継ぐ。
+const LEGACY_ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
+// リポジトリにコミットされていたプレースホルダ（ダミー + BIP-173 例示アドレス）。
+// 例示アドレス宛の送金は事実上のバーンで資金喪失になるため、移行時に引き継がない。
+const BUNDLED_SEED_ADDRESSES = new Set([
+  'bc1qoperatoridem0000000000000000000000',
+  'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
+]);
 
 // 並行 add/remove で list 全体を read-modify-write しているため、
 // 並行 remove(攻撃者旧アドレス) + add(正規新アドレス) が、片方の読み込んだ古い
@@ -31,10 +44,26 @@ function isValidBtcAddress(address) {
   return BTC_ADDRESS_PATTERNS.some((re) => re.test(a));
 }
 
-// 初期化：ディレクトリ・ファイルがなければ作成
+// 初期化：ディレクトリ・ファイルがなければ作成。
+// 旧パス（src/data/）に実データが残る環境では、同梱シードを除外して一度だけ移行する。
 if (!fs.existsSync(ADDR_FILE)) {
   fs.mkdirSync(path.dirname(ADDR_FILE), { recursive: true });
-  atomicWriteJSON(ADDR_FILE, []);
+  let migrated = [];
+  if (fs.existsSync(LEGACY_ADDR_FILE)) {
+    try {
+      const legacy = JSON.parse(fs.readFileSync(LEGACY_ADDR_FILE));
+      if (Array.isArray(legacy)) {
+        const dropped = legacy.length;
+        migrated = legacy.filter(a => !BUNDLED_SEED_ADDRESSES.has(a));
+        if (migrated.length !== dropped) {
+          logger.warn(`profit-addresses: dropped ${dropped - migrated.length} bundled seed address(es) during migration`);
+        }
+      }
+    } catch (e) {
+      logger.warn(`profit-addresses: legacy store unreadable, starting empty: ${e.message}`);
+    }
+  }
+  atomicWriteJSON(ADDR_FILE, migrated);
 }
 
 function getProfitAddresses() {
@@ -91,5 +120,9 @@ module.exports = {
   addProfitAddress,
   removeProfitAddress,
   selectProfitAddress,
-  isValidBtcAddress
+  isValidBtcAddress,
+  // テスト用フック: ストアパスの回帰検証（timingSafeStrEqual/_isSSRFUrl と同型）
+  _ADDR_FILE: ADDR_FILE,
+  _LEGACY_ADDR_FILE: LEGACY_ADDR_FILE,
+  _BUNDLED_SEED_ADDRESSES: BUNDLED_SEED_ADDRESSES
 };

@@ -38,13 +38,14 @@ const NotifyType = {
 const { sendEmailNotification } = require('./email');
 const fs = require('fs');
 const path = require('path');
+const { resolveDataDir } = require('../db/json/data-dir');
 
 async function sendNotification(typeOrUserId, message, options = {}) {
   // typeOrUserIdがユーザーIDの場合、多段通知
   if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
     // 設定ファイルから通知設定を取得
     const userId = typeOrUserId;
-    const settingsPath = path.resolve(__dirname, '../../data/notification-settings.json');
+    const settingsPath = path.join(resolveDataDir(), 'notification-settings.json');
     let settings = {};
     try {
       if (fs.existsSync(settingsPath)) {

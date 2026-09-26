@@ -2,9 +2,10 @@
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
+const { resolveDataDir } = require('../../db/json/data-dir');
 const { withLock } = require('../../utils/async-lock');
 const { logger } = require('../../utils/logger');
-const ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
+const ADDR_FILE = path.join(resolveDataDir(), 'profit-addresses.json');
 
 // 並行 add/remove で list 全体を read-modify-write しているため、
 // 並行 remove(攻撃者旧アドレス) + add(正規新アドレス) が、片方の読み込んだ古い

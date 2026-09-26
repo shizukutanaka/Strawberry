@@ -6,10 +6,11 @@ const crypto = require('crypto');
 const path = require('path');
 const Joi = require('joi');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { resolveDataDir } = require('../db/json/data-dir');
 const { authenticateJWT, checkRole } = require('./middleware/security');
 const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
 
-const SANDBOX_KEY_PATH = path.join(__dirname, '../../data/sandbox-apikeys.json');
+const SANDBOX_KEY_PATH = path.join(resolveDataDir(), 'sandbox-apikeys.json');
 
 // サンドボックスAPIキー生成
 function generateApiKey() {

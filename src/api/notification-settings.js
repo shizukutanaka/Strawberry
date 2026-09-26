@@ -5,6 +5,7 @@ const path = require('path');
 const Joi = require('joi');
 const { authenticateJWT } = require('./middleware/security');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { resolveDataDir } = require('../db/json/data-dir');
 const { asyncHandler, APIError, ErrorTypes } = require('../utils/error-handler');
 const { withLock } = require('../utils/async-lock');
 
@@ -47,7 +48,7 @@ const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)
     return value;
   }).messages({ 'any.invalid': 'Webhook URL must not point to private or internal addresses' });
 
-const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
+const SETTINGS_PATH = path.join(resolveDataDir(), 'notification-settings.json');
 
 function loadSettings() {
   if (!require('fs').existsSync(SETTINGS_PATH)) return {};

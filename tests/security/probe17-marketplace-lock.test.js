@@ -11,7 +11,8 @@ const OrderRepository = require('../../src/db/json/OrderRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 const UserRepository = require('../../src/db/json/UserRepository');
 
-const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
+const SETTINGS_PATH = path.join(resolveDataDir(), 'notification-settings.json');
 
 const uniq = `p17${Date.now().toString(36)}`;
 let adminTok;

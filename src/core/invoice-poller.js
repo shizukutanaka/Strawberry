@@ -1,6 +1,8 @@
 // src/core/invoice-poller.js
 // Polls pending Lightning invoices and transitions payment/order state when settled.
 // Design: single setInterval loop, re-entrant-safe (lock prevents overlapping runs).
+const fs = require('fs');
+const path = require('path');
 const { logger } = require('../utils/logger');
 const PaymentRepository = require('../db/json/PaymentRepository');
 const OrderRepository = require('../db/json/OrderRepository');
@@ -8,18 +10,38 @@ const { appendAuditLog } = require('../utils/audit-log');
 
 const POLL_INTERVAL_MS = 15_000; // check every 15 s
 const INVOICE_EXPIRE_BUFFER_MS = 60_000; // 1 min grace after invoiceExpiresAt
+const PAYMENTS_FILE = path.resolve(__dirname, '../../data/payments.json');
 
 let _timer = null;
 let _running = false;
 let _lightning = null; // set via start()
+let _lastStamp = null;   // `${mtimeMs}:${size}` — 前回スキャン時のファイル指紋
+let _lastPending = null; // 前回スキャンの pending 数（null=未走査）
+
+function _fileStamp() {
+  try {
+    const s = fs.statSync(PAYMENTS_FILE);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null; // stat 失敗時はゲートを使わず従来通り読む
+  }
+}
 
 async function pollOnce() {
   if (!_lightning || _running) return;
   _running = true;
   try {
+    // stat ゲート: ファイルが前回スキャンから不変かつ前回 pending 0 なら、
+    // pending は依然 0 が確定するので全量パースをスキップ。
+    // （pending >0 のときは各インボイスの外部決済状態を毎回問い合わせるため
+    // この経路は使わない — 静寂時の I/O をゼロにするための早期 return）
+    const stamp = _fileStamp();
+    if (stamp !== null && stamp === _lastStamp && _lastPending === 0) return;
     const pending = PaymentRepository.getAll().filter(
       (p) => p.method === 'lightning' && p.status === 'pending' && p.paymentHash
     );
+    _lastStamp = stamp;
+    _lastPending = pending.length;
     if (pending.length === 0) return;
 
     for (const payment of pending) {
@@ -187,6 +209,8 @@ function stop() {
   }
   _lightning = null;
   _running = false;
+  _lastStamp = null;
+  _lastPending = null;
 }
 
 module.exports = { start, stop, pollOnce };

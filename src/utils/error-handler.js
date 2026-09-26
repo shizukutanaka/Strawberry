@@ -132,6 +132,13 @@ function errorMiddleware(err, req, res, next) {
     });
   }
   
+  // レスポンスヘッダ送信済みの場合は二重送信できない。
+  // sendFile の途中でディスク障害が起きた場合などに到達し得るため、
+  // Express 既定ハンドラへ委譲して接続を閉じさせる（Express 公式推奨パターン）。
+  if (res.headersSent) {
+    return next(err);
+  }
+
   // クライアントにレスポンスを返す（本番では 5xx 詳細をマスク）
   const maskInternal = process.env.NODE_ENV === 'production';
   res.status(apiError.statusCode).json(apiError.toJSON(maskInternal));

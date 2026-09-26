@@ -1,14 +1,55 @@
 // src/core/p2p-network.js - P2P Network Module
 const EventEmitter = require('events');
-const Libp2p = require('libp2p');
-const TCP = require('@libp2p/tcp');
-const WebSockets = require('@libp2p/websockets');
-const Mplex = require('@libp2p/mplex');
-const { Noise } = require('@chainsafe/libp2p-noise');
-const KadDHT = require('@libp2p/kad-dht');
-const Gossipsub = require('@libp2p/gossipsub');
-const Bootstrap = require('@libp2p/bootstrap');
-const PeerId = require('peer-id');
+// §6: libp2p は 1.x 以降 pure ESM でトップレベル require は必ず失敗する
+//   （それまで safeLoad でモジュール丸ごと無効化されていた）。
+//   依存は start() 時に遅延解決し、CJS require → dynamic import() の順で試す。
+//   どちらも無ければサービスは無効のまま（従来挙動と同じ失敗経路）。
+let _libp2pDepsPromise = null;
+function loadLibp2pDeps() {
+    if (_libp2pDepsPromise) return _libp2pDepsPromise;
+    _libp2pDepsPromise = (async () => {
+        try {
+            return {
+                Libp2p: require('libp2p'),
+                TCP: require('@libp2p/tcp'),
+                WebSockets: require('@libp2p/websockets'),
+                Mplex: require('@libp2p/mplex'),
+                Noise: require('@chainsafe/libp2p-noise').Noise,
+                KadDHT: require('@libp2p/kad-dht'),
+                Gossipsub: require('@libp2p/gossipsub'),
+                Bootstrap: require('@libp2p/bootstrap'),
+                PeerId: require('peer-id'),
+            };
+        } catch (_requireErr) {
+            const [libp2p, tcp, ws, mplex, noise, kadDHT, gossipsub, bootstrap, peerId] =
+                await Promise.all([
+                    import('libp2p'),
+                    import('@libp2p/tcp'),
+                    import('@libp2p/websockets'),
+                    import('@libp2p/mplex'),
+                    import('@chainsafe/libp2p-noise'),
+                    import('@libp2p/kad-dht'),
+                    import('@libp2p/gossipsub'),
+                    import('@libp2p/bootstrap'),
+                    import('peer-id'),
+                ]);
+            return {
+                Libp2p: libp2p.default || libp2p,
+                TCP: tcp.default || tcp,
+                WebSockets: ws.default || ws,
+                Mplex: mplex.default || mplex,
+                Noise: noise.Noise || noise.default || noise,
+                KadDHT: kadDHT.default || kadDHT,
+                Gossipsub: gossipsub.default || gossipsub,
+                Bootstrap: bootstrap.default || bootstrap,
+                PeerId: peerId.default || peerId,
+            };
+        }
+    })();
+    // 失敗は一度だけ投げ、次回 start() で再試行できるよう promise をリセット
+    _libp2pDepsPromise.catch(() => { _libp2pDepsPromise = null; });
+    return _libp2pDepsPromise;
+}
 // このファイルはリポジトリ直下にある（先頭コメントの src/core/ は移動時の取り残し）。
 // '../utils/logger' はリポジトリ外を指すため './src/utils/logger' が正。
 const { logger } = require('./src/utils/logger');
@@ -57,10 +98,14 @@ class P2PNetwork extends EventEmitter {
     async start() {
         try {
             logger.info('Starting P2P network...');
-            
+
+            // §6: libp2p 依存を遅延解決（CJS require → ESM dynamic import）
+            this._deps = await loadLibp2pDeps();
+            const { Libp2p, TCP, WebSockets, Mplex, Noise, KadDHT, Gossipsub } = this._deps;
+
             // PeerID生成または読み込み
             const peerId = await this.getOrCreatePeerId();
-            
+
             // Libp2pノード作成
             this.node = await Libp2p.create({
                 peerId,
@@ -131,6 +176,7 @@ class P2PNetwork extends EventEmitter {
     }
 
     async getOrCreatePeerId() {
+        const { PeerId } = this._deps || (await loadLibp2pDeps());
         try {
             // 保存されたPeerIDを読み込み
             const fs = require('fs').promises;

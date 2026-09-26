@@ -131,6 +131,8 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 1. (中期) libp2p を ESM 動的 import で読み込む薄いラッパを作る（`src/core/services.js` のガードと整合）か、最新 CJS 互換構成へ移行。
 2. peer scoring を有効化し、§5 のレピュテーションと統合。
 
+> **実装済（部分: 1）**: `p2p-network.js` のトップレベル `require('libp2p')` 群を `loadLibp2pDeps()`（CJS require → ESM dynamic import、失敗は再試行可能）の遅延解決に移行。モジュールは libp2p 不在でも読み込め、`services.js` は `require.resolve('libp2p')` で未導入を検出して従来通り null/503 無効化を維持。libp2p 導入すれば ESM 版でも起動する（PR #28）。peer scoring（アクション2）は残件。
+
 優先度: **中**
 
 ---

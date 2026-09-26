@@ -10,6 +10,11 @@ const { logger } = require('../utils/logger');
 function safeLoad(label, loader) {
   try {
     const Klass = loader();
+    if (Klass === null) {
+      // loader が依存の欠如を検出して明示的に無効化を返した場合（503 経路を維持）
+      logger.warn(`Optional service "${label}" unavailable (dependency not installed); related endpoints disabled.`);
+      return null;
+    }
     if (typeof Klass !== 'function') {
       logger.warn(`Optional service "${label}" did not export a constructor; disabled.`);
       return null;
@@ -23,7 +28,12 @@ function safeLoad(label, loader) {
 
 const gpuDetector = safeLoad('gpu-detector-extended', () => require('./gpu-detector-extended').ExtendedGPUDetector);
 const vgpuManager = safeLoad('virtual-gpu-manager', () => require('../../virtual-gpu-manager').VirtualGPUManager);
-const p2pNetwork = safeLoad('p2p-network', () => require('../../p2p-network').P2PNetwork);
+// libp2p が未インストールなら p2p-network を読み込まず無効化（従来の 503 経路を維持）。
+// インストール済みなら ESM 版でも読み込める（p2p-network.js 側で dynamic import へ移行済み）。
+const p2pNetwork = safeLoad('p2p-network', () => {
+  try { require.resolve('libp2p'); } catch (_) { return null; }
+  return require('../../p2p-network').P2PNetwork;
+});
 const lightning = safeLoad('lightning-service', () => require('../../lightning-service').LightningService);
 
 /**

@@ -425,3 +425,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- invoice-poller の stat ゲート早期 return（perf）: 15 秒周期ポーラーが毎回 payments.json を全量読み込み+パースしていた。`fs.statSync` の (mtimeMs,size) 指紋で「ファイル不変かつ前回 pending=0」のとき全量パースをスキップ（pending>0 は外部決済の再確認が必要なので従来通り）。静寂時のファイル I/O がゼロになり、新規支払いはファイル変更で確実に検知される。stop() でゲート状態もリセット。

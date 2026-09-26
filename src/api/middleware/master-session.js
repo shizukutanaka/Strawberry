@@ -14,17 +14,27 @@
 const session = require('express-session');
 const { requireSecret } = require('../../utils/config');
 
-const masterSession = session({
+// 3段階認証完了（masterAuth）を保持する昇格セッションの有効期限。
+// cookie.maxAge を設定すると express-session は MemoryStore 側にも TTL を載せるため、
+// ブラウザが Cookie を保持し続けてもサーバ側で確実に失効する。
+// 資金アドレスを守るステップアップ認証のため絶対期限とし（rolling 延長しない）、
+// 既定 30 分（GitHub sudo モード等の昇格認証の慣例）。
+const MASTER_SESSION_TTL_MS = parseInt(process.env.MASTER_SESSION_TTL_MS || '', 10);
+const masterSessionOptions = {
   secret: requireSecret('SESSION_SECRET'),
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
+    sameSite: 'strict',
     // path 未指定 = デフォルト '/' 全パスに Cookie を送信するため、
     // /master-auth/* で確立したセッションを他パスのルートからも参照できる。
+    maxAge: Number.isFinite(MASTER_SESSION_TTL_MS) && MASTER_SESSION_TTL_MS > 0
+      ? MASTER_SESSION_TTL_MS
+      : 30 * 60 * 1000
   }
-});
+};
+const masterSession = session(masterSessionOptions);
 
-module.exports = { masterSession };
+module.exports = { masterSession, masterSessionOptions };

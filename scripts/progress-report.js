@@ -2,21 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { authorize } = require('./google-sheets-auth');
 
-const CREDENTIALS_PATH = path.join(__dirname, '../scripts/credentials.json');
-const TOKEN_PATH = path.join(__dirname, '../scripts/token.json');
 const SPREADSHEET_ID = process.env.PROGRESS_SHEET_ID;
 const SHEET_NAME = 'ProgressBoard';
 const REPORT_FILE = path.join(__dirname, '../docs/progress-report.md');
-
-async function authorize() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
-  const { client_secret, client_id, redirect_uris } = credentials.installed;
-  const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
-  const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
-  oAuth2Client.setCredentials(token);
-  return oAuth2Client;
-}
 
 async function fetchBoard(auth) {
   const sheets = google.sheets({ version: 'v4', auth });
@@ -56,6 +46,9 @@ function renderReport(kpi, rows) {
 }
 
 async function main() {
+  if (!SPREADSHEET_ID) {
+    throw new Error('PROGRESS_SHEET_IDが未設定です (.env でスプレッドシートIDを指定してください)');
+  }
   const auth = await authorize();
   const rows = await fetchBoard(auth);
   const kpi = aggregateKPI(rows);
@@ -65,7 +58,7 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch((e) => { console.error(e.message); process.exit(1); });
 }
 
 module.exports = { main };

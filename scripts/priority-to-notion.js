@@ -23,6 +23,9 @@ async function addFeedbackToNotion(feedback) {
 }
 
 async function main() {
+  if (!NOTION_TOKEN || !NOTION_DB_ID) {
+    throw new Error('NOTION_TOKENとNOTION_DB_IDが未設定です (.env で指定してください)');
+  }
   if (!fs.existsSync(PRIORITY_FILE)) return;
   const feedbacks = JSON.parse(fs.readFileSync(PRIORITY_FILE, 'utf8'));
   for (const fb of feedbacks) {
@@ -32,7 +35,7 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch((e) => { console.error(e.message); process.exit(1); });
 }
 
 module.exports = { main };

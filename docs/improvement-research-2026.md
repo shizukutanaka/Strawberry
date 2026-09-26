@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- サービス死活監視の外部通知を状態遷移ベース化（`src/core/service-monitor.js`）: 不健全 tick ごとに Slack/Sentry/LINE へ送っていた service_down / service_restart_failed を、不健全エッジ1回 + 継続中は `SERVICE_MONITOR_RENOTIFY_MS`（既定5分）間隔の再通知のみに絞り、復帰時は `service_recovered` を1回送信。監査ログ・メトリクスは従来通り毎 tick 記録。あわせて tick 重なり防止（再入ガード）と startMonitor 二重起動ガードを追加。根拠: Nagios の state-change notification + re-notification interval、PagerDuty の alert dedup、Google SRE Book「Monitoring Distributed Systems」のアラート疲弊対策。

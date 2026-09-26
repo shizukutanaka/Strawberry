@@ -296,7 +296,12 @@ router.get('/me',
 // ハード削除はしない: 注文履歴・係争・監査証跡を保全しつつ、本人を確実にロックアウトする。
 // メール/ユーザー名を匿名化して再ログイン・再利用を防ぎ、現在のアクセストークンを失効させる。
 router.delete('/me',
+  authLimiter,
   authenticateJWT,
+  validateMiddleware(Joi.object({
+    password: Joi.string().max(72),
+    confirmEmail: Joi.string().email().max(254),
+  }), 'body'),
   asyncHandler(async (req, res) => {
     const user = UserRepository.getById(req.user.id);
     if (!user) {
@@ -304,6 +309,24 @@ router.delete('/me',
     }
     if (user.status === 'deactivated') {
       return res.status(409).json({ error: 'Account is already deactivated' });
+    }
+    // 退会は PII 匿名化 + 全セッション失効を伴う不可逆の高権度操作のため、
+    // JWT 所持だけでなく認証要素の再提示を求める（OWASP: sensitive operations
+    // には re-authentication）。盗難・漏洩トークンだけでアカウントを抹消される
+    // 経路を塞ぐ。パスワード設定済みユーザーは password を照合し、
+    // パスワードを持たない OAuth 専用ユーザーは登録メールの再入力で代替する。
+    const { password, confirmEmail } = req.body || {};
+    if (user.password) {
+      const ok = typeof password === 'string' && await bcrypt.compare(password, user.password);
+      if (!ok) {
+        return res.status(401).json({ error: 'Password confirmation required for account deactivation' });
+      }
+    } else {
+      const ok = typeof confirmEmail === 'string' &&
+        confirmEmail.toLowerCase() === String(user.email || '').toLowerCase();
+      if (!ok) {
+        return res.status(403).json({ error: 'Confirm deactivation with your account email' });
+      }
     }
     // 最後の管理者は自己退会できない（管理不能化の防止。ロール変更と同一ポリシー）
     if (user.role === 'admin') {

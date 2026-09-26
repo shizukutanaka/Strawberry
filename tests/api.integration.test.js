@@ -1428,7 +1428,8 @@ describe('API Integration', () => {
       const user = await freshUser('del');
       const res = await request(app)
         .delete('/api/v1/users/me')
-        .set('Authorization', `Bearer ${user.token}`);
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
       expect(res.statusCode).toBe(200);
       const rec = UserRepository.getById(user.id);
       expect(rec.status).toBe('deactivated');
@@ -1438,7 +1439,7 @@ describe('API Integration', () => {
 
     it('a deactivated account cannot log in (401)', async () => {
       const user = await freshUser('dl2');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       // original email is anonymized → login fails
       const login = await request(app).post('/api/v1/users/login')
         .send({ email: user.email, password: 'Test1234!' });
@@ -1447,7 +1448,7 @@ describe('API Integration', () => {
 
     it('a deactivated account cannot refresh its token (401)', async () => {
       const user = await freshUser('dl3');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       const refresh = await request(app).post('/api/v1/users/refresh')
         .send({ refreshToken: user.refreshToken });
       expect(refresh.statusCode).toBe(401);
@@ -1455,17 +1456,17 @@ describe('API Integration', () => {
 
     it('the current access token is revoked after self-deactivation (subsequent /me → 401)', async () => {
       const user = await freshUser('dl4');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       const me = await request(app).get('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
       expect(me.statusCode).toBe(401);
     });
 
     it('double deactivation → 409', async () => {
       const user = await freshUser('dl5');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       // token is revoked; mint a path by directly checking the repo guard via a fresh login is impossible,
       // so assert idempotency guard at the repo level isn't reachable twice with same token (401 now).
-      const again = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      const again = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       expect(again.statusCode).toBe(401); // revoked token blocks re-entry
     });
 
@@ -1487,7 +1488,7 @@ describe('API Integration', () => {
           UserRepository.update(other.id, { status: 'deactivated' });
         }
       }
-      const res = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${token}`);
+      const res = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${token}`).send({ password: 'Test1234!' });
       for (const sid of suspended) UserRepository.update(sid, { status: 'active' });
       expect(res.statusCode).toBe(400);
       expect(res.body.error).toMatch(/admin/i);
@@ -1505,7 +1506,8 @@ describe('API Integration', () => {
       expect(order.statusCode).toBe(201);
 
       const res = await request(app).delete('/api/v1/users/me')
-        .set('Authorization', `Bearer ${user.token}`);
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
       expect(res.statusCode).toBe(409);
       expect(res.body.openOrderCount).toBeGreaterThanOrEqual(1);
 
@@ -1513,8 +1515,43 @@ describe('API Integration', () => {
       await request(app).delete(`/api/v1/orders/${order.body.order.id}`)
         .set('Authorization', `Bearer ${user.token}`);
       const ok = await request(app).delete('/api/v1/users/me')
-        .set('Authorization', `Bearer ${user.token}`);
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
       expect(ok.statusCode).toBe(200);
+    });
+
+    it('requires password re-confirmation: missing/wrong password → 401, correct → 200', async () => {
+      const user = await freshUser('dlre');
+      const noPw = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({});
+      expect(noPw.statusCode).toBe(401);
+      const wrongPw = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'WrongPass1!' });
+      expect(wrongPw.statusCode).toBe(401);
+      // still active after failed attempts
+      expect(UserRepository.getById(user.id).status).not.toBe('deactivated');
+      const ok = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
+      expect(ok.statusCode).toBe(200);
+    });
+
+    it('OAuth-only account (no password) confirms via account email', async () => {
+      const { signAccessToken } = require('../src/api/utils/tokens');
+      const email = `oauthdel${unique}@example.com`;
+      const oauthUser = UserRepository.create({ googleId: `g-${unique}`, email, name: 'OAuth U', role: 'user' });
+      const token = signAccessToken(oauthUser);
+      const bad = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ confirmEmail: 'someone-else@example.com' });
+      expect(bad.statusCode).toBe(403);
+      const ok = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ confirmEmail: email });
+      expect(ok.statusCode).toBe(200);
+      expect(UserRepository.getById(oauthUser.id).status).toBe('deactivated');
     });
   });
 

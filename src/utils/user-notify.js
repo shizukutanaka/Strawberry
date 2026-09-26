@@ -9,14 +9,37 @@ const { logger } = require('./logger');
 
 const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
 
+// price-watch 等で同一ユーザーイベントを複数送信するとき、通知ごとに
+// notification-settings.json を全量読み込み+パースするのを防ぐ。
+// (mtimeMs, size) の stat ゲートで「ファイルが変わった時だけ再読み込み」にする。
+// 設定保存側は atomicWriteJSON（rename 更新）のため mtime は必ず変わる。
+let _settingsStamp = null;
+let _settingsCache = null;
+
 function loadAllSettings() {
+  let stamp;
   try {
-    return fs.existsSync(SETTINGS_PATH)
-      ? JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'))
-      : {};
+    const s = fs.statSync(SETTINGS_PATH);
+    stamp = `${s.mtimeMs}:${s.size}`;
   } catch (_) {
+    // ファイル不在/読めない → 設定なしとして扱う（従来と同じ結果）
     return {};
   }
+  if (_settingsStamp !== stamp) {
+    try {
+      _settingsCache = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    } catch (_) {
+      _settingsCache = {};
+    }
+    _settingsStamp = stamp;
+  }
+  return _settingsCache;
+}
+
+// テスト用: キャッシュを明示的にクリア
+function _resetSettingsCache() {
+  _settingsStamp = null;
+  _settingsCache = null;
 }
 
 /**
@@ -78,4 +101,4 @@ function notifyUser(userId, eventType, message, extraOptions = {}) {
   return channels.length;
 }
 
-module.exports = { notifyUser, resolveChannels };
+module.exports = { notifyUser, resolveChannels, _resetSettingsCache };

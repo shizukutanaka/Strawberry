@@ -497,8 +497,10 @@ router.get('/provider/earnings',
     }
     // getById は毎回ファイル全量読み込みするため、gpuId ごとのループ参照は
     // 1回の getAll で Map を作って照会する（N+1 ファイル I/O の抑止）。
-    const gpuById = new Map((GpuRepository.getAll() || []).map(g => [g.id, g]));
+    // 完了注文 0 件では Map 構築自体が不要な全量スキャンになるため遅延生成する。
+    let gpuById = null;
     for (const entry of Object.values(byGpu)) {
+      if (!gpuById) gpuById = new Map((GpuRepository.getAll() || []).map(g => [g.id, g]));
       const gpu = gpuById.get(entry.gpuId);
       entry.gpuName = gpu ? gpu.name : null;
     }

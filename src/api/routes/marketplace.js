@@ -2,12 +2,13 @@
 // マーケットプレイス・ドメイン API（docs/SPECIFICATION.md §6-2 配線）。
 // marketplace-service を HTTP で公開する薄いラッパ。/api/v1 配下にマウントされ JWT 必須。
 // 既存の order/payment ルートは変更せず、新規追加エンドポイントとして提供する（低リスク）。
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 const { withLock } = require('../../utils/async-lock');
-const { cacheMiddleware } = require('../middleware/cache');
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -175,10 +176,37 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
 
 // パブリック市場統計（認証不要 — マーケットブラウジング用）
 // GET /marketplace/stats — GPU 供給・需要・価格帯の概要
-// 公開パスのため全量スキャンは 60s キャッシュで間引く（orders.json/gpus.json の
-// 毎リクエスト読み直しを抑止）。
-router.get('/stats', cacheMiddleware(), (req, res) => {
+//
+// 統計値は gpus.json / orders.json の内容と現在時刻（占有窓の終了）に依存する。
+// URL キャッシュだと GPU/注文の書き込み後も TTL 満了まで古い統計を返し、
+// 一覧 API との不整合が起きるため、入力ファイルの stat 指紋で無効化する専用
+// キャッシュを持つ。指紋一致中でも時刻依存の占有窓が残りうるため TTL で上限化する。
+const STATS_CACHE_TTL_MS = 30_000;
+let _statsCache = null;
+let _statsStamp = null;
+let _statsAt = 0;
+const DATA_DIR = path.resolve(__dirname, '../../../data');
+function _statsInputStamp() {
   try {
+    const fp = [];
+    for (const f of ['gpus.json', 'orders.json']) {
+      const s = fs.statSync(path.join(DATA_DIR, f));
+      fp.push(`${s.mtimeMs}:${s.size}`);
+    }
+    return fp.join('|');
+  } catch (_) {
+    // ファイル不在/stat 失敗時はキャッシュを使わない
+    return null;
+  }
+}
+
+router.get('/stats', (req, res) => {
+  try {
+    const stamp = _statsInputStamp();
+    if (_statsCache && stamp !== null && stamp === _statsStamp && (Date.now() - _statsAt) < STATS_CACHE_TTL_MS) {
+      res.set('X-Cache', 'HIT');
+      return res.json(_statsCache);
+    }
     const GpuRepository = require('../../db/json/GpuRepository');
     const OrderRepository = require('../../db/json/OrderRepository');
 
@@ -228,7 +256,7 @@ router.get('/stats', cacheMiddleware(), (req, res) => {
       if (g.vendor) vendorCounts[g.vendor] = (vendorCounts[g.vendor] || 0) + 1;
     }
 
-    res.json({
+    const body = {
       totalGpus: allGpus.length,
       availableGpus: availableGpus.length,
       occupiedGpus: allGpus.filter(g => occupiedGpuIds.has(g.id)).length,
@@ -236,7 +264,14 @@ router.get('/stats', cacheMiddleware(), (req, res) => {
       vendorDistribution: vendorCounts,
       topGpusByCompletedOrders: topGpus,
       pendingOrders: allOrders.filter(o => o.status === 'pending').length,
-    });
+    };
+    if (stamp !== null) {
+      _statsCache = body;
+      _statsStamp = stamp;
+      _statsAt = Date.now();
+    }
+    res.set('X-Cache', 'MISS');
+    res.json(body);
   } catch (e) {
     res.status(500).json({ error: isProd ? 'Internal server error' : e.message });
   }

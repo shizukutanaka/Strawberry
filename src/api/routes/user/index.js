@@ -1003,9 +1003,14 @@ router.get('/me/watches',
     const watches = WatchRepository.getByUser(req.user.id) || [];
     // getById は毎回ファイル全量読み込みするため、ウォッチ件数ぶんの
     // N+1 ファイル I/O を避けるため Map 化して照会する。
-    const gpuById = new Map((GpuRepository.getAll() || []).map(g => [g.id, g]));
+    // ウォッチ 0 件では Map 構築自体が不要な全量スキャンになるため遅延生成する。
+    let gpuById = null;
+    const lookupGpu = (id) => {
+      if (!gpuById) gpuById = new Map((GpuRepository.getAll() || []).map(g => [g.id, g]));
+      return gpuById.get(id);
+    };
     const enriched = watches.map(w => {
-      const raw = gpuById.get(w.gpuId);
+      const raw = lookupGpu(w.gpuId);
       // apiKey・providerId など機密/内部フィールドを除外し、表示に必要な公開フィールドのみ返す
       const gpu = raw ? {
         id: raw.id,

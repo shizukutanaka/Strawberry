@@ -284,6 +284,8 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 
 **推奨アクション**: (中期) 推論向けの**サーバーレス/オートスケール**ティアと、§3 の Lightning ストリーミング・マイクロペイメントによる**実消費メータリング課金**を追加。
 
+**実装済（2026-09）**: 実消費メータリング課金 — `/stop` で双方向ハートビート実利用秒（OrderUsageSession）を vgpu usageStats 欠落時の第2測定源として採用し（壁時計より厳密、両者生存確認区間のみ課金）、`order.metering = {usageSeconds, source, billableSats, reservedSats, creditSats}` を記録。5分粒度・予約額上限。エスクロー按分の deliveredRatio にも接続。`GET /orders/:id/usage` で当事者向けにライブ/確定メータリング照会。サーバーレス・オートスケールティアと LN ストリーミング課金は残件。
+
 優先度: **中**
 
 ---

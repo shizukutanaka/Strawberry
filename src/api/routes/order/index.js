@@ -638,6 +638,44 @@ router.get('/:id/payment',
   })
 );
 
+// §13 実消費メータリング照会（注文当事者＝借り手/プロバイダ/管理者のみ）。
+// active 中はライブの双方向ハートビート実利用秒、終了後は注文に記録された metering を返す。
+// billableSats は予約額(totalPrice)を上限とする 5 分粒度課金。
+router.get('/:id/usage',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
+  asyncHandler(async (req, res) => {
+    const order = req.resource;
+    const session = usageSessions.get(order.id);
+    const liveSeconds = session && typeof session.getUsageSeconds === 'function'
+      ? session.getUsageSeconds()
+      : null;
+    const usageSeconds = liveSeconds != null
+      ? liveSeconds
+      : (order.metering && Number.isFinite(order.metering.usageSeconds) ? order.metering.usageSeconds : null);
+    let billableSats = null;
+    if (usageSeconds != null && Number.isFinite(order.pricePerHour) && order.pricePerHour > 0) {
+      billableSats = Math.min(
+        order.totalPrice || Infinity,
+        Math.round(Math.ceil(usageSeconds / 300) * (order.pricePerHour / 12))
+      );
+    }
+    res.json({
+      orderId: order.id,
+      orderStatus: order.status,
+      usageSeconds,
+      live: liveSeconds != null,
+      billableSats,
+      reservedSats: typeof order.totalPrice === 'number' ? order.totalPrice : null,
+      creditSats: billableSats != null && typeof order.totalPrice === 'number'
+        ? Math.max(0, order.totalPrice - billableSats)
+        : null,
+      metering: order.metering || null,
+    });
+  })
+);
+
 // オーダー更新 (認証必須)
 router.put('/:id',
   authenticateJWT,
@@ -1897,6 +1935,15 @@ router.post('/:id/stop',
         }
       }
 
+      // §13 実消費メータリング: 双方向ハートビートの実利用秒を課金根拠として採用する。
+      // vgpuManager の usageStats が無いときの壁時計フォールバックより厳密
+      // （両者の生存確認が取れた区間のみ課金対象）。セッションが無い場合は
+      // 既存の elapsedSeconds フォールバックに委ねる（無課金逃れ防止）。
+      const hbSession = usageSessions.get(orderId);
+      const heartbeatUsageSeconds = hbSession && typeof hbSession.getUsageSeconds === 'function'
+        ? hbSession.getUsageSeconds()
+        : null;
+
       // ハートビートセッションを削除（メモリリーク防止）。
       // heartbeatTimestamps の対応エントリも同時に除去（旧実装は usageSessions だけ
       // 削除し timestamps Map が無限増加していた）。
@@ -1906,8 +1953,29 @@ router.post('/:id/stop',
       // Atomic compare-and-swap: only write completed if still active.
       // Reputation and escrow settlement only run when this write succeeds,
       // preventing double-increment if a second concurrent stop somehow slipped through.
+      // 実消費メータリング: 実利用秒 → 5分粒度の課金額を注文へ記録。
+      // 測定源の優先順: vgpu usageStats > 双方向heartbeat > 壁時計（下でフォールバック）。
+      const meteredSeconds = (usageStats && Number.isFinite(usageStats.usageSeconds))
+        ? usageStats.usageSeconds
+        : heartbeatUsageSeconds;
+      let metering = null;
+      if (meteredSeconds != null && Number.isFinite(order.pricePerHour) && order.pricePerHour > 0) {
+        const units = Math.ceil(meteredSeconds / 300);
+        const billableSats = Math.min(
+          order.totalPrice || Infinity,
+          Math.round(units * (order.pricePerHour / 12))
+        );
+        metering = {
+          usageSeconds: meteredSeconds,
+          source: usageStats && Number.isFinite(usageStats.usageSeconds) ? 'vgpu' : 'heartbeat',
+          billableSats,
+          reservedSats: order.totalPrice || null,
+          creditSats: order.totalPrice != null ? Math.max(0, order.totalPrice - billableSats) : null,
+        };
+      }
+
       const now43g = new Date().toISOString();
-      const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
+      const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats, metering };
       const result = OrderRepository.updateIf(orderId, o => o.status === 'active', updateData);
       if (!result.ok) {
         return res.status(409).json({ error: 'Order was already stopped by a concurrent request' });
@@ -1945,11 +2013,15 @@ router.post('/:id/stop',
           ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
           : 0;
         for (const escrow of escrows) {
+          // §13: 双方向ハートビートの実利用秒を vgpu 欠落時の第2測定源として使用
+          // （両者の生存確認区間のみ課金 — 壁時計より「実消費」に近い）。
           const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
             ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
-            : order.durationMinutes
-              ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
-              : 0;
+            : heartbeatUsageSeconds != null && order.durationMinutes
+              ? Math.max(0, Math.min(1, heartbeatUsageSeconds / (order.durationMinutes * 60)))
+              : order.durationMinutes
+                ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
+                : 0;
           escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
           escrowSvc.apply(escrow.id, 'DELIVER_OK');
           logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
@@ -1970,7 +2042,7 @@ router.post('/:id/stop',
 
       invalidateUserCache(order.userId);
       if (order.providerId) invalidateUserCache(order.providerId);
-      res.json({ message: 'Order execution stopped successfully', usageStats });
+      res.json({ message: 'Order execution stopped successfully', usageStats, metering });
     });
   })
 );

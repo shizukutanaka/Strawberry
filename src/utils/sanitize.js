@@ -4,12 +4,17 @@
  * 機密情報自動マスキング
  * @param {object} obj - マスキング対象オブジェクト
  * @param {string[]} fields - マスキング対象フィールド名（デフォルトは主要機密）
+ * @param {number} [_depth] - 内部用の再帰深度カウンタ。呼び出し側は渡さない。
  * @returns {object}
  */
+// 攻撃者が深くネストした JSON を POST すると再帰がスタックを使い尽くして
+// RangeError になるため、深度に上限を設ける（express.json は深さを制限しない）。
+const MAX_SANITIZE_DEPTH = 32;
 function sanitizeSensitiveFields(obj, fields = [
   'password','secret','token','apiKey','privateKey','email','refreshToken','accessToken','jwt','macaroon','mnemonic','seed'
-]) {
+], _depth = 0) {
   if (!obj || typeof obj !== 'object') return obj;
+  if (_depth >= MAX_SANITIZE_DEPTH) return '[TRUNCATED]';
   const out = { ...obj };
   // 大文字小文字を問わずマスキング（'Password', 'TOKEN' 等の非標準ケーシングを取り漏らさないため）
   const fieldsLower = fields.map(f => f.toLowerCase());
@@ -19,7 +24,7 @@ function sanitizeSensitiveFields(obj, fields = [
   // ネストも再帰的にマスキング
   for (const k in out) {
     if (typeof out[k] === 'object' && out[k] !== null) {
-      out[k] = sanitizeSensitiveFields(out[k], fields);
+      out[k] = sanitizeSensitiveFields(out[k], fields, _depth + 1);
     }
   }
   return out;

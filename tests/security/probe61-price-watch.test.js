@@ -675,7 +675,8 @@ describe('watch resource limits and lifecycle', () => {
     // User deletes (deactivates) their own account.
     const del = await request(app)
       .delete('/api/v1/users/me')
-      .set('Authorization', `Bearer ${renter.token}`);
+      .set('Authorization', `Bearer ${renter.token}`)
+      .send({ password: 'Test1234!' });
     expect(del.status).toBe(200);
     // The user's watches must be gone.
     expect((WatchRepository.getByUser(renter.id) || []).length).toBe(0);

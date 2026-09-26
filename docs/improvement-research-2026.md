@@ -428,3 +428,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- アカウント退会（DELETE /users/me）と payoutAddress 変更（PUT /me）に再認証を追加: JWT 所持のみで PII 匿名化＋全セッション失効、およびプロバイダ受取アドレス差替（＝次回決済の攻撃者宛送金）が可能だった。OWASP「sensitive operations require re-authentication」に倣い `verifySensitiveConfirmation` を共通化 — パスワード照合（bcrypt）を必須化し、パスワードを持たない OAuth 専用アカウントは登録メール再入力で代替。`authLimiter` 付与で確認パスワードの総当たりも防止。資金に直結しない通常プロフィール項目（username/bio 等）は再認証不要。

@@ -94,6 +94,8 @@
 2. (中期) 逆オークション or ダブルオークションでマッチング（Akash 流, arXiv:1804.09961）。
 3. (中期) 腐敗性財 AMM（arXiv:2511.16357）で空き GPU 時間の動的値下げ・在庫消化。
 
+> **実装済（部分: 1, 3）**: アクション1は `feature-pricer` を注文の `referencePrice`/`priceDeviationPct` へ advisory 配線（注文額は不変）。アクション3は `idleDiscount`（opt-in: pctPerHour/maxPct/thresholdHours）による空転逓減値下げを実装 — `idleAdjustedPrice` が直近使用終了（`lastBusyAtByGpu`、未使用は `createdAt` 起点）から線形減衰し、注文価格に適用＋注文へ `idleDiscount` 記録、`GET /gpus` に `effectivePricePerHour`/`idleDiscountPct` を添付（PR #17/#25）。AMM 本格化・オークション配線は残件。
+
 優先度: **中**
 
 ---

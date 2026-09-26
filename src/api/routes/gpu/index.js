@@ -270,6 +270,22 @@ router.get('/', asyncHandler(async (req, res) => {
   const totalAvailable = allGpus.filter(g => g.available !== false && !occupiedGpuIds.has(g.id)).length;
   const totalOccupied = allGpus.filter(g => occupiedGpuIds.has(g.id)).length;
 
+  // §4(3): 空転割引の実効価格を一覧へ添える（idleDiscount opt-in の GPU のみ）。
+  const idleBusyMap = (() => {
+    try {
+      const { lastBusyAtByGpu } = require('../../../marketplace/idle-pricing');
+      return lastBusyAtByGpu(allOrders);
+    } catch (_) { return new Map(); }
+  })();
+  const idlePrice = (gpu) => {
+    if (!gpu.idleDiscount || gpu.idleDiscount.enabled !== true) return null;
+    try {
+      const { idleAdjustedPrice } = require('../../../marketplace/idle-pricing');
+      const p = idleAdjustedPrice(gpu, idleBusyMap.get(gpu.id));
+      return p.discountPct > 0 ? p : null;
+    } catch (_) { return null; }
+  };
+
   // レスポンスに追加情報を含める（reviewMap を使ってページ内 GPU に rating を付与）
   const response = {
     message: 'Fetched available GPUs',
@@ -280,6 +296,7 @@ router.get('/', asyncHandler(async (req, res) => {
     gpus: pagedGpus.map(({ apiKey, providerId: _pid, manualBlocks: _mb, ...gpu }) => {
       const r = reviewMap.get(gpu.id);
       const rel = relFor(_pid);
+      const idle = idlePrice(gpu);
       return {
         ...gpu,
         rating: r && r.count > 0
@@ -287,6 +304,8 @@ router.get('/', asyncHandler(async (req, res) => {
           : { average: null, count: 0 },
         // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
         reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
+        // 空転割引中の実効時給（割引が実際に発動している場合のみ付与）
+        ...(idle ? { effectivePricePerHour: idle.pricePerHour, idleDiscountPct: idle.discountPct } : {}),
       };
     }),
     timestamp: new Date().toISOString()
@@ -763,7 +782,7 @@ router.put('/:id',
     // 旧 allowlist に含まれておらずサニタイズで無言に剥落し、機能が完全に
     // 死んでいた（gpu.rejectUnratedRenters は常に undefined → 注文時チェックが
     // 素通り）。allowlist に追加して機能を正常化する。
-    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available', 'rejectUnratedRenters']);
+    const sanitized = sanitizeObject(req.validatedBody, ['name', 'pricePerHour', 'availability', 'minRenterRating', 'available', 'rejectUnratedRenters', 'idleDiscount']);
     // available は boolean のみ許可（任意の型汚染を防ぐ）
     if ('available' in sanitized && typeof sanitized.available !== 'boolean') {
       return res.status(400).json({ error: '"available" must be a boolean' });

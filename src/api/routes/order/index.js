@@ -944,6 +944,16 @@ router.post('/',
     if (!pricePerHour || typeof pricePerHour !== 'number' || pricePerHour <= 0) {
       throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
     }
+    // §4(3): 空転割引（プロバイダ opt-in のみ発動）。直近使用終了からの経過で実効価格を逓減。
+    let idlePricing = null;
+    if (gpu.idleDiscount && gpu.idleDiscount.enabled === true) {
+      try {
+        const { idleAdjustedPrice, lastBusyAtByGpu } = require('../../../marketplace/idle-pricing');
+        const busyMap = lastBusyAtByGpu(_allOrdersForRating.filter((o) => o.gpuId === gpu.id));
+        idlePricing = idleAdjustedPrice(gpu, busyMap.get(gpu.id));
+        if (idlePricing.discountPct > 0) pricePerHour = idlePricing.pricePerHour;
+      } catch (_) { /* 割引計算失敗は注文を妨げない */ }
+    }
 
     // 為替レートを先にフェッチ（キャッシュ活用）。以下の全チェックと create() は
     // 同期的に実行される（await なし）ため、この await の後に事前予約/二重予約の
@@ -1050,6 +1060,9 @@ router.post('/',
     // computeOrderPricing が GPU の「現在価格」へフォールバックし、プロバイダが注文後に
     // 値上げするとレンターが合意額より高く課金される（見積りの拘束力が失われる）バグになる。
     orderData.pricePerHour = pricePerHour;
+    if (idlePricing && idlePricing.discountPct > 0) {
+      orderData.idleDiscount = { basePricePerHour: idlePricing.basePricePerHour, discountPct: idlePricing.discountPct, idleHours: idlePricing.idleHours };
+    }
     orderData.totalPrice = totalPrice;
     orderData.totalPriceJPY = totalPriceJPY;
     const createdOrder = OrderRepository.create(orderData);

@@ -105,6 +105,13 @@ const schemas = {
       utilizationPct: Joi.number().min(0).max(100).optional(),
     }).unknown(false).optional(),
   }).unknown(false).optional(),
+  // §4(3): 空転割引（腐敗性財の自動値下げ、opt-in）。
+  idleDiscount: Joi.object({
+    enabled: Joi.boolean().required(),
+    pctPerHour: Joi.number().min(0).max(50).optional(),
+    maxPct: Joi.number().min(0).max(90).optional(),
+    thresholdHours: Joi.number().min(0).max(168).optional(),
+  }).unknown(false).optional(),
 }),
 
     // GPU更新用スキーマ（全フィールドオプション — 部分更新）
@@ -119,7 +126,13 @@ const schemas = {
       }).unknown(false).optional(),
       minRenterRating: Joi.number().min(1).max(5).optional(),
       rejectUnratedRenters: Joi.boolean().optional(),
-      available: Joi.boolean().optional()
+      available: Joi.boolean().optional(),
+      idleDiscount: Joi.object({
+        enabled: Joi.boolean().required(),
+        pctPerHour: Joi.number().min(0).max(50).optional(),
+        maxPct: Joi.number().min(0).max(90).optional(),
+        thresholdHours: Joi.number().min(0).max(168).optional(),
+      }).unknown(false).optional()
     }),
 
     // GPU検索用スキーマ

@@ -306,6 +306,18 @@ const graphqlReady = (async () => {
 // 拡張子なしのパス（SPAのハッシュルート等）のみ index.html にフォールバックする。
 app.get('*', (req, res, next) => {
   if (path.extname(req.path)) return next();
+  // API 系パスは SPA フォールバックしない。
+  // 認証済みクライアントが存在しない API パスを叩くと、ここで index.html が
+  // 200/HTML で返ってしまい、JSON を期待するクライアントはパースエラーになる。
+  // 404 は notFoundMiddleware が JSON で返すのが正しい契約。
+  const nonSpaPrefixes = [
+    config.server.apiPrefix || '/api/v1',
+    '/api/',        // exchange-rate, profit-addresses 等の別プレフィクス API
+    '/graphql',
+    '/master-auth',
+    '/metrics', '/health', '/ready', '/openapi.json',
+  ];
+  if (nonSpaPrefixes.some(p => req.path === p || req.path.startsWith(p === '/' ? p : p + '/'))) return next();
   res.sendFile(path.join(__dirname, '../../public/index.html'));
 });
 

@@ -18,6 +18,7 @@ const _attestationVerifier = createMockAttestationVerifier();
 const { createReputationService } = require('../../../reputation/reputation-service');
 // プロバイダー稼働実績（客観的な信頼性スコア）
 const providerUptime = require('../../../reputation/provider-uptime');
+const { standardScoreFields, standardScore } = require('../../../marketplace/dlperf-score');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -215,8 +216,19 @@ router.get('/', asyncHandler(async (req, res) => {
       return (r.sum / r.count) >= _minRating;
     });
   }
-  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)|availability(空き優先)
-  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; rating/reliability は常に高→低）
+  // ソート: ?sort=price(default)|rating(高→低)|memory(高→低)|reliability(高→低)|standard(標準スコア高→低)|availability(空き優先)
+  // ?sortDir=asc(default)|desc で方向を逆転（price/memory のみ有効; rating/reliability/standard は常に高→低）
+  // ?minStandardScore=N で参照テーブル収録かつスコア N 以上に絞り込み（§12 DLPerf 相当）
+  if (req.query.minStandardScore !== undefined) {
+    const _mss = parseFloat(req.query.minStandardScore);
+    if (!Number.isFinite(_mss) || _mss < 0) {
+      return res.status(400).json({ error: 'minStandardScore must be a non-negative number' });
+    }
+    gpus = gpus.filter(g => {
+      const s = standardScore(g).score;
+      return s !== null && s >= _mss;
+    });
+  }
   const sort = req.query.sort || 'price';
   const sortDir = req.query.sortDir === 'desc' ? -1 : 1;
   // 信頼性は providerId 単位でファイル読み取りを伴うため、リクエスト内でメモ化する
@@ -244,6 +256,9 @@ router.get('/', asyncHandler(async (req, res) => {
       const sb = relFor(b.providerId).score || 0;
       return sb - sa;
     });
+  } else if (sort === 'standard') {
+    // §12: DLPerf 相当の標準スコア降順（未知機種=null は末尾）
+    gpus.sort((a, b) => (standardScore(b).score || 0) - (standardScore(a).score || 0));
   } else if (sort === 'availability') {
     // 空き GPU を先に表示
     gpus.sort((a, b) => {
@@ -287,6 +302,8 @@ router.get('/', asyncHandler(async (req, res) => {
           : { average: null, count: 0 },
         // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
         reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
+        // §12: 機種標準スコア（RTX4090=1.0 正規化、自己申告ではなく参照テーブル由来）
+        ...standardScoreFields(gpu),
       };
     }),
     timestamp: new Date().toISOString()
@@ -348,6 +365,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
       rating: { average: ratingAverage, count: ratingCount },
       // 客観的な信頼性シグナル（集計値のみ — プロバイダー身元は露出しない）
       reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions, beats: rel.beats, gapEvents: rel.gapEvents, measuring: rel.measuring },
+      // §12: 機種標準スコア（RTX4090=1.0 正規化）
+      ...standardScoreFields(gpu),
     }
   };
   res.json(response);

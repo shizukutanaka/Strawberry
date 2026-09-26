@@ -273,6 +273,8 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 1. (短期) 出品時に標準ベンチを必須化し、**DLPerf 風の正規化スコア**を算出・掲示（§2 のスペック詐称検出と統合）。
 2. (短期) 稼働率・中断率・完了率から**ホスト信頼性スコア**を出し、検索ランキング（`gpu/index.js` のソート）と §5 レピュテーションに反映。
 
+**実装済（2026-09）**: アクション1・2を両方実装。`src/marketplace/dlperf-score.js` — 公開データシート値（FP16 tensor TFLOPS × メモリ帯域の幾何平均）を RTX 4090=1.000 に正規化した `standardScore` を機種名から解決（40+機種、ベンダー名除去・最長部分一致、未知機種は null＝自己申告値に依存しない）。`GET /gpus` 一覧/詳細に `standardScore`/`standardScoreModel` を掲示、`?sort=standard`（高→低、未知は末尾）と `?minStandardScore` フィルタ追加。ホスト信頼性は `provider-uptime` の `reliability`（稼働率・ギャップイベント由来）として既に一覧/詳細+`sort=reliability` 済み。
+
 優先度: **中**
 
 ## 13. Serverless / オートスケール推論・分課金メータリング

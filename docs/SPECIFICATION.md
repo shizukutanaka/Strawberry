@@ -34,7 +34,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | メソッド/パス | 役割 | 認証 | ステータス |
 |---|---|---|---|
 | POST `/api/v1/users/register`,`/login`,`/me` | ユーザ登録/認証 | register/login=公開, me=JWT | ✅ |
-| GET `/api/v1/gpus`, `/gpus/:id` | GPU 検索/詳細 | JWT | ✅(JSON層で動作) |
+| GET `/api/v1/gpus`, `/gpus/:id` | GPU 検索/詳細 | JWT | ✅(JSON層で動作, standardScore 掲示+sort=standard/minStandardScore) |
 | POST/PUT `/api/v1/gpus` | 出品登録/更新 | JWT+role | 🟡(アテステーション無し) |
 | GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
 | POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |

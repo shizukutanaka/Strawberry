@@ -181,8 +181,11 @@ async function sendEmailNotify(message, { to, subject = '通知', from, sendFunc
   return await sendFunc({ to, subject, text: message, from });
 }
 
-// 指数バックオフ付きリトライ（一時的なネットワーク障害 / 5xx に対応）
-async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
+// 指数バックオフ付きリトライ（一時的なネットワーク障害 / 5xx に対応）。
+// 遅延は full jitter（AWS Architecture Blog「Exponential Backoff And Jitter」流）。
+// 固定指数バックオフだと一括障害・一斉通知（price-watch 等）の失敗リトライが
+// 同期化してサンダリングハードを起こすため、0〜指数上限の一様乱数で分散させる。
+async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000, maxDelayMs = 30_000 } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -193,7 +196,8 @@ async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
       const status = err.response && err.response.status;
       if (status && status >= 400 && status < 500) throw err;
       if (attempt < maxAttempts) {
-        await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt - 1)));
+        const cap = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
+        await new Promise(r => setTimeout(r, Math.random() * cap));
       }
     }
   }

@@ -425,3 +425,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- 通知リトライの full jitter 化（resilience）: `notifier.js` の `withRetry` が固定指数バックオフ（1s,2s…）で、一括通知障害時に全呼び出しの再送が同期化し得た（thundering herd。AWS Architecture Blog「Exponential Backoff And Jitter」の定番対策）。遅延を `random() * min(maxDelayMs, base*2^n)` の一様乱数に変更し上限も追加。併せてユーザーIDが UUID v4 で 'user_' 始まりにならない `sendNotification` の到達不能な多段分岐を削除（多段通知は user-notify.js が担当）。

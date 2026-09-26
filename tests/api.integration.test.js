@@ -3505,6 +3505,48 @@ describe('API Integration', () => {
       expect(calls).toBe(1);
     });
 
+    it('backoff delay is jittered within the exponential cap', async () => {
+      // full jitter: delay は [0, baseDelayMs * 2^(attempt-1)] の一様乱数。
+      // fake timers で「cap 分進めれば必ず再試行される」ことと、
+      // cap 未満のままでは完了しない可能性がある（乱数依存）ことの境界を検証する。
+      jest.useFakeTimers();
+      try {
+        let calls = 0;
+        const promise = withRetry(async () => {
+          calls++;
+          if (calls === 1) throw Object.assign(new Error('boom'), { code: 'ECONNREFUSED' });
+          return 'ok';
+        }, { maxAttempts: 2, baseDelayMs: 1000 });
+        // 1回目の失敗は同期済み・タイマーはまだ未発火（ジッターで即時再試行しないことを確認）
+        expect(calls).toBe(1);
+        // cap 分進めれば必ず再試行される
+        await jest.advanceTimersByTimeAsync(1000);
+        await expect(promise).resolves.toBe('ok');
+        expect(calls).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('maxDelayMs caps the jitter window', async () => {
+      jest.useFakeTimers();
+      try {
+        let calls = 0;
+        const promise = withRetry(async () => {
+          calls++;
+          throw Object.assign(new Error('boom'), { code: 'ECONNREFUSED' });
+        }, { maxAttempts: 3, baseDelayMs: 60_000, maxDelayMs: 5 });
+        promise.catch(() => {});
+        // 各リトライ間隔は maxDelayMs で上限化: 全3回は 3*cap 内に必ず尽きる
+        // （cap なしなら 60s+120s かかる）
+        await jest.advanceTimersByTimeAsync(3 * 5);
+        await expect(promise).rejects.toThrow('boom');
+        expect(calls).toBe(3);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('delivers to a real localhost HTTP webhook server', async () => {
       // The send-time SSRF guard blocks loopback by default; this test exercises
       // delivery to a local server, which is the legitimate opt-in use case.

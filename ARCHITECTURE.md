@@ -119,9 +119,8 @@ API スモーク、rbac、gpu、failover、exchange-rate、error-handler 等）�
   `SETTLED` でも実際の LN 払い出しが実行されず資金が滞留しうる。LND/CLN アダプタ実装と
   合わせて `evaluate`→`settle`→`executeActions(ctx.payoutSats=settlement.providerPayoutSats)`
   を結線すること。**LN 実機統合を伴う大改修のため本ブランチでは未着手**。
-- **JSON 層のクロスプロセス lost-update**: `createJsonRepository` の書き込みは
-  temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
-  flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で
-  更新消失が起こりうる。マルチプロセス運用前に flock もしくは単一ライタープロセス化が必要。
-  （単一プロセス運用では問題なし。`profit-addresses`/`peerID`/`notification-settings` は
-  プロセス内 `withLock` で直列化済み。）
+- **JSON 層のクロスプロセス lost-update（対応済み）**: `createJsonRepository` の
+  全書き込み操作は `proper-lockfile` による `<file>.lock` のクロスプロセス排他で
+  直列化されるようになった（lockSync + 2s リトライ + 10s stale 回収、取得失敗は
+  fail-closed で throw）。PM2 クラスタ等の複数ワーカーでの「後勝ち rename」による
+  更新消失を防止。残件: Prisma/Postgres 等への単一永続化層移行。

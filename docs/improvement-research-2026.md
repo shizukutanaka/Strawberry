@@ -154,6 +154,8 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 
 **推奨アクション**: 単一の永続化層（当面 JSON、将来 Prisma/Postgres）へ統一し、注文・決済・残高に整合性制約を導入。`ARCHITECTURE.md` のフォローアップ参照。
 
+**実装済（部分）**: `createJsonRepository` の全書き込み操作（create/update/updateIf/delete）を `proper-lockfile` の `<file>.lock` でクロスプロセス直列化 — `ARCHITECTURE.md` の「クロスプロセス lost-update」ギャップに対応し、PM2 クラスタ等の複数ワーカーで後勝ち rename による更新消失を防止。ロック取得は 2s リトライ + fail-closed throw、残骸ロックは 10s stale 回収。残件: エスクロー action executor 配線・Prisma/Postgres への本格移行。
+
 優先度: **中**
 
 ---

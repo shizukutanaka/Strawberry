@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { atomicWriteJSON } = require('./atomicWrite');
+const lockfile = require('proper-lockfile');
 
 // プロトタイプ汚染対策（深層防御）。全リポジトリの create/update/updateIf がこの
 // チョークポイントを通るため、ここで危険キーを一括除去する。
@@ -54,6 +55,47 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
     if (!onAccess) return;
     try { onAccess(action, detail); } catch (e) { /* 監査失敗はサイレント */ }
   };
+
+  // クロスプロセス排他。atomicWriteJSON(temp+rename)は単一プロセス内で原子だが、
+  // PM2 クラスタ等では「両者 load → 別キー更新 → 後勝ち rename」で更新が消失する。
+  // load→write を <file>.lock で直列化し、ロック取得失敗は fail-closed で throw
+  // （破損ファイルの温存方針と同じ: 書き込み拒否 > 不整合永続化）。
+  // stale はクラッシュ残骸ロックの回収期限。single process でも acquire→release が
+  // 同期的に完結し入れ子が無いためデッドロックしない。
+  const LOCK_OPTS = {
+    realpath: false, // 対象 .json 未生成でもロック可能にする
+    stale: 10_000,   // クラッシュ残骸ロックの回収期限
+  };
+  const LOCK_TIMEOUT_MS = 2_000;
+  const LOCK_RETRY_MS = 25;
+  function sleepSync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  }
+  function withFileLock(fn) {
+    let release;
+    let lastErr;
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    // proper-lockfile の sync API は retries 非対応なので手動リトライ。
+    // リポジトリ自体は同期設計のため async lock にできない。
+    do {
+      try {
+        release = lockfile.lockSync(filePath, LOCK_OPTS);
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (e.code !== 'ELOCKED') throw new Error(`[json-repo] could not acquire write lock for ${fileName}: ${e.message}`);
+        sleepSync(LOCK_RETRY_MS);
+      }
+    } while (Date.now() < deadline);
+    if (!release) {
+      throw new Error(`[json-repo] could not acquire write lock for ${fileName}: ${lastErr.message}`);
+    }
+    try {
+      return fn();
+    } finally {
+      try { release(); } catch (e) { /* release 失敗は stale で回収される */ }
+    }
+  }
 
   function load() {
     if (!fs.existsSync(filePath)) return [];
@@ -97,7 +139,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       audit('getById', { id, found: !!row });
       return row;
     },
-    create: (rec) => {
+    create: (rec) => withFileLock(() => {
       const rows = load();
       const safeRec = stripDangerousKeys(rec);
       const row = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
@@ -105,8 +147,8 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       atomicWriteJSON(filePath, rows);
       audit('create', { id: row.id });
       return row;
-    },
-    update: (id, updates) => {
+    }),
+    update: (id, updates) => withFileLock(() => {
       const rows = load();
       const idx = rows.findIndex((r) => r.id === id);
       if (idx === -1) {
@@ -117,11 +159,11 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       atomicWriteJSON(filePath, rows);
       audit('update', { id, updates });
       return rows[idx];
-    },
+    }),
     // Atomic compare-and-swap: loads, checks predicate, and writes in one synchronous
     // section (no await between load and write), preventing TOCTOU race conditions.
     // Returns { ok: true, row } on success or { ok: false, reason, current } on failure.
-    updateIf: (id, predicate, updates) => {
+    updateIf: (id, predicate, updates) => withFileLock(() => {
       const rows = load();
       const idx = rows.findIndex((r) => r.id === id);
       if (idx === -1) {
@@ -136,15 +178,15 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       atomicWriteJSON(filePath, rows);
       audit('updateIf', { id, updates });
       return { ok: true, row: rows[idx] };
-    },
-    delete: (id) => {
+    }),
+    delete: (id) => withFileLock(() => {
       const rows = load();
       const remaining = rows.filter((r) => r.id !== id);
       const deleted = remaining.length < rows.length;
       atomicWriteJSON(filePath, remaining);
       audit('delete', { id, deleted });
       return deleted;
-    },
+    }),
   };
 
   for (const [name, spec] of Object.entries(finders)) {

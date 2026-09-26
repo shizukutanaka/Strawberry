@@ -48,6 +48,27 @@ function createVerificationService({
       return repo.update(rec.id, { replicaOutputs: [...(rec.replicaOutputs || []), output], updatedAt: new Date().toISOString() });
     },
 
+    /** 検証レコードを取得、無ければ open する（heartbeat 等からの遅延初期化用）。 */
+    openOrGet(jobId, opts = {}) {
+      const existing = repo.getByJobId(jobId);
+      if (existing) return existing;
+      return this.open(jobId, opts);
+    },
+
+    /**
+     * 稼働中 GPU 利用率サンプルを追記（実ジョブ収集: lender heartbeat 連携）。
+     * レコードが無ければ jobId=orderId で open してから追記する。
+     * 上限 MAX_UTIL_SAMPLES で打ち切り、無制限に肥大させない（ゼロ負荷判定は
+     * 全体比率で十分であり、長時間稼働でも配列が暴走しない）。
+     */
+    recordUtilSample(jobId, pct, { providerId = null, maxSamples = 1000 } = {}) {
+      const n = Number(pct);
+      if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('utilizationPct must be 0-100');
+      const rec = repo.getByJobId(jobId) || this.open(jobId, { providerId });
+      const utilSamples = [...(rec.utilSamples || []), n].slice(-maxSamples);
+      return repo.update(rec.id, { utilSamples, updatedAt: new Date().toISOString() });
+    },
+
     /**
      * verdict を確定する。
      * - ゼロ負荷の疑い → failed

@@ -505,6 +505,119 @@ router.get('/provider/earnings',
   })
 );
 
+// --- ジョブ検証API（§1 Proof-of-Compute のルート配線） ---
+// jobId = orderId。楽観的検証（auditRate サンプリング、§11 前提）で、
+// heartbeat の utilizationPct がゼロ負荷検出の実ジョブ収集になる。
+const _verifSvc = () => require('../../../verification/verification-service').createVerificationService();
+
+// 当事者（借り手/プロバイダ/admin）チェック用ヘルパ
+function _orderParty(req, order) {
+  return req.user.role === 'admin' || req.user.id === order.userId || req.user.id === order.providerId;
+}
+const _verifParams = validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params');
+
+// 検証レコードの参照（当事者 + admin のみ — verdict/出力ハッシュは当事者の資産情報）
+// GET /orders/:id/verification
+router.get('/:id/verification',
+  authenticateJWT, _verifParams,
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    if (!_orderParty(req, order)) throw new APIError(ErrorTypes.FORBIDDEN, 'Not a party to this order', 403);
+    const rec = _verifSvc().get(order.id);
+    res.json({ verification: rec || null });
+  })
+);
+
+// 借り手が受領したジョブ結果（出力ハッシュ/ベクトル）を primary output として記録。
+// POST /orders/:id/verify/output { output: any }
+router.post('/:id/verify/output',
+  authenticateJWT, _verifParams,
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    // primary output は「借り手が観測した結果」。プロバイダ自身が書き込むと
+    // 自己申告で検証が空転するため借り手/admin のみに限定する。
+    if (req.user.role !== 'admin' && req.user.id !== order.userId) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the renter (or admin) can submit the primary output', 403);
+    }
+    if (!('output' in (req.body || {}))) {
+      throw new APIError(ErrorTypes.VALIDATION, 'output is required', 400);
+    }
+    if (!['active', 'matched', 'pending', 'completed'].includes(order.status)) {
+      throw new APIError(ErrorTypes.CONFLICT, `Cannot submit output for order in '${order.status}' state`, 409);
+    }
+    try {
+      // auditRate 0-1 を指定するとレコード開設時の監査サンプリング率を上書きできる
+      // （楽観的検証の既定 10% より厳しくしたい借り手/運用者向け）。
+      const ar = req.body && typeof req.body.auditRate === 'number' ? req.body.auditRate : undefined;
+      const rec = _verifSvc().openOrGet(order.id, { providerId: order.providerId, auditRate: ar });
+      const saved = _verifSvc().recordPrimary(order.id, req.body.output, { utilSamples: rec.utilSamples || [] });
+      res.json({ recorded: true, jobId: order.id, verdict: saved.verdict });
+    } catch (e) {
+      throw new APIError(ErrorTypes.VALIDATION, e.message, 400);
+    }
+  })
+);
+
+// 監査用: 他プロバイダが再実行した結果を replica として追加（ternary consensus 用）。
+// POST /orders/:id/verify/replica { output: any }
+router.post('/:id/verify/replica',
+  authenticateJWT, _verifParams,
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    // 独立した第三者プロバイダのみ（本実行プロバイダの replica は独立監査にならない）。
+    // admin も可（監査オペレータが代理投入するケース）。
+    if (req.user.role !== 'admin') {
+      if (req.user.role !== 'provider') {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'Only an independent provider (or admin) can submit a replica output', 403);
+      }
+      if (order.providerId && req.user.id === order.providerId) {
+        throw new APIError(ErrorTypes.FORBIDDEN, 'The primary provider cannot audit itself', 403);
+      }
+    }
+    if (!('output' in (req.body || {}))) {
+      throw new APIError(ErrorTypes.VALIDATION, 'output is required', 400);
+    }
+    try {
+      const ar = req.body && typeof req.body.auditRate === 'number' ? req.body.auditRate : undefined;
+      _verifSvc().openOrGet(order.id, { providerId: order.providerId, auditRate: ar });
+      const saved = _verifSvc().submitReplica(order.id, req.body.output);
+      res.json({ recorded: true, jobId: order.id, replicas: (saved.replicaOutputs || []).length });
+    } catch (e) {
+      throw new APIError(ErrorTypes.VALIDATION, e.message, 400);
+    }
+  })
+);
+
+// verdict 確定（admin のみ — reputation/escrow に影響するため）。
+// 結果はエスクローがあればそのまま解放/係争判定の verificationCtx として使える。
+// POST /orders/:id/verify/finalize { tolerance?: number }
+router.post('/:id/verify/finalize',
+  authenticateJWT, _verifParams,
+  asyncHandler(async (req, res) => {
+    if (req.user.role !== 'admin') {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only admins can finalize a verification', 403);
+    }
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+    const rec = _verifSvc().get(order.id);
+    if (!rec) throw new APIError(ErrorTypes.NOT_FOUND, 'No verification record for this order', 404);
+    try {
+      const { createReputationService } = require('../../../reputation/reputation-service');
+      const svc = require('../../../verification/verification-service').createVerificationService({
+        reputationService: createReputationService(),
+      });
+      const result = svc.finalize(order.id, { tolerance: req.body && req.body.tolerance });
+      logger.info(`Verification finalized: order=${order.id} verdict=${result.verdict}`);
+      res.json(result);
+    } catch (e) {
+      throw new APIError(ErrorTypes.VALIDATION, e.message, 400);
+    }
+  })
+);
+
 // --- ハートビート受付API ---
 // POST /api/orders/:id/heartbeat { role: 'lender'|'renter' }
 router.post('/:id/heartbeat',
@@ -553,6 +666,15 @@ router.post('/:id/heartbeat',
     // best-effort（失敗してもハートビート応答は返す）。
     if (role === 'lender') {
       providerUptime.recordProviderHeartbeat(order.providerId, orderId, nowMs);
+      // §1 実ジョブ収集: utilizationPct (0-100) を検証レコードへ追記し、
+      // ゼロ負荷検出（架空の稼働報告で課金を得る不正）の材料にする。
+      if (req.body.utilizationPct !== undefined) {
+        try {
+          _verifSvc().recordUtilSample(orderId, req.body.utilizationPct, { providerId: order.providerId });
+        } catch (e) {
+          return res.status(400).json({ error: `invalid utilizationPct: ${e.message}` });
+        }
+      }
     }
     res.json({ usageSeconds: session.getUsageSeconds() });
   })
@@ -1958,6 +2080,22 @@ router.post('/:id/stop',
         logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
       }
 
+      // §1: 未確定の検証レコードがあれば停止時に確定する（best-effort）。
+      // heartbeat で収集した利用率サンプルがあればゼロ負荷検出が走り、
+      // verified/failed は reputationService.recordAudit へ反映される。
+      let verificationVerdict = null;
+      try {
+        const verifSvc = require('../../../verification/verification-service').createVerificationService({
+          reputationService: (() => { const { createReputationService } = require('../../../reputation/reputation-service'); return createReputationService(); })(),
+        });
+        const rec = verifSvc.get(orderId);
+        if (rec && rec.verdict === 'pending' && (rec.hasPrimary || (rec.utilSamples || []).length > 0 || (rec.replicaOutputs || []).length > 0)) {
+          verificationVerdict = verifSvc.finalize(orderId).verdict;
+        }
+      } catch (e) {
+        logger.warn(`verification finalize failed for order ${orderId}: ${e.message}`);
+      }
+
       // 借り手へ完了通知（支払い確認と利用時間サマリを含む）
       try {
         const { notifyUser } = require('../../../utils/user-notify');
@@ -1970,7 +2108,7 @@ router.post('/:id/stop',
 
       invalidateUserCache(order.userId);
       if (order.providerId) invalidateUserCache(order.providerId);
-      res.json({ message: 'Order execution stopped successfully', usageStats });
+      res.json({ message: 'Order execution stopped successfully', usageStats, verification: verificationVerdict });
     });
   })
 );

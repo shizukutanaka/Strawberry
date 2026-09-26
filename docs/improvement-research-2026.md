@@ -31,6 +31,8 @@
 2. (短期) **GPU profiling チェック**: 実行中に `nvidia-smi` の利用率/温度/メモリを定期取得し（既に `src/gpu/gpu-metrics.js` 基盤あり）、課金対象の負荷実態と突き合わせ、ゼロ負荷課金を検出。
 3. (中期) ZK 系（JSTprove 等, arXiv:2510.21024）や TEE attestation（§2）と組み合わせた検証パイプライン。
 
+**実装済（2026-09）**: アクション1・2の API 配線を完了。`POST /orders/:id/verify/output`（借り手が観測結果を投入、プロバイダは不可＝自己申告防止）、`POST /orders/:id/verify/replica`（第三者プロバイダのみ、本実行者の自己監査を拒否）、`POST /orders/:id/verify/finalize`（admin、verdict を reputationService.recordAudit へ反映）、`GET /orders/:id/verification`（当事者参照）。lender heartbeat の `utilizationPct` が `recordUtilSample` で実ジョブ収集（上限1000件）されゼロ負荷検出に供される。`/stop` で pending レコードを自動 finalize。`auditRate` 0-1 をリクエストで上書き可能（楽観的検証の既定 10% サンプリング）。残件: 実再実行の自動ディスパッチ（監査プロバイダへのジョブ再投入 orchestration）。
+
 優先度: **高（信頼基盤の核）**
 
 ---

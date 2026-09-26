@@ -37,6 +37,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | GET `/api/v1/gpus`, `/gpus/:id` | GPU 検索/詳細 | JWT | ✅(JSON層で動作) |
 | POST/PUT `/api/v1/gpus` | 出品登録/更新 | JWT+role | 🟡(アテステーション無し) |
 | GET/POST `/api/v1/orders` … `/:id/start` | 注文 | JWT | ✅(create スキーマ不整合/param検証/状態遷移バグ修正済, 統合テスト有) |
+| `/:id/verify/output`,`/:id/verify/replica`,`/:id/verify/finalize`,GET `/:id/verification` | ジョブ検証(§1配線) | JWT(当事者/admin) | ✅(統合テスト有) |
 | POST `/api/v1/payments/...` | 決済 | JWT | 🟡(エスクロー無し) |
 | POST `/api/v1/marketplace/quote`,`/rank` | 特徴量価格/レピュテーション順位 | JWT | ✅ |
 | POST `/api/v1/marketplace/auction` | 逆オークション（価格×レピュ×SLA×アテステーション） | JWT | ✅ |
@@ -60,7 +61,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 6. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
 
 ### F2. 信頼基盤（最優先トリオ）
-- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。**ルート配線・実ジョブ収集は未**。
+- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。ルート配線済み（orders `/:id/verify/*` + GET `/:id/verification`、lender heartbeat の `utilizationPct` がゼロ負荷検出の実ジョブ収集、`/stop` で未確定レコードを自動 finalize）。
 - **Lightning エスクロー**: ❌→🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。**LN実機連携・ルート配線は未**。
 - **GPU アテステーション**: ❌（nvtrust 連携未, カテゴリ3）。
 

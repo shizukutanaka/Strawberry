@@ -1,1 +1,29 @@
-# GPUワーカー用
+# GPUワーカー用 — virtual-gpu-manager.js がテナント隔離コンテナとして
+# `strawberry/gpu-worker:latest` を参照するイメージ。
+#
+# コンテナには Cmd が指定されないためイメージの既定 CMD で長時間生存する必要があり、
+# テナントジョブは /data バインドマウント経由で投入・docker exec / kubectl exec で実行される。
+# HostConfig.Runtime='nvidia' / resources.limits['nvidia.com/gpu'] で GPU が割り当てられる前提。
+#
+# ベースは runtime フレーバー（devel は不要な toolchain を含み攻撃面が大きい）。
+# タグは運用時に固定して使うこと（latest のまま push/pull すると再現性が失われる）。
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+# 非 root 実行（Dockerfile.api と同方針。テナントコードが走る箱なので必須）。
+# GPU デバイスは nvidia runtime が video グループ相当の権限を仲介するため
+# worker ユーザでも nvidia-smi/CUDA に到達できる。
+RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin worker \
+    && mkdir -p /data \
+    && chown worker:worker /data
+
+WORKDIR /data
+USER worker
+
+# GPU 未割当・ドライバ不達は unhealthy として検出できるようにする
+# （gpu-worker が GPU なしで healthy だと、テナントは「GPUがあるのに動かない」
+# 不可解な失敗に直面する）。
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD ["nvidia-smi", "-L"]
+
+# テナントジョブ待受のための無期限待機（exec でジョブを投入する前提）
+CMD ["sleep", "infinity"]

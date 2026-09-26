@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（ログ基盤統一）
+
+- 重複ロガー解消: `src/core/logger.js`（420行・winston-daily-rotate-file 使用・logs/ を cwd 基準で別系統）は provider-uptime.js のみが使用していたため、共通 `src/utils/logger.js` へ移行して削除。winston-daily-rotate-file 依存も除去。

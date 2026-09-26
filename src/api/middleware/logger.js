@@ -1,5 +1,6 @@
 // src/api/middleware/logger.js - リクエストログミドルウェア
 const morgan = require('morgan');
+const client = require('prom-client');
 const { logger } = require('../../utils/logger');
 
 // カスタムトークン定義
@@ -64,23 +65,46 @@ const devRequestLogger = morgan(
   }
 );
 
+// RED メトリクス（Rate / Errors / Duration）。/metrics 経由で Prometheus が
+// スクレイプする。ラベルは実 URL ではなくルートテンプレート（/orders/:id 等）を
+// 使う: UUID・注文ID が label 値になると時系列が無限に増殖し、メトリクス自体が
+// メモリ DoS になるため（Prometheus ベストプラクティス）。
+const httpRequestsTotal = new client.Counter({
+  name: 'http_requests_total',
+  help: 'Total HTTP requests',
+  labelNames: ['method', 'route', 'status'],
+});
+const httpRequestDurationSeconds = new client.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'HTTP request duration in seconds',
+  labelNames: ['method', 'route', 'status'],
+  buckets: [0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+});
+
+function routeLabel(req) {
+  const routePath = req.route && req.route.path;
+  if (!routePath) return 'unmatched';
+  const p = Array.isArray(routePath) ? routePath.join(',') : String(routePath);
+  return `${req.baseUrl || ''}${p}` || '/';
+}
+
 // レスポンスタイム測定ミドルウェア
 const responseTime = (req, res, next) => {
   const start = Date.now();
-  
+
   // レスポンス送信後に実行
   res.on('finish', () => {
-    const duration = Date.now() - start;
-    
+    const durationMs = Date.now() - start;
+    const labels = { method: req.method, route: routeLabel(req), status: res.statusCode };
+    httpRequestsTotal.inc(labels);
+    httpRequestDurationSeconds.observe(labels, durationMs / 1000);
+
     // 遅いレスポンスを警告
-    if (duration > 1000) {
-      logger.warn(`Slow response: ${req.method} ${req.originalUrl} - ${duration}ms`);
+    if (durationMs > 1000) {
+      logger.warn(`Slow response: ${req.method} ${req.originalUrl} - ${durationMs}ms`);
     }
-    
-    // メトリクス収集（将来的に拡張）
-    // TODO: Prometheusなどのメトリクス収集システムと連携
   });
-  
+
   next();
 };
 

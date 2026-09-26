@@ -58,6 +58,9 @@ function renderReport(kpi, pages) {
 }
 
 async function main() {
+  if (!NOTION_TOKEN || !NOTION_DB_ID) {
+    throw new Error('NOTION_TOKENとNOTION_DB_IDが未設定です (.env で指定してください)');
+  }
   const pages = await fetchAllPages();
   const kpi = aggregateKPI(pages);
   const report = renderReport(kpi, pages);
@@ -66,7 +69,7 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch((e) => { console.error(e.message); process.exit(1); });
 }
 
 module.exports = { main };

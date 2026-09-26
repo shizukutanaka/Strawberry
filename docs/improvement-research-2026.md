@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（DX 修正）
+
+- `npm run dev` が nodemon 未導入で即死していた問題を修正（devDependencies に nodemon ^3.1.14 を追加。実際にサーバ起動・/health 200 を確認）。

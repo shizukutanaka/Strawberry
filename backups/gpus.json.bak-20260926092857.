@@ -1,0 +1,1922 @@
+[
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "b98e1563-371b-4156-a91d-4b9f9e6ff777",
+    "createdAt": "2026-09-26T09:28:03.815Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "0f5ab3a5-015e-45ad-bb95-e8d72bd014c2",
+    "createdAt": "2026-09-26T09:28:03.963Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "89097d51-b056-4ae2-b80b-2d8e1f415481",
+    "createdAt": "2026-09-26T09:28:03.972Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "1ad7be11-4441-4e4d-b4ce-de3d1b8d97f3",
+    "createdAt": "2026-09-26T09:28:04.092Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "f208a2e0-e37a-4a18-ab56-59116fc12556",
+    "createdAt": "2026-09-26T09:28:04.108Z"
+  },
+  {
+    "name": "IT Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-IT",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "1535c5b6-240d-40d4-a56f-72adf28ceeef",
+    "createdAt": "2026-09-26T09:28:04.120Z"
+  },
+  {
+    "name": "Gap Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-GAP",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "588dde84-8303-450d-a0ec-0667aa5c7f39",
+    "createdAt": "2026-09-26T09:28:04.878Z"
+  },
+  {
+    "name": "Gap Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-GAP",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "9186e0ec-3d13-4b90-a57f-0ebbda89c257",
+    "createdAt": "2026-09-26T09:28:04.885Z"
+  },
+  {
+    "name": "Gap Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-GAP",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "f448ba71-f5bf-4189-bc7a-871cbd64f200",
+    "createdAt": "2026-09-26T09:28:04.890Z"
+  },
+  {
+    "name": "Gap Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-GAP",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "5c38e4be-c634-4b0e-88f2-7c52ffb73769",
+    "createdAt": "2026-09-26T09:28:05.408Z"
+  },
+  {
+    "name": "Slot Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SLOT",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "id": "9eb2cb4d-b4b2-4549-9f5c-e236a79783d0",
+    "createdAt": "2026-09-26T09:28:05.557Z"
+  },
+  {
+    "name": "Slot Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SLOT",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "id": "ab8dca27-4664-40b5-8105-f61fa411b316",
+    "createdAt": "2026-09-26T09:28:05.565Z"
+  },
+  {
+    "name": "Slot Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SLOT",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "id": "0dcec30d-6504-4ec4-9892-9437d8c5392d",
+    "createdAt": "2026-09-26T09:28:05.577Z"
+  },
+  {
+    "name": "Slot Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SLOT",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "id": "2a83c1bf-0ee1-4d3e-b3dc-4d5afa1d4991",
+    "createdAt": "2026-09-26T09:28:05.587Z"
+  },
+  {
+    "name": "Slot Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SLOT",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "id": "b5d10cfd-2fce-488f-bd03-6ec15cfbd3e3",
+    "createdAt": "2026-09-26T09:28:05.609Z"
+  },
+  {
+    "name": "Review Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-REV",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "providerId": "583d08e0-3ca1-4a0a-be0e-edf833f9817f",
+    "id": "6688bda7-5089-4de6-b710-811fb525a3a2",
+    "createdAt": "2026-09-26T09:28:05.858Z"
+  },
+  {
+    "name": "Bad Rating GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-400",
+    "memoryGB": 8,
+    "pricePerHour": 0.5,
+    "id": "8f16d59e-0b81-466f-b9ba-1f252d1827b7",
+    "createdAt": "2026-09-26T09:28:06.049Z"
+  },
+  {
+    "name": "Dispute/Rating GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-DR",
+    "memoryGB": 24,
+    "pricePerHour": 0.00001,
+    "providerId": "ca2015fe-0f92-4fa3-9fcd-8e156f83b538",
+    "id": "7e951288-e957-4c45-8b5e-8fdd8ef0ca65",
+    "createdAt": "2026-09-26T09:28:06.579Z"
+  },
+  {
+    "name": "Sort Test GPU",
+    "vendor": "AMD",
+    "model": "RX-SORT",
+    "memoryGB": 32,
+    "pricePerHour": 0.3,
+    "id": "0722928a-51f6-4bb9-a8b8-4fbb477ba208",
+    "createdAt": "2026-09-26T09:28:06.923Z"
+  },
+  {
+    "name": "Dispute Resolve GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-DRR",
+    "memoryGB": 16,
+    "pricePerHour": 0.6,
+    "providerId": "f9b9b892-498f-4ec1-9f38-0227863c8f72",
+    "id": "07483be7-9f81-4f33-ae17-3f7ff7496490",
+    "createdAt": "2026-09-26T09:28:07.177Z"
+  },
+  {
+    "name": "Self Deal GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SD",
+    "memoryGB": 12,
+    "pricePerHour": 0.4,
+    "providerId": "d1e563ce-ed77-4621-abb9-457d8464e455",
+    "id": "8efc0535-abd3-4ff8-9edb-40b7023198c4",
+    "createdAt": "2026-09-26T09:28:07.488Z"
+  },
+  {
+    "name": "Frivolous Dispute GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-FD",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "providerId": "8017e0c7-c77d-4f7f-b6e9-e439acd190f1",
+    "id": "f0ee0665-71e0-4970-b604-b592ed8ad7d8",
+    "createdAt": "2026-09-26T09:28:07.737Z"
+  },
+  {
+    "name": "Deact GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-DA",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "6aa59b59-e150-4337-a311-240a60001d41",
+    "createdAt": "2026-09-26T09:28:08.620Z"
+  },
+  {
+    "name": "Pay/Review GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-PV",
+    "memoryGB": 16,
+    "pricePerHour": 0.5,
+    "providerId": "8ca86a35-04a1-4902-8c59-93b3e46c3791",
+    "id": "fd7394f4-1257-4273-b0de-041ce71a44c2",
+    "createdAt": "2026-09-26T09:28:08.926Z"
+  },
+  {
+    "name": "Seed GPU",
+    "vendor": "AMD",
+    "model": "RX-SEED",
+    "memoryGB": 4,
+    "pricePerHour": 0.1,
+    "providerId": "896bc5fd-c8e2-43a7-9051-faed591f96ba",
+    "id": "32c24b52-6b2e-409a-84fa-ab54b4f6863f",
+    "createdAt": "2026-09-26T09:28:09.265Z"
+  },
+  {
+    "name": "Floor GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-FLOOR",
+    "memoryGB": 8,
+    "pricePerHour": 0.2,
+    "providerId": "896bc5fd-c8e2-43a7-9051-faed591f96ba",
+    "minRenterRating": 4,
+    "id": "4383b819-bed7-45c4-9789-815dda04ea72",
+    "createdAt": "2026-09-26T09:28:09.282Z"
+  },
+  {
+    "name": "Floor GPU 2",
+    "vendor": "NVIDIA",
+    "model": "RTX-FLOOR2",
+    "memoryGB": 8,
+    "pricePerHour": 0.2,
+    "providerId": "896bc5fd-c8e2-43a7-9051-faed591f96ba",
+    "minRenterRating": 4,
+    "id": "55314ab7-5c87-4dc4-908b-b94d46e6f439",
+    "createdAt": "2026-09-26T09:28:09.297Z"
+  },
+  {
+    "name": "Strict Floor GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-STRICT",
+    "memoryGB": 8,
+    "pricePerHour": 0.2,
+    "providerId": "896bc5fd-c8e2-43a7-9051-faed591f96ba",
+    "minRenterRating": 4,
+    "rejectUnratedRenters": true,
+    "id": "98b2b827-6789-49de-a1e3-746bdb5ec302",
+    "createdAt": "2026-09-26T09:28:09.301Z"
+  },
+  {
+    "name": "No Floor GPU",
+    "vendor": "AMD",
+    "model": "RX-NOFLOOR",
+    "memoryGB": 8,
+    "pricePerHour": 0.2,
+    "providerId": "896bc5fd-c8e2-43a7-9051-faed591f96ba",
+    "id": "8e2f9b01-2e1e-4643-be68-404cb7aefa39",
+    "createdAt": "2026-09-26T09:28:09.308Z"
+  },
+  {
+    "name": "Profile GPU",
+    "vendor": "AMD",
+    "model": "RX-PROF",
+    "memoryGB": 8,
+    "pricePerHour": 0.15,
+    "providerId": "896bc5fd-c8e2-43a7-9051-faed591f96ba",
+    "id": "159217b9-83ba-4cf9-a5cc-ae381ab3168a",
+    "createdAt": "2026-09-26T09:28:09.318Z"
+  },
+  {
+    "name": "Earn GPU",
+    "vendor": "AMD",
+    "model": "RX-EARN",
+    "memoryGB": 8,
+    "pricePerHour": 0.1,
+    "providerId": "897c0425-87a9-4e57-8e87-d2dcbfaf802a",
+    "id": "bec10eb5-b820-48f4-8160-91642a32fdd2",
+    "createdAt": "2026-09-26T09:28:09.447Z"
+  },
+  {
+    "name": "Admin Filter GPU",
+    "vendor": "AMD",
+    "model": "RX-AF",
+    "memoryGB": 4,
+    "pricePerHour": 0.05,
+    "providerId": "6d9a666b-3ad1-40fb-80a9-bc73733d2f93",
+    "id": "07cdb828-3fbc-4b5a-a332-54b7b43b970b",
+    "createdAt": "2026-09-26T09:28:09.618Z"
+  },
+  {
+    "name": "Timeline GPU",
+    "vendor": "AMD",
+    "model": "RX-TL",
+    "memoryGB": 8,
+    "pricePerHour": 0.1,
+    "id": "6a275051-56fb-4e89-85b9-63feecf7008d",
+    "createdAt": "2026-09-26T09:28:09.829Z"
+  },
+  {
+    "name": "JP GPU",
+    "vendor": "NVIDIA",
+    "model": "A100-JP",
+    "memoryGB": 40,
+    "pricePerHour": 2,
+    "apiType": "CUDA",
+    "location": {
+      "country": "JP",
+      "city": "Tokyo"
+    },
+    "id": "46f127a0-623a-4a3c-884c-4b1835a2b3fd",
+    "createdAt": "2026-09-26T09:28:09.845Z"
+  },
+  {
+    "name": "US GPU",
+    "vendor": "AMD",
+    "model": "MI300-US",
+    "memoryGB": 64,
+    "pricePerHour": 3,
+    "apiType": "ROCm",
+    "location": {
+      "country": "US",
+      "city": "Seattle"
+    },
+    "id": "415751eb-44bc-4e69-98cf-fc427637dd7e",
+    "createdAt": "2026-09-26T09:28:09.846Z"
+  },
+  {
+    "name": "Filter GPU A",
+    "vendor": "AMD",
+    "model": "RX-FA",
+    "memoryGB": 4,
+    "pricePerHour": 0.05,
+    "id": "f7241b4c-cce2-4588-afee-3b021f2dd943",
+    "createdAt": "2026-09-26T09:28:09.954Z"
+  },
+  {
+    "name": "Filter GPU B",
+    "vendor": "NVIDIA",
+    "model": "RTX-FB",
+    "memoryGB": 8,
+    "pricePerHour": 0.1,
+    "id": "57bdd266-5734-4810-b078-f531e0f690fe",
+    "createdAt": "2026-09-26T09:28:09.955Z"
+  },
+  {
+    "name": "Toggle GPU",
+    "vendor": "AMD",
+    "model": "RX-TOG",
+    "memoryGB": 8,
+    "pricePerHour": 0.1,
+    "providerId": "716fd7cf-9b74-4c9e-95b5-7bd4bbf9a35f",
+    "id": "d77a46a5-3e9e-4735-b0a8-0c23f2cdbff4",
+    "createdAt": "2026-09-26T09:28:10.717Z",
+    "available": true
+  },
+  {
+    "name": "Estimate GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-EST",
+    "memoryGB": 8,
+    "pricePerHour": 1,
+    "providerId": "est-provider-1",
+    "id": "05a4e970-56b2-4f9b-a7ec-dede4f3c71a3",
+    "createdAt": "2026-09-26T09:28:10.733Z",
+    "minRenterRating": null
+  },
+  {
+    "name": "Block GPU",
+    "vendor": "AMD",
+    "model": "RX-BLK",
+    "memoryGB": 8,
+    "pricePerHour": 0.1,
+    "providerId": "d909f206-d981-4fb7-b76a-7ef5dd6d5a1b",
+    "id": "822d9e42-38d7-4c8a-8ce8-17bf6eb331a6",
+    "createdAt": "2026-09-26T09:28:10.936Z",
+    "manualBlocks": [
+      {
+        "id": "c69cd1cb-05d5-46ce-8c88-13fac803e736",
+        "from": "2026-09-26T11:28:10.938Z",
+        "to": "2026-09-26T13:28:10.938Z",
+        "reason": "maintenance",
+        "createdAt": "2026-09-26T09:28:10.939Z"
+      }
+    ]
+  },
+  {
+    "name": "RTX Turbo Beast",
+    "vendor": "NVIDIA",
+    "model": "RTX-9090",
+    "memoryGB": 24,
+    "pricePerHour": 2,
+    "providerId": "srch-p1",
+    "id": "0846f7e5-5906-41c3-ac25-9dfac9929c5c",
+    "createdAt": "2026-09-26T09:28:10.961Z"
+  },
+  {
+    "name": "Radeon RX Pro",
+    "vendor": "AMD",
+    "model": "RX-9800XT",
+    "memoryGB": 16,
+    "pricePerHour": 1,
+    "providerId": "srch-p2",
+    "id": "3ec490df-7c17-409e-920b-21b730600dce",
+    "createdAt": "2026-09-26T09:28:10.962Z"
+  },
+  {
+    "name": "Escrow GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ESC",
+    "memoryGB": 8,
+    "pricePerHour": 0.5,
+    "providerId": "esc-prov-mui6slm0gva2k9",
+    "id": "bbbbf4db-f8c3-4c81-99cd-ce184919b991",
+    "createdAt": "2026-09-26T09:28:11.086Z"
+  },
+  {
+    "name": "Source GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SRC",
+    "memoryGB": 24,
+    "pricePerHour": 1.5,
+    "providerId": "6e6a0d03-835a-449e-8761-a0cd115de5be",
+    "clockMHz": 2000,
+    "powerWatt": 350,
+    "id": "302bf671-c6fb-47f8-8f29-e38821fe7711",
+    "createdAt": "2026-09-26T09:28:11.307Z"
+  },
+  {
+    "name": "Clone GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-SRC",
+    "memoryGB": 24,
+    "pricePerHour": 1.5,
+    "clockMHz": 2000,
+    "powerWatt": 350,
+    "providerId": "6e6a0d03-835a-449e-8761-a0cd115de5be",
+    "available": true,
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "cloned from 302bf671-c6fb-47f8-8f29-e38821fe7711; re-attest to verify"
+      ],
+      "verifiedAt": null
+    },
+    "id": "1055b480-31fa-49a2-b711-49936dd0d3c6",
+    "createdAt": "2026-09-26T09:28:11.315Z"
+  },
+  {
+    "name": "Source GPU (copy)",
+    "vendor": "NVIDIA",
+    "model": "RTX-SRC",
+    "memoryGB": 24,
+    "pricePerHour": 1.5,
+    "clockMHz": 2000,
+    "powerWatt": 350,
+    "providerId": "6e6a0d03-835a-449e-8761-a0cd115de5be",
+    "available": true,
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "cloned from 302bf671-c6fb-47f8-8f29-e38821fe7711; re-attest to verify"
+      ],
+      "verifiedAt": null
+    },
+    "id": "0542dd3c-e811-441d-986f-db94b5d3e359",
+    "createdAt": "2026-09-26T09:28:11.322Z"
+  },
+  {
+    "name": "Accept GPU",
+    "vendor": "AMD",
+    "model": "RX-ACC",
+    "memoryGB": 8,
+    "pricePerHour": 0.2,
+    "providerId": "3c321b95-0f70-4d1e-808a-2203636f8f26",
+    "id": "990a4202-8d8b-4e14-9ceb-60dbc167ea4b",
+    "createdAt": "2026-09-26T09:28:11.530Z"
+  },
+  {
+    "name": "Cmp GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-CMP",
+    "memoryGB": 8,
+    "pricePerHour": 0.5,
+    "providerId": "ca6ca5c3-1fde-4fa0-a1f5-6d8fe72ba65a",
+    "id": "4a2fdf05-f6bc-4b74-bda2-1f5b2fdf1ea8",
+    "createdAt": "2026-09-26T09:28:11.776Z"
+  },
+  {
+    "name": "My GPU 1",
+    "vendor": "NVIDIA",
+    "model": "RTX-MY1",
+    "memoryGB": 8,
+    "pricePerHour": 0.5,
+    "providerId": "d086e658-ae95-435a-ac45-ff78ffce892f",
+    "id": "1df2f3f2-c44d-4b8b-ad3f-86f2ff052ed8",
+    "createdAt": "2026-09-26T09:28:11.997Z"
+  },
+  {
+    "name": "My GPU 2",
+    "vendor": "AMD",
+    "model": "RX-MY2",
+    "memoryGB": 16,
+    "pricePerHour": 0.3,
+    "providerId": "d086e658-ae95-435a-ac45-ff78ffce892f",
+    "id": "4c3cdb5c-9eb7-4784-91ba-0c186f9f8ce4",
+    "createdAt": "2026-09-26T09:28:12.000Z"
+  },
+  {
+    "name": "DR GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-DR",
+    "memoryGB": 8,
+    "pricePerHour": 0.1,
+    "providerId": "dr-prov",
+    "id": "4d8deca8-782b-4c0e-93a5-7adc27ff9c44",
+    "createdAt": "2026-09-26T09:28:12.104Z"
+  },
+  {
+    "name": "Bulk GPU A",
+    "vendor": "NVIDIA",
+    "model": "RTX-BLK-A",
+    "apiType": "CUDA",
+    "driverVersion": "1.0",
+    "os": "Linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1000,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "1402169d-c7db-4a73-bd89-7cfbe1bd3178",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "67d60b11-d41d-46ab-a6f8-da69d843a6ce",
+    "createdAt": "2026-09-26T09:28:12.214Z"
+  },
+  {
+    "name": "Bulk GPU B",
+    "vendor": "NVIDIA",
+    "model": "RTX-BLK-B",
+    "apiType": "CUDA",
+    "driverVersion": "1.0",
+    "os": "Linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1000,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "1402169d-c7db-4a73-bd89-7cfbe1bd3178",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "872c8dd9-da06-4593-a77a-618114eea007",
+    "createdAt": "2026-09-26T09:28:12.215Z"
+  },
+  {
+    "name": "Bulk GPU C",
+    "vendor": "NVIDIA",
+    "model": "RTX-BLK-C",
+    "apiType": "CUDA",
+    "driverVersion": "1.0",
+    "os": "Linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1000,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "1402169d-c7db-4a73-bd89-7cfbe1bd3178",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "af45a38b-3b03-4faa-9b5f-bc7050300468",
+    "createdAt": "2026-09-26T09:28:12.218Z"
+  },
+  {
+    "name": "Bulk GPU Q1",
+    "vendor": "NVIDIA",
+    "model": "RTX-BLK-Q1",
+    "apiType": "CUDA",
+    "driverVersion": "1.0",
+    "os": "Linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1000,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "1f157ed6-1d17-497f-9bd9-21031c37cfba",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "efd40243-c6dd-41fc-a190-b9cb3c057efd",
+    "createdAt": "2026-09-26T09:28:12.426Z"
+  },
+  {
+    "name": "Max GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-M",
+    "apiType": "CUDA",
+    "driverVersion": "1.0",
+    "os": "Linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1000,
+    "powerWatt": 200,
+    "pricePerHour": 1000000,
+    "providerId": "c4dda150-25dc-4958-9eb2-e41dac4794f0",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "9e734422-f92a-43ee-ac98-0eb3cad884f8",
+    "createdAt": "2026-09-26T09:28:12.575Z"
+  },
+  {
+    "name": "Earn GPU 1",
+    "vendor": "NVIDIA",
+    "model": "RTX-E1",
+    "memoryGB": 8,
+    "pricePerHour": 1,
+    "providerId": "c6dca9d7-c2fd-4292-a310-64cfe1d1cc83",
+    "id": "7398d46b-00dd-4229-b1b5-23996c9b3080",
+    "createdAt": "2026-09-26T09:28:13.217Z"
+  },
+  {
+    "name": "Earn GPU 2",
+    "vendor": "AMD",
+    "model": "RX-E2",
+    "memoryGB": 8,
+    "pricePerHour": 0.5,
+    "providerId": "c6dca9d7-c2fd-4292-a310-64cfe1d1cc83",
+    "id": "88de0a2f-ba3b-4184-8dab-fc06e17832dd",
+    "createdAt": "2026-09-26T09:28:13.220Z"
+  },
+  {
+    "name": "ProvA70 GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-P70A",
+    "apiType": "CUDA",
+    "driverVersion": "525.0",
+    "os": "linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1500,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "b873627b-b255-400b-8ff6-10bcec4de4f8",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "28e76afb-a270-4224-99eb-f86f93c1b6a3",
+    "createdAt": "2026-09-26T09:28:13.488Z"
+  },
+  {
+    "name": "Stats71 GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-S71",
+    "apiType": "CUDA",
+    "driverVersion": "525.0",
+    "os": "linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1500,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "e3a669cf-9b99-4ed6-8628-03e30c2e618d",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "65463652-b2c6-4cda-9b7e-5f8dec269fa8",
+    "createdAt": "2026-09-26T09:28:13.620Z"
+  },
+  {
+    "name": "Reject72 GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-REJ72",
+    "apiType": "CUDA",
+    "driverVersion": "525.0",
+    "os": "linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1500,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "2d32fded-b5a1-48c5-9a41-5fb1cdc405d0",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "373f9242-d6a3-4c93-8463-d4f50baab748",
+    "createdAt": "2026-09-26T09:28:13.996Z"
+  },
+  {
+    "name": "P69 GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-P69",
+    "apiType": "CUDA",
+    "driverVersion": "525.0",
+    "os": "linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1500,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "87c2bdb6-8ad8-4a60-b1b2-c28e48365c1f",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "66e52a6c-584d-431c-8687-97573b808626",
+    "createdAt": "2026-09-26T09:28:14.224Z"
+  },
+  {
+    "name": "Activity GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ACT",
+    "apiType": "CUDA",
+    "driverVersion": "525.0",
+    "os": "linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1500,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "2a7a2ae7-b438-4fb6-b811-6dd12d4c234b",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "d7412369-d8aa-41c2-9ce7-18fe3629c504",
+    "createdAt": "2026-09-26T09:28:14.579Z"
+  },
+  {
+    "name": "History GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-HIST",
+    "apiType": "CUDA",
+    "driverVersion": "525.0",
+    "os": "linux",
+    "arch": "x86_64",
+    "memoryGB": 8,
+    "clockMHz": 1500,
+    "powerWatt": 200,
+    "pricePerHour": 0.5,
+    "providerId": "ee7f0aac-895a-4adb-82c1-2e2be4ad1807",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "8f658e27-a6ca-44e2-a8d4-bd1d423dcaa3",
+    "createdAt": "2026-09-26T09:28:14.755Z"
+  },
+  {
+    "name": "Idem GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ID",
+    "memoryGB": 24,
+    "pricePerHour": 0.5,
+    "id": "e7952b2e-3c8c-403e-b4d5-4b6f3eba287b",
+    "createdAt": "2026-09-26T09:28:15.468Z"
+  },
+  {
+    "name": "Admin-Del GPU",
+    "vendor": "AMD",
+    "model": "RX-DEL",
+    "memoryGB": 8,
+    "pricePerHour": 1,
+    "id": "a0ae57a4-2456-447c-aa1e-6b2633dcb0ad",
+    "createdAt": "2026-09-26T09:28:15.950Z"
+  },
+  {
+    "name": "Lock GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-LK",
+    "memoryGB": 24,
+    "pricePerHour": 5,
+    "id": "51eeb878-fda2-4dcf-b442-d21d2f945c8f",
+    "createdAt": "2026-09-26T09:28:16.054Z"
+  },
+  {
+    "name": "TestGPU-1790414896833-2",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "efb17eee-f54d-4716-8b8c-11bcbfb57dca",
+    "available": true,
+    "id": "5fa792f6-2add-4e5f-b828-4d32048f61d7",
+    "createdAt": "2026-09-26T09:28:16.834Z"
+  },
+  {
+    "name": "TestGPU-1790414897137-5",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 1,
+    "providerId": "4a571fcf-6a17-42fb-99db-8a0ef59ef439",
+    "available": true,
+    "id": "ad5a5234-2bf9-49db-8c0b-04fa951b9a2a",
+    "createdAt": "2026-09-26T09:28:17.137Z"
+  },
+  {
+    "name": "TestGPU-1790414897396-8",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "501aec32-fa7a-4d92-a632-59a98719c968",
+    "available": true,
+    "id": "beb9e21d-9d14-4e02-9950-f3aa6aba4005",
+    "createdAt": "2026-09-26T09:28:17.396Z"
+  },
+  {
+    "name": "TestGPU-1790414897775-12",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "5b7c3101-3f67-44ff-a394-1484a4efbdea",
+    "available": true,
+    "id": "c7f502b8-8c0e-4c48-809f-301f76309a81",
+    "createdAt": "2026-09-26T09:28:17.775Z"
+  },
+  {
+    "name": "TestGPU-1790414898040-15",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "17cba39a-ebf5-42e1-a482-6eb1a0553ca6",
+    "available": true,
+    "id": "b68bf244-2cc1-4dc8-907b-2df2706f57c3",
+    "createdAt": "2026-09-26T09:28:18.040Z"
+  },
+  {
+    "name": "TestGPU-1790414898052-16",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 4,
+    "providerId": "17cba39a-ebf5-42e1-a482-6eb1a0553ca6",
+    "available": true,
+    "id": "b9458350-540e-4293-b544-343de6aaa0d4",
+    "createdAt": "2026-09-26T09:28:18.052Z"
+  },
+  {
+    "name": "TestGPU-1790414901548-21",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "8401b5a0-3393-44f0-9123-5c975a187321",
+    "available": true,
+    "id": "128308fe-5ad3-484b-aa9b-4aa569e2fe64",
+    "createdAt": "2026-09-26T09:28:21.549Z"
+  },
+  {
+    "name": "TestGPU-1790414901800-24",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "1151cd09-48ce-4233-8bf5-2f26272c476d",
+    "available": true,
+    "id": "dbaeb9b5-2190-45e1-bdc4-58feab53de3e",
+    "createdAt": "2026-09-26T09:28:21.800Z"
+  },
+  {
+    "name": "TestGPU-1790414904836-31",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 3,
+    "providerId": "03cd24d0-28b3-4264-b7e7-3c74a0a55e79",
+    "available": true,
+    "id": "81592620-207d-49a9-bf6f-94fa488e4c61",
+    "createdAt": "2026-09-26T09:28:24.836Z"
+  },
+  {
+    "name": "TestGPU-1790414904841-32",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 4,
+    "providerId": "03cd24d0-28b3-4264-b7e7-3c74a0a55e79",
+    "available": true,
+    "id": "f553c5b3-7ae8-43b4-8bd9-fd7f6db904f6",
+    "createdAt": "2026-09-26T09:28:24.841Z"
+  },
+  {
+    "name": "RUR-Test-1790414905586",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "clockMHz": 1000,
+    "powerWatt": 400,
+    "pricePerHour": 2,
+    "driverVersion": "525.0",
+    "os": "Linux",
+    "arch": "x86_64",
+    "apiType": "CUDA",
+    "minRenterRating": 4,
+    "rejectUnratedRenters": true,
+    "providerId": "ef301db4-bfa4-4841-bfd2-00302290d1c4",
+    "capabilities": {
+      "cuda": true
+    },
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "no attestation report provided"
+      ],
+      "verifiedAt": null
+    },
+    "id": "8411122a-02c8-4979-83b6-5b4268a5c86a",
+    "createdAt": "2026-09-26T09:28:25.588Z"
+  },
+  {
+    "name": "RUR-PUT-1790414905598",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "ef301db4-bfa4-4841-bfd2-00302290d1c4",
+    "available": true,
+    "id": "c13676cf-376a-439a-a418-44c6bbadd9ce",
+    "createdAt": "2026-09-26T09:28:25.598Z",
+    "rejectUnratedRenters": true
+  },
+  {
+    "name": "RUR-Clear-1790414905623",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "ef301db4-bfa4-4841-bfd2-00302290d1c4",
+    "rejectUnratedRenters": false,
+    "id": "c50958e5-0b1a-49a7-9caf-07a00737431c",
+    "createdAt": "2026-09-26T09:28:25.623Z"
+  },
+  {
+    "name": "RUR-E2E-1790414905866",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "85b6b280-a6a8-484d-bb72-41173f0ae938",
+    "available": true,
+    "rejectUnratedRenters": true,
+    "id": "b039575a-f708-49e5-8891-e9c76f446965",
+    "createdAt": "2026-09-26T09:28:25.866Z"
+  },
+  {
+    "name": "RUR-Dflt-1790414906109",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "7cac3eaa-d59a-463f-b0a4-4f7f860501b2",
+    "available": true,
+    "rejectUnratedRenters": false,
+    "id": "03b10caa-1fdc-402b-b3eb-416cfb7da85e",
+    "createdAt": "2026-09-26T09:28:26.109Z"
+  },
+  {
+    "name": "ELG-1790414911263-0.11266621133808963",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "ce4ccd53-59d5-429c-8178-9e3117c5028e",
+    "available": true,
+    "id": "77eaea99-f3fe-4f83-9448-5a5ab40ee8e0",
+    "createdAt": "2026-09-26T09:28:31.263Z"
+  },
+  {
+    "name": "ELG-1790414911274-0.01731906491756796",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "ce4ccd53-59d5-429c-8178-9e3117c5028e",
+    "available": true,
+    "id": "0ab2e472-efe5-4c3e-baff-d5023a5d1cb5",
+    "createdAt": "2026-09-26T09:28:31.275Z"
+  },
+  {
+    "name": "ELG-1790414911286-0.14678409563769024",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "ce4ccd53-59d5-429c-8178-9e3117c5028e",
+    "available": true,
+    "minRenterRating": 4,
+    "rejectUnratedRenters": true,
+    "id": "53ca834f-ea5d-4318-8283-6d749030ce89",
+    "createdAt": "2026-09-26T09:28:31.286Z"
+  },
+  {
+    "name": "ELG-1790414911405-0.6841792533431184",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "8eb42442-5b47-415a-b7b2-0dd18f10a8d5",
+    "available": true,
+    "id": "09e705f4-67ce-4a66-84b8-293e0e1d5cb3",
+    "createdAt": "2026-09-26T09:28:31.405Z"
+  },
+  {
+    "name": "ELG-1790414911609-0.8588182113275927",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "b5869dd3-c71f-48a2-8ea7-d76afa769a27",
+    "available": true,
+    "rejectUnratedRenters": true,
+    "id": "0f0dbd98-de59-4dde-bfbc-cb9ddb2a5ac3",
+    "createdAt": "2026-09-26T09:28:31.609Z"
+  },
+  {
+    "name": "ELG-1790414911614-0.008781011570356823",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "b5869dd3-c71f-48a2-8ea7-d76afa769a27",
+    "available": true,
+    "rejectUnratedRenters": false,
+    "id": "749601a0-6649-4a31-b911-5308a6856ca5",
+    "createdAt": "2026-09-26T09:28:31.614Z"
+  },
+  {
+    "name": "ELG-1790414911855-0.4264329321706827",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "00f69c77-3646-4d5d-a791-26371fc99239",
+    "available": true,
+    "minRenterRating": 4,
+    "id": "32e3e775-a80a-4588-a408-d91eb18d01e8",
+    "createdAt": "2026-09-26T09:28:31.855Z"
+  },
+  {
+    "name": "ELG-1790414912082-0.8826382825526411",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "7c6a6d0f-b437-4e95-b7f8-c29449989f54",
+    "available": true,
+    "minRenterRating": 4,
+    "id": "ef5a95ac-911d-47ed-aab7-a393c9a2e301",
+    "createdAt": "2026-09-26T09:28:32.083Z"
+  },
+  {
+    "name": "ELG-1790414912319-0.7525854466786563",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "7d66f868-475d-45c0-9e26-1680cbf85520",
+    "available": false,
+    "id": "f1396faa-290a-4c1b-9dca-e56c04b7b6ef",
+    "createdAt": "2026-09-26T09:28:32.319Z"
+  },
+  {
+    "name": "GPU-RL-1790414916353-0.9748388425660648",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "f53dbbc9-eba2-4097-b322-70422e227311",
+    "createdAt": "2026-09-26T09:28:36.353Z"
+  },
+  {
+    "name": "GPU-RL-1790414916409-0.39225184217443854",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "3df55984-e948-4a41-a83f-5673b12c1cde",
+    "createdAt": "2026-09-26T09:28:36.409Z"
+  },
+  {
+    "name": "GPU-RL-1790414916418-0.8992400745942332",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "58b600c0-8395-4a8e-9e05-824918e70eac",
+    "createdAt": "2026-09-26T09:28:36.418Z"
+  },
+  {
+    "name": "GPU-RL-1790414916425-0.525626661636551",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "1887537c-8f50-4fd4-a19c-8b6ce176e4ec",
+    "createdAt": "2026-09-26T09:28:36.425Z"
+  },
+  {
+    "name": "GPU-RL-1790414916431-0.9836102255907356",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "59fe947d-b8d1-4a70-9651-0142199f75ae",
+    "createdAt": "2026-09-26T09:28:36.431Z"
+  },
+  {
+    "name": "GPU-RL-1790414916437-0.49021518241370377",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "73bc5618-24c3-4b0a-8ab8-8c7f4a365dba",
+    "createdAt": "2026-09-26T09:28:36.437Z"
+  },
+  {
+    "name": "GPU-RL-1790414916442-0.3602065865514118",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "4a3fe7d4-ecbf-4cb0-81aa-22af668a3304",
+    "createdAt": "2026-09-26T09:28:36.442Z"
+  },
+  {
+    "name": "GPU-RL-1790414916449-0.6601927915084224",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "03b1e0e8-6a2c-4c53-ba24-4d0d824b8dce",
+    "createdAt": "2026-09-26T09:28:36.449Z"
+  },
+  {
+    "name": "GPU-RL-1790414916458-0.9796751812093449",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "ddec3339-3a30-4e90-b46c-e750b57984b0",
+    "createdAt": "2026-09-26T09:28:36.458Z"
+  },
+  {
+    "name": "GPU-RL-1790414916487-0.46398653325446026",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "21ec0053-7b87-45bc-a163-c50b2e676c1a",
+    "createdAt": "2026-09-26T09:28:36.487Z"
+  },
+  {
+    "name": "GPU-RL-1790414916498-0.03902417698025762",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "ce7315e3-ea46-4082-ace9-3e1c1534e057",
+    "createdAt": "2026-09-26T09:28:36.498Z"
+  },
+  {
+    "name": "GPU-RL-1790414916505-0.9554404670728884",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "b160bf11-4250-44be-b91c-5261b9e6a5a6",
+    "createdAt": "2026-09-26T09:28:36.505Z"
+  },
+  {
+    "name": "GPU-RL-1790414916510-0.593980240354841",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "1f88726f-a090-44a0-b989-30d4d43531ac",
+    "createdAt": "2026-09-26T09:28:36.510Z"
+  },
+  {
+    "name": "GPU-RL-1790414916517-0.9207394752539437",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "410deeef-7fcc-443c-90f0-280ec92aff96",
+    "createdAt": "2026-09-26T09:28:36.517Z"
+  },
+  {
+    "name": "GPU-RL-1790414916522-0.1452465460540292",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "7ebafed3-d95b-459d-a2b0-663392ea17f2",
+    "createdAt": "2026-09-26T09:28:36.522Z"
+  },
+  {
+    "name": "GPU-RL-1790414916529-0.35296101344412845",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "c32dcad6-0379-457e-bf0e-dff3c826387f",
+    "createdAt": "2026-09-26T09:28:36.529Z"
+  },
+  {
+    "name": "GPU-RL-1790414916539-0.6634050415042446",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "59411ecf-9bf8-45df-a3f0-d83dd448f47d",
+    "createdAt": "2026-09-26T09:28:36.539Z"
+  },
+  {
+    "name": "GPU-RL-1790414916553-0.865922234083223",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "6febed70-4e08-4f4d-a788-e95f9614529b",
+    "createdAt": "2026-09-26T09:28:36.553Z"
+  },
+  {
+    "name": "GPU-RL-1790414916562-0.770838343153504",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "8a9cbacb-8911-43c9-ba27-8788507623cb",
+    "createdAt": "2026-09-26T09:28:36.562Z"
+  },
+  {
+    "name": "GPU-RL-1790414916568-0.5142110117519981",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "b12435c1-44e2-4d13-811e-31c34cf37357",
+    "createdAt": "2026-09-26T09:28:36.568Z"
+  },
+  {
+    "name": "GPU-RL-1790414916576-0.06875209111492797",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "facc3681-27af-4e3b-996d-f9ecbe6a28d8",
+    "createdAt": "2026-09-26T09:28:36.577Z"
+  },
+  {
+    "name": "GPU-RL-1790414916584-0.7561788948629565",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "f1103c85-dbcb-4f07-9c3a-38e8768bda82",
+    "createdAt": "2026-09-26T09:28:36.584Z"
+  },
+  {
+    "name": "GPU-RL-1790414916589-0.9089397456216538",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "c3a49ed5-bd2f-4a52-9926-2fbdd1a9df27",
+    "createdAt": "2026-09-26T09:28:36.589Z"
+  },
+  {
+    "name": "GPU-RL-1790414916593-0.5564236228044961",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "e49699e7-e552-47ba-a547-e6930b5d1e1e",
+    "createdAt": "2026-09-26T09:28:36.593Z"
+  },
+  {
+    "name": "GPU-RL-1790414916600-0.006692100067316797",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "8c3ee97f-7676-437a-acd0-f33860ffbe6e",
+    "createdAt": "2026-09-26T09:28:36.600Z"
+  },
+  {
+    "name": "GPU-RL-1790414916607-0.1552637407881945",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "787986db-7048-4595-bbae-4c9cc95760ea",
+    "createdAt": "2026-09-26T09:28:36.607Z"
+  },
+  {
+    "name": "GPU-RL-1790414916620-0.10139063000202186",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "238aea10-9993-465e-ac5a-01c75b7c1986",
+    "createdAt": "2026-09-26T09:28:36.620Z"
+  },
+  {
+    "name": "GPU-RL-1790414916631-0.5044558939698294",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "cc458a91-a2eb-4bf2-b9fb-fc0c0d414bc2",
+    "createdAt": "2026-09-26T09:28:36.631Z"
+  },
+  {
+    "name": "GPU-RL-1790414916639-0.5243718768138695",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "26672087-7257-47eb-ba7e-640335b84c41",
+    "createdAt": "2026-09-26T09:28:36.639Z"
+  },
+  {
+    "name": "GPU-RL-1790414916646-0.4464314530203951",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "e0b98e58-650a-46b8-8949-57377c23d508",
+    "createdAt": "2026-09-26T09:28:36.646Z"
+  },
+  {
+    "name": "GPU-RL-1790414916652-0.2739202614969939",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "e016e517-5059-49e9-aa11-733890811464",
+    "createdAt": "2026-09-26T09:28:36.652Z"
+  },
+  {
+    "name": "GPU-RL-1790414916658-0.5011241082670982",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "39967b43-47d9-40e3-bc61-d0e5b07c6011",
+    "createdAt": "2026-09-26T09:28:36.658Z"
+  },
+  {
+    "name": "GPU-RL-1790414916664-0.6805100927076909",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "45968aae-ac0b-4bc0-bcd8-fdb466a03d55",
+    "createdAt": "2026-09-26T09:28:36.664Z"
+  },
+  {
+    "name": "GPU-RL-1790414916670-0.8586888265259863",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "a5255b64-8023-40d7-82b3-b6867b110752",
+    "createdAt": "2026-09-26T09:28:36.670Z"
+  },
+  {
+    "name": "GPU-RL-1790414916677-0.48497927643131733",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "35f3c192-2d6f-42c3-80ed-18c62f1a32b2",
+    "createdAt": "2026-09-26T09:28:36.677Z"
+  },
+  {
+    "name": "GPU-RL-1790414916688-0.9201225398463216",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "9baf07be-8ae6-402d-ba83-03a8a4c6c9ed",
+    "createdAt": "2026-09-26T09:28:36.689Z"
+  },
+  {
+    "name": "GPU-RL-1790414916699-0.3946179089532116",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "90c7c46b-3643-40fd-bbaf-d1a92890d845",
+    "createdAt": "2026-09-26T09:28:36.699Z"
+  },
+  {
+    "name": "GPU-RL-1790414916706-0.3266718225351013",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "9eccb694-faf9-4670-8756-bf40734e6713",
+    "createdAt": "2026-09-26T09:28:36.706Z"
+  },
+  {
+    "name": "GPU-RL-1790414916712-0.15469730703497375",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "893c704e-9b14-4434-839d-4b528de053f4",
+    "createdAt": "2026-09-26T09:28:36.713Z"
+  },
+  {
+    "name": "GPU-RL-1790414916719-0.585154042561728",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "725f1d1f-588e-493e-ac49-1b3bd71e0673",
+    "createdAt": "2026-09-26T09:28:36.719Z"
+  },
+  {
+    "name": "GPU-RL-1790414916724-0.9520762273705573",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "a6ebf7d0-e73c-40e8-b435-d51521d4f847",
+    "createdAt": "2026-09-26T09:28:36.725Z"
+  },
+  {
+    "name": "GPU-RL-1790414916730-0.9784401189769872",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "7680f83f-b7e4-4f2e-86b5-d12a036f7392",
+    "createdAt": "2026-09-26T09:28:36.730Z"
+  },
+  {
+    "name": "GPU-RL-1790414916735-0.3051402903472671",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "8aa316c7-f47c-443f-912b-0963f25ee1db",
+    "createdAt": "2026-09-26T09:28:36.735Z"
+  },
+  {
+    "name": "GPU-RL-1790414916743-0.08933778233799794",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "d3384f52-ecbd-4bfe-bb63-fab5fe244be3",
+    "createdAt": "2026-09-26T09:28:36.743Z"
+  },
+  {
+    "name": "GPU-RL-1790414916752-0.46307760610913806",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "984e1493-eccb-4c89-8d70-7e7e79ea6459",
+    "createdAt": "2026-09-26T09:28:36.753Z"
+  },
+  {
+    "name": "GPU-RL-1790414916764-0.8140595313898216",
+    "model": "A100",
+    "vendor": "NVIDIA",
+    "memoryGB": 80,
+    "pricePerHour": 2,
+    "providerId": "f9eb58bd-ec41-4c5a-811a-4ec0c4ad30d0",
+    "available": true,
+    "id": "1c3a0064-dc32-4bf1-8bda-40e5c07963f1",
+    "createdAt": "2026-09-26T09:28:36.764Z"
+  },
+  {
+    "name": "E2E Smoke GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-E2E",
+    "memoryGB": 24,
+    "pricePerHour": 100000,
+    "providerId": "dd8246d5-6947-489b-aab2-87bcbcbd1bfe",
+    "available": true,
+    "id": "d1cbdc5e-ec24-4b9b-a97d-f4e1d4125d1b",
+    "createdAt": "2026-09-26T09:28:38.984Z"
+  },
+  {
+    "name": "Limit GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-LIM",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "id": "77e949b1-4a97-4d29-a38a-63064eed7a82",
+    "createdAt": "2026-09-26T09:28:41.945Z"
+  },
+  {
+    "name": "Limit GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-LIM",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "id": "2852a689-939d-4efc-9c0f-1a8ec5013599",
+    "createdAt": "2026-09-26T09:28:41.951Z"
+  },
+  {
+    "name": "Limit GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-LIM",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "id": "d24a19fa-6c79-478f-abf4-0a8c89ebbf52",
+    "createdAt": "2026-09-26T09:28:42.286Z"
+  },
+  {
+    "name": "Limit GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-LIM",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "id": "a056603f-73ab-42df-87d3-68d9d213ba91",
+    "createdAt": "2026-09-26T09:28:42.292Z"
+  },
+  {
+    "name": "Limit GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-LIM",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "id": "a61ed12f-4649-41dc-b92e-7dd511100d04",
+    "createdAt": "2026-09-26T09:28:42.297Z"
+  },
+  {
+    "name": "Cap GPU 1",
+    "vendor": "NVIDIA",
+    "model": "A100",
+    "memoryGB": 40,
+    "pricePerHour": 10,
+    "providerId": "acc0f371-b5d0-40fa-aabd-d354e30fbbe7",
+    "id": "0e9bfbf7-2bad-4c97-924e-92a58c079ae1",
+    "createdAt": "2026-09-26T09:28:43.325Z"
+  },
+  {
+    "name": "Cap GPU 2",
+    "vendor": "AMD",
+    "model": "MI250",
+    "memoryGB": 64,
+    "pricePerHour": 8,
+    "providerId": "acc0f371-b5d0-40fa-aabd-d354e30fbbe7",
+    "id": "811413e6-6540-4ed5-b349-db74dbd37d5a",
+    "createdAt": "2026-09-26T09:28:43.330Z"
+  },
+  {
+    "name": "Cap GPU 3",
+    "vendor": "NVIDIA",
+    "model": "H100",
+    "memoryGB": 80,
+    "pricePerHour": 12,
+    "providerId": "acc0f371-b5d0-40fa-aabd-d354e30fbbe7",
+    "id": "4d31b7e9-e68d-4fa7-82de-02ec526edc52",
+    "createdAt": "2026-09-26T09:28:43.335Z"
+  },
+  {
+    "name": "Cap GPU 4",
+    "vendor": "Intel",
+    "model": "A770",
+    "memoryGB": 16,
+    "pricePerHour": 5,
+    "providerId": "acc0f371-b5d0-40fa-aabd-d354e30fbbe7",
+    "id": "1fccb35d-b8e9-4e38-918c-cab3a01140ed",
+    "createdAt": "2026-09-26T09:28:43.339Z"
+  },
+  {
+    "name": "Cap GPU OK1",
+    "vendor": "NVIDIA",
+    "model": "RTX4090",
+    "memoryGB": 24,
+    "pricePerHour": 3,
+    "providerId": "acc0f371-b5d0-40fa-aabd-d354e30fbbe7",
+    "id": "bd39f385-65e7-435a-a366-f4f25dd700c9",
+    "createdAt": "2026-09-26T09:28:43.670Z"
+  },
+  {
+    "name": "Cap GPU OK2",
+    "vendor": "AMD",
+    "model": "RX7900",
+    "memoryGB": 20,
+    "pricePerHour": 2,
+    "providerId": "acc0f371-b5d0-40fa-aabd-d354e30fbbe7",
+    "id": "77e37e6a-2aa9-425b-801b-09c81c69e601",
+    "createdAt": "2026-09-26T09:28:43.672Z"
+  },
+  {
+    "name": "BTC Pay GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-BTC",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "providerId": "299c9dd0-7226-4ec4-8e21-f8f39b272c68",
+    "id": "47b4b789-9881-4273-ad8d-84acf950be53",
+    "createdAt": "2026-09-26T09:28:48.358Z"
+  },
+  {
+    "name": "Idem GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ID",
+    "memoryGB": 16,
+    "pricePerHour": 100,
+    "providerId": "63433827-e832-45a2-ab1c-52eecbc689de",
+    "id": "6176ee97-a009-4752-beff-7d43133d039e",
+    "createdAt": "2026-09-26T09:28:49.478Z"
+  },
+  {
+    "name": "P17 Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-P17",
+    "memoryGB": 8,
+    "pricePerHour": 100,
+    "providerId": "real-provider-id",
+    "id": "638be2f5-5f1c-460d-af68-4c1526cc969d",
+    "createdAt": "2026-09-26T09:28:50.030Z"
+  },
+  {
+    "name": "Escrow Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ESC",
+    "memoryGB": 8,
+    "pricePerHour": 100,
+    "providerId": "prov-escrow-test",
+    "id": "16d3d026-7c81-4f52-b9d2-9fcdcc63095d",
+    "createdAt": "2026-09-26T09:28:51.622Z"
+  },
+  {
+    "name": "Escrow Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ESC",
+    "memoryGB": 8,
+    "pricePerHour": 100,
+    "providerId": "prov-escrow-test",
+    "id": "12e1043e-79c5-43e1-8107-095081b09fa9",
+    "createdAt": "2026-09-26T09:28:51.646Z"
+  },
+  {
+    "name": "Escrow Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ESC",
+    "memoryGB": 8,
+    "pricePerHour": 100,
+    "providerId": "prov-escrow-test",
+    "id": "6ffee582-07fb-49e0-a8ef-982be91ab6f2",
+    "createdAt": "2026-09-26T09:28:51.700Z"
+  },
+  {
+    "name": "Escrow Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-ESC",
+    "memoryGB": 8,
+    "pricePerHour": 100,
+    "providerId": "prov-escrow-test",
+    "id": "2fcba7ae-b096-4957-97c6-e80aa2754136",
+    "createdAt": "2026-09-26T09:28:51.710Z"
+  },
+  {
+    "name": "alert(1)Safe Name",
+    "vendor": "NVIDIA",
+    "model": "RTX-P28S",
+    "memoryGB": 8,
+    "pricePerHour": 1,
+    "providerId": "81ee2338-22b0-437a-afea-50d6f7cead28",
+    "available": true,
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "cloned from bc5b0c56-3d8c-4970-8a0f-b66a5c1aa0ef; re-attest to verify"
+      ],
+      "verifiedAt": null
+    },
+    "id": "561d40bd-b1e5-45b7-93b8-ea3e1c4851de",
+    "createdAt": "2026-09-26T09:28:53.494Z"
+  },
+  {
+    "name": "P28 Clone",
+    "vendor": "NVIDIA",
+    "model": "RTX-P28S",
+    "memoryGB": 8,
+    "pricePerHour": 1,
+    "providerId": "81ee2338-22b0-437a-afea-50d6f7cead28",
+    "available": true,
+    "attestation": {
+      "passed": false,
+      "score": 0,
+      "findings": [
+        "cloned from bc5b0c56-3d8c-4970-8a0f-b66a5c1aa0ef; re-attest to verify"
+      ],
+      "verifiedAt": null
+    },
+    "id": "abf3a367-247b-4961-bbe5-eadbeaf6e3c7",
+    "createdAt": "2026-09-26T09:28:53.505Z"
+  },
+  {
+    "name": "Reliability GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-REL",
+    "memoryGB": 8,
+    "pricePerHour": 10,
+    "providerId": "1907f433-502e-4bbb-aa97-1fe2a2327d0d",
+    "id": "09d3dc73-b8ff-4a10-8bcc-e370821c0dc3",
+    "createdAt": "2026-09-26T09:28:54.777Z"
+  },
+  {
+    "name": "Auth Test GPU",
+    "vendor": "NVIDIA",
+    "model": "RTX-A",
+    "memoryGB": 8,
+    "pricePerHour": 50,
+    "id": "5103e7be-2883-4638-a41a-63d3acb081c0",
+    "createdAt": "2026-09-26T09:28:55.267Z"
+  }
+]

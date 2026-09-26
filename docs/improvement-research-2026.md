@@ -425,3 +425,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+### その他実装済（支払いリマインダー）
+
+- `payment-reminder` は全 pending 支払いに無差別送信する cron CLI で、定期実行すると同一支払いへ毎周期スパムになる設計だった。`getPendingPayments` にフィルタを実装: 期限切れインボイス除外（支払えないものを催促しない）・作成直後猶予 `REMINDER_MIN_AGE_MS`（既定15分）・クールダウン `REMINDER_COOLDOWN_MS`（既定24h、`payment.lastRemindedAt` で管理・送信成功時のみ記録）。
+- `payment-reminder-poller` を追加し server.js 起動時に配線（既定1時間間隔、`PAYMENT_REMINDER_INTERVAL_MS`）。invoice-poller 系と同型。
+

@@ -119,6 +119,17 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// 未払い支払いへのリマインド定期実行（既定1時間間隔・起動10分後に初回）。
+// 同一支払いへの再送間隔・期限切れ除外は payment-reminder 側で制御。
+// テスト環境では起動しない（タイマー積み上がり防止、service monitor と同理由）。
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    require('../core/payment-reminder-poller').start();
+  } catch (e) {
+    logger.warn(`payment-reminder-poller: failed to start: ${e.message}`);
+  }
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

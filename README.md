@@ -373,11 +373,11 @@ flowchart LR
 
 ### 一人運用のための具体的な自動化コマンド例
 - サービス起動・監視: `npm start` または `pm2 start src/api/server.js --watch`
-- 監査証跡/Prometheusサーバ起動: `npm run start:prometheus`
+- メトリクス確認: `curl -H "Authorization: Bearer $METRICS_AUTH_TOKEN" http://localhost:3000/metrics`（Prometheus 形式、アプリ内蔵・別サーバ不要）
 - テスト自動実行: `npm test`（CI/CDでは自動）
 - 障害通知hookの手動テスト: `curl -X POST $SLACK_WEBHOOK_URL -d '{"text":"テスト通知"}'`
-- ノード死活監視: `npm run monitor:nodes`
-- 監査証跡/障害ログ確認: `cat logs/audit-*.log`
+- GPU ノード死活監視: `npm run gpu-failure-monitor`
+- 監査証跡/障害ログ確認: `cat logs/audit.log logs/access-audit.log`
 
 ### AI活用Tips（FAQ/README自動生成・障害分析）
 - READMEやFAQの自動生成・更新にAIアシスタントを活用
@@ -465,7 +465,7 @@ flowchart LR
 - 運用ドキュメントの自動生成・API仕様書の自動更新も拡張予定
 
 ### 自動ベンチマーク・自己診断の自動化例
-- API応答速度・障害復旧時間・通知遅延などを`npm run benchmark`等で自動測定
+- API応答速度・障害復旧時間・通知遅延などをベンチマークスクリプトで自動測定（現状 `npm run benchmark` スクリプトは未実装。`/metrics` の `http_request_duration_seconds` ヒストグラムで代替可能）
 - cronやGitHub Actionsで定期実行し、結果をPrometheus/README/Slack等へ自動送信
 - 例（週次ベンチマーク）:
   ```yaml
@@ -478,8 +478,8 @@ flowchart LR
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v3
-        - run: npm run benchmark > logs/bench-$(date +\%F).txt
-        - run: cat logs/bench-$(date +\%F).txt | curl -X POST $SLACK_WEBHOOK_URL -d @-
+        - run: curl -H "Authorization: Bearer $METRICS_AUTH_TOKEN" http://localhost:3000/metrics > logs/metrics-$(date +\%F).txt
+        - run: cat logs/metrics-$(date +\%F).txt | curl -X POST $SLACK_WEBHOOK_URL -d @-
   ```
 
 ### AI要約の自動レビュー・承認フロー例
@@ -490,7 +490,7 @@ flowchart LR
 ### 運用ダッシュボード・月次AIレポートの自動配信Tips
 - 監査証跡や障害履歴を自動グラフ化し、Prometheus/Grafanaや静的HTMLで可視化
 - API利用状況や障害傾向をAIが月次で自動レポート化し、運用者へSlack/メール配信
-- 例: `npm run report:monthly`→AI要約→`logs/monthly-report-2025-06.txt`→Slack/メールへ自動送信
+- 例: `npm run progress-report`（`PROGRESS_SHEET_ID` + Google OAuth 設定時）→ `logs/` へのレポート出力→ Slack/メールへ連携可能
 
 ### 異常検知パターン・自動アラート設定例
 - API応答遅延: Prometheusアラート例
@@ -771,7 +771,7 @@ flowchart LR
 
 ### 運用自動化・品質維持Tips
 
-- **CI/CD・自動テスト・自動デプロイ**：mainブランチへのpushで自動ビルド・テスト・本番デプロイ（GitHub Actions推奨）
+- **CI/CD・自動テスト**：mainブランチへのpushで自動ビルド・テスト（GitHub Actions）。自動デプロイは `ci-cd.yml` の Deploy ステップが現状スタブのため手動運用
 - **scripts/はエラー処理・バリデーション・テスト・i18n・共通設定管理を徹底**
 - **public/はキャッシュ制御・バージョニング・画像圧縮・セキュリティヘッダー・CDN連携・自動テストを推奨**
 - **docs/は目次自動生成・見出し統一・ナレッジ共有を推奨**

@@ -225,6 +225,8 @@ const { sendNotification, NotifyType } = require('../../../utils/notifier');
 const { isValidOrderTransition } = require('../../../utils/state-checker');
 // 未決済 pending 注文の自動失効（一覧取得・注文作成時の遅延スイープ）
 const { expireStaleOrders, expireStaleMatchedOrders, expireStaleDisputedOrders, expireStaleActiveOrders } = require('../../../utils/order-expiry');
+// spot/中断可能ティア（§9）: 価格解決・中断猶予・実経過課金・代替GPUサジェスト
+const spotTier = require('../../../marketplace/spot-tier');
 // GPU を占有中とみなす注文ステータス（二重予約チェックに使用）
 const BLOCKING_ORDER_STATUSES = new Set(['pending', 'matched', 'active']);
 
@@ -581,6 +583,7 @@ router.get('/:id',
         { status: 'active',    at: order.startedAt || null },
         { status: 'completed', at: order.completedAt || null },
         { status: 'cancelled', at: order.cancelledAt || null },
+        { status: 'preempted', at: order.preemptedAt || null },
         { status: 'disputed',  at: order.dispute ? order.dispute.raisedAt : null },
       ].filter(e => e.at).sort((a, b) => a.at.localeCompare(b.at));
       res.json({
@@ -944,6 +947,19 @@ router.post('/',
     if (!pricePerHour || typeof pricePerHour !== 'number' || pricePerHour <= 0) {
       throw new APIError(ErrorTypes.VALIDATION, 'GPU pricePerHour must be a positive number', 400);
     }
+    // 料金ティア（§9）: 'spot' はプロバイダ都合の preempt を許容する代わりに
+    // GPU の spot 価格（spotPricePerHour または spotDiscountPct、既定30%引き）で課金。
+    // spotEnabled でない GPU への spot 注文は拒否 — 借り手は「中断され得る安さ」を
+    // 明示的に選ぶ必要がある（暗黙の安価枠では中断リスクが告知されない）。
+    const tier = orderData.tier === 'spot' ? 'spot' : 'reserved';
+    if (tier === 'spot') {
+      const spot = spotTier.spotPricePerHour(gpu);
+      if (!spot.enabled || !(spot.pricePerHour > 0)) {
+        throw new APIError(ErrorTypes.CONFLICT, 'GPU does not offer a spot (interruptible) tier', 409);
+      }
+      pricePerHour = spot.pricePerHour;
+    }
+    orderData.tier = tier;
 
     // 為替レートを先にフェッチ（キャッシュ活用）。以下の全チェックと create() は
     // 同期的に実行される（await なし）ため、この await の後に事前予約/二重予約の
@@ -1190,6 +1206,108 @@ router.post('/:id/reject',
     invalidateUserCache(order.userId);
     if (order.providerId) invalidateUserCache(order.providerId);
     res.json({ message: 'Order rejected', orderId: order.id });
+  })
+);
+
+// プロバイダによる spot 注文の中断（preempt）— §9 中断可能インスタンス。
+// spot ティア注文のみ対象（reserved は中断不可 — ティア差の核心）。
+// pending/matched/active → 'preempted'。請求は preempt 時点までの実経過時間のみ
+// （spot 価格 × 経過分を 5 分粒度で切り上げ）。preemption.deadlineAt までは借り手が
+// チェックポイント退避できる猶予（既定60s、30〜600s）。中断はプロバイダの
+// interruptionRate としてレピュテーションに反映される。
+// POST /orders/:id/preempt { noticeSec?: number(30-600), reason?: string }
+router.post('/:id/preempt',
+  authenticateJWT,
+  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
+  asyncHandler(async (req, res) => {
+    const order = OrderRepository.getById(req.params.id);
+    if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
+
+    // order.providerId は注文作成時に確定させる（GPU 乗っ取り後の拒否回避）
+    const isProvider = order.providerId && order.providerId === req.user.id;
+    if (req.user.role !== 'admin' && !isProvider) {
+      throw new APIError(ErrorTypes.FORBIDDEN, 'Only the GPU provider or admin can preempt an order', 403);
+    }
+    if (order.tier !== 'spot') {
+      throw new APIError(ErrorTypes.CONFLICT,
+        "Only spot-tier orders can be preempted (reserved-tier orders are non-interruptible)", 409);
+    }
+    if (!['pending', 'matched', 'active'].includes(order.status)) {
+      throw new APIError(ErrorTypes.CONFLICT,
+        `Cannot preempt order in '${order.status}' state`, 409);
+    }
+    const gpu = GpuRepository.getById(order.gpuId);
+    const reason = req.body.reason ? sanitizeString(String(req.body.reason)).slice(0, 500) : null;
+    const preemption = spotTier.buildPreemption({ noticeSec: req.body.noticeSec, reason });
+    const settlement = spotTier.spotSettlement(order);
+    const { rate: btcToJPY } = await fetchRateInfo();
+    const rawJPY = Math.round((settlement.totalPrice / 1e8) * btcToJPY);
+
+    const preemptResult = OrderRepository.updateIf(order.id,
+      (o) => ['pending', 'matched', 'active'].includes(o.status),
+      {
+        status: 'preempted',
+        preemptedAt: preemption.requestedAt,
+        preemption,
+        // 支払額を実経過時間へ縮小（価格ロック済みの totalPrice を spot 精算へ置換）
+        totalPrice: settlement.totalPrice,
+        totalPriceJPY: Number.isFinite(rawJPY) ? rawJPY : null,
+        updatedAt: preemption.requestedAt,
+      });
+    if (!preemptResult.ok) {
+      throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before preempt could complete; please retry', 409);
+    }
+
+    // プロバイダ都合の中断をレピュテーションへ記録（interruptionRate 逐次推定 → スコア低下）
+    if (order.providerId) {
+      try {
+        const { createReputationService } = require('../../../reputation/reputation-service');
+        createReputationService().recordPreemption(order.providerId);
+        invalidateRepCache(order.providerId);
+      } catch (e) {
+        logger.warn(`preempt: reputation record failed (provider=${order.providerId}): ${e.message}`);
+      }
+    }
+    // 支払い済みエスクローがあれば返金キャンセルを試みる（ベストエフォート、reject と同型）
+    try {
+      const EscrowRepository = require('../../../db/json/EscrowRepository');
+      const escrows = EscrowRepository.getByOrderId(order.id);
+      if (Array.isArray(escrows) && escrows.length > 0) {
+        const { createEscrowService } = require('../../../payments/escrow-service');
+        const escrowSvc = createEscrowService();
+        for (const escrow of escrows) {
+          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
+            try { escrowSvc.cancel(escrow.id); } catch (e) {
+              logger.warn(`Escrow cancel failed on preempt (id=${escrow.id}): ${e.message}`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Escrow lookup on order preempt failed (order=${order.id}): ${e.message}`);
+    }
+    const { notifyUser } = require('../../../utils/user-notify');
+    const gpuName = gpu ? gpu.name : order.gpuId;
+    notifyUser(order.userId, 'order_preempted',
+      `【Strawberry】プロバイダがあなたの spot 注文を中断しました\n注文: #${order.id}\nGPU: ${gpuName}\n請求対象: ${settlement.chargeableMinutes}分 (${settlement.totalPrice} sat)${reason ? `\n理由: ${reason}` : ''}`,
+      { subject: `【Strawberry】spot 注文 #${order.id} が中断されました` });
+    const alternatives = spotTier.findSpotAlternatives(order, gpu, {
+      gpus: GpuRepository.getAll(), orders: OrderRepository.getAll(),
+    });
+    logger.info(`Spot order preempted: ${order.id}`, {
+      orderId: order.id, providerId: req.user.id, noticeSec: preemption.noticeSec,
+      chargeableMinutes: settlement.chargeableMinutes, totalPrice: settlement.totalPrice,
+    });
+    invalidateUserCache(order.userId);
+    if (order.providerId) invalidateUserCache(order.providerId);
+    res.json({
+      message: 'Order preempted',
+      orderId: order.id,
+      status: 'preempted',
+      preemption,
+      settlement: { chargeableMinutes: settlement.chargeableMinutes, totalPrice: settlement.totalPrice },
+      alternatives,
+    });
   })
 );
 

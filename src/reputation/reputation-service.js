@@ -14,6 +14,7 @@ function defaultStats() {
     auditFails: 0,
     slaUptimePct: 100,
     interruptionRate: 0,
+    preemptions: 0,
     stake: 0,
     slashCount: 0,
   };
@@ -69,6 +70,18 @@ function createReputationService({ repository } = {}) {
               slashCount: s.slashCount + 1,
             },
       ),
+
+    /**
+     * spot 注文の preempt（プロバイダ都合の中断）を記録。
+     * interruptionRate = preemptions / (完了+失敗+preempt) で逐次推定し、
+     * スコア側（reliability = uptime × (1 - interruptionRate)）へ自動反映される。
+     */
+    recordPreemption: (providerId) =>
+      mutate(providerId, (s) => {
+        const preemptions = (s.preemptions || 0) + 1;
+        const total = s.completedJobs + s.failedJobs + preemptions;
+        return { preemptions, interruptionRate: total > 0 ? preemptions / total : 0 };
+      }),
 
     /** SLA 指標の更新。 */
     setSla: (providerId, { slaUptimePct, interruptionRate } = {}) =>

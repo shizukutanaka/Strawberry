@@ -226,6 +226,8 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 
 優先度: **中（コスト競争力に直結）**
 
+**実装済（2026-09、ティア+中断プロトコル部分）**: GPU 出品に `spotEnabled`/`spotPricePerHour`/`spotDiscountPct`（既定30%引き）を追加し、`POST /orders` に `tier:'reserved'|'spot'`。spot 注文は spot 価格で価格ロックされ、`POST /orders/:id/preempt`（プロバイダ/admin のみ、reserved は 409）で pending/matched/active → `preempted` へ遷移。請求は preempt 時点までの実経過（5分粒度切上げ）へ totalPrice を縮小し、支払い済みエスクローはベストエフォートでキャンセル、`reputation.recordPreemption` が `interruptionRate` を逐次推定してスコアへ反映。応答に同モデル優先の代替 spot GPU（`findSpotAlternatives`）を同梱。純関数は `src/marketplace/spot-tier.js`（価格解決・notice 30-600s・精算・候補選定）。残件: 三層チェックポイント退避の実機制御と自動再スケジュール（`gpu-auto-recovery` 拡張）。
+
 ## 10. 低通信の分散学習サブストレート化
 
 **現状**: 単一 GPU 貸出のみ。複数プロバイダの GPU を束ねた**分散学習ジョブのオーケストレーションが無い**
@@ -293,7 +295,7 @@ gossip 配信のセキュリティ（peer scoring 等）も未活用。
 | # | 改善領域 | 優先度 | 根拠（代表） |
 |---|---------|--------|-------------|
 | 11 | 検証の落とし穴対策（楽観的検証＋TEE＋透かし） | 高 | arXiv:2208.03567, 2403.09603, 2502.18535 |
-| 9 | Spot/中断耐性＋三層チェックポイント | 中 | arXiv:2204.12013, 2605.17821; Vast.ai |
+| 9 | Spot/中断耐性＋三層チェックポイント | 中（ティア+preempt **実装済**、チェックポイント退避は残） | arXiv:2204.12013, 2605.17821; Vast.ai |
 | 12 | 標準ベンチ/ホスト信頼性スコア | 中 | Vast.ai DLPerf; Nosana |
 | 13 | Serverless/オートスケール＋実消費課金 | 中 | Vast.ai Serverless; Spheron |
 | 10 | 低通信の分散学習サブストレート | 低〜中 | arXiv:2412.01152, 2506.21263, 2503.11023 |

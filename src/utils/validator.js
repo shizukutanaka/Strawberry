@@ -88,6 +88,12 @@ const schemas = {
   // 未評価（レビュー履歴ゼロ）の借り手を minRenterRating フロアで拒否するか。
   // 既定 false（新規借り手を許可）。Sybil 耐性を必須とするプロバイダがオプトインする。
   rejectUnratedRenters: Joi.boolean().optional(),
+  // spot/中断可能ティア（§9）: true にすると借り手は割安な spot 価格で注文できる代わりに
+  // プロバイダ都合の preempt を許容する。価格は spotPricePerHour（明示）か
+  // spotDiscountPct（通常価格からの割引率）で決まり、両方無ければ既定30%引き。
+  spotEnabled: Joi.boolean().optional(),
+  spotPricePerHour: Joi.number().min(0.00001).max(1000000).optional(),
+  spotDiscountPct: Joi.number().min(1).max(95).optional(),
   // アテステーションレポート（任意）— 許可フィールドを明示的に列挙し unknown を拒否する。
   // req.body から直接読むと攻撃者が任意のフィールドを注入できるため Joi を通す。
   attestationReport: Joi.object({
@@ -119,6 +125,9 @@ const schemas = {
       }).unknown(false).optional(),
       minRenterRating: Joi.number().min(1).max(5).optional(),
       rejectUnratedRenters: Joi.boolean().optional(),
+      spotEnabled: Joi.boolean().optional(),
+      spotPricePerHour: Joi.number().min(0.00001).max(1000000).optional(),
+      spotDiscountPct: Joi.number().min(1).max(95).optional(),
       available: Joi.boolean().optional()
     }),
 
@@ -180,6 +189,8 @@ const schemas = {
         longitude: Joi.number().min(-180).max(180)
       }).optional(),
       priority: Joi.string().valid('price', 'performance', 'availability', 'distance').default('price'),
+      // 料金ティア: 'reserved'(既定, preempt 不可) / 'spot'(割引だがプロバイダ preempt 許容, §9)
+      tier: Joi.string().valid('reserved', 'spot').optional(),
       // 事前予約: 指定しない場合は即時（now）として扱う
       scheduledStartAt: Joi.string().isoDate().optional()
     })

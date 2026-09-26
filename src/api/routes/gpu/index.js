@@ -18,6 +18,7 @@ const _attestationVerifier = createMockAttestationVerifier();
 const { createReputationService } = require('../../../reputation/reputation-service');
 // プロバイダー稼働実績（客観的な信頼性スコア）
 const providerUptime = require('../../../reputation/provider-uptime');
+const { spotPricePerHour } = require('../../../marketplace/spot-tier');
 const { sanitizeObject, sanitizeString } = require('../../../utils/sanitize');
 const { withLock } = require('../../../utils/async-lock');
 const { appendAuditLog } = require('../../../utils/audit-log');
@@ -287,6 +288,10 @@ router.get('/', asyncHandler(async (req, res) => {
           : { average: null, count: 0 },
         // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
         reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
+        // spot/中断可能ティア（§9）: 提供中なら実効 spot 価格を掲示
+        ...(spotPricePerHour(gpu).enabled
+          ? { spot: { enabled: true, pricePerHour: spotPricePerHour(gpu).pricePerHour } }
+          : {}),
       };
     }),
     timestamp: new Date().toISOString()
@@ -348,6 +353,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
       rating: { average: ratingAverage, count: ratingCount },
       // 客観的な信頼性シグナル（集計値のみ — プロバイダー身元は露出しない）
       reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions, beats: rel.beats, gapEvents: rel.gapEvents, measuring: rel.measuring },
+      ...(spotPricePerHour(gpu).enabled
+        ? { spot: { enabled: true, pricePerHour: spotPricePerHour(gpu).pricePerHour } }
+        : {}),
     }
   };
   res.json(response);

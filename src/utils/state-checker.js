@@ -1,5 +1,5 @@
 // src/utils/state-checker.js - 状態遷移チェックヘルパー
-const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed'];
+const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed', 'preempted'];
 const GPU_STATES = ['available', 'allocated', 'maintenance', 'offline'];
 
 function isValidOrderTransition(from, to) {
@@ -8,8 +8,11 @@ function isValidOrderTransition(from, to) {
     matched: ['active', 'cancelled', 'disputed'],
     active: ['completed', 'cancelled', 'disputed'],
     disputed: ['completed', 'cancelled'],
+    // 'preempted' は専用ルート POST /:id/preempt のみが到達（spot 注文の中断）。
+    // ここでは遷移先が無い終端として定義し、PUT 経由での操作を構造的に封じる。
     completed: [],
-    cancelled: []
+    cancelled: [],
+    preempted: []
   };
   return allowed[from] && allowed[from].includes(to);
 }

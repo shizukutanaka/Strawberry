@@ -1,5 +1,12 @@
-// GraphQL APIエンドポイント自動生成（Express+apollo-server-express）
-const { ApolloServer, gql, AuthenticationError, ForbiddenError } = require('apollo-server-express');
+// GraphQL APIエンドポイント自動生成（Express + @apollo/server v5）
+// apollo-server-express v3 は upstream EOL で XS-Search CSRF（moderate、
+// GHSA-9q82-xgwf-vj6h）に修正版がないため v5 へ移行。csrfPrevention で
+// GET/単純 POST 経由の読み取り専用 CSRF を構造的に遮断する。
+const { ApolloServer } = require('@apollo/server');
+// v5 では express 統合が外部パッケージに分離（express4 用）
+const { expressMiddleware } = require('@as-integrations/express4');
+const { gql } = require('graphql-tag');
+const { GraphQLError } = require('graphql');
 const { getBTCtoJPYRate } = require('../utils/exchange-rate');
 const OrderRepository = require('../db/json/OrderRepository');
 const UserRepository = require('../db/json/UserRepository');
@@ -10,6 +17,13 @@ const { isRevoked } = require('./middleware/token-denylist');
 const { sanitizeUser } = require('./utils/sanitize-user');
 // 価格計算は REST と同一の共通ユーティリティを使う（整数 sats へ丸め・単位統一）。
 const { computeOrderPricing } = require('../utils/order-pricing');
+
+// v3 の AuthenticationError/ForbiddenError は v4 で廃止 — GraphQLError +
+// extensions.code で等価なコードを返す（クライアント側の分岐互換）。
+const unauthenticated = (msg = 'Authentication required') =>
+  new GraphQLError(msg, { extensions: { code: 'UNAUTHENTICATED' } });
+const forbidden = (msg = 'Access denied') =>
+  new GraphQLError(msg, { extensions: { code: 'FORBIDDEN' } });
 
 // GraphQLスキーマ定義（簡易例）
 const typeDefs = gql`
@@ -58,28 +72,28 @@ const resolvers = {
   Query: {
     // 認証必須クエリ
     orders: (_, __, { user }) => {
-      if (!user) throw new AuthenticationError('Authentication required');
+      if (!user) throw unauthenticated();
       const all = OrderRepository.getAll();
       // admin は全件、一般ユーザーは自分の注文のみ
       return user.role === 'admin' ? all : all.filter(o => o.userId === user.id);
     },
     order: (_, { id }, { user }) => {
-      if (!user) throw new AuthenticationError('Authentication required');
+      if (!user) throw unauthenticated();
       const order = OrderRepository.getById(id);
       if (!order) return null;
       if (user.role !== 'admin' && order.userId !== user.id && order.providerId !== user.id) {
-        throw new ForbiddenError('Access denied');
+        throw forbidden();
       }
       return order;
     },
     users: (_, __, { user }) => {
-      if (!user) throw new AuthenticationError('Authentication required');
-      if (user.role !== 'admin') throw new ForbiddenError('Admin only');
+      if (!user) throw unauthenticated();
+      if (user.role !== 'admin') throw forbidden('Admin only');
       return UserRepository.getAll().map(sanitizeUser);
     },
     user: (_, { id }, { user }) => {
-      if (!user) throw new AuthenticationError('Authentication required');
-      if (user.role !== 'admin' && user.id !== id) throw new ForbiddenError('Access denied');
+      if (!user) throw unauthenticated();
+      if (user.role !== 'admin' && user.id !== id) throw forbidden();
       const found = UserRepository.getById(id);
       if (!found) return null;
       return sanitizeUser(found);
@@ -134,7 +148,7 @@ function depthAndSelectionLimitRule(context) {
     Field(node, _key, _parent, _path, ancestors) {
       totalSelections += 1;
       if (totalSelections > MAX_TOTAL_SELECTIONS) {
-        context.reportError(new (require('graphql').GraphQLError)(
+        context.reportError(new GraphQLError(
           `Query exceeds total selection limit (${MAX_TOTAL_SELECTIONS}); reduce aliases/fields and retry.`,
         ));
       }
@@ -143,7 +157,7 @@ function depthAndSelectionLimitRule(context) {
         if (a && a.kind === 'Field') depth += 1;
       }
       if (depth > MAX_QUERY_DEPTH) {
-        context.reportError(new (require('graphql').GraphQLError)(
+        context.reportError(new GraphQLError(
           `Query depth ${depth} exceeds limit ${MAX_QUERY_DEPTH}.`,
         ));
       }
@@ -169,7 +183,27 @@ async function setupGraphQL(app) {
     // GRAPHQL_INTROSPECTION=true を設定した環境のみで有効化することで
     // オプトアウト方式（デフォルト公開）をオプトイン方式（デフォルト非公開）に変更する。
     introspection: process.env.GRAPHQL_INTROSPECTION === 'true',
-    context: ({ req }) => {
+    // v4 組み込みの CSRF 防御: Content-Type が JSON でも multipart でもない
+    // クエリ（＝ブラウザの通常フォーム/GET から送れるもの）を拒否し、
+    // apollo-server-core v3 の XS-Search（読み取り専用 CSRF）を構造的に解消。
+    csrfPrevention: true,
+    // 本番では詳細なエラースタックを非表示。
+    // v4 の formatError は (formattedError, originalError) を受け、
+    // 返すべき整形済みエラーを返すシグネチャ。
+    formatError: (formattedError) => {
+      if (process.env.NODE_ENV === 'production' && formattedError.extensions?.code === 'INTERNAL_SERVER_ERROR') {
+        return { message: 'Internal server error', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
+      }
+      return formattedError;
+    },
+  });
+  await server.start();
+  // express.json() は親 app（server.js）で既に適用済み。サブアプリ側でも
+  // Content-Type: application/json のボディを受け取れるよう念のため付ける
+  // （expressMiddleware は JSON パース済みボディを要求する）。
+  const express = require('express');
+  app.use('/graphql', express.json(), expressMiddleware(server, {
+    context: async ({ req }) => {
       const auth = req.headers.authorization || '';
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
       if (!token) return { user: null };
@@ -193,16 +227,7 @@ async function setupGraphQL(app) {
         return { user: null };
       }
     },
-    // 本番では詳細なエラースタックを非表示
-    formatError: (err) => {
-      if (process.env.NODE_ENV === 'production' && err.extensions?.code === 'INTERNAL_SERVER_ERROR') {
-        return { message: 'Internal server error', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
-      }
-      return err;
-    }
-  });
-  await server.start();
-  server.applyMiddleware({ app, path: '/graphql' });
+  }));
 }
 
 module.exports = { setupGraphQL };

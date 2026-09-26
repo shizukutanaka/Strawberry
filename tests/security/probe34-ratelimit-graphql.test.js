@@ -82,7 +82,8 @@ describe('GraphQL: apiLimiter applied to /graphql endpoint', () => {
     expect(src).toMatch(/app\.use\(apiLimiter\)/);
     // Rate limiter must be applied before server.applyMiddleware
     const limiterIdx = src.indexOf('app.use(apiLimiter)');
-    const apolloIdx = src.indexOf('server.applyMiddleware');
+    // Apollo Server v4: applyMiddleware は廃止され expressMiddleware で mount する
+    const apolloIdx = src.indexOf('expressMiddleware(server');
     expect(limiterIdx).toBeGreaterThan(-1);
     expect(apolloIdx).toBeGreaterThan(-1);
     expect(limiterIdx).toBeLessThan(apolloIdx);

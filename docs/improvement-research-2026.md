@@ -425,3 +425,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+
+### その他実装済（GraphQL 基盤刷新）
+
+- apollo-server-express v3 は upstream EOL で XS-Search（moderate・GHSA-9q82-xgwf-vj6h、読み取り専用 CSRF）に修正版がないため、@apollo/server v5 + @as-integrations/express4 へ移行（applyMiddleware → expressMiddleware、AuthenticationError/ForbiddenError → GraphQLError+extensions.code）。`csrfPrevention: true` で GET/単純 POST 経由の CSRF を構造的に遮断。graphql は peer 要件に合わせ ^16.11.0 へ。

@@ -262,7 +262,22 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // 静的ファイル
-app.use(express.static(path.join(__dirname, '../../public')));
+// version-assets.js が生成する `file.<8hex>.<ext>` のフィンガープリント付き
+// アセットは内容不変なので immutable 長期キャッシュ。HTML は新規アセット参照を
+// 拾うため毎回再検証、その他の静的ファイルは短いキャッシュに留める。
+const FINGERPRINTED_ASSET = /\.[0-9a-f]{8}\.[^.]+$/i;
+app.use(express.static(path.join(__dirname, '../../public'), {
+  setHeaders(res, filePath) {
+    const base = path.basename(filePath);
+    if (FINGERPRINTED_ASSET.test(base)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (/\.html?$/i.test(base)) {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+  },
+}));
 
 // マスター認証ルート（/master-auth）
 app.use('/master-auth', masterAuthRouter.router);

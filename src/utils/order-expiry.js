@@ -20,6 +20,49 @@ function resolveTimeoutMinutes() {
 }
 
 /**
+ * 注文キャンセルに伴い孤立する HELD エスクローを FSM 経由で解放する。
+ * /stop・dispute 自動解決はエスクローを精算するが、タイムアウト系スイープは
+ * 従来キャンセルだけ行い、支払済み資金が HELD のまま永久ロックされていた。
+ * - mode 'refund': HELD → CANCELED（借り手へ返金）。GPU が未提供の失効に用いる。
+ * - mode 'prorate': /stop と同じ壁時計フォールバックで deliveredRatio を算出し
+ *   HELD → SETTLED（提供者へ出来高払い）。active タイムアウトに用いる。
+ * ベストエフォート: 個別失敗は warn ログのみで失効処理を妨げない。
+ * @param {object} order 遷移確定後の注文
+ * @param {'refund'|'prorate'} mode
+ */
+function releaseEscrowsOnTimeout(order, mode) {
+  try {
+    const EscrowRepository = require('../db/json/EscrowRepository');
+    const { createEscrowService } = require('../payments/escrow-service');
+    const escrowSvc = createEscrowService();
+    const escrows = (EscrowRepository.getByOrderId
+      ? EscrowRepository.getByOrderId(order.id)
+      : (EscrowRepository.getAll() || []).filter(e => e.orderId === order.id)
+    ).filter(e => e.state === 'HELD');
+    for (const esc of escrows) {
+      try {
+        if (mode === 'prorate') {
+          const elapsedSeconds = order.startedAt
+            ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
+            : 0;
+          const deliveredRatio = order.durationMinutes
+            ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
+            : 0;
+          escrowSvc.settle(esc.id, { deliveredRatio, slaUptimePct: 100 });
+          escrowSvc.apply(esc.id, 'DELIVER_OK');
+        } else {
+          escrowSvc.cancel(esc.id);
+        }
+      } catch (inner) {
+        logger.warn(`Escrow timeout release failed (escrow=${esc.id}, mode=${mode}): ${inner.message}`);
+      }
+    }
+  } catch (e) {
+    logger.warn(`Escrow timeout release failed (order=${order.id}, mode=${mode}): ${e.message}`);
+  }
+}
+
+/**
  * 期限切れの pending 注文を cancelled に遷移させる（pending→cancelled は正規遷移）。
  * scheduledStartAt が未来の注文（事前予約）はタイムアウト対象外。
  * @returns {number} 失効させた件数
@@ -56,6 +99,9 @@ function expireStaleOrders() {
     });
     if (!result.ok) continue; // 既に他経路で確定済み（冪等）
     expired++;
+    // 支払済みエスクローが残っていれば借り手へ返金（オンチェーン事前決済等で
+    // HELD のまま pending 失効した資金をロックしない）
+    releaseEscrowsOnTimeout(order, 'refund');
     logger.info(`Order auto-expired (payment timeout): ${order.id}`);
     // 借り手へ失効通知（決済タイムアウトで自動キャンセルされたことを即時周知）
     try {
@@ -92,6 +138,9 @@ function expireStaleMatchedOrders() {
     });
     if (!result.ok) continue; // 既に他経路で確定済み（冪等）
     expired++;
+    // マッチ後未開始の失効: GPU は一度も提供されていないため支払済み
+    // エスクローは借り手へ全額返金する。
+    releaseEscrowsOnTimeout(order, 'refund');
     logger.info(`Order auto-expired (match timeout): ${order.id}`);
     try {
       const { notifyUser } = require('./user-notify');
@@ -214,6 +263,9 @@ function expireStaleActiveOrders() {
       updatedAt: now,
     });
     if (!result.ok) continue;
+    // active タイムアウト: GPU は実際に稼働していた可能性があるため、/stop と
+    // 同じ壁時計フォールバックで経過時間分を出来高払いし残額を借り手へ返す。
+    releaseEscrowsOnTimeout(order, 'prorate');
     expired.push({ id: order.id, gpuId: order.gpuId });
     logger.info(`Order auto-expired (active timeout): ${order.id}`);
     try {

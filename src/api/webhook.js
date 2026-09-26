@@ -46,14 +46,38 @@ async function sendWebhook(event, payload) {
       // 本番で署名無しは受信側が改ざん検知できないため、起動時ではなく送信時に1回警告
       logger.warn('WEBHOOK_SIGNING_SECRET unset; sending unsigned webhook');
     }
-    try {
-      await axios.post(url, rawBody, { headers });
-      logger.info('Webhook送信成功', { url, event });
-      appendAuditLog('webhook_sent', { url, event, signed: !!WEBHOOK_SIGNING_SECRET });
-      success = true;
-    } catch (e) {
-      logger.warn('Webhook送信失敗', { url, event, error: e.message });
-      appendAuditLog('webhook_failed', { url, event, error: e.message });
+    // Stripe 流 at-least-once 配送: 一過性の 5xx/ネットワーク断で配送を落とさないため
+    // 指数バックオフで再送する。リトライ毎に署名タイムスタンプを再発行して
+    // 受信側の鮮度窓（±5min）から外れないようにする。
+    // 4xx（恒久的拒否）は即座に諦める — 再送しても同じ結果で配送遅延になるだけ。
+    const MAX_ATTEMPTS = Math.max(1, Number(process.env.WEBHOOK_MAX_ATTEMPTS) || 3);
+    let attempts = 0;
+    let lastErr = null;
+    while (attempts < MAX_ATTEMPTS) {
+      attempts++;
+      const signedHeaders = WEBHOOK_SIGNING_SECRET
+        ? { ...headers, 'X-Strawberry-Signature': signWebhookBody(rawBody) }
+        : headers;
+      try {
+        await axios.post(url, rawBody, { headers: signedHeaders });
+        logger.info('Webhook送信成功', { url, event, attempts });
+        appendAuditLog('webhook_sent', { url, event, signed: !!WEBHOOK_SIGNING_SECRET, attempts });
+        success = true;
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        const status = e.response && e.response.status;
+        const permanent = Number.isFinite(status) && status >= 400 && status < 500;
+        if (permanent || attempts >= MAX_ATTEMPTS) break;
+        const backoffMs = 1000 * Math.pow(2, attempts - 1); // 1s, 2s, 4s, ...
+        logger.warn(`Webhook送信失敗（${attempts}/${MAX_ATTEMPTS}）`, { url, event, error: e.message, retryInMs: backoffMs });
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
+    if (lastErr) {
+      logger.warn('Webhook送信失敗', { url, event, error: lastErr.message, attempts });
+      appendAuditLog('webhook_failed', { url, event, error: lastErr.message, attempts });
     }
   }
   if (!success) throw new Error('全Webhook送信失敗');

@@ -429,3 +429,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+### 依存脆弱性の semver-safe 一括解消 + bcrypt メジャー更新（2026-09-27）
+- **対応**: `npm audit` の残存49件のうち semver 非互換を要しない13件を `npm audit fix` で解消（axios 1.17→1.20: プロトタイプ汚染/Basic auth 注入、js-yaml、express/body-parser、morgan、joi、protobufjs、browserslist 等）。`bcrypt` を ^5.1.1→^6.0.0 へ更新（API 互換、Node18+ 要件を満たす）し、@mapbox/node-pre-gyp 経由の tar critical・node-pre-gyp high チェーンを除去。合計 49→36 件。残存は @kubernetes/client-node 2.x・aws-sdk v3・nodemailer 10・imagemin 系のメジャー更新または代替が必要なもの（#46 で却下された apollo 系を除く）。

@@ -429,3 +429,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- feedback パイプライン（priority/checklist/sheets/report）の読込み経路を共有 `scripts/lib/feedback-store.js` へ集約。各スクリプトの独自 JSON.parse(readFileSync) は破損ログで全段クラッシュ・非文字列フィールドで TypeError・report/checklist は require 副作用でファイル書込みという欠陥があった。ローダーは破損時にファイル名付きの明示エラー＋エントリ正規化、各スクリプトに require.main ガード・env パス差し替え・エラーハンドリングを追加し、sheets は credentials/token/FEEDBACK_SHEET_ID の事前検証を追加。priority 出力を atomicWriteJSON 化。

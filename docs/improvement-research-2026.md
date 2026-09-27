@@ -429,3 +429,10 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## chore: package.json の npm メタデータ整備（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-pkg-metadata` → PR 化
+
+package.json に `license`/`repository`/`bugs`/`homepage` が未記載で、npm・GitHub・各種ツールのメタデータ解決が効かなかった（`npm WARN`・パッケージ情報のリンク欠如）。LICENSE（MIT）と一致する `license: "MIT"`、`repository`/`bugs`/`homepage` を GitHub URL で宣言し、あわせて `private: true` を追加 — 本リポジトリは npm 公開を意図しないアプリケーションであり、誤 `npm publish` を構造的に防止するガードとして標準的な手段。
+

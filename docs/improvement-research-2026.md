@@ -429,3 +429,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## scripts/*.sh スタブの正直な実装化 (2026-09-26)
+
+- **観測**: `build.sh`・`deploy.sh`・`setup-production.sh` は shebang+コメントのみの2行スタブで、呼ばれても exit 0 で無言成功する。CI や手動運用から参照された場合「成功したが何も起きなかった」と誤認される構造（いずれも現在参照ゼロ）。
+- **変更**:
+  - `build.sh`: Node サーバにコンパイル工程はないため「ビルド」を正直に定義 — `npm ci` + `npm run openapi-gen`（生成物の最新化）。
+  - `setup-production.sh`: `config.js` の `requireSecret` が本番で fail-fast する必須シークレット（JWT_SECRET≥32 / SESSION_SECRET・ENCRYPTION_KEY≥16）を事前検査し、未設定なら具体的な案内とともに exit 1。`--check` で npm ci を伴わない検査のみ実行可能（テスト可否のため）。検査通過後は `npm ci --omit=dev`。
+  - `deploy.sh`: デプロイ経路が未構成（ci-cd.yml の Deploy は echo スタブ）である旨を stderr で説明し exit 1 — 無言成功による誤認を防止。
+- **テスト**: `tests/scripts/sh-scripts.test.js` 新規5件 — bash -n 構文・`set -euo pipefail`・deploy.sh の非ゼロ終了・preflight の両経路（実機で両方向の終了コードを確認済み）。
+- **参考**: Google Shell Style Guide（set -euo pipefail）/ 十二因子アプリの fail-fast 設定検証

@@ -429,3 +429,16 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## fix(utils): gpu-monitor の三重実害修正とタイマー健全化（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-gpu-monitor-fix` → PR 化
+
+`src/utils/gpu-monitor.js`（GPU 死活→自動リカバリ）が呼び出せば必ず失敗する三重の実害を修正:
+
+1. `OrderRepository.updateStatus` — 存在しないメソッド（正は `update`）を destructure → TypeError クラッシュ
+2. 状態値 `'auto_recovered'` — `state-checker` の ORDER_STATES/遷移表に非登録で、書き込まれた注文は永久に遷移不能 → 有効値 `cancelled` へ
+3. `PaymentRepository.getByOrderId`（many:true=配列）を単体扱い + `refundPayment`（存在しない）呼び出し → 配列反復 + `update(id,{status:'refunded'})` へ（gpu-auto-recovery と同規約）
+
+あわせて `startGpuMonitor` を unref 済み・単一フライト・多重起動防止 + `stopGpuMonitor` 追加（service-monitor と同規約 — #150 のタイマー健全性と同クラス）。
+

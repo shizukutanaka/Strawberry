@@ -429,3 +429,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- `src/utils/anomaly-detector.js` の堅牢化 — `logs/` は gitignore 済みで新規 clone には存在しないため、`reportAnomaly` の `appendFileSync(logs/anomaly.log)` が mkdir 無しで ENOENT を投げ呼び出し元（gpu-monitor）が初回異常報告でクラッシュしていた（wired バグ）。mkdir + 書込失敗の非致命化を追加。あわせて `detectRequestAnomaly` の IP カウンタがユニーク IP 毎に永久蓄積する無制限増殖（#58 同型）を TTL スイープ+10k 上限でバウンド化。`google-calendar.js` の `defaultConfig` 宣言漏れ（暗黙グローバル）と googleapis トップレベル require（未導入で require 自体クラッシュ）を遅延化、`ai-benchmark.js` の axios に timeout/maxContentLength/maxRedirects を付与（#151 同型の未防御外向き呼出し）。

@@ -261,6 +261,13 @@ if (config.security.rateLimitEnabled) {
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+// /.well-known/security.txt（RFC 9116）。パスにドット始まりのセグメントを含むため
+// express.static の既定（dotfiles: 'ignore'）では 404 になる。明示ルートで提供する。
+app.get('/.well-known/security.txt', (req, res) => {
+  res.type('text/plain; charset=utf-8');
+  res.sendFile(path.join(__dirname, '../../public/.well-known/security.txt'));
+});
+
 // 静的ファイル
 app.use(express.static(path.join(__dirname, '../../public')));
 

@@ -429,3 +429,10 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## RFC 9116 `security.txt` の配信 (2026-09-26)
+
+- **観測**: リポジトリに `SECURITY.md`（開示ポリシー）があるが、デプロイされたサービスから機械可読な連絡先を取得する経路がなかった。RFC 9116 は `/.well-known/security.txt` を標準化しており、セキュリティ研究者・脆弱性スキャナはここを最初に参照する（GitHub/GitLab/Certificate Transparency のスキャン連携も同規格）。
+- **罠**: `public/.well-known/` にファイルを置くだけでは `express.static` の既定 `dotfiles: 'ignore'` がドット始まりセグメントを拒否し、リクエストは SPA キャッチオールへ流れて index.html (200/HTML) を返す — スキャナからは「security.txt 不在」どころか誤った 200 応答に見える。
+- **変更**: `public/.well-known/security.txt`（Contact=GitHub Security Advisory、Policy=SECURITY.md、Preferred-Languages、Expires）を新設し、`server.js` に static より前の明示ルート `GET /.well-known/security.txt` を追加。`tests/api/basic.test.js` に 200・text/plain・必須フィールドの回帰テストを追加。
+- **参考**: RFC 9116 / GitHub "Adding a security policy" / securitytxt.org

@@ -429,3 +429,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-timer-unref` → PR 化
+
+1. `AutoPerformanceOptimizer.start()` の `setInterval` が `unref` されておらず `stop()` も存在しなかった — 起動配線（open PR 参照）後は ref 済みタイマーがイベントループを生かし続け、SIGTERM での drain 不能→コンテナ環境で SIGKILL タイムアウトに化ける。unref + `stop()` 追加（service-monitor/invoice-poller と同一規約）。
+2. `MetricsCollector.startCollection()` の interval も同様に unref。
+3. **実バグ**: `src/gpu/metrics.js` のカスタム Gauge/Counter 34件が `registers` 未指定で prom-client のグローバル default registry へ登録されていた — `new MetricsCollector()` は同一プロセス内で2回目に必ず `already been registered` を throw し、MetricsCollector をそれぞれインスタンス化する auto-performance-optimizer と gpu-liveness-monitor が同居できない設計上の衝突だった。各メトリクスへ `registers: [this.register]` を付与しインスタンス registry を正とし、`registerAllMetrics()` は冪等化。`/metrics` エンドポイントは prom-client グローバルを返すが、現在どの起動経路も MetricsCollector を生成していないため main の観測出力は変化しない。
+

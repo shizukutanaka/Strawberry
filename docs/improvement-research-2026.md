@@ -429,3 +429,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- `src/utils/ssrf-guard.js` の IPv6 分類を 8 グループ展開＋数値判定へ書換え: 旧実装の `startsWith('fe80')` では fe80::/10 の fe90〜febf リンクローカルが素通りし、`::7f00:1`（IPv4-compatible ループバック）・`::ffff:0a00:1`（16進テールの mapped）・`2002:7f00:1::`（6to4）・`64:ff9b::7f00:1`（NAT64）等の IPv4 埋め込み遷移機構経由で内部アドレスへ SSRF 可能だった。fec0::/10 site-local・2001:db8::/32・2001:0::/32 Teredo も遮断対象に追加（PortSwigger SSRF cheat sheet 系の既知バイパス対応）。

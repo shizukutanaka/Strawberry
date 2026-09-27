@@ -11,7 +11,11 @@ module.exports = async function globalSetup() {
   // 対応させる（網羅性は tests/globalSetup-coverage.test.js が構造的に検証する）。
   // ここに無いリポジトリはリセットされず、レコードがテスト実行間で蓄積して
   // getAll() ベースのテストが過去ランの残骸に左右される（watches が実際に漏れていた）。
-  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'uptime', 'watches'];
+  const arrayFiles = [
+    'users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'uptime', 'watches',
+    // createJsonRepository 経由ではないが data/ に書く独自ストア
+    'sandbox-apikeys', // src/api/sandbox-apikey.js — 配列に追記型
+  ];
   const objectFiles = ['revoked-tokens', 'notification-settings'];
   // 配列/オブジェクト空でもない独自初期形状を持つファイル。
   // sla-tracker の loadSLA() が期待する { total, up, down, history } と同一にする —

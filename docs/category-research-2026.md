@@ -18,6 +18,36 @@ Strawberry（P2P GPU マーケットプレイス＋BTC Lightning 決済）を **
 
 ---
 
+## 追記: 実装状況の更新（2026-09 時点）
+
+本書は 2026-06 時点の調査スナップショット。各カテゴリの「Strawberry の現状」は調査当時の記述であり、
+その後の実装で以下は**陳腐化**している（推奨事項と参照集としての価値は維持）:
+
+- **カテゴリ1（計算検証）**: 「検証の仕組みが皆無」はもはや不正確。`src/verification/work-verifier.js` /
+  `verification-service.js` / `VerificationRepository` が実装され、`GET /admin/verifications[/:jobId]` で
+  検証結果を照会可能。未実装なのは ZKML・楽観的検証・自動スラッシング連携などの高度な層。
+- **カテゴリ2（エスクロー）**: 「エスクロー無し」は解消済み。`src/payments/escrow-service.js` +
+  `escrow-state-machine.js` + `EscrowRepository` による PENDING/HELD/SETTLED/CANCELED の
+  多状態エスクローが注文フローに配線済み（hold invoice 連携・部分精算・失効遷移を実装）。
+  残る推奨は submarine swap・BOLT12・ストリーミング課金などの拡張。
+- **カテゴリ3（アテステーション）**: 「真正性検証が無い」は部分的に解消。`src/security/gpu-attestation-verifier.js`
+  が存在し GPU ルートから参照される。nvtrust Local GPU Verifier との本格統合は未実装。
+- **カテゴリ5（レピュテーション）**: 「stake もレピュテーションも無い」は解消済み。
+  `ReputationRepository` + `src/reputation/reputation-service.js` / `reputation-scorer.js` が実装・配線済み
+  （レビュー・完了実績・SLA からスコア算出）。担保ステーク/スラッシング自体は限定的。
+- **カテゴリ10（可観測性/データ層）**: 「分散トレーシングが無い」は解消済み — OpenTelemetry
+  auto-instrumentation（`src/telemetry/instrumentation.js`）が `server.js` 起動時に読み込まれる。
+  「並行書込み保護無し」も部分的に解消 — `createJsonRepository` の全書込みが
+  `atomicWriteJSON`（temp+rename+dir fsync）経由で、CAS 風の `updateIf` プリミティブと
+  ルート/サービス層の `withLock` 排他がある。クロスプロセスのトランザクション保証や
+  Prisma/Postgres 統一・監査アンカー・カーボン指標は未実装のまま。
+
+依然として正確な記述: カテゴリ6（libp2p ESM 化で無効）、カテゴリ7（preemption/チェックポイント無し）、
+カテゴリ8（推論最適化レイヤ無し）、カテゴリ9（分散学習オーケストレーション無し）、
+カテゴリ4 の「孤立 pricing engine 未配線」。
+
+---
+
 ## 1. 計算検証・Proof-of-Compute（Verifiable Compute / ZKML）
 
 **Strawberry の現状**: 借りた GPU が実際に計算したかを検証する仕組みが皆無

@@ -1,5 +1,6 @@
 // src/utils/email.js - SendGrid/Mailgunメール送信ユーティリティ
 const axios = require('axios');
+const { AXIOS_SAFE_CONFIG } = require('./http-safe-config');
 
 /**
  * Send email notification using SendGrid or Mailgun
@@ -25,6 +26,7 @@ async function sendEmailNotification({ to, subject, text, html }, config = proce
         html ? { type: 'text/html', value: html } : { type: 'text/plain', value: text }
       ]
     }, {
+      ...AXIOS_SAFE_CONFIG,
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
     });
   } else if (provider === 'mailgun') {
@@ -35,7 +37,7 @@ async function sendEmailNotification({ to, subject, text, html }, config = proce
     const auth = Buffer.from(`api:${apiKey}`).toString('base64');
     await axios.post(`https://api.mailgun.net/v3/${domain}/messages`,
       new URLSearchParams({ from, to, subject, text, html }),
-      { headers: { Authorization: `Basic ${auth}` } }
+      { ...AXIOS_SAFE_CONFIG, headers: { Authorization: `Basic ${auth}` } }
     );
   } else {
     throw new Error('Unknown EMAIL_PROVIDER');

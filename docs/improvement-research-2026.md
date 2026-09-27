@@ -429,3 +429,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
+- **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→249件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。Electron 未統合・SPA リフレッシュ未実装など依然正確な残課題は維持。

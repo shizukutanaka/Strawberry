@@ -7,7 +7,7 @@
 ## 長所（Strengths）
 
 ### 1. コア取引フローが実働する
-- ユーザー登録 → ログイン → GPU 閲覧 → 注文作成 → 状態遷移（pending→matched→active→completed）→ 決済記録までが API として動作し、統合テストで検証されている（`tests/api.integration.test.js` 18件）。
+- ユーザー登録 → ログイン → GPU 閲覧 → 注文作成 → 状態遷移（pending→matched→active→completed）→ 決済記録までが API として動作し、統合テストで検証されている（`tests/api.integration.test.js` — 2026-09 時点で 249 件、全緑）。
 - 注文状態機械（`src/utils/state-checker.js`）とエスクロー状態機械（`src/payments/escrow-state-machine.js`）が分離されており、遷移の妥当性がテスト付きで保証される。
 
 ### 2. セキュリティ基盤が体系的
@@ -41,8 +41,8 @@
 ### 3. 決済が実 LND 前提
 - Lightning 決済・hold invoice エスクローは LND 未接続時 503。決済なしでも注文フローは動くが、「実際にお金が動く」検証は実環境依存（モック統合テストはあり）。
 
-### 4. フロントエンドが未配線
-- `public/` の静的ファイルは最小限。Electron（preload/react-app）は未統合。実用には API クライアントか UI の実装が必要。
+### 4. フロントエンドは最小 SPA（2026-09 追記）
+- `public/` には hash ルータ式の SPA が存在し、ログイン/登録・マーケット・GPU 詳細/出品・自 GPU 一覧・収益・決済管理ページが実装済み（`public/js/app.js` + `pages/*`、Playwright e2e 付き）。認証はアクセストークン前提で、リフレッシュの再試行は未実装（改善余地）。Electron（preload/react-app）は未統合。
 
 ### 5. 単一プロセス・単一ノード前提
 - レートリミット・キャッシュ・トークン失効リストはすべてインメモリ（+ローカルJSON）。水平スケールには Redis 等の共有ストアが必要。
@@ -145,7 +145,7 @@
 
 ## 総評
 
-土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 44 件中 43 件が実装済み（116/116 テスト通過、2 件は外部インフラ依存でスキップ）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
+土台（認証・認可・監査・原子的永続化・状態機械・テスト）は堅牢になった。一方でプロダクトの看板である「P2P」と「Lightning 実決済」は外部依存が未接続のため、現状の実態は**単一ノードの GPU 貸出 REST API + 決済抽象層**である。不足機能 44 件中 43 件が実装済み（当該サイクルで 116/116 テスト通過、2 件は外部インフラ依存でスキップ。2026-09 時点のスイート全体は 130+ スイート・約 1200 テスト）。次の価値順は (1) UI または API クライアント、(2) regtest LND での決済 E2E、(3) DB 移行。
 
 - **プロバイダ注文拒否**: `POST /api/v1/orders/:id/reject`。GPU の `providerId` または admin のみが呼び出し可能。pending 状態の注文のみ拒否可能で、それ以外は 400。キャンセル理由（`reason`、最大500文字）を任意指定可能。拒否後に注文者へ `notifyUser` 通知。
 - **レビュー・評価**: `POST /api/v1/orders/:id/review`（注文者のみ、completed 注文のみ、1回限り）。rating（1–5整数）+ comment（最大500文字）。`GET /api/v1/gpus/:id/reviews`（公開・ページネーション付き）で GPU の全レビューと評価平均を照会。`GET /gpus/:id` の詳細レスポンスにも `rating.average` / `rating.count` を含む。

@@ -41,6 +41,23 @@ const lastProviderBeatByOrder = new Map();
 // 再起動後や sessions 集計のため、既に集計済みのオーダーを記録（プロセス揮発）。
 const countedOrders = new Set();
 
+// 上記2構造は orderId ごとに永久に蓄積するため、長期稼働では完了・取消済み注文の
+// エントリが残り続けて緩やかにリークする。上限を超えたら挿入順（Map/Set は
+// 挿入順を保持する）で最古を逐出す:
+//   - lastProviderBeatByOrder から逐出された注文の次ビートは「初回ビート」扱いに
+//     なるだけで、偽の gap イベントを生まない（安全側の方向）。
+//   - countedOrders から逐出された注文は再度「新セッション」として1回多めに
+//     カウントされ得る。再起動時と同じ扱いで、統計誤差として許容する。
+const MAX_TRACKED_ORDERS = Math.max(100, Number(process.env.UPTIME_MAX_TRACKED_ORDERS) || 10000);
+
+function _capOrdered(container, limit) {
+  while (container.size > limit) {
+    const oldest = container.keys().next().value;
+    if (oldest === undefined) break;
+    container.delete(oldest);
+  }
+}
+
 function _clamp01(n) {
   if (!Number.isFinite(n)) return 0;
   return n < 0 ? 0 : n > 1 ? 1 : n;
@@ -57,9 +74,11 @@ function recordProviderHeartbeat(providerId, orderId, nowMs = Date.now()) {
       gapEvent = true;
     }
     lastProviderBeatByOrder.set(orderId, nowMs);
+    _capOrdered(lastProviderBeatByOrder, MAX_TRACKED_ORDERS);
 
     const isNewSession = !countedOrders.has(orderId);
     if (isNewSession) countedOrders.add(orderId);
+    _capOrdered(countedOrders, MAX_TRACKED_ORDERS);
 
     const nowIso = new Date(nowMs).toISOString();
     const existing = UptimeRepository.getByProviderId(providerId);
@@ -163,5 +182,9 @@ module.exports = {
   getReliability,
   GAP_THRESHOLD_MS,
   MIN_BEATS_FOR_SCORE,
+  MAX_TRACKED_ORDERS,
   _resetVolatileState,
+  // テスト用: 揮発構造のサイズ確認
+  _lastProviderBeatByOrder: lastProviderBeatByOrder,
+  _countedOrders: countedOrders,
 };

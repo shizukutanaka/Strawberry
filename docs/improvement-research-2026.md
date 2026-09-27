@@ -429,3 +429,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- `src/api/routes/payment/btc-onchain.js` のエスクロー CAS 競合を fail-closed 化 — tx1 送信後に期限切れスイープ等が PENDING→CANCELED へ遷移すると `updateIf` が condition_failed を返すが、従来は戻り値を無視して tx2 まで進み、証跡の残らない資金移動＋再送時の新規エスクロー作成（tx1 再送＝借り手二重課金）になり得た。CAS 失敗時は txid 証跡を行へ追記・`payment_escrow_cas_failed` 監査・500+手動照合で停止し、txid 持ち CANCELED エスクローへの再送は 409 で拒否。回帰テスト2件追加。

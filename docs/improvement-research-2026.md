@@ -429,3 +429,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+### ルート SPECIFICATION.md の 2026-09 追補（2026-09-27）
+- **対応**: ルート `SPECIFICATION.md`（2026-06 実態ベース仕様書）の冒頭に追補を追加。当時の残課題だった OTel SDK 連携（D-2）が `src/telemetry/instrumentation.js` で配線済みである点、probe テストが 60 件超へ拡充、§4 表外の `/admin/*`・`/marketplace/escrow/*`・`/gpus/:id/estimate`・`/gpus/:id/watch` 追加、エスクロー状態機械の実装を明記。docs/SPECIFICATION.md（#133）とは別ファイル・非重複。

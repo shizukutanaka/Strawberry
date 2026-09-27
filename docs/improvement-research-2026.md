@@ -429,3 +429,10 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## Jest globalSetup のリセット対象漏れ修正 (2026-09-26)
+
+- **観測**: `tests/globalSetup.js` は各ラン冒頭で `data/*.json` をリセットするが、対象リストが `createJsonRepository()` で作られる全永続ファイルを網羅していなかった — `watches.json`（WatchRepository、probe61-price-watch 等が実際に書き込む）が漏れて跨ラン蓄積、`sla.json`（sla-tracker が書く独自形状 `{total,up,down,history}`）も未対象。
+- **変更**: `arrayFiles` に `watches` を追加。`sla` は配列ではないため新設した `defaultFiles` マップで `loadSLA()` と同一の初期形状にリセット（`'[]'`/`'{}'` だと `sla.history.push` が TypeError で監視クラッシュする）。
+- **テスト**: `tests/globalSetup-coverage.test.js` 新規3件 — ① `src/db/json/*.js` 内の `createJsonRepository('X.json')` を走査し globalSetup のリセット対象との網羅性を構造的に検証（将来のリポジトリ追加で漏れを捕捉）② 汚れた watches.json が空配列へリセットされる ③ sla.json が正しい初期オブジェクト形状でリセットされる。全緑 + probe61（47件）緑で回帰なし。
+- **参考**: Jest globalSetup 公式ガイド / Heroku "test fixtures isolation" 系の共有フィクスチャ衛生

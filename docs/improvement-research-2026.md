@@ -428,3 +428,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+
+### .env.example 再同期（2026-09-27・#55 後の差分）
+- **対応**: #55 マージ後に残っていた未記載の環境変数 12 件を追記 — ops スクリプト系（PROGRESS_SHEET_ID/FEEDBACK_SHEET_ID/NOTION_TOKEN/NOTION_DB_ID/GITHUB_TOKEN/GITHUB_REPO/SLACK_BOT_TOKEN/SLACK_CHANNEL/LND_PROTO_PATH/API_ENDPOINT）と e2e 系（E2E_BASE_URL/PLAYWRIGHT_CHROMIUM_PATH）。CI/DOCKER_HOST/HOME 等のシステム由来変数は対象外。

@@ -65,4 +65,18 @@ describe('GPU障害履歴', () => {
     expect(raw['old-1']).toBeDefined();
     expect(raw['brand-new-gpu']).toHaveLength(1);
   });
+
+  it('既存履歴が既に上限超過している場合は上限まで戻す（1件だけでは回復しない）', async () => {
+    fs.mkdirSync(path.dirname(HISTORY_PATH), { recursive: true });
+    const seed = {};
+    for (let i = 0; i < 1200; i++) seed[`old-${i}`] = [{ time: 't', error: 'e', stack: null, context: {} }];
+    fs.writeFileSync(HISTORY_PATH, JSON.stringify(seed));
+    await recordGpuError('brand-new-gpu', 'overflow');
+    const raw = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf-8'));
+    expect(Object.keys(raw)).toHaveLength(1000);
+    expect(raw['brand-new-gpu']).toHaveLength(1);
+    // 最古の201キーが除かれ、残りは上限内
+    expect(raw['old-200']).toBeUndefined();
+    expect(raw['old-201']).toBeDefined();
+  });
 });

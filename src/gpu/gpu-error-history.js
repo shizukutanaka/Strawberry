@@ -45,10 +45,11 @@ async function recordGpuError(gpuId, error, context = {}) {
   const entry = await withLock(HISTORY_LOCK, async () => {
     const history = loadHistory();
     if (!history[gpuId]) {
-      // 鍵数上限: 未知の新規 gpuId で上限超過なら最古の挿入キーから除く
+      // 鍵数上限: 未知の新規 gpuId で上限超過なら最古の挿入キーから除く。
+      // 既存履歴が既に上限超過している場合は上限まで戻す（1件だけでは回復しない）。
       const keys = Object.keys(history);
-      if (keys.length >= MAX_GPU_KEYS) {
-        delete history[keys[0]];
+      while (keys.length >= MAX_GPU_KEYS) {
+        delete history[keys.shift()];
       }
       history[gpuId] = [];
     }

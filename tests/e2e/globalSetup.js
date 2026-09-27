@@ -9,8 +9,12 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '../../data');
 
 module.exports = async function globalSetup() {
-  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'watches', 'uptime'];
+  const arrayFiles = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'watches', 'uptime', 'sandbox-apikeys'];
   const objectFiles = ['revoked-tokens', 'notification-settings'];
+  // jest 側 tests/globalSetup.js と同じく、独自初期形状のファイルは正しい形でリセットする
+  const defaultFiles = {
+    'sla': { total: 0, up: 0, down: 0, history: [] },
+  };
 
   // クリーンチェックアウト（CI 等）には data/ が無いため作成する。以前は
   // existsSync ガードで「無ければスキップ」していたが、それだと data/ が空の
@@ -23,5 +27,8 @@ module.exports = async function globalSetup() {
   }
   for (const name of objectFiles) {
     fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), '{}', 'utf-8');
+  }
+  for (const [name, value] of Object.entries(defaultFiles)) {
+    fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), JSON.stringify(value), 'utf-8');
   }
 };

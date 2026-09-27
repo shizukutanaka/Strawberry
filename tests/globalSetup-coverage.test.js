@@ -24,15 +24,16 @@ describe('globalSetup のリセット網羅性', () => {
     }
     expect(declared.size).toBeGreaterThan(0);
 
-    // globalSetup.js 内のリセット対象名を抽出（arrayFiles/objectFiles/defaultFiles）
-    const setupSrc = fs.readFileSync(path.join(__dirname, 'globalSetup.js'), 'utf8');
-    const reset = new Set();
-    for (const m of setupSrc.matchAll(/['"]([\w-]+)['"]/g)) {
-      reset.add(m[1]);
-    }
-
-    for (const name of declared) {
-      expect(reset.has(name)).toBe(true);
+    // 両 globalSetup（jest / e2e）のリセット対象名を抽出
+    for (const file of ['globalSetup.js', 'e2e/globalSetup.js']) {
+      const setupSrc = fs.readFileSync(path.join(__dirname, file), 'utf8');
+      const reset = new Set();
+      for (const m of setupSrc.matchAll(/['"]([\w-]+)['"]/g)) {
+        reset.add(m[1]);
+      }
+      for (const name of declared) {
+        expect(reset.has(name)).toBe(true);
+      }
     }
   });
 

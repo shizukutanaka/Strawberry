@@ -66,7 +66,7 @@ class VirtualGPUManager extends EventEmitter {
         if (this.platform === 'kubernetes') {
             try {
                 if (!this.k8sApi) return false;
-                await this.k8sApi.listPodForAllNamespaces();
+                await this.k8sApi.listPodForAllNamespaces({});
             } catch (e) {
                 return false;
             }
@@ -140,13 +140,14 @@ class VirtualGPUManager extends EventEmitter {
             const k8s = getK8s();
             const kc = new k8s.KubeConfig();
             kc.loadFromDefault();
-            
+            this.kc = kc;
+
             this.k8sApi = kc.makeApiClient(k8s.CoreV1Api);
             this.k8sAppsApi = kc.makeApiClient(k8s.AppsV1Api);
             
             // GPU Device Plugin確認
-            const devicePlugins = await this.k8sApi.listNamespacedPod('kube-system');
-            const gpuPlugin = devicePlugins.body.items.find(pod => 
+            const devicePlugins = await this.k8sApi.listNamespacedPod({ namespace: 'kube-system' });
+            const gpuPlugin = devicePlugins.items.find(pod => 
                 pod.metadata.name.includes('nvidia-device-plugin')
             );
             
@@ -234,8 +235,8 @@ class VirtualGPUManager extends EventEmitter {
         // Kubernetes GPU サポート
         if (this.platform === 'kubernetes') {
             try {
-                const nodes = await this.k8sApi.listNode();
-                support.kubernetes = nodes.body.items.some(node => 
+                const nodes = await this.k8sApi.listNode({});
+                support.kubernetes = nodes.items.some(node => 
                     node.status.capacity && node.status.capacity['nvidia.com/gpu']
                 );
             } catch {}
@@ -365,7 +366,9 @@ class VirtualGPUManager extends EventEmitter {
         };
         
         // ConfigMap 作成
-        await this.k8sApi.createNamespacedConfigMap('strawberry-gpu', {
+        await this.k8sApi.createNamespacedConfigMap({
+            namespace: 'strawberry-gpu',
+            body: {
             metadata: {
                 name: `vgpu-config-${vgpuId}`
             },
@@ -373,15 +376,16 @@ class VirtualGPUManager extends EventEmitter {
                 'config.json': JSON.stringify(config),
                 'gpu.json': JSON.stringify(physicalGPU)
             }
+            }
         });
         
         // Pod 作成
-        const pod = await this.k8sApi.createNamespacedPod('strawberry-gpu', podManifest);
-        
+        const pod = await this.k8sApi.createNamespacedPod({ namespace: 'strawberry-gpu', body: podManifest });
+
         return {
             platform: 'kubernetes',
-            pod: pod.body.metadata.name,
-            namespace: pod.body.metadata.namespace
+            pod: pod.metadata.name,
+            namespace: pod.metadata.namespace
         };
     }
 
@@ -768,7 +772,9 @@ nvidia-cuda-mps-control -d
 
     async setupK8sAccess(vgpu, allocation) {
         // Kubernetes Service作成
-        const service = await this.k8sApi.createNamespacedService('strawberry-gpu', {
+        const service = await this.k8sApi.createNamespacedService({
+            namespace: 'strawberry-gpu',
+            body: {
             metadata: {
                 name: `vgpu-access-${allocation.id}`,
                 labels: {
@@ -788,14 +794,15 @@ nvidia-cuda-mps-control -d
                     targetPort: 8080
                 }]
             }
+            }
         });
         
         // Service IP取得待機
         let serviceIP;
         for (let i = 0; i < 30; i++) {
-            const svc = await this.k8sApi.readNamespacedService(service.body.metadata.name, 'strawberry-gpu');
-            if (svc.body.status.loadBalancer.ingress && svc.body.status.loadBalancer.ingress[0]) {
-                serviceIP = svc.body.status.loadBalancer.ingress[0].ip;
+            const svc = await this.k8sApi.readNamespacedService({ name: service.metadata.name, namespace: 'strawberry-gpu' });
+            if (svc.status.loadBalancer.ingress && svc.status.loadBalancer.ingress[0]) {
+                serviceIP = svc.status.loadBalancer.ingress[0].ip;
                 break;
             }
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -853,10 +860,10 @@ nvidia-cuda-mps-control -d
     async releaseK8sAccess(vgpu, allocation) {
         // Kubernetes Service削除
         try {
-            await this.k8sApi.deleteNamespacedService(
-                `vgpu-access-${allocation.id}`,
-                'strawberry-gpu'
-            );
+            await this.k8sApi.deleteNamespacedService({
+                name: `vgpu-access-${allocation.id}`,
+                namespace: 'strawberry-gpu'
+            });
         } catch (error) {
             logger.error('Failed to delete K8s service:', error);
         }
@@ -891,16 +898,16 @@ nvidia-cuda-mps-control -d
     async destroyK8sVirtualGPU(vgpu) {
         try {
             // Pod削除
-            await this.k8sApi.deleteNamespacedPod(
-                `strawberry-vgpu-${vgpu.id}`,
-                'strawberry-gpu'
-            );
-            
+            await this.k8sApi.deleteNamespacedPod({
+                name: `strawberry-vgpu-${vgpu.id}`,
+                namespace: 'strawberry-gpu'
+            });
+
             // ConfigMap削除
-            await this.k8sApi.deleteNamespacedConfigMap(
-                `vgpu-config-${vgpu.id}`,
-                'strawberry-gpu'
-            );
+            await this.k8sApi.deleteNamespacedConfigMap({
+                name: `vgpu-config-${vgpu.id}`,
+                namespace: 'strawberry-gpu'
+            });
         } catch (error) {
             logger.error('Failed to destroy K8s vGPU:', error);
         }
@@ -1114,14 +1121,19 @@ nvidia-cuda-mps-control -d
 
     async getK8sVGPUStats(vgpu) {
         try {
-            const metrics = await this.k8sApi.readNamespacedPodMetrics(
-                `strawberry-vgpu-${vgpu.id}`,
-                'strawberry-gpu'
+            // @kubernetes/client-node 2.x では metrics.k8s.io は CoreV1Api から
+            // 分離し Metrics クライアントが PodMetricsList を返す
+            const metrics = await new getK8s().Metrics(this.kc).getPodMetrics('strawberry-gpu');
+            const podMetrics = (metrics.items || []).find(p =>
+                p.metadata && p.metadata.name === `strawberry-vgpu-${vgpu.id}`
             );
-            
+            const usage = podMetrics && podMetrics.containers && podMetrics.containers[0]
+                ? podMetrics.containers[0].usage
+                : {};
+
             return {
-                cpu: metrics.body.containers[0].usage.cpu,
-                memory: metrics.body.containers[0].usage.memory,
+                cpu: usage.cpu,
+                memory: usage.memory,
                 gpu: {
                     utilization: 0, // Prometheusから取得
                     memory: 0,

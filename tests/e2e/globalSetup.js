@@ -10,9 +10,13 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '../../data');
 const SNAPSHOT_DIR = path.join(DATA_DIR, '.e2e-snapshot');
 
-const ARRAY_FILES = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'watches', 'uptime'];
+const ARRAY_FILES = ['users', 'orders', 'gpus', 'escrows', 'payments', 'reputations', 'verifications', 'watches', 'uptime', 'sandbox-apikeys'];
 const OBJECT_FILES = ['revoked-tokens', 'notification-settings'];
-const SEED_FILES = [...ARRAY_FILES, ...OBJECT_FILES];
+// 配列/空オブジェクト以外の初期形状を持つシード
+const DEFAULT_FILES = {
+  'sla': { total: 0, up: 0, down: 0, history: [] },
+};
+const SEED_FILES = [...ARRAY_FILES, ...OBJECT_FILES, ...Object.keys(DEFAULT_FILES)];
 
 function restoreSnapshot() {
   const manifestPath = path.join(SNAPSHOT_DIR, 'manifest.json');
@@ -67,6 +71,9 @@ module.exports = async function globalSetup() {
   }
   for (const name of OBJECT_FILES) {
     fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), '{}', 'utf-8');
+  }
+  for (const [name, value] of Object.entries(DEFAULT_FILES)) {
+    fs.writeFileSync(path.join(DATA_DIR, `${name}.json`), JSON.stringify(value), 'utf-8');
   }
 };
 

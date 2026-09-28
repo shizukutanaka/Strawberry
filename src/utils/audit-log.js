@@ -9,8 +9,17 @@ const DEFAULT_LOG_PATH = path.join(__dirname, '../../logs/audit.log');
 // ディスク枯渇防止: ログファイルがこのサイズを超えたら新規エントリを拒否し警告を出す。
 // 認証済みユーザーが監査対象アクション（異常検知・webhook 失敗等）を連打することで
 // ディスクをフルにし、audit.log のサイレント失敗と引き換えにサービス全体を落とせる。
-const MAX_AUDIT_LOG_BYTES = (process.env.MAX_AUDIT_LOG_MB
-  ? parseInt(process.env.MAX_AUDIT_LOG_MB, 10) : 50) * 1024 * 1024;
+// MAX_AUDIT_LOG_MB が数値でない値（タイポ等）に設定されると parseInt が NaN を返し、
+// NaN * 1MB = NaN で全サイズ比較が false → 上限が無言で無効化され、防ぐはずの
+// ディスク枯渇 DoS が成立してしまう。NaN/負値は既定 50MB へフォールバックする
+// （明示的な 0 は「監査停止」の意図指定として残す）。
+const _auditLogMbEnv = process.env.MAX_AUDIT_LOG_MB;
+const _auditLogMbParsed = _auditLogMbEnv !== undefined && _auditLogMbEnv !== ''
+  ? parseInt(_auditLogMbEnv, 10)
+  : 50;
+const MAX_AUDIT_LOG_BYTES = (Number.isFinite(_auditLogMbParsed) && _auditLogMbParsed >= 0
+  ? _auditLogMbParsed
+  : 50) * 1024 * 1024;
 
 // ログ/ハッシュのパスは呼び出し時に解決する。AUDIT_LOG_PATH を設定すると差し替え可能で、
 // テストが各自の隔離ファイルを使えるため、並列実行時に共有 audit.log を汚染し合って
@@ -130,4 +139,4 @@ function verifyAuditLogIntegrity() {
   return prevHash === lastHash;
 }
 
-module.exports = { appendAuditLog, verifyAuditLogIntegrity };
+module.exports = { appendAuditLog, verifyAuditLogIntegrity, MAX_AUDIT_LOG_BYTES };

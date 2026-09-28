@@ -41,7 +41,7 @@
     "prisma-migrate": "echo \"prisma is not installed (this project persists via data/*.json, not prisma)\" && exit 1",
     "prisma-studio": "echo \"prisma is not installed (this project persists via data/*.json, not prisma)\" && exit 1",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
-    "setup": "npm ci && npm run openapi-gen && npm test"
+    "setup": "npm ci && npm run openapi-gen"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.78.0",

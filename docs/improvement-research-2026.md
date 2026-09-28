@@ -429,3 +429,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- ops スクリプトの JSON 読み込みを堅牢化: `scripts/lib/read-json.js` を新設し、`alert-high-priority`/`alert-overdue`/`alert-overdue-high`/`priority-to-notion`/`progress-report` の裸 `JSON.parse(readFileSync)`（docs/feedback-priority.json 等の破損や未作成で cron チェーンごとクラッシュ、オブジェクト書込時は .filter で TypeError）を ENOENT/破損/非配列に耐性のある共通ヘルパーへ置き換え。progress-report は credentials/token 欠損時に明確なエラーメッセージで終了するよう改善。

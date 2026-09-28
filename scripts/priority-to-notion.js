@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('@notionhq/client');
+const { readJsonArray } = require('./lib/read-json');
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DB_ID = process.env.NOTION_DB_ID;
@@ -24,7 +25,7 @@ async function addFeedbackToNotion(feedback) {
 
 async function main() {
   if (!fs.existsSync(PRIORITY_FILE)) return;
-  const feedbacks = JSON.parse(fs.readFileSync(PRIORITY_FILE, 'utf8'));
+  const feedbacks = readJsonArray(PRIORITY_FILE);
   for (const fb of feedbacks) {
     await addFeedbackToNotion(fb);
   }

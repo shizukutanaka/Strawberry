@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { readJsonFile } = require('./lib/read-json');
 
 const CREDENTIALS_PATH = path.join(__dirname, '../scripts/credentials.json');
 const TOKEN_PATH = path.join(__dirname, '../scripts/token.json');
@@ -10,10 +11,16 @@ const SHEET_NAME = 'ProgressBoard';
 const REPORT_FILE = path.join(__dirname, '../docs/progress-report.md');
 
 async function authorize() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
+  const credentials = readJsonFile(CREDENTIALS_PATH);
+  if (!credentials || !credentials.installed) {
+    throw new Error(`credentials.json が読めません (${CREDENTIALS_PATH})`);
+  }
   const { client_secret, client_id, redirect_uris } = credentials.installed;
   const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
-  const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+  const token = readJsonFile(TOKEN_PATH);
+  if (!token) {
+    throw new Error(`token.json が読めません (${TOKEN_PATH})`);
+  }
   oAuth2Client.setCredentials(token);
   return oAuth2Client;
 }
@@ -65,7 +72,10 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
 }
 
 module.exports = { main };

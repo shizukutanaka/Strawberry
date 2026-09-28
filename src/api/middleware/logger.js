@@ -8,11 +8,18 @@ const { logger } = require('../../utils/logger');
 // 認証コード）・apiKey 等が平文で dev ログへ残ってしまう。セッションを盗む
 // 資格情報・秘密値に限る（payoutAddress 等のプロフィール値は対象外）。
 const SENSITIVE_BODY_KEY = /^(password|currentPassword|newPassword|token|refreshToken|accessToken|idToken|paymentRequest|code|mailCode|apiKey|totp|secret|peerKey)$/i;
-function redactBodyForLog(body) {
+// 配列ボディ（POST /gpus/bulk 等）やネストしたオブジェクト内の資格情報も
+// 漏れないよう再帰する。深度上限で循環参照・病的に深い入力で無限再帰しない。
+const MAX_REDACT_DEPTH = 5;
+function redactBodyForLog(body, depth = 0) {
   if (!body || typeof body !== 'object') return body;
-  const out = { ...body };
-  for (const key of Object.keys(out)) {
-    if (SENSITIVE_BODY_KEY.test(key)) out[key] = '[REDACTED]';
+  if (depth >= MAX_REDACT_DEPTH) return '[REDACTED]';
+  if (Array.isArray(body)) {
+    return body.map((v) => redactBodyForLog(v, depth + 1));
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(body)) {
+    out[key] = SENSITIVE_BODY_KEY.test(key) ? '[REDACTED]' : redactBodyForLog(value, depth + 1);
   }
   return out;
 }

@@ -47,4 +47,29 @@ describe('redactBodyForLog', () => {
     expect(redactBodyForLog(undefined)).toBeUndefined();
     expect(redactBodyForLog('str')).toBe('str');
   });
+
+  it('masks credentials inside array bodies (POST /gpus/bulk)', () => {
+    const body = [{ name: 'gpu1', apiKey: 'k1' }, { name: 'gpu2', apiKey: 'k2' }];
+    expect(redactBodyForLog(body)).toEqual([
+      { name: 'gpu1', apiKey: '[REDACTED]' },
+      { name: 'gpu2', apiKey: '[REDACTED]' },
+    ]);
+  });
+
+  it('masks credentials in nested objects', () => {
+    const body = { gpu: { apiKey: 'k', specs: { mem: 24 } }, orderId: 'o1' };
+    expect(redactBodyForLog(body)).toEqual({
+      gpu: { apiKey: '[REDACTED]', specs: { mem: 24 } },
+      orderId: 'o1',
+    });
+  });
+
+  it('terminates on circular references via the depth cap', () => {
+    const body = { a: 1 };
+    body.self = body;
+    const redacted = redactBodyForLog(body);
+    expect(redacted.a).toBe(1);
+    // 深度上限に達した部分は '[REDACTED]' で打ち止めされる
+    expect(JSON.stringify(redacted)).toContain('"[REDACTED]"');
+  });
 });

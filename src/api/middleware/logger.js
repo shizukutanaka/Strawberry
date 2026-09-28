@@ -2,19 +2,27 @@
 const morgan = require('morgan');
 const { logger } = require('../../utils/logger');
 
+// :body トークンへ書き出す前にクレデンシャル系フィールドを [REDACTED] へ
+// 置き換える。対象はキー名で判定 — password/token/paymentRequest だけでは
+// refreshToken・idToken（Google）・currentPassword/newPassword・code（メール
+// 認証コード）・apiKey 等が平文で dev ログへ残ってしまう。セッションを盗む
+// 資格情報・秘密値に限る（payoutAddress 等のプロフィール値は対象外）。
+const SENSITIVE_BODY_KEY = /^(password|currentPassword|newPassword|token|refreshToken|accessToken|idToken|paymentRequest|code|mailCode|apiKey|totp|secret|peerKey)$/i;
+function redactBodyForLog(body) {
+  if (!body || typeof body !== 'object') return body;
+  const out = { ...body };
+  for (const key of Object.keys(out)) {
+    if (SENSITIVE_BODY_KEY.test(key)) out[key] = '[REDACTED]';
+  }
+  return out;
+}
+
 // カスタムトークン定義
 morgan.token('id', (req) => req.id);
 morgan.token('user', (req) => (req.user ? req.user.id : 'anonymous'));
 morgan.token('body', (req) => {
   // 機密情報をマスク
-  const body = { ...req.body };
-  
-  // パスワードなどの機密情報をマスク
-  if (body.password) body.password = '[REDACTED]';
-  if (body.token) body.token = '[REDACTED]';
-  if (body.paymentRequest) body.paymentRequest = '[REDACTED]';
-  
-  return JSON.stringify(body);
+  return JSON.stringify(redactBodyForLog(req.body));
 });
 
 // リクエストIDを生成するミドルウェア。
@@ -104,5 +112,6 @@ module.exports = {
   requestLogger,
   devRequestLogger,
   responseTime,
-  errorLogger
+  errorLogger,
+  redactBodyForLog
 };

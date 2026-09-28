@@ -429,3 +429,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- `slack-notify-checklist-kpi.js`: `.env` 未読込で `slack-feedback-bot` が require 時に捕捉する `SLACK_WEBHOOK_URL` が常に空となり `npm run slack-notify-checklist-kpi` の通知が無言スキップされる不具合を修正（dotenv を require 前に読み込み。`slack-notify-notion` と同型）。サブプロセス経由の回帰テストを追加。

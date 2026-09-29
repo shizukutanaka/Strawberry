@@ -9,15 +9,20 @@ const DEFAULT_LOG_PATH = path.join(__dirname, '../../logs/audit.log');
 // ディスク枯渇防止: ログファイルがこのサイズを超えたら新規エントリを拒否し警告を出す。
 // 認証済みユーザーが監査対象アクション（異常検知・webhook 失敗等）を連打することで
 // ディスクをフルにし、audit.log のサイレント失敗と引き換えにサービス全体を落とせる。
-// MAX_AUDIT_LOG_MB が数値でない値（タイポ等）に設定されると parseInt が NaN を返し、
-// NaN * 1MB = NaN で全サイズ比較が false → 上限が無言で無効化され、防ぐはずの
-// ディスク枯渇 DoS が成立してしまう。NaN/負値は既定 50MB へフォールバックする
-// （明示的な 0 は「監査停止」の意図指定として残す）。
+// MAX_AUDIT_LOG_MB の検証は厳密に行う。緩い parseInt は3系統の故障を招く:
+// - '0oops' のような部分一致を通すと 0 と解釈され監査全体が黙って停止する
+// - NaN/負値をそのまま掛けると全サイズ比較が false になり上限が無言で無効化される
+// - 巨大整数は MB→bytes 換算で Infinity となり、同じく比較を常時 false にする
+// 数字のみの完全一致を要求し、NaN/負値/上限超過は既定 50MB へフォールバックする
+// （明示的な '0' のみ「監査停止」の意図指定として残す）。
 const _auditLogMbEnv = process.env.MAX_AUDIT_LOG_MB;
 const _auditLogMbParsed = _auditLogMbEnv !== undefined && _auditLogMbEnv !== ''
-  ? parseInt(_auditLogMbEnv, 10)
+  ? (/^\d+$/.test(_auditLogMbEnv.trim()) ? parseInt(_auditLogMbEnv, 10) : NaN)
   : 50;
-const MAX_AUDIT_LOG_BYTES = (Number.isFinite(_auditLogMbParsed) && _auditLogMbParsed >= 0
+// MB 指定の上限は 1TB — これを超える指定は設定ミスと見做す（Infinity 化防止）
+const MAX_AUDIT_LOG_BYTES = (Number.isFinite(_auditLogMbParsed)
+  && _auditLogMbParsed >= 0
+  && _auditLogMbParsed <= 1048576
   ? _auditLogMbParsed
   : 50) * 1024 * 1024;
 
@@ -86,6 +91,8 @@ function _getOrInitPrevHash(logPath, hashPath) {
  */
 function appendAuditLog(action, detail = {}, user = 'system') {
   try {
+    // 明示的な 0 指定は監査停止の意図指定 — ファイル未作成時も含め一切書き込まない
+    if (MAX_AUDIT_LOG_BYTES === 0) return;
     const logPath = auditLogPath();
     const hashPath = hashChainPath();
     // ディレクトリが存在しない場合に作成（起動時・テスト時の ENOENT を防ぐ）

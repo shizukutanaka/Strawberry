@@ -435,3 +435,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **観測**: `.github/` にワークフローと dependabot.yml はあるが、`pull_request_template.md` と `ISSUE_TEMPLATE/` が不在。PR 本文が毎回バラバラで、脆弱性報告が公開 Issue に流れるリスクもあった（SECURITY.md の導線が Issue 作成時に示されない）。
 - **変更**: GitHub 標準規約の `pull_request_template.md`（概要/変更内容/テスト/セキュリティ影響）と `ISSUE_TEMPLATE/bug_report.md`・`feature_request.md` を日本語で追加。bug テンプレート冒頭に「脆弱性は公開 Issue に書かず SECURITY.md へ」の導線を明記（RFC 9116 security.txt と整合）。
 - **参考**: GitHub Docs "Creating a pull request template for your repository" / "Configuring issue templates"
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

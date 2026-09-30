@@ -24,7 +24,21 @@ function redactBodyForLog(body, depth = 0) {
   return out;
 }
 
+// URL 内の機密クエリパラメータをマスクする。
+// 監査ミドルウェア（middleware/audit.js）は req.query を sanitizeSensitiveFields で
+// マスクしているが、こちらが記録する req.originalUrl にはクエリ文字列が生のまま
+// 含まれるため、`GET /x?token=abc` のようなリクエストがアクセス/エラーログへ
+// 平文で残ってしまう。キー集合は utils/sanitize.js の機密フィールド定義と同一
+// （クエリ名は api_key 等のスネークケースもあり得るためそれを包含）。
+const SENSITIVE_QUERY_KEY = /([?&])(password|secret|token|api_?key|private_?key|email|refresh_?token|access_?token|jwt|macaroon|mnemonic|seed)=([^&]*)/gi;
+function redactUrlQuery(url) {
+  return typeof url === 'string'
+    ? url.replace(SENSITIVE_QUERY_KEY, (m, sep, key) => `${sep}${key}=[MASKED]`)
+    : url;
+}
+
 // カスタムトークン定義
+morgan.token('safeUrl', (req) => redactUrlQuery(req.originalUrl));
 morgan.token('id', (req) => req.id);
 morgan.token('user', (req) => (req.user ? req.user.id : 'anonymous'));
 morgan.token('body', (req) => {
@@ -57,7 +71,7 @@ const requestId = (req, res, next) => {
 
 // リクエストロガー
 const requestLogger = morgan(
-  ':id :remote-addr - :user ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" - :response-time ms',
+  ':id :remote-addr - :user ":method :safeUrl HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" - :response-time ms',
   {
     stream: {
       write: (message) => {
@@ -69,7 +83,7 @@ const requestLogger = morgan(
 
 // 詳細なリクエストロガー（開発環境用）
 const devRequestLogger = morgan(
-  ':id :method :url :status :response-time ms - :body',
+  ':id :method :safeUrl :status :response-time ms - :body',
   {
     stream: {
       write: (message) => {
@@ -89,7 +103,7 @@ const responseTime = (req, res, next) => {
     
     // 遅いレスポンスを警告
     if (duration > 1000) {
-      logger.warn(`Slow response: ${req.method} ${req.originalUrl} - ${duration}ms`);
+      logger.warn(`Slow response: ${req.method} ${redactUrlQuery(req.originalUrl)} - ${duration}ms`);
     }
     
     // メトリクス収集（将来的に拡張）
@@ -104,7 +118,7 @@ const errorLogger = (err, req, res, next) => {
   // エラーの詳細をログに記録
   logger.error(`${err.name || 'Error'}: ${err.message}`, {
     requestId: req.id,
-    path: req.originalUrl,
+    path: redactUrlQuery(req.originalUrl),
     method: req.method,
     statusCode: err.statusCode || 500,
     stack: err.stack,
@@ -119,6 +133,13 @@ module.exports = {
   requestLogger,
   devRequestLogger,
   responseTime,
+<<<<<<< HEAD
   errorLogger,
   redactBodyForLog
+||||||| 67c131a
+  errorLogger
+=======
+  errorLogger,
+  redactUrlQuery
+>>>>>>> origin/main
 };

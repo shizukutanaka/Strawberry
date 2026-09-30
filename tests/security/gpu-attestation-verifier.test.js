@@ -158,4 +158,54 @@ describe('gpu-attestation-verifier', () => {
     const r2 = await verifyAttestation(claimed, validReport);
     expect(r1).toEqual(r2);
   });
+
+  // ---- mandatory checks fail closed on absent fields ----
+  // freshness / memory_match は mandatory に含まれる。レポートが該当フィールドを
+  // 省略しても pass しない（欠落を許すと「一度取得した正当レポートの無期限再提示」や
+  // 「容量をアテストしないままのスペック申告」が mandatory を素通りする）。
+
+  it('fails freshness when the report omits timestamp (mandatory, replay protection)', async () => {
+    const r = await verifyAttestation(claimed, { ...validReport, timestamp: undefined });
+    expect(r.passed).toBe(false);
+    expect(r.findings.some(f => f.includes('timestamp'))).toBe(true);
+  });
+
+  it('fails freshness on an unparseable timestamp', async () => {
+    const r = await verifyAttestation(claimed, { ...validReport, timestamp: 'not-a-date' });
+    expect(r.passed).toBe(false);
+    expect(r.findings.some(f => f.includes('timestamp'))).toBe(true);
+  });
+
+  it('accepts a near-future timestamp within the clock-skew allowance', async () => {
+    const r = await verifyAttestation(claimed, {
+      ...validReport,
+      timestamp: new Date(Date.now() + 60_000).toISOString(), // +60s
+    });
+    expect(r.passed).toBe(true);
+  });
+
+  it('fails on a far-future timestamp beyond the skew allowance', async () => {
+    const r = await verifyAttestation(claimed, {
+      ...validReport,
+      timestamp: new Date(Date.now() + 3_600_000).toISOString(), // +1h
+    });
+    expect(r.passed).toBe(false);
+    expect(r.findings.some(f => f.includes('future'))).toBe(true);
+  });
+
+  it('fails memory_match when the report omits memoryGB (mandatory)', async () => {
+    const r = await verifyAttestation(claimed, { ...validReport, memoryGB: undefined });
+    expect(r.passed).toBe(false);
+    expect(r.findings.some(f => f.includes('memory'))).toBe(true);
+  });
+
+  it('still passes a minimal-but-complete report (only optional checks dropped)', async () => {
+    const rest = { ...validReport };
+    delete rest.certChain;
+    delete rest.measurements;
+    const r = await verifyAttestation(claimed, rest);
+    // mandatory: model/memory/firmware/freshness 全て揃っているため passed は維持
+    expect(r.passed).toBe(true);
+    expect(r.score).toBeLessThan(1);
+  });
 });

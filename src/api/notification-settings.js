@@ -14,34 +14,75 @@ const { withLock } = require('../utils/async-lock');
 const SETTINGS_LOCK = 'notification-settings:global';
 
 // SSRF対策: プライベートIPアドレス・ループバック・メタデータサービスをブロック
-// 設定時（POST）と送信時（notifier.js の sendWebhookNotify）の両方で検証（多層防御）。
-const PRIVATE_IP_PATTERNS = [
-  /^https?:\/\/localhost[:/]/i,
-  /^https?:\/\/127\.\d+\.\d+\.\d+[:/]/,
-  /^https?:\/\/0\.0\.0\.0[:/]/,            // 0.0.0.0 = ループバック扱い
-  /^https?:\/\/10\.\d+\.\d+\.\d+[:/]/,
-  /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+[:/]/,
-  /^https?:\/\/192\.168\.\d+\.\d+[:/]/,
-  /^https?:\/\/169\.254\.\d+\.\d+[:/]/,   // AWS/Azure/GCP リンクローカルメタデータ
-  /^https?:\/\/\[::1\][:/]/i,             // IPv6 loopback ::1
-  /^https?:\/\/\[::ffff:/i,               // IPv4-mapped IPv6 (::ffff:127.x.x.x 等)
-  /^https?:\/\/\[f[cd]/i,                 // IPv6 プライベート fc00::/7 (fc/fd) & リンクローカル fe80::/10 の一部
-  /^https?:\/\/\[fe80:/i,                 // IPv6 link-local
-  /^https?:\/\/metadata\.google\.internal[:/]/i,  // GCP metadata
-  /^https?:\/\/instance-data[:/]/i,       // AWS 代替メタデータホスト名
-];
-function isSSRFUrl(url) {
-  if (!url || typeof url !== 'string') return false;
-  if (!/^https?:\/\//i.test(url)) return true;
-  return PRIVATE_IP_PATTERNS.some(re => re.test(url));
+// 設定時（POST）と送信時（notifier.js の sendWebhookNotify → assertPublicUrl）の
+// 両方で検証する多層防御。
+//
+// 旧実装は URL 文字列への正規表現適合のみで、以下を素通りさせていた:
+//   - http://anything@127.0.0.1/    — userinfo を挟むと ^http://127. 系に非適合
+//   - http://2130706433/ / http://0x7f000001/ / http://127.1/ — 数値IPv4リテラル
+//   - attacker.example.com → 169.254.169.254 — DNS 解決結果を一切見ていない
+//   - SSRF_ALLOW_PRIVATE_WEBHOOKS 未考慮 — 送信側は許可するのに登録側が常に拒否
+// WHATWG URL パーサはホスト部を正規化する（数値IPv4は dotted-quad へ、
+// userinfo は hostname から分離される）ため、new URL().hostname を
+// 共有分類器 ssrf-guard.isPrivateIp で評価すれば送信側と判定が一致する。
+const net = require('net');
+const dnsPromises = require('dns').promises;
+const { isPrivateIp } = require('../utils/ssrf-guard');
+
+function privateWebhooksAllowed() {
+  const v = process.env.SSRF_ALLOW_PRIVATE_WEBHOOKS;
+  return v === 'true' || v === '1';
 }
-// エクスポートして notifier.js の送信時にも再検証できるようにする
-module.exports._isSSRFUrl = isSSRFUrl;
+
+// DNS を引かずに判定できる内部ホスト名の既定ブロックリスト。
+// FQDN → private IP の解決結果は POST ハンドラの resolvesToPrivateAddress で確認する。
+const INTERNAL_HOSTNAME_RE = /^(?:localhost|.*\.localhost|metadata\.google\.internal|instance-data|metadata|.*\.internal|.*\.local|.*\.lan|.*\.corp|.*\.home(?:\.arpa)?)$/i;
+
+// 同期判定: true = ブロック対象。
+// リテラル IP は URL パーサで正規化した hostname を isPrivateIp へ渡し、
+// 既知内部ホスト名はパターンで弾く。FQDN の解決結果はここでは扱わない。
+function isBlockedWebhookTarget(url) {
+  if (typeof url !== 'string') return true;
+  if (privateWebhooksAllowed()) return false;
+  let parsed;
+  try { parsed = new URL(url); } catch (_) { return true; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true;
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
+  // IPv4 埋め込み IPv6（::ffff:*）は従来通り一律ブロック。
+  // 16進埋め込み形（::ffff:7f00:1 等）を避けるための安全側の判断で、
+  // 公開宛をこの形式で指定する正当な用途は実質存在しない。
+  if (hostname.toLowerCase().startsWith('::ffff:')) return true;
+  if (net.isIP(hostname)) return isPrivateIp(hostname);
+  return INTERNAL_HOSTNAME_RE.test(hostname);
+}
+
+// 登録時の DNS 事前検証: FQDN が private アドレスへ解決される設定
+// （127.0.0.1.nip.io のような「公開名→内部IP」）を登録時点で弾く。
+// DNS 解決失敗（ENOTFOUND・一時的障害）は許容する — 送信時の assertPublicUrl が
+// 権威チェックとして再解決・再判定するため、ここで拒否するとオフライン開発環境や
+// まだ未開通の内部ホスト名の登録まで不能になってしまう。
+async function resolvesToPrivateAddress(url) {
+  if (privateWebhooksAllowed()) return false;
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.replace(/^\[|\]$/g, '');
+  } catch (_) {
+    return false;
+  }
+  if (net.isIP(hostname)) return isPrivateIp(hostname);
+  try {
+    const addrs = await dnsPromises.lookup(hostname, { all: true });
+    return (Array.isArray(addrs) ? addrs : [addrs])
+      .some((a) => isPrivateIp(a && a.address));
+  } catch (_) {
+    return false;
+  }
+}
 
 // Joi カスタムバリデータ（URI形式 + SSRF禁止）
 const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)
   .custom((value, helpers) => {
-    if (isSSRFUrl(value)) {
+    if (isBlockedWebhookTarget(value)) {
       return helpers.error('any.invalid');
     }
     return value;
@@ -147,6 +188,20 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
           return res.status(400).json({ error: `payloadTemplate is not valid JSON: ${e.message}` });
         }
       }
+    }
+  }
+  // 登録時の DNS 事前検証: ホスト名が private アドレスへ解決される webhook
+  // （nip.io 等の公開名→内部IPマッピング）をここで弾く。同期チェックは
+  // リテラル IP と既知内部名しか見ないため、FQDN の実解決結果が抜け道だった。
+  // 解決失敗は許容する（resolvesToPrivateAddress 内）— 送信時の assertPublicUrl
+  // が権威チェックとして再解決する多層防御。
+  const candidateUrls = [
+    value.discordWebhook, value.slackWebhook, value.genericWebhook,
+    ...(Array.isArray(value.webhooks) ? value.webhooks.map((w) => w && w.url) : []),
+  ].filter((u) => typeof u === 'string' && u.length > 0);
+  for (const u of candidateUrls) {
+    if (await resolvesToPrivateAddress(u)) {
+      return res.status(400).json({ error: 'Webhook URL resolves to a private or internal address' });
     }
   }
   await withLock(SETTINGS_LOCK, async () => {

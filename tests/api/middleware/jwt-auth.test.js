@@ -10,6 +10,11 @@ jest.mock('../../../src/db/json/UserRepository', () => ({
     }
     return null;
   },
+  // getAuthUser (src/api/utils/auth-user-lookup.js) builds its cache via getAll.
+  getAll: () => [
+    { id: 1, role: 'admin', status: 'active' },
+    { id: 'user1', role: 'admin', status: 'active' },
+  ],
 }));
 
 const jwtAuth = require('../../../src/api/middleware/jwt-auth');

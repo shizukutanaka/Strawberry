@@ -486,6 +486,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `docs/category-research-2026.md` に「実装状況の更新（2026-09）」追記セクションを追加。2026-06 調査時点の「現状」記述のうち実装で解消済みの項目（エスクロー・レピュテーション・検証基盤・アテステーション・OTel・リポジトリ原子性）と依然正確な項目（libp2p/spot/推論/分散学習/pricing engine 未配線）を明示し、調査記録を残しつつ読者の誤認を防ぐ。
+- `tests/api/middleware/master-session.test.js` を追加: `master-session.js` が全 importer（master-auth.js / profit-addresses.js）へ同一インスタンスを返すシングルトン契約と、本番での秘密欠落 fail-fast を固定（ルート個別の session() 化による MemoryStore 分離回帰を防止）。
 - `src/api/middleware/ip-key.js`（レート制限キー生成）のユニットテストを追加。IPv6 の /64 畳み込み（同一割り当て単位で1バケット＝アドレス回しによる authLimiter バイパス防止）と TRUST_PROXY の hop 数セマンティクス（`true` 等を拒否し X-Forwarded-For 左端偽装を防止）の不変条件を固定。
 - `.env.example` の `METRICS_AUTH_TOKEN` コメント誤記を修正: 「未設定なら公開」→ 実際は本番で fail-closed/503。（`docs/operations.md` 側の実態同期は #103 の全面改訂へ統合済みのため本 PR からは除外）
 - `tests/db/json-repository-finders.test.js` を追加: `ReputationRepository`/`VerificationRepository` の finder→フィールド配線（`getByProviderId`→providerId、`getByJobId`→jobId）を固定 — createJsonRepository の宣言的 finders の field 名タイポによる無言の null 返却回帰を防止。

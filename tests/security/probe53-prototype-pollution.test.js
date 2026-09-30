@@ -40,7 +40,7 @@ describe('stripDangerousKeys', () => {
 
 describe('createJsonRepository: dangerous keys never persisted', () => {
   const tmpFile = '__probe53_tmp.json';
-  const tmpPath = path.resolve(__dirname, '../../data', tmpFile);
+  const tmpPath = path.join(require('../../src/db/json/data-dir').resolveDataDir(), tmpFile);
   const repo = createJsonRepository(tmpFile);
 
   afterAll(() => {

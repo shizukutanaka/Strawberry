@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('@notionhq/client');
+const { readJsonArray } = require('./lib/read-json');
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DB_ID = process.env.NOTION_DB_ID;
@@ -23,8 +24,11 @@ async function addFeedbackToNotion(feedback) {
 }
 
 async function main() {
+  if (!NOTION_TOKEN || !NOTION_DB_ID) {
+    throw new Error('NOTION_TOKENとNOTION_DB_IDが未設定です (.env で指定してください)');
+  }
   if (!fs.existsSync(PRIORITY_FILE)) return;
-  const feedbacks = JSON.parse(fs.readFileSync(PRIORITY_FILE, 'utf8'));
+  const feedbacks = readJsonArray(PRIORITY_FILE);
   for (const fb of feedbacks) {
     await addFeedbackToNotion(fb);
   }
@@ -32,7 +36,7 @@ async function main() {
 }
 
 if (require.main === module) {
-  main();
+  main().catch((e) => { console.error(e.message); process.exit(1); });
 }
 
 module.exports = { main };

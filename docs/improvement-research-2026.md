@@ -445,6 +445,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
   逐次 update の N+1 書き込み増幅を潰す。
 
 ### その他実装済（運用ドキュメント）
+- `tests/unit/test_exchange_rate.js` を `exchange-rate-fallback.test.js` へ改修: 旧ファイルは名前が jest testMatch に合わず常時スキップされ、かつ assert で実 API を呼ぶ死テストだった（「全失敗で throw」期待も非 production では誤り）。axios モック化＋NODE_ENV 分岐を正しく検証（全API失敗→DEFAULT_RATE/production throw/stale 優先・プロバイダフォールバック順・範囲外レート拒否・withTimestamp）。
 - `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。
 - `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。

@@ -340,6 +340,7 @@ class MarketPricingEngine extends EventEmitter {
      * GPUスペック取得
      */
     getGPUSpecs(gpuModel) {
+        if (!gpuModel || typeof gpuModel !== 'string') return null;
         // 完全一致
         if (this.gpuPerformanceMap[gpuModel]) {
             return this.gpuPerformanceMap[gpuModel];
@@ -351,14 +352,12 @@ class MarketPricingEngine extends EventEmitter {
                 return specs;
             }
         }
-        
-        // デフォルト値（不明なGPU）
-        return {
-            tflops: 10,
-            vram: 8192,
-            hasTensorCores: false,
-            hasRTCores: false
-        };
+
+        // 不明な GPU: 無条件の合成スペックを返していた（tflops=10, vram=8GB）ため
+        // calculateGPUPrice() の `!gpuSpecs → getDefaultPrice()` が死んでおり、
+        // 未知モデルにも「実測相当」の価格が返っていた。未一致は null を返し、
+        // 呼び出し側が明示的にフォールバックを選べるようにする。
+        return null;
     }
 
     /**

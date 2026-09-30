@@ -13,7 +13,31 @@ const serviceDownCounter = new client.Counter({ name: 'service_down_total', help
 let services = {};
 function setServices(refs) {
   services = refs;
+  // 監視対象から外れたサービスの通知状態を掃除する（旧 service が再追加される
+  // まで古い downSince が残り続けるのを防ぐ）。
+  for (const name of _serviceState.keys()) {
+    if (!refs[name]) _serviceState.delete(name);
+  }
 }
+
+// サービスごとの外部通知状態。不健全 tick ごとに service_down / service_restart_failed
+// を外部通知していた旧実装は、監視間隔 10 秒 × 障害 1 時間で 1 サービスあたり最大
+// 720 件のアラートを発し、通知疲弊で初回の本物の通知が埋もれる。Nagios/PagerDuty
+// と同じく「状態遷移時に 1 回通知 + 継続中は再通知間隔でのみ再通知 + 復帰時に
+// service_recovered」とする。監査ログとカウンタは従来通り毎 tick 記録する
+// （ローカルの逐次証跡とメトリクスには連続性が要るため）。
+//   name -> { downSince:number, lastDownAlertAt:number, lastFailAlertAt:number }
+const _serviceState = new Map();
+const RENOTIFY_MS = parseInt(process.env.SERVICE_MONITOR_RENOTIFY_MS, 10) || 5 * 60 * 1000;
+
+// jest.spyOn(monitor, 'notifyExternalAlert') が内部呼び出しを捕捉できるよう、
+// 呼び出し時点で module.exports を引き直す（auditLog と同じモジュール参照方式）。
+const _notify = (...args) => module.exports.notifyExternalAlert(...args);
+
+// 監視 tick の再入ガード。isHealthy()/initialize() が監視間隔より長くブロック
+// した場合、setInterval の次の tick が前回実行と重なり、同一サービスの restart
+// が並行して走る。前回 tick 完了までは次の tick をスキップする。
+let _monitorRunning = false;
 
 // 外部通知hook（Slack/Sentry/LINE/他サービス拡張）
 async function notifyExternalAlert(event, data) {
@@ -72,38 +96,75 @@ async function isServiceHealthy(name, svc) {
 
 // サービスの死活監視・自動復旧
 async function monitorServices() {
-  for (const [name, svc] of Object.entries(services)) {
-    if (!svc || typeof svc !== 'object') continue;
-    try {
-      const healthy = await isServiceHealthy(name, svc);
-      if (!healthy) {
+  if (_monitorRunning) {
+    logger.debug('[Monitor] Previous tick still running; skipping');
+    return;
+  }
+  _monitorRunning = true;
+  try {
+    for (const [name, svc] of Object.entries(services)) {
+      if (!svc || typeof svc !== 'object') continue;
+      try {
+        const healthy = await isServiceHealthy(name, svc);
+        const now = Date.now();
+        if (healthy) {
+          // 復帰エッジ: ダウン通知済みのサービスが健全へ戻ったときだけ
+          // service_recovered を1回送り、通知状態をリセットする。
+          const st = _serviceState.get(name);
+          if (st) {
+            logger.info(`[Monitor] ${name} recovered.`);
+            auditLog.appendAuditLog('service_recovered', { service: name, downForMs: now - st.downSince });
+            await _notify('service_recovered', { service: name, downForMs: now - st.downSince });
+            _serviceState.delete(name);
+          }
+          continue;
+        }
+        const st = _serviceState.get(name) || { downSince: now, lastDownAlertAt: 0, lastFailAlertAt: 0, restartNotified: false };
+        _serviceState.set(name, st);
+
         logger.error(`[Monitor] ${name} unhealthy. Attempting restart.`);
         auditLog.appendAuditLog('service_down', { service: name });
         serviceDownCounter.inc({ service: name });
-        await notifyExternalAlert('service_down', { service: name });
+        // 不健全エッジ（最初の検出）または再通知間隔を超えたときだけ外部通知する。
+        if (now - st.lastDownAlertAt >= RENOTIFY_MS) {
+          st.lastDownAlertAt = now;
+          await _notify('service_down', { service: name });
+        }
         try {
+          let restarted = false;
           if (typeof svc.initialize === 'function') {
             await svc.initialize();
+            restarted = true;
+          } else if (typeof svc.start === 'function') {
+            await svc.start();
+            restarted = true;
+          }
+          if (restarted) {
             logger.info(`[Monitor] ${name} restarted successfully.`);
             auditLog.appendAuditLog('service_restart', { service: name });
             serviceRestartCounter.inc({ service: name });
-            await notifyExternalAlert('service_restart', { service: name });
-          } else if (typeof svc.start === 'function') {
-            await svc.start();
-            logger.info(`[Monitor] ${name} started successfully.`);
-            auditLog.appendAuditLog('service_restart', { service: name });
-            serviceRestartCounter.inc({ service: name });
-            await notifyExternalAlert('service_restart', { service: name });
+            // 再起動「成功」しても不健全のままの場合、毎 tick service_restart が
+            // 飛び続けるため、ダウン窓内では最初の成功1回だけ通知する。
+            if (!st.restartNotified) {
+              st.restartNotified = true;
+              await _notify('service_restart', { service: name });
+            }
           }
         } catch (e) {
           logger.error(`[Monitor] ${name} restart failed:`, e);
           auditLog.appendAuditLog('service_restart_failed', { service: name, error: e.message });
-          await notifyExternalAlert('service_restart_failed', { service: name, error: e.message });
+          // 再起動失敗も service_down と同じ間隔でスロットルする。
+          if (now - st.lastFailAlertAt >= RENOTIFY_MS) {
+            st.lastFailAlertAt = now;
+            await _notify('service_restart_failed', { service: name, error: e.message });
+          }
         }
+      } catch (e) {
+        logger.error(`[Monitor] Exception during monitoring ${name}:`, e);
       }
-    } catch (e) {
-      logger.error(`[Monitor] Exception during monitoring ${name}:`, e);
     }
+  } finally {
+    _monitorRunning = false;
   }
 }
 
@@ -122,6 +183,12 @@ let _timer = null;
 
 // 10秒ごとに監視
 function startMonitor() {
+  // 二重起動で既存タイマーが取り残されるのを防ぐ（_timer を上書きすると
+  // 旧タイマーは clearInterval できず永久に発火し続ける）。
+  if (_timer) {
+    logger.warn('[Monitor] Service monitor already running; ignoring second start');
+    return;
+  }
   const interval = parseInt(process.env.SERVICE_MONITOR_INTERVAL_MS, 10) || 10000;
   // unref: テスト等でプロセス終了を妨げない
   _timer = setInterval(monitorServices, interval);
@@ -135,6 +202,7 @@ function stopMonitor() {
     _timer = null;
   }
   services = {};
+  _serviceState.clear();
 }
 
 module.exports = {
@@ -146,4 +214,11 @@ module.exports = {
   notifyExternalAlert,
   serviceRestartCounter,
   serviceDownCounter,
+  RENOTIFY_MS,
+};
+
+// テスト用: 通知状態と再入フラグを初期化する。
+module.exports._resetMonitorStateForTest = () => {
+  _serviceState.clear();
+  _monitorRunning = false;
 };

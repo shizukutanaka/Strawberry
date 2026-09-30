@@ -148,6 +148,7 @@ async function apiCompleteOrderCycle(request, baseURL, { providerToken, renterTo
 // used throughout manual verification earlier in this project's history.
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../../src/db/json/atomicWrite');
 const DATA_USERS = path.join(__dirname, '../../data/users.json');
 
 async function promoteToAdmin(request, baseURL, email, password) {
@@ -155,7 +156,10 @@ async function promoteToAdmin(request, baseURL, email, password) {
   const idx = users.findIndex((u) => u.email === email);
   if (idx === -1) throw new Error(`user ${email} not found in data/users.json`);
   users[idx].role = 'admin';
-  fs.writeFileSync(DATA_USERS, JSON.stringify(users, null, 2));
+  // 起動中の webServer が同じ data/users.json を読む。非アトミックな writeFileSync
+  // で書き込み中にサーバ側の読み込みが重なると、半分書かれた JSON を parse して
+  // 以降の UserRepository 呼出しが全滅するため、アプリ側と同じ原子書込みを使う。
+  atomicWriteJSON(DATA_USERS, users);
   const loginRes = await request.post(`${baseURL}/api/v1/users/login`, { data: { email, password } });
   const body = await loginRes.json();
   return body.token;

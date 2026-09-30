@@ -463,6 +463,16 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `checklist-to-issues.js` の堅牢化: ①require 時に env 未設定だと `process.exit(1)` でホストプロセスを殺していた副作用を除去（検証は呼び出し時へ）。②`@octokit/rest` を呼び出し時遅延 require に変更（optionalDeps 未導入で import 自体が MODULE_NOT_FOUND にならない）。③`GITHUB_REPO` の `owner/repo` 形式検証（`split('/')` のみでは repo 未定義で API が不可解に失敗）。④open issue の取得を `octokit.paginate` 全ページ化（per_page:100 単発では 100 件超の既存 issue を見落とし重複作成）。⑤付与ラベルがリポジトリに無いと `issues.create` が 422 で全件失敗するため `createLabel` を冪等実行（422=既存は無視）。⑥1件の作成失敗で残り全件を捨てないよう per-issue try/catch + 件数サマリ返却。⑦チェックリスト不在の明示エラーと `CHECKLIST_ISSUES_PATH` env 差し替え。
 - `lightning-service.js` のイベントストリーム再接続を堅牢化（`_setupResilientStream` 集約）: 旧実装は gRPC ストリーム切断時の error/end/close 連鎖発火それぞれが個別に `setTimeout` を積み、1回の切断で3本の再購読が並走（invoice:paid 二重 emit・リスナー蓄積）。再接続をストリーム毎1タイマーへ単一化、再購読前に旧ストリームを `cancel()`（cancel 起因の同期 close が再接続を積み直さないよう superseded ガード）、指数バックオフ 5s→5分キャップ＋データ到着でリセット。監査/通知のイベント名（invoice_stream_error 等）は従来タグを維持。
 
+## scripts/*.sh スタブの正直な実装化 (2026-09-26)
+
+- **観測**: `build.sh`・`deploy.sh`・`setup-production.sh` は shebang+コメントのみの2行スタブで、呼ばれても exit 0 で無言成功する。CI や手動運用から参照された場合「成功したが何も起きなかった」と誤認される構造（いずれも現在参照ゼロ）。
+- **変更**:
+  - `build.sh`: Node サーバにコンパイル工程はないため「ビルド」を正直に定義 — `npm ci` + `npm run openapi-gen`（生成物の最新化）。
+  - `setup-production.sh`: `config.js` の `requireSecret` が本番で fail-fast する必須シークレット（JWT_SECRET≥32 / SESSION_SECRET・ENCRYPTION_KEY≥16）を事前検査し、未設定なら具体的な案内とともに exit 1。`--check` で npm ci を伴わない検査のみ実行可能（テスト可否のため）。検査通過後は `npm ci --omit=dev`。
+  - `deploy.sh`: デプロイ経路が未構成（ci-cd.yml の Deploy は echo スタブ）である旨を stderr で説明し exit 1 — 無言成功による誤認を防止。
+- **テスト**: `tests/scripts/sh-scripts.test.js` 新規5件 — bash -n 構文・`set -euo pipefail`・deploy.sh の非ゼロ終了・preflight の両経路（実機で両方向の終了コードを確認済み）。
+- **参考**: Google Shell Style Guide（set -euo pipefail）/ 十二因子アプリの fail-fast 設定検証
+
 ## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-timer-unref` → PR 化

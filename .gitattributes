@@ -1,0 +1,24 @@
+# Line-ending normalization for cross-platform checkouts.
+# Without this, a Windows clone with core.autocrlf=true writes scripts/*.sh
+# with CRLF endings, and bash then fails with the cryptic
+#   /usr/bin/env: ‘bash\r’: No such file or directory
+# (the shebang parser treats the CR as part of the interpreter name).
+# Forcing LF keeps shell scripts executable regardless of the checkout OS.
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# Everything else: normalize to LF in the repo but let the platform
+# decide on checkout (text=auto).
+*           text=auto
+
+# Lockfiles: mark as generated so GitHub collapses them in diffs and
+# `git diff` skips them by default with -a.
+package-lock.json -diff -merge -text linguist-generated=true
+
+# PNG/JPEG etc. are binary — don't let autocrlf corrupt them.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.webp      binary

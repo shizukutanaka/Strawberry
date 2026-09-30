@@ -35,6 +35,12 @@ describe('profit-addresses store location', () => {
       require('../../src/api/utils/profit-addresses');
     const validAddr = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh'; // BIP-173 別例
     jest.resetModules();
+    // 実運用ストア（gitignore された data/）を消さないよう、既存内容を退避して最後に復元する。
+    const backup = new Map(
+      [_ADDR_FILE, _LEGACY_ADDR_FILE]
+        .filter((f) => fs.existsSync(f))
+        .map((f) => [f, fs.readFileSync(f)])
+    );
     // 新規側を消し、レガシーに シード+実アドレス を置いて再読込 → 移行結果を確認
     if (fs.existsSync(_ADDR_FILE)) fs.rmSync(_ADDR_FILE);
     fs.mkdirSync(path.dirname(_LEGACY_ADDR_FILE), { recursive: true });
@@ -50,9 +56,11 @@ describe('profit-addresses store location', () => {
         expect(stored).not.toContain(seed);
       }
     } finally {
-      // 後片付け: 作成した両ファイルを除去してクリーンに戻す
-      if (fs.existsSync(_LEGACY_ADDR_FILE)) fs.rmSync(_LEGACY_ADDR_FILE);
-      if (fs.existsSync(_ADDR_FILE)) fs.rmSync(_ADDR_FILE);
+      // 後片付け: 作成した両ファイルを除去し、テスト前に存在した内容は復元する
+      for (const f of [_LEGACY_ADDR_FILE, _ADDR_FILE]) {
+        if (backup.has(f)) fs.writeFileSync(f, backup.get(f));
+        else if (fs.existsSync(f)) fs.rmSync(f);
+      }
       jest.resetModules();
     }
   });

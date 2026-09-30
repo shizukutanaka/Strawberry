@@ -1,4 +1,8 @@
 // Notion週次KPIレポートをSlackに自動通知するスクリプト
+// dotenv は slack-feedback-bot を require する「前」に読み込むこと。
+// slack-feedback-bot はモジュール評価時に process.env.SLACK_WEBHOOK_URL を
+// 定数へ捕捉するため、後読み込みでは .env の値が反映されない（通知が常にスキップされる）。
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { sendSlackMessage } = require('./slack-feedback-bot');
@@ -10,7 +14,14 @@ function notifyNotionReport() {
     console.log('Notion週次レポートがありません');
     return;
   }
-  const report = fs.readFileSync(REPORT_FILE, 'utf8');
+  let report;
+  try {
+    report = fs.readFileSync(REPORT_FILE, 'utf8');
+  } catch (e) {
+    console.error(`レポートの読み込みに失敗しました: ${e.message}`);
+    process.exitCode = 1;
+    return;
+  }
   // Slackは長文を分割送信
   const chunks = report.match(/([\s\S]{1,3000})/g) || [];
   chunks.forEach(chunk => sendSlackMessage(chunk));

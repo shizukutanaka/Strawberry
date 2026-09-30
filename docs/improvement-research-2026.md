@@ -449,6 +449,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `improvement_checklist2.md` の「既知の未完了」内の陳腐記述を修正: 「孤立した `*-fixed.js`」は現存せず、「Electron(preload/react-app) は未配線」も `public/electron.js` のみ存在する現状へ同期。
+- `provider-uptime` の直接ユニットテスト追加（0カバレッジだった信頼性スコア算出）: beats/gapEvents/sessions の累計・GAP_THRESHOLD 超過での gap 判定・再起動後初回ビートの偽 gap 抑制・MIN_BEATS 未満の measuring・breach があれば measuring で隠さない・disruptionRate+ペナルティでの減点。11件。
+- `cache.js` の直接ユニットテスト追加: 2xx のみキャッシュ・非2xx は次リクエストでハンドラ再実行（500 を 60 秒 200 で replay する旧バグの回帰固定）・perUser は userId:role でキー分離（他ユーザーデータ漏洩防止）・invalidateUserCache/ByUrlPattern/purgeCache の境界検証。8件。
 - `instrumentation.js` の OTel ゲーティング不変条件をテスト固定: `OTEL_EXPORTER_OTLP_ENDPOINT` 未設定時に @opentelemetry/* を一切 require しないこと・シグナルハンドラを登録しないことを検証（無条件化の回帰防止 — server.js の最初の require のため誤って無条件化すると全起動で ~140 パッケージ読み込みのコストが発生）。
 - `tests/unit/test_exchange_rate.js` を `exchange-rate-fallback.test.js` へ改修: 旧ファイルは名前が jest testMatch に合わず常時スキップされ、かつ assert で実 API を呼ぶ死テストだった（「全失敗で throw」期待も非 production では誤り）。axios モック化＋NODE_ENV 分岐を正しく検証（全API失敗→DEFAULT_RATE/production throw/stale 優先・プロバイダフォールバック順・範囲外レート拒否・withTimestamp）。
 - `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。

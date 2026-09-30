@@ -426,7 +426,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
 - token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。
-||||||| 5c3f4ed
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
@@ -438,6 +437,16 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - webhook.js / lightning-api.js の SSRF リダイレクト迂回とタイムアウト欠如を修正: assertPublicUrl() は最初の URL のみ検証するため、axios 既定のリダイレクト追従でガードを迂回可能だった残存経路を遮断（OWASP SSRF Prevention Cheat Sheet の「リダイレクトごとの再検証または追従禁止」準拠）。SAFE_AXIOS_CONFIG を ssrf-guard に集約し、ガードと安全設定を同所化。
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## fix(utils): 外向き axios 安全設定の共有化と未適用経路の塞ぎ（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-http-safe-config` → PR 化
+
+notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedirects:0 の SSRF 迂回遮断）を `src/utils/http-safe-config.js` へ集約し共有化。同値を複製していた resilient-notify.js を共用に揃え、安全設定が付いていなかった2経路を塞いだ:
+
+- `src/utils/email.js`（SendGrid/Mailgun — notifier.js 経由で配線済み）: axios.post に timeout 無し — SendGrid 接続の半開き滞留が通知パスを永久ブロックし得た
+- `src/utils/gpu-price-compare.js`: AWS EC2 オファー index（非圧縮1GB超）を timeout・サイズ上限なしで全量メモリ展開 — 呼び出せばほぼ確実に OOM。timeout 30s + maxContentLength 256MiB で有界エラー化（同時に、全 index 取得方式自体の限界をコメントで明記）
+
 - `devRequestLogger` の資格情報漏洩を修正: NODE_ENV=development でリクエストボディをログへ流す際のマスク対象が password/token/paymentRequest の3件のみで、refreshToken・idToken・currentPassword/newPassword・code（メール認証コード）・apiKey 等の live クレデンシャルが平文で dev ログへ残っていた。キー名ベースの再帰 `redactBodyForLog`（配列ボディ・ネスト対応・深度上限で循環安全）へ置き換え、新規8テストで固定。
 - `middleware/logger.js` のクエリ秘匿漏れを修正: `req.originalUrl` を生記録していた3系統（morgan アクセスログ/低速警告/エラーログ）に `redactUrlQuery` を適用し、`?token=`/`?api_key=` 等の機密クエリを `[MASKED]` 化。監査ミドルウェアの `query` マスキング・error-handler の `req.path` サニタイズと一貫させた（キー集合は sanitize.js と同一 + snake_case 包含）。
 - `src/security-audit.js` の `exec('npm audit --json')` を堅牢化: タイムアウト無し（レジストリ障害時に監視プロセスが永久滞留）と maxBuffer 既定 1MB（脆弱性多数時の大きな JSON が切断され「パース失敗」のみ記録され通知が永久に届かない）を修正（timeout 120s・maxBuffer 32MB）。パース失敗時に exec エラー/stderr も記録して原因診断可能に。exec モックの回帰テスト4件追加。

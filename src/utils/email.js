@@ -1,16 +1,8 @@
 // src/utils/email.js - SendGrid/Mailgunメール送信ユーティリティ
 const axios = require('axios');
 
-// 外向き HTTP 呼出の共通安全設定（notifier.js / resilient-notify.js と同値）。
-// timeout/maxContentLength: 外部 API の無限レスポンス・ハングでの DoS 防止。
-// maxRedirects:0: 固定 URL のためリダイレクトは不要で、追従すると攻撃者制御の
-// DNS/ドメイン経由の間接指定（SSRF 類）を防げない。
-const SAFE_AXIOS_CONFIG = Object.freeze({
-  timeout: 10_000,
-  maxContentLength: 1_048_576,
-  maxBodyLength: 1_048_576,
-  maxRedirects: 0,
-});
+// 外向き HTTP 呼出の共通安全設定（timeout/サイズ上限/maxRedirects:0）は ./http-safe-config.js に集約。
+const { AXIOS_SAFE_CONFIG: SAFE_AXIOS_CONFIG } = require('./http-safe-config');
 
 /**
  * Send email notification using SendGrid or Mailgun

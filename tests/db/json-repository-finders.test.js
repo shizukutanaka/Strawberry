@@ -9,7 +9,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.resolve(__dirname, '../../src/data');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
+
+const DATA_DIR = resolveDataDir();
 
 describe('createJsonRepository finder wiring', () => {
   const saved = {};

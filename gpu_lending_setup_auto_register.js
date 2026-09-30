@@ -46,9 +46,15 @@ function detectGPU() {
       }
       const lines = wmic.split('\n').filter(x => x.trim());
       if (lines.length > 1) {
+        // /format:csv の列順は要求順ではなく Node,<プロパティ名のアルファベット順>
+        const header = lines[0].split(',').map(h => h.trim());
         const parts = lines[1].split(',');
-        model = (parts[1] || 'Unknown').trim();
-        driverVersion = (parts[2] || 'Unknown').trim();
+        const col = (name) => {
+          const i = header.indexOf(name);
+          return i >= 0 ? (parts[i] || '').trim() : '';
+        };
+        model = col('Name') || 'Unknown';
+        driverVersion = col('DriverVersion') || 'Unknown';
       }
     } else if (platform === 'linux') {
       const lspci = execSync('lspci | grep VGA').toString();

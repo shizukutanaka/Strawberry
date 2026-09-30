@@ -1,6 +1,8 @@
 // src/utils/email.js - SendGrid/Mailgunメール送信ユーティリティ
 const axios = require('axios');
-const { AXIOS_SAFE_CONFIG } = require('./http-safe-config');
+
+// 外向き HTTP 呼出の共通安全設定（timeout/サイズ上限/maxRedirects:0）は ./http-safe-config.js に集約。
+const { AXIOS_SAFE_CONFIG: SAFE_AXIOS_CONFIG } = require('./http-safe-config');
 
 /**
  * Send email notification using SendGrid or Mailgun
@@ -26,8 +28,8 @@ async function sendEmailNotification({ to, subject, text, html }, config = proce
         html ? { type: 'text/html', value: html } : { type: 'text/plain', value: text }
       ]
     }, {
-      ...AXIOS_SAFE_CONFIG,
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      ...SAFE_AXIOS_CONFIG,
     });
   } else if (provider === 'mailgun') {
     const apiKey = config.MAILGUN_API_KEY;
@@ -37,7 +39,7 @@ async function sendEmailNotification({ to, subject, text, html }, config = proce
     const auth = Buffer.from(`api:${apiKey}`).toString('base64');
     await axios.post(`https://api.mailgun.net/v3/${domain}/messages`,
       new URLSearchParams({ from, to, subject, text, html }),
-      { ...AXIOS_SAFE_CONFIG, headers: { Authorization: `Basic ${auth}` } }
+      { headers: { Authorization: `Basic ${auth}` }, ...SAFE_AXIOS_CONFIG }
     );
   } else {
     throw new Error('Unknown EMAIL_PROVIDER');

@@ -5,6 +5,24 @@ const fs = require('fs').promises;
 const path = require('path');
 const { logger } = require('../utils/logger');
 
+// ドライバ系コマンド（rocm-smi / intel_gpu_top / clinfo / PowerShell / wmic）は
+// 異常なドライバ状態で応答しなくなり得る。timeout なしで await すると検出パス全体が
+// 永久滞留するため全 exec に上限を付ける。windowsHide は win32 でのみ意味を持つ。
+const EXEC_OPTS = { timeout: 15_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 };
+
+// ROCm と sysfs 等の複数経路が同一物理 GPU を別 uuid で列挙し得るため、
+// PCI busId で重複排除する（ROCm 側の方が情報量が多いので先勝ち）。
+function dedupeByBusId(gpus) {
+    const seen = new Set();
+    return gpus.filter((g) => {
+        const key = (g.busId || '').toLowerCase();
+        if (!key) return true; // busId 不明は落とさない
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
 class ExtendedGPUDetector {
     constructor() {
         this.platform = process.platform;
@@ -39,7 +57,7 @@ class ExtendedGPUDetector {
             }
             
             logger.info(`Detected ${gpus.length} AMD GPUs`);
-            return gpus;
+            return dedupeByBusId(gpus);
             
         } catch (error) {
             logger.error('AMD GPU detection failed:', error);
@@ -49,7 +67,7 @@ class ExtendedGPUDetector {
 
     async checkROCmInstallation() {
         try {
-            const { stdout } = await exec('rocm-smi --version');
+            const { stdout } = await exec('rocm-smi --version', EXEC_OPTS);
             return stdout.includes('ROCm');
         } catch {
             return false;
@@ -61,7 +79,7 @@ class ExtendedGPUDetector {
         
         try {
             // ROCm-SMI JSON出力
-            const { stdout } = await exec('rocm-smi --showallinfo --json');
+            const { stdout } = await exec('rocm-smi --showallinfo --json', EXEC_OPTS);
             const rocmData = JSON.parse(stdout);
             
             for (const [cardId, cardInfo] of Object.entries(rocmData)) {
@@ -183,7 +201,7 @@ class ExtendedGPUDetector {
                 '"Get-CimInstance Win32_VideoController | ' +
                 'Select-Object Name,DeviceID,PNPDeviceID,AdapterRAM,DriverVersion,DriverDate,AdapterCompatibility | ' +
                 'ConvertTo-Json -Compress"',
-                { windowsHide: true }
+                EXEC_OPTS
             );
             const text = (stdout || '').trim();
             if (text) {
@@ -204,7 +222,7 @@ class ExtendedGPUDetector {
         try {
             const { stdout } = await exec(
                 'wmic path Win32_VideoController get Name,DeviceID,PNPDeviceID,AdapterRAM,DriverVersion,DriverDate,AdapterCompatibility /format:csv',
-                { windowsHide: true }
+                EXEC_OPTS
             );
             const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
             if (lines.length < 2) return [];
@@ -266,7 +284,7 @@ class ExtendedGPUDetector {
             }
             
             logger.info(`Detected ${gpus.length} Intel GPUs`);
-            return gpus;
+            return dedupeByBusId(gpus);
             
         } catch (error) {
             logger.error('Intel GPU detection failed:', error);
@@ -279,7 +297,7 @@ class ExtendedGPUDetector {
         
         try {
             // intel_gpu_top コマンドで情報取得
-            const { stdout } = await exec('timeout 1 intel_gpu_top -J -o -');
+            const { stdout } = await exec('timeout 1 intel_gpu_top -J -o -', EXEC_OPTS);
             const data = JSON.parse(stdout);
             
             if (data.engines) {
@@ -445,7 +463,7 @@ class ExtendedGPUDetector {
     async getAMDDriverVersion() {
         try {
             if (this.platform === 'linux') {
-                const { stdout } = await exec('modinfo amdgpu | grep version:');
+                const { stdout } = await exec('modinfo amdgpu | grep version:', EXEC_OPTS);
                 const match = stdout.match(/version:\s+(.+)/);
                 return match ? match[1].trim() : 'Unknown';
             }
@@ -457,7 +475,7 @@ class ExtendedGPUDetector {
 
     async getROCmVersion() {
         try {
-            const { stdout } = await exec('rocm-smi --version');
+            const { stdout } = await exec('rocm-smi --version', EXEC_OPTS);
             const match = stdout.match(/ROCm version:\s+(\d+\.\d+\.\d+)/);
             return match ? match[1] : 'Unknown';
         } catch {
@@ -467,7 +485,7 @@ class ExtendedGPUDetector {
 
     async checkLevelZero() {
         try {
-            await exec('level-zero-info');
+            await exec('level-zero-info', EXEC_OPTS);
             return true;
         } catch {
             return false;
@@ -477,7 +495,7 @@ class ExtendedGPUDetector {
     async getIntelGPUMemory() {
         try {
             // Intel GPU メモリ情報取得（実装は環境依存）
-            const { stdout } = await exec('clinfo | grep "Global memory size"');
+            const { stdout } = await exec('clinfo | grep "Global memory size"', EXEC_OPTS);
             const match = stdout.match(/(\d+)/);
             return match ? parseInt(match[1]) / (1024 * 1024) : 0;
         } catch {
@@ -485,8 +503,12 @@ class ExtendedGPUDetector {
         }
     }
 
+    // 詳細/ベンチマーク系メソッドは、取得した stdout を解析せず捨てていたため
+    // 副作用のあるコマンド（rocm-bandwidth-test は GPU メモリ帯域を占有し、
+    // 貸出中テナントの性能を奪う）を検出のたびに実行するだけの実害があった。
+    // 解析実装まではゼロ値のプレースホルダを返す（exec は発行しない）。
     async getAMDGPUDetails(gpu) {
-        const details = {
+        return {
             computeUnits: 0,
             streamProcessors: 0,
             roPs: 0,
@@ -494,75 +516,42 @@ class ExtendedGPUDetector {
             l2Cache: 0,
             infinityCache: 0
         };
-        
-        try {
-            // ROCm経由で詳細情報取得
-            if (gpu.capabilities.rocm) {
-                const deviceIndex = gpu.uuid.split('-').pop().replace(/[^0-9a-fA-F]/g, '');
-                const { stdout } = await exec(`rocm-smi -d ${deviceIndex} --showproductname`);
-                // 詳細解析
-            }
-        } catch {}
-        
-        return details;
     }
 
     async getIntelGPUDetails(gpu) {
-        const details = {
+        return {
             euCount: 0,
             sliceCount: 0,
             subsliceCount: 0,
             threadsPerEu: 0,
             l3Cache: 0
         };
-        
-        try {
-            // Level Zero経由で詳細情報取得
-            if (gpu.capabilities.levelZero) {
-                const { stdout } = await exec('level-zero-info');
-                // 詳細解析
-            }
-        } catch {}
-        
-        return details;
     }
 
     async benchmarkAMDGPU(gpu) {
-        const benchmark = {
+        return {
             computeScore: 0,
             memoryBandwidth: 0,
             powerEfficiency: 0
         };
-        
-        try {
-            // 簡易ベンチマーク実行
-            if (gpu.capabilities.rocm) {
-                // rocm-bandwidth-test
-                const { stdout } = await exec('rocm-bandwidth-test --quick');
-                // 結果解析
-            }
-        } catch {}
-        
-        return benchmark;
     }
 
     async benchmarkIntelGPU(gpu) {
-        const benchmark = {
+        return {
             computeScore: 0,
             memoryBandwidth: 0,
             quickSyncScore: 0
         };
-        
-        try {
-            // 簡易ベンチマーク実行
-            if (gpu.capabilities.levelZero) {
-                // ze_peak benchmark
-                const { stdout } = await exec('ze_peak');
-                // 結果解析
-            }
-        } catch {}
-        
-        return benchmark;
+    }
+
+    // GET /gpus/system/detected が呼ぶ結合エントリポイント。
+    // これまでメソッド自体が存在せず管理者呼び出しは常に TypeError → 500 だった。
+    async detectAllGPUs() {
+        const [amd, intel] = await Promise.all([
+            this.detectAMDGPUsAdvanced(),
+            this.detectIntelGPUsAdvanced(),
+        ]);
+        return dedupeByBusId([...amd, ...intel]);
     }
 
     async parseAMDGPUFromSysfs(devicePath, cardName) {

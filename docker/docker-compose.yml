@@ -1,1 +1,21 @@
-# 開発環境
+# 開発環境 — API を Dockerfile.api でローカル起動する最小構成。
+# 使い方: docker compose -f docker/docker-compose.yml up --build
+# （リポジトリルートから実行。env はルートの .env を読む。未作成なら開発既定値で起動）
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    image: strawberry-api:latest
+    ports:
+      - "3000:3000"
+    env_file:
+      # 無くても起動は可能（開発モードは ephemeral シークレットで動く）。
+      # 本番相当の確認時は JWT_SECRET 等を .env に記載する。
+      - path: ../.env
+        required: false
+    volumes:
+      # JSON リポジトリとログをホストへ永続化
+      - ../data:/app/data
+      - ../logs:/app/logs
+    restart: unless-stopped

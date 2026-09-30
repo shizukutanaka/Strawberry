@@ -128,5 +128,6 @@ if (require.main === module) {
 
 module.exports = {
   backupAll,
+  backupLocalWithGeneration,
   restoreFromLatestBackup,
 };

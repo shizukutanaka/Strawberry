@@ -1,9 +1,9 @@
 // フィードバックに自動で優先度ラベルを付与するサンプル
-const fs = require('fs');
 const path = require('path');
+const { atomicWriteJSON } = require('../src/db/json/atomicWrite');
+const { loadFeedback } = require('./lib/feedback-store');
 
-const FEEDBACK_FILE = path.join(__dirname, '../docs/feedback-log.json');
-const PRIORITY_FILE = path.join(__dirname, '../docs/feedback-priority.json');
+const PRIORITY_FILE = process.env.FEEDBACK_PRIORITY_PATH || path.join(__dirname, '../docs/feedback-priority.json');
 
 // 簡易なキーワードベース優先度判定
 function getPriority(message) {
@@ -15,15 +15,20 @@ function getPriority(message) {
 }
 
 function labelFeedback() {
-  if (!fs.existsSync(FEEDBACK_FILE)) return;
-  const log = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf8'));
+  const log = loadFeedback();
   const labeled = log.map(fb => ({ ...fb, priority: getPriority(fb.message) }));
-  fs.writeFileSync(PRIORITY_FILE, JSON.stringify(labeled, null, 2));
+  atomicWriteJSON(PRIORITY_FILE, labeled);
   console.log('フィードバックに優先度ラベルを付与しました。');
+  return labeled;
 }
 
 if (require.main === module) {
-  labelFeedback();
+  try {
+    labelFeedback();
+  } catch (e) {
+    console.error(`優先度ラベル付与に失敗: ${e.message}`);
+    process.exit(1);
+  }
 }
 
-module.exports = { labelFeedback };
+module.exports = { labelFeedback, getPriority };

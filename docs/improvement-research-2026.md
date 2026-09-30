@@ -429,6 +429,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。
 
 ### その他実装済（運用ドキュメント）
+- `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。
 - `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。

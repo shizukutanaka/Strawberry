@@ -430,6 +430,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- 注文タイムアウト失効時のエスクロー孤立解消: `expireStaleOrders`/`expireStaleMatchedOrders`/`expireStaleActiveOrders` は注文を cancelled へ遷移するが HELD 状態のエスクローを精算せず、支払済み資金が永久ロックされる経路があった。`releaseEscrowsOnTimeout` を新設し pending/matched 失効は HELD→CANCELED で借り手返金、active 失効は /stop と同じ壁時計フォールバックの deliveredRatio で HELD→SETTLED の出来高払いにした。
 - 検証監査抽出の予測不能化: `shouldAudit` が無キー `sha256(jobId)` で決定していたため、プロバイダが自ジョブの監査要否を事前計算し「監査されないジョブだけ手を抜く」選択的チートが成立していた（Proof-of-Compute のランダム監査は auditee 予測不能が要件）。HMAC-SHA256 鍵付き判定へ変更（`VERIFICATION_AUDIT_SECRET` env → 未設定時はプロセス生成のエフェメラル鍵。監査要否は open 時に永続化済みのため再起動でも整合）。
 - 監査ログミドルウェアの耐性化: 全 API の body/query/response を全文記録していたものを 2KB 上限 + `{_truncated,bytes}` 記録へ（監査ログ急膨張と stringify+再帰マスクのリクエスト処理コストを抑止）。`sanitizeSensitiveFields` に深度上限 32 を追加し深ネスト JSON によるスタックオーバーフロー DoS を防止。mkdirSync を初回のみへ。
 - 追記型ログのローテーション化: `appendFileSync` で手動追記する高頻度ログ（access-audit.log は認証済み全リクエスト、db-access.log は UserRepository 全アクセス、gpu-events.log）にサイズ上限がなく無制限肥大・ディスク枯渇リスクがあった。`appendRotated` ヘルパー（statSync→超過で .1 退避の 1 世代ローテーション）を新設して適用。ハッシュチェーン監査ログ（audit.log）は改ざん検知との整合のため対象外。
@@ -448,9 +449,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### P2P MVP スクリプトの任意依存遅延 require 化（2026-09-27）
 - **対応**: `src/p2p-{node,sync,notify}.js`・`src/cli.js` が package.json 未収録の libp2p 系/ipfs-core/orbit-db をトップレベル require し、README 記載の `node src/cli.js`・`node src/p2p-notify.js` が MODULE_NOT_FOUND で即死していた。遅延 require + 手順付きエラー化し、`p2p-notify` は libp2p 未導入でも外部 API 監視（MONITOR_TARGETS）が単独動作するよう変更（実機検証済み）。
 - **同時修正**: 監視 tick の単一フライト化（複数監視対象で 1 tick が 15s 超過時のアラート二重化を防止）、stale health.json は NODE_DOWN ではなく NODE_MONITOR_STALE として区別（監視プロセス停止とピア切断を分離）。
+- `src/core/gpu-detector-extended.js` の三重実害を修正 — ① `GET /gpus/system/detected` が存在しない `detectAllGPUs()` を呼び管理者呼出が常に TypeError→500 だったため実装（AMD+Intel を Promise.all で併合）② ROCm と sysfs が同一物理 GPU を別 uuid で二重列挙していたため PCI busId で重複排除（ROCm 側を優先）③ 検出のたびに `rocm-bandwidth-test --quick`/`ze_peak`/`level-zero-info`/`rocm-smi -d` を実行し stdout を解析せず破棄 — 貸出中テナントの GPU 帯域を占有する副作用を除去しゼロ値プレースホルダへ。あわせて全 exec（rocm-smi/intel_gpu_top/clinfo/modinfo/PowerShell/wmic）へ timeout 15s+maxBuffer を付与しドライバ異常時の永久滞留を防止。参考: Kubernetes device-plugin の health-check 設計（検出系は side-effect free で bounded）、OOB hardware enumeration のベストプラクティス。
 - feedback パイプライン（priority/checklist/sheets/report）の読込み経路を共有 `scripts/lib/feedback-store.js` へ集約。各スクリプトの独自 JSON.parse(readFileSync) は破損ログで全段クラッシュ・非文字列フィールドで TypeError・report/checklist は require 副作用でファイル書込みという欠陥があった。ローダーは破損時にファイル名付きの明示エラー＋エントリ正規化、各スクリプトに require.main ガード・env パス差し替え・エラーハンドリングを追加し、sheets は credentials/token/FEEDBACK_SHEET_ID の事前検証を追加。priority 出力を atomicWriteJSON 化。
 - `src/gpu/` 監視モジュールの健全性修正 — `gpu-health-monitor` の `execSync(nvidia-smi)` にタイムアウト無し（ドライバハングでイベントループ全体が停止）・同一異常の毎 tick 再通知（アラート嵐）・unref/stop 無しを修正（シグネチャ dedup + 回復後の再通知化）。`gpu-liveness-monitor` も同様に unref+stop+単一フライト化し、`recordGpuError`（内部で多段通知済み）と呼び出し側の二重通知を解消。あわせて未使用の `MetricsCollector` 即時生成を遅延化（コンストラクタでの Prometheus メトリクス登録を回避）。
 - `cloud-storage.js` の任意クラウド SDK を遅延 require 化: トップレベル require の `googleapis`/`dropbox` が未宣言だったため未導入環境で require('utils/backup') 自体が MODULE_NOT_FOUND で落ち、ローカル世代バックアップ・リストアも全滅していた。AWS SDK（aws-sdk）・googleapis・dropbox を各 upload 関数内でのみ解決し、未導入時は `npm i <pkg>` の手順付きエラーに変更。`backupLocalWithGeneration` を export 化し、世代バックアップ→破損→リストアの往復テストを追加。
+
+### sentry-notify の @sentry/node 遅延 require 化（2026-09-27）
+- **対応**: `scripts/sentry-notify.js` が意図的に未宣言の任意依存 `@sentry/node` をトップレベル require していたため、SENTRY_DSN 設定済み環境で service-monitor の遅延 require が MODULE_NOT_FOUND で失敗し Sentry 通知が一度も届かず警告だけを量産していた。関数内遅延 require＋`npm install @sentry/node` の手順付きエラーへ変更。require 安全性を固定するテスト3件。
 
 ## fix(utils): gpu-monitor の三重実害修正とタイマー健全化（2026-09-26 追加）
 

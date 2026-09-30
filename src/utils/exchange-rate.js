@@ -26,6 +26,16 @@ try {
 let cache = { rate: null, timestamp: 0 };
 const CACHE_MS = 5 * 60 * 1000;
 
+// 外向き axios の安全設定（notifier.js / resilient-notify.js と同型のインライン設定。
+// 共有モジュール http-safe-config.js への統一は別途行う）。為替ティッカーの応答は
+// 数バイト〜数KB の JSON のみを期待するため、巨大ボディ・リダイレクトは全て異常とみなす:
+//   - maxContentLength: ハイジャック/プロキシ混入時に巨大レスポンスでメモリを食い潰す DoS 防止
+//   - maxRedirects: 0 : 302 で内部アドレスへ誘導される SSRF リダイレクト迂回を遮断
+const AXIOS_SAFE_CONFIG = Object.freeze({
+  maxContentLength: 65_536,      // ティッカー JSON は ~1KB 未満。64KiB で十分な余裕
+  maxRedirects: 0,               // リダイレクト追従禁止
+});
+
 // デフォルトレート（全API障害かつキャッシュ皆無時の最終フォールバック）。
 // 単位はライブ取得値と同じ「1 BTC あたりの JPY」。検証レンジ [100000, 15000000] の
 // 範囲内に置く。旧値 0.0001 は単位（JPY/satoshi）が混在しており、障害時に注文の
@@ -52,25 +62,25 @@ async function _fetchFreshRate() {
   const API_TIMEOUT = process.env.NODE_ENV === 'test' ? 500 : 4000;
   const apis = [
     async () => {
-      const res = await axios.get(COINGECKO_URL, { timeout: API_TIMEOUT });
+      const res = await axios.get(COINGECKO_URL, { timeout: API_TIMEOUT, ...AXIOS_SAFE_CONFIG });
       const btcJpy = res.data?.bitcoin?.jpy;
       if (typeof btcJpy === 'number' && btcJpy > 0) return btcJpy;
       throw new Error('Invalid Coingecko response');
     },
     async () => {
-      const res = await axios.get(CRYPTOCOMPARE_URL, { timeout: API_TIMEOUT });
+      const res = await axios.get(CRYPTOCOMPARE_URL, { timeout: API_TIMEOUT, ...AXIOS_SAFE_CONFIG });
       const btcJpy = res.data?.JPY;
       if (typeof btcJpy === 'number' && btcJpy > 0) return btcJpy;
       throw new Error('Invalid CryptoCompare response');
     },
     async () => {
-      const res = await axios.get(BITFLYER_URL, { timeout: API_TIMEOUT });
+      const res = await axios.get(BITFLYER_URL, { timeout: API_TIMEOUT, ...AXIOS_SAFE_CONFIG });
       const btcJpy = res.data?.ltp;
       if (typeof btcJpy === 'number' && btcJpy > 0) return btcJpy;
       throw new Error('Invalid BitFlyer response');
     },
     async () => {
-      const res = await axios.get(BINANCE_URL, { timeout: API_TIMEOUT });
+      const res = await axios.get(BINANCE_URL, { timeout: API_TIMEOUT, ...AXIOS_SAFE_CONFIG });
       const btcJpy = parseFloat(res.data?.price);
       if (!isNaN(btcJpy) && btcJpy > 0) return btcJpy;
       throw new Error('Invalid Binance response');

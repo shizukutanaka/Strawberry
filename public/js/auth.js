@@ -1,13 +1,18 @@
 // public/js/auth.js — session/token storage.
-// Token kept in localStorage (survives reload). The app's strict CSP
+// Tokens kept in localStorage (survives reload). The app's strict CSP
 // (script-src 'self' only, no inline scripts) is the primary XSS mitigation
 // for this trade-off; there is no server-set httpOnly cookie session for the
 // bearer JWT used by the JSON API.
 const TOKEN_KEY = 'strawberry.token';
+const REFRESH_KEY = 'strawberry.refreshToken';
 const USER_KEY = 'strawberry.user';
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getRefreshToken() {
+  return localStorage.getItem(REFRESH_KEY);
 }
 
 export function getUser() {
@@ -20,13 +25,17 @@ export function getUser() {
   }
 }
 
-export function setSession(token, user) {
+export function setSession(token, user, refreshToken) {
   localStorage.setItem(TOKEN_KEY, token);
+  // refreshToken は更新成功時にローテーションされ新しいものが返る。
+  // 呼出し側が持っている場合のみ上書き（未供給なら既存値を保持）。
+  if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(USER_KEY);
 }
 
@@ -50,8 +59,8 @@ export async function performLogin(email, password) {
   // called at runtime, needs api.js).
   const { api } = await import('./api.js');
   const loginRes = await api.login(email, password);
-  setSession(loginRes.token, null);
+  setSession(loginRes.token, null, loginRes.refreshToken);
   const user = await api.me();
-  setSession(loginRes.token, user);
+  setSession(loginRes.token, user, loginRes.refreshToken);
   return user;
 }

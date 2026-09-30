@@ -488,6 +488,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
 - **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→249件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。Electron 未統合・SPA リフレッシュ未実装など依然正確な残課題は維持。
+- `src/api/utils/btc-payment.js` の直接ユニットテストを追加: 送金経路の金額計算（calcTotalWithFee/calcFee/calcPayout の Satoshi 丸めと total=payout+fee 整合性）、BTC_FEE_RATE の起動時 fail-fast 検証、sendBTC の資金安全不変条件（Lightning API が txid を返さない場合にダミー成功を返さず例外へ伝播）を網羅。従来は送金系ユーティリティに直接テストが無かった。
 - `tests/api/middleware/master-session.test.js` を追加: `master-session.js` が全 importer（master-auth.js / profit-addresses.js）へ同一インスタンスを返すシングルトン契約と、本番での秘密欠落 fail-fast を固定（ルート個別の session() 化による MemoryStore 分離回帰を防止）。
 - `src/api/middleware/ip-key.js`（レート制限キー生成）のユニットテストを追加。IPv6 の /64 畳み込み（同一割り当て単位で1バケット＝アドレス回しによる authLimiter バイパス防止）と TRUST_PROXY の hop 数セマンティクス（`true` 等を拒否し X-Forwarded-For 左端偽装を防止）の不変条件を固定。
 - `.env.example` の `METRICS_AUTH_TOKEN` コメント誤記を修正: 「未設定なら公開」→ 実際は本番で fail-closed/503。（`docs/operations.md` 側の実態同期は #103 の全面改訂へ統合済みのため本 PR からは除外）

@@ -39,13 +39,13 @@
     "alert-overdue": "node scripts/alert-overdue.js",
     "alert-overdue-high": "node scripts/alert-overdue-high.js",
     "alert-kpi-trend": "node scripts/alert-kpi-trend.js",
-    "prisma": "prisma",
-    "prisma-generate": "prisma generate",
-    "prisma-migrate": "prisma migrate dev --name init",
-    "prisma-studio": "prisma studio",
+    "prisma": "echo \"prisma is not installed (this project persists via data/*.json, not prisma)\" && exit 1",
+    "prisma-generate": "echo \"prisma is not installed (this project persists via data/*.json, not prisma)\" && exit 1",
+    "prisma-migrate": "echo \"prisma is not installed (this project persists via data/*.json, not prisma)\" && exit 1",
+    "prisma-studio": "echo \"prisma is not installed (this project persists via data/*.json, not prisma)\" && exit 1",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
     "desktop": "npx -y electron@44.4.3 public/electron.js",
-    "setup": "npm ci && npm run openapi-gen && npm test"
+    "setup": "npm ci && npm run openapi-gen"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.78.0",

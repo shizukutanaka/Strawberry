@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { sendSlackMessage } = require('./slack-feedback-bot');
+const { readJsonArray } = require('./lib/read-json');
 
 const PRIORITY_FILE = path.join(__dirname, '../docs/feedback-priority.json');
 
@@ -17,7 +18,7 @@ function alertOverdueHigh() {
     console.log('優先度付きフィードバックファイルがありません');
     return;
   }
-  const feedbacks = JSON.parse(fs.readFileSync(PRIORITY_FILE, 'utf8'));
+  const feedbacks = readJsonArray(PRIORITY_FILE);
   const overdueHigh = feedbacks.filter(fb => fb.priority === '高' && isOverdue(fb.due || fb.deadline || fb.期限 || fb.date));
   if (overdueHigh.length === 0) {
     console.log('期限切れかつ高優先度のタスクはありません');

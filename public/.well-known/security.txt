@@ -1,0 +1,6 @@
+# security.txt (RFC 9116) — vulnerability disclosure contact for this deployment.
+# The canonical policy text lives in SECURITY.md at the repository root.
+Contact: https://github.com/shizukutanaka/Strawberry/security/advisories/new
+Policy: https://github.com/shizukutanaka/Strawberry/blob/main/SECURITY.md
+Preferred-Languages: ja, en
+Expires: 2027-09-26T00:00:00.000Z

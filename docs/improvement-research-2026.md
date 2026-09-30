@@ -503,6 +503,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### docs/SPECIFICATION.md のステータス同期（2026-09-27）
 - **対応**: 2026-06 時点の実装ステータスが陳腐化していたため main 実態へ追随 — Escrow（btc-onchain/marketplace/escrow 配線済）・GPU アテステーション（Mock verifier 配線済）・Reputation（アテステーション/稼働統計経由で部分配線）・OTel（instrumentation 読込済）・feature-pricer（marketplace-service 経由配線済）・データ整合性（updateIf/withLock 済）を更新。open PR にのみ存在する配線は「未」のまま維持。
 
+### ルート SPECIFICATION.md の 2026-09 追補（2026-09-27）
+- **対応**: ルート `SPECIFICATION.md`（2026-06 実態ベース仕様書）の冒頭に追補を追加。当時の残課題だった OTel SDK 連携（D-2）が `src/telemetry/instrumentation.js` で配線済みである点、probe テストが 60 件超へ拡充、§4 表外の `/admin/*`・`/marketplace/escrow/*`・`/gpus/:id/estimate`・`/gpus/:id/watch` 追加、エスクロー状態機械の実装を明記。docs/SPECIFICATION.md（#133）とは別ファイル・非重複。
+
 ### 依存脆弱性の semver-safe 一括解消 + bcrypt メジャー更新（2026-09-27）
 - **対応**: `npm audit` の残存49件のうち semver 非互換を要しない13件を `npm audit fix` で解消（axios 1.17→1.20: プロトタイプ汚染/Basic auth 注入、js-yaml、express/body-parser、morgan、joi、protobufjs、browserslist 等）。`bcrypt` を ^5.1.1→^6.0.0 へ更新（API 互換、Node18+ 要件を満たす）し、@mapbox/node-pre-gyp 経由の tar critical・node-pre-gyp high チェーンを除去。合計 49→36 件。残存は @kubernetes/client-node 2.x・aws-sdk v3・nodemailer 10・imagemin 系のメジャー更新または代替が必要なもの（#46 で却下された apollo 系を除く）。
 

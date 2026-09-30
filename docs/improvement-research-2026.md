@@ -501,6 +501,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
+## chore: package.json の npm メタデータ整備（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-pkg-metadata` → PR 化
+
+package.json に `license`/`repository`/`bugs`/`homepage` が未記載で、npm・GitHub・各種ツールのメタデータ解決が効かなかった（`npm WARN`・パッケージ情報のリンク欠如）。LICENSE（MIT）と一致する `license: "MIT"`、`repository`/`bugs`/`homepage` を GitHub URL で宣言し、あわせて `private: true` を追加 — 本リポジトリは npm 公開を意図しないアプリケーションであり、誤 `npm publish` を構造的に防止するガードとして標準的な手段。
+
+
 ### 管理ダッシュボード SPA ページ（2026-09-27, §19 管理画面の部分対応）
 - **対応**: `/admin/stats`・`/admin/verifications`・`/admin/escrow`・`/admin/expire-orders`・`/admin/cache/purge` の admin API は実装済みだが SPA 側に利用経路がなく運用者が curl 頼みだった。`public/js/pages/admin.js` を新設（統計カード/検証監査表/エスクロー表＋状態フィルタ/スイープ・パージ操作）、api.js に admin.* ヘルパー5件、`#/admin` ルート＋admin ナビリンクを追加。フロントが架空パスを呼ぶ事故を防ぐ契約テスト3件（tests/unit/admin-page-contract.test.js）+ e2e spec（admin.spec.js）を追加。
 

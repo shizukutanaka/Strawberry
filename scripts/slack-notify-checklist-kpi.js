@@ -1,6 +1,7 @@
 // チェックリストKPIレポートをSlackに自動通知するスクリプト
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config(); // slack-feedback-bot が require 時に SLACK_WEBHOOK_URL を捕捉するため先に読み込む
 const { sendSlackMessage } = require('./slack-feedback-bot');
 
 const REPORT_FILE = path.join(__dirname, '../docs/checklist-kpi-report.md');

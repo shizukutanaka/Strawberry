@@ -27,4 +27,21 @@ const masterSession = session({
   }
 });
 
-module.exports = { masterSession };
+// OAuth Web フロー（/auth/google|github）の state 保存専用セッション。
+// プロバイダ（accounts.google.com / github.com）からの callback はクロスサイトの
+// トップレベル遷移のため、SameSite=Strict の Cookie は送られず state 検証が必ず失敗する。
+// state 保存用途に限定した Lax・短命・別名 Cookie のインスタンスを分けて提供する。
+const oauthStateSession = session({
+  name: 'strawberry.oauth',
+  secret: requireSecret('SESSION_SECRET'),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000
+  }
+});
+
+module.exports = { masterSession, oauthStateSession };

@@ -3,16 +3,8 @@ const axios = require('axios');
 const { logger } = require('./logger');
 const { assertPublicUrl } = require('./ssrf-guard');
 
-// 送信共通安全設定。maxRedirects:0 が重要:
-// assertPublicUrl() は最初の URL のみ検証するため、リダイレクト追従を許すと検証通過済みの
-// 公開 URL が 30x で内部アドレス（127.0.0.1 / 169.254.169.254 等）へ誘導でき SSRF ガードを
-// 迂回される。タイムアウト・サイズ上限と併せてリダイレクトを一切追わない。
-const SAFE_CONFIG = Object.freeze({
-  timeout: 10_000,
-  maxContentLength: 1_048_576,
-  maxBodyLength: 1_048_576,
-  maxRedirects: 0,
-});
+// 送信共通安全設定（maxRedirects:0 の SSRF 意義など）は ./http-safe-config.js を参照
+const { AXIOS_SAFE_CONFIG: SAFE_CONFIG } = require('./http-safe-config');
 
 const CHANNELS = [
   { type: 'line', url: process.env.LINE_NOTIFY_URL, token: process.env.LINE_TOKEN },

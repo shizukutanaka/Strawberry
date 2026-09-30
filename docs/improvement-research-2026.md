@@ -503,6 +503,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### docs/SPECIFICATION.md のステータス同期（2026-09-27）
 - **対応**: 2026-06 時点の実装ステータスが陳腐化していたため main 実態へ追随 — Escrow（btc-onchain/marketplace/escrow 配線済）・GPU アテステーション（Mock verifier 配線済）・Reputation（アテステーション/稼働統計経由で部分配線）・OTel（instrumentation 読込済）・feature-pricer（marketplace-service 経由配線済）・データ整合性（updateIf/withLock 済）を更新。open PR にのみ存在する配線は「未」のまま維持。
 
+### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
+- **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→255件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。SPA の refresh サイレント更新・Electron シェル（electron.js + preload.js）も実装済みの現状へ同期。
+
 ## GitHub PR/Issue テンプレートの新設 (2026-09-26)
 
 - **観測**: `.github/` にワークフローと dependabot.yml はあるが、`pull_request_template.md` と `ISSUE_TEMPLATE/` が不在。PR 本文が毎回バラバラで、脆弱性報告が公開 Issue に流れるリスクもあった（SECURITY.md の導線が Issue 作成時に示されない）。

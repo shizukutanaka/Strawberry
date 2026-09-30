@@ -444,6 +444,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
   atomicWrite に束ねる。ポーラー・バッチフラッシュ等の N 行更新経路で
   逐次 update の N+1 書き込み増幅を潰す。
 
+- 残存 N+1 の後始末（perf）: `payment-reminder.js` の支払いごとの `UserRepository.getById`（users.json を件数ぶん全量読込）を 1 回の `getAll` → Map 化へ置換。`order-expiry.js` の係争自動解決では `EscrowRepository.getAll` を「解決が実際に発生した時だけ構築する orderId→HELD エスクロー Map」に遅延集約（no-op スイープで無駄読みしない）。孤立 React ファイル `src/web/pages/settings/notifications.js`（React/axios 前提だがビルド系・参照ともに無し、JWT モデルと整合しない旧式実装）を削除。
+
 ### その他実装済（運用ドキュメント）
 - `tests/unit/test_exchange_rate.js` を `exchange-rate-fallback.test.js` へ改修: 旧ファイルは名前が jest testMatch に合わず常時スキップされ、かつ assert で実 API を呼ぶ死テストだった（「全失敗で throw」期待も非 production では誤り）。axios モック化＋NODE_ENV 分岐を正しく検証（全API失敗→DEFAULT_RATE/production throw/stale 優先・プロバイダフォールバック順・範囲外レート拒否・withTimestamp）。
 - `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。
@@ -483,6 +485,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
+- `src/api/middleware/ip-key.js`（レート制限キー生成）のユニットテストを追加。IPv6 の /64 畳み込み（同一割り当て単位で1バケット＝アドレス回しによる authLimiter バイパス防止）と TRUST_PROXY の hop 数セマンティクス（`true` 等を拒否し X-Forwarded-For 左端偽装を防止）の不変条件を固定。
 - `.env.example` の `METRICS_AUTH_TOKEN` コメント誤記を修正: 「未設定なら公開」→ 実際は本番で fail-closed/503。（`docs/operations.md` 側の実態同期は #103 の全面改訂へ統合済みのため本 PR からは除外）
 - `tests/db/json-repository-finders.test.js` を追加: `ReputationRepository`/`VerificationRepository` の finder→フィールド配線（`getByProviderId`→providerId、`getByJobId`→jobId）を固定 — createJsonRepository の宣言的 finders の field 名タイポによる無言の null 返却回帰を防止。
 - `test` ジョブ（test-coverage-check.yml）のカバレッジ閾値チェックが全 PR で落ちていた問題を jest.config.js 側で修正: (a) 閾値チェックが読む `coverage/coverage-summary.json` を生成する `json-summary` レポーターが未設定で MODULE_NOT_FOUND でクラッシュしていたのを `coverageReporters` に追加して解消、(b) 実カバレッジ 68.1% が閾値 70 を下回っていた件は、libp2p 未導入・Docker/k8s・実 GPU 前提で CI 上で実行不能な経路しか持たない 3 ファイル（`p2p-network.js`・`virtual-gpu-manager.js`・`gpu-detector-extended.js`、計 737 未カバー行）を `coveragePathIgnorePatterns` で除外し 75.5% に。既定の「ロード済みファイルのみ計測」セマンティクスを保つため `collectCoverageFrom` ではなく ignorePatterns を採用。

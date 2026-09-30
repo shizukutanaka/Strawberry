@@ -486,6 +486,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### alert-kpi-trend の実動化（2026-09-27）
 - **対応**: `npm run alert-kpi-trend` が生成側の単一ファイル上書き（`docs/checklist-kpi-report.md`）と食い違う「日付付き履歴2件必須」前提で常に「2つ以上必要です」で終了する構造的デッドコードだった。前回値を `data/kpi-trend-state.json`（`KPI_STATE_FILE`/`KPI_REPORT_DIR`/`KPI_ALERT_THRESHOLD` で差し替え可）へ自身で記録する方式へ変更 — 単一レポート運用で動作し、同一内容の再実行では差分ゼロなので二重通知しない。パース不能・状態ファイル破損・レポート不在の各経路を明示ハンドリング。#127（kpi-trend-graph の同型バグ）の姉妹修正。テスト5件追加。
 
+## RFC 9116 `security.txt` の配信 (2026-09-26)
+
+- **観測**: リポジトリに `SECURITY.md`（開示ポリシー）があるが、デプロイされたサービスから機械可読な連絡先を取得する経路がなかった。RFC 9116 は `/.well-known/security.txt` を標準化しており、セキュリティ研究者・脆弱性スキャナはここを最初に参照する（GitHub/GitLab/Certificate Transparency のスキャン連携も同規格）。
+- **罠**: `public/.well-known/` にファイルを置くだけでは `express.static` の既定 `dotfiles: 'ignore'` がドット始まりセグメントを拒否し、リクエストは SPA キャッチオールへ流れて index.html (200/HTML) を返す — スキャナからは「security.txt 不在」どころか誤った 200 応答に見える。
+- **変更**: `public/.well-known/security.txt`（Contact=GitHub Security Advisory、Policy=SECURITY.md、Preferred-Languages、Expires）を新設し、`server.js` に static より前の明示ルート `GET /.well-known/security.txt` を追加。`tests/api/basic.test.js` に 200・text/plain・必須フィールドの回帰テストを追加。
+- **参考**: RFC 9116 / GitHub "Adding a security policy" / securitytxt.org
+
 ## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-timer-unref` → PR 化

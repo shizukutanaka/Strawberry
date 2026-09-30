@@ -675,111 +675,117 @@ class LightningService extends EventEmitter {
         }
     }
 
-    setupEventStreams() {
-        // 監査証跡
+    // LND gRPC ストリームの再接続共有部品。
+    // 旧実装は error/end/close の各イベントが個別に setTimeout を積んでおり、
+    // 1回の切断で3本の再接続が並走し subscribeInvoices が多重化していた
+    // （invoice:paid の二重 emit・リスナー肥大）。また旧ストリームを cancel
+    // しないまま再購読し、gRPC 側に死んだストリームが蓄積していた。
+    // ここでは ①未処理再接続タイマーを1本に単一化（連鎖発火の重複を吸収）
+    // ②再購読前に旧ストリームを cancel() ③指数バックオフ（5s→最大5分、
+    // データ到着=健全でリセット）により、LND 長期停止時でもログ・接続を
+    // スパムせず、回復時は自動で疎通周期へ戻る。
+    _setupResilientStream(name, subscribe, onData, { baseMs = 5000, maxMs = 5 * 60 * 1000 } = {}) {
         const { appendAuditLog } = require('./src/utils/audit-log');
-        // 外部通知hook（Slack/Sentry等）
-        const notifyExternal = (msg, detail={}) => {
+        const auditTag = `${name}_stream`;
+        const notifyExternal = (msg, detail = {}) => {
             if (process.env.SENTRY_DSN) {
                 // Sentry.captureMessage(msg, { extra: detail });
             }
             // Slack等もここで拡張可
         };
+        if (!this._streamState) this._streamState = {};
+        const state = this._streamState[name] = this._streamState[name] || {
+            stream: null, timer: null, failures: 0,
+        };
 
-        // イベントストリーム再接続ロジック
-        const setupInvoiceStream = () => {
-            let invoiceStream;
+        const scheduleReconnect = (reason, detail = {}) => {
+            // 既に再接続が予約済みなら監査だけ残して重複スケジュールを捨てる。
+            if (state.timer) return;
+            state.failures += 1;
+            const delay = Math.min(baseMs * Math.pow(2, state.failures - 1), maxMs);
+            appendAuditLog(`${auditTag}_${reason}`, { ...detail, reconnectInMs: delay });
+            notifyExternal(`${name} stream ${reason}`, detail);
+            state.timer = setTimeout(connect, delay);
+            if (state.timer.unref) state.timer.unref();
+        };
+
+        const connect = () => {
+            state.timer = null;
+            const prev = state.stream;
+            if (prev) {
+                // cancel() は close を同期発火し得るため、先に superseded マークして
+                // そのハンドラが再接続を積み直さないようにする
+                prev.superseded = true;
+                if (typeof prev.cancel === 'function') {
+                    try { prev.cancel(); } catch (_) { /* 既終了ストリームは無視 */ }
+                }
+            }
+            let stream;
             try {
-                invoiceStream = this.lnd.subscribeInvoices({});
+                stream = subscribe();
             } catch (err) {
-                logger.error('Failed to subscribe to invoice stream', err);
-                appendAuditLog('invoice_stream_subscribe_error', { error: err.message });
-                notifyExternal('Invoice stream subscribe error', { error: err.message });
-                setTimeout(setupInvoiceStream, 5000);
+                logger.error(`Failed to subscribe to ${name} stream`, err);
+                scheduleReconnect('subscribe_error', { error: err.message });
                 return;
             }
-            invoiceStream.on('data', (invoice) => {
-                const paymentHash = invoice.r_hash.toString('hex');
-                const invoiceData = this.invoices.get(paymentHash);
-                if (invoiceData && invoice.settled) {
-                    invoiceData.status = 'paid';
-                    invoiceData.settledAt = invoice.settle_date * 1000;
-                    invoiceData.amountPaid = parseInt(invoice.amt_paid_sat);
-                    logger.info(`Invoice paid: ${paymentHash.substring(0, 16)}...`);
-                    appendAuditLog('invoice_paid', { paymentHash, amount: invoiceData.amountPaid });
-                    this.emit('invoice:paid', invoiceData);
-                    this.emit(`payment:${paymentHash}`, {
-                        preimage: invoice.r_preimage.toString('hex')
-                    });
-                }
+            state.stream = stream;
+            // データ到着 = 疎通健全: バックオフカウンタをリセットしてから本体処理へ渡す
+            stream.on('data', (data) => {
+                if (stream.superseded) return;
+                state.failures = 0;
+                onData(data);
             });
-            invoiceStream.on('error', (error) => {
-                logger.error('Invoice stream error:', error);
-                appendAuditLog('invoice_stream_error', { error: error.message });
-                notifyExternal('Invoice stream error', { error: error.message });
-                // 自動再接続
-                setTimeout(setupInvoiceStream, 5000);
+            stream.on('error', (error) => {
+                if (stream.superseded) return;
+                logger.error(`${name} stream error:`, error);
+                scheduleReconnect('error', { error: error && error.message });
             });
-            invoiceStream.on('end', () => {
-                logger.warn('Invoice stream ended, reconnecting...');
-                appendAuditLog('invoice_stream_end', {});
-                notifyExternal('Invoice stream ended');
-                setTimeout(setupInvoiceStream, 5000);
-            });
-            invoiceStream.on('close', () => {
-                logger.warn('Invoice stream closed, reconnecting...');
-                appendAuditLog('invoice_stream_close', {});
-                notifyExternal('Invoice stream closed');
-                setTimeout(setupInvoiceStream, 5000);
-            });
+            for (const evt of ['end', 'close']) {
+                stream.on(evt, () => {
+                    if (stream.superseded) return;
+                    logger.warn(`${name} stream ${evt}, reconnecting...`);
+                    scheduleReconnect(evt);
+                });
+            }
         };
-        setupInvoiceStream();
+        connect();
+    }
+
+    setupEventStreams() {
+        // インボイスイベントストリーム（支払い検知）
+        this._setupResilientStream('invoice', () => this.lnd.subscribeInvoices({}), (invoice) => {
+            const paymentHash = invoice.r_hash.toString('hex');
+            const invoiceData = this.invoices.get(paymentHash);
+            if (invoiceData && invoice.settled) {
+                invoiceData.status = 'paid';
+                invoiceData.settledAt = invoice.settle_date * 1000;
+                invoiceData.amountPaid = parseInt(invoice.amt_paid_sat);
+                logger.info(`Invoice paid: ${paymentHash.substring(0, 16)}...`);
+                const { appendAuditLog } = require('./src/utils/audit-log');
+                appendAuditLog('invoice_paid', { paymentHash, amount: invoiceData.amountPaid });
+                this.emit('invoice:paid', invoiceData);
+                this.emit(`payment:${paymentHash}`, {
+                    preimage: invoice.r_preimage.toString('hex')
+                });
+            }
+        });
 
         // チャネルイベントストリーム
-        const setupChannelStream = () => {
-            let channelStream;
-            try {
-                channelStream = this.lnd.subscribeChannelEvents({});
-            } catch (err) {
-                logger.error('Failed to subscribe to channel stream', err);
-                appendAuditLog('channel_stream_subscribe_error', { error: err.message });
-                notifyExternal('Channel stream subscribe error', { error: err.message });
-                setTimeout(setupChannelStream, 5000);
-                return;
+        this._setupResilientStream('channel', () => this.lnd.subscribeChannelEvents({}), (event) => {
+            if (event.type === 'OPEN_CHANNEL') {
+                logger.info('Channel opened:', event.open_channel);
+                const { appendAuditLog } = require('./src/utils/audit-log');
+                appendAuditLog('channel_opened', { channel: event.open_channel });
+                this.emit('channel:opened', event.open_channel);
+            } else if (event.type === 'CLOSED_CHANNEL') {
+                logger.info('Channel closed:', event.closed_channel);
+                const { appendAuditLog } = require('./src/utils/audit-log');
+                appendAuditLog('channel_closed', { channel: event.closed_channel });
+                this.emit('channel:closed', event.closed_channel);
             }
-            channelStream.on('data', (event) => {
-                if (event.type === 'OPEN_CHANNEL') {
-                    logger.info('Channel opened:', event.open_channel);
-                    appendAuditLog('channel_opened', { channel: event.open_channel });
-                    this.emit('channel:opened', event.open_channel);
-                } else if (event.type === 'CLOSED_CHANNEL') {
-                    logger.info('Channel closed:', event.closed_channel);
-                    appendAuditLog('channel_closed', { channel: event.closed_channel });
-                    this.emit('channel:closed', event.closed_channel);
-                }
-                // チャネル情報更新
-                this.updateChannels();
-            });
-            channelStream.on('error', (error) => {
-                logger.error('Channel stream error:', error);
-                appendAuditLog('channel_stream_error', { error: error.message });
-                notifyExternal('Channel stream error', { error: error.message });
-                setTimeout(setupChannelStream, 5000);
-            });
-            channelStream.on('end', () => {
-                logger.warn('Channel stream ended, reconnecting...');
-                appendAuditLog('channel_stream_end', {});
-                notifyExternal('Channel stream ended');
-                setTimeout(setupChannelStream, 5000);
-            });
-            channelStream.on('close', () => {
-                logger.warn('Channel stream closed, reconnecting...');
-                appendAuditLog('channel_stream_close', {});
-                notifyExternal('Channel stream closed');
-                setTimeout(setupChannelStream, 5000);
-            });
-        };
-        setupChannelStream();
+            // チャネル情報更新
+            this.updateChannels();
+        });
     }
 
     async getChannelBalance() {

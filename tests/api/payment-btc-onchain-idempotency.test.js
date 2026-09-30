@@ -154,4 +154,72 @@ describe('btc-onchain payment idempotency and partial-settlement recovery', () =
     expect(rb.statusCode).toBe(200);
     expect(callCount).toBe(2); // no additional Lightning calls
   });
+
+  it('refuses to create a fresh escrow when a prior canceled one carries txids (sweep-race double-charge guard)', async () => {
+    // Simulates the aftermath of: tx1 broadcast → sweep cancels escrow → retry.
+    // Without the guard, a new escrow would be created and tx1 re-broadcast.
+    let callCount = 0;
+    sendLightningPayment.mockImplementation(async () => {
+      callCount++;
+      return { id: `txid-${callCount}`, payment_hash: `hash-${callCount}` };
+    });
+
+    const orderId = makeOrder();
+    EscrowRepository.create({
+      orderId, amountSats: 150, feeRate: 0.015, state: 'CANCELED',
+      txBorrowerToOperator: 'txid-already-broadcast',
+    });
+
+    const res = await request(app).post('/api/v1/payments/btc')
+      .set({ Authorization: `Bearer ${renter.token}` })
+      .send({ orderId, borrowerWallet: BORROWER_WALLET });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.retryable).toBe(false);
+    expect(callCount).toBe(0); // nothing broadcast
+  });
+
+  it('stops before tx2 and persists tx1 evidence when the PENDING->HELD CAS fails', async () => {
+    let callCount = 0;
+    sendLightningPayment.mockImplementation(async () => {
+      callCount++;
+      return { id: `txid-${callCount}`, payment_hash: `hash-${callCount}` };
+    });
+
+    const orderId = makeOrder();
+    const body = { orderId, borrowerWallet: BORROWER_WALLET };
+    const auth = { Authorization: `Bearer ${renter.token}` };
+
+    // Fail only the first updateIf (the PENDING->HELD transition), as if a
+    // concurrent sweep moved the escrow to CANCELED after tx1 broadcast.
+    const realUpdateIf = EscrowRepository.updateIf;
+    let failed = false;
+    jest.spyOn(EscrowRepository, 'updateIf').mockImplementation((id, pred, upd) => {
+      if (!failed) {
+        failed = true;
+        // Simulate the sweep: the row transitions to CANCELED out from under us.
+        EscrowRepository.update(id, { state: 'CANCELED' });
+        const cur = EscrowRepository.getById(id);
+        return { ok: false, reason: 'condition_failed', current: cur };
+      }
+      return realUpdateIf(id, pred, upd);
+    });
+
+    const r1 = await request(app).post('/api/v1/payments/btc').set(auth).send(body);
+    EscrowRepository.updateIf.mockRestore();
+
+    expect(r1.statusCode).toBe(500);
+    expect(r1.body.retryable).toBe(false);
+    expect(r1.body.stage).toBe('escrow_state_lost');
+    expect(callCount).toBe(1); // tx1 sent, tx2 NOT sent
+
+    // tx1 txid was persisted onto the row as evidence
+    const esc = EscrowRepository.getById(r1.body.escrowId);
+    expect(esc.txBorrowerToOperator).toBe('txid-1');
+
+    // A retry now hits the orphaned-txid guard: 409, zero additional calls
+    const r2 = await request(app).post('/api/v1/payments/btc').set(auth).send(body);
+    expect(r2.statusCode).toBe(409);
+    expect(callCount).toBe(1);
+  });
 });

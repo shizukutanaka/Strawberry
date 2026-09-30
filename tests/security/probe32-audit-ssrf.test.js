@@ -96,7 +96,7 @@ describe('SSRF guards: env-configured notification URLs are validated', () => {
     expect(src).toMatch(/ssrf-guard/);
     // The SSRF check must come BEFORE the axios.post call
     const ssrfIdx = src.indexOf('assertPublicUrl(url)');
-    const axiosIdx = src.indexOf('axios.post(url, body)');
+    const axiosIdx = src.indexOf('axios.post(url, body');
     expect(ssrfIdx).toBeGreaterThan(-1);
     expect(axiosIdx).toBeGreaterThan(-1);
     expect(ssrfIdx).toBeLessThan(axiosIdx);

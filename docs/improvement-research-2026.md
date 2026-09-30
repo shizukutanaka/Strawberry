@@ -493,6 +493,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 package.json に `license`/`repository`/`bugs`/`homepage` が未記載で、npm・GitHub・各種ツールのメタデータ解決が効かなかった（`npm WARN`・パッケージ情報のリンク欠如）。LICENSE（MIT）と一致する `license: "MIT"`、`repository`/`bugs`/`homepage` を GitHub URL で宣言し、あわせて `private: true` を追加 — 本リポジトリは npm 公開を意図しないアプリケーションであり、誤 `npm publish` を構造的に防止するガードとして標準的な手段。
 
+
+### Node バージョン下限の宣言（2026-09-27）
+- **対応**: `package.json` に `engines.node >= 20` を追加し `.nvmrc` を新設。CI は全ワークフロー Node 20/22 で検証されており下限は 20 が実態（加えて #134 の bcrypt 6 が Node 18+ を要求）。nvm/fnm/volta 利用者と npm engine チェックが機能するようになる。
 - `src/core/services.js`（任意サービスの safeLoad/requireService ゲート）のユニットテストを追加。GPU/P2P/Lightning の任意依存が未導入でも本体が起動し、無効サービスのエンドポイントが 503 を返す契約を固定。
 - `src/api/utils/btc-payment.js` の直接ユニットテストを追加: 送金経路の金額計算（calcTotalWithFee/calcFee/calcPayout の Satoshi 丸めと total=payout+fee 整合性）、BTC_FEE_RATE の起動時 fail-fast 検証、sendBTC の資金安全不変条件（Lightning API が txid を返さない場合にダミー成功を返さず例外へ伝播）を網羅。従来は送金系ユーティリティに直接テストが無かった。
 - `tests/api/middleware/master-session.test.js` を追加: `master-session.js` が全 importer（master-auth.js / profit-addresses.js）へ同一インスタンスを返すシングルトン契約と、本番での秘密欠落 fail-fast を固定（ルート個別の session() 化による MemoryStore 分離回帰を防止）。

@@ -11,6 +11,9 @@
   "bugs": "https://github.com/shizukutanaka/Strawberry/issues",
   "homepage": "https://github.com/shizukutanaka/Strawberry#readme",
   "main": "src/api/server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/api/server.js",
     "dev": "nodemon src/api/server.js",

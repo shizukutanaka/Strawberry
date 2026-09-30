@@ -506,6 +506,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### nodemailer 6→10 メジャー更新（2026-09-27）
 - **対応**: nodemailer の high 脆弱性（Interpretation Conflict による意図しないドメインへのメール送信）は 10.0.11 でのみ修正されるため、^6.9.14→^10.0.11 へ更新。mailer.js の利用は `createTransport().sendMail()` の安定 API のみで互換性確認済み（モジュール読込み・sendMail 実在を検証）。残存 35 件。
 
+## GitHub PR/Issue テンプレートの新設 (2026-09-26)
+
+- **観測**: `.github/` にワークフローと dependabot.yml はあるが、`pull_request_template.md` と `ISSUE_TEMPLATE/` が不在。PR 本文が毎回バラバラで、脆弱性報告が公開 Issue に流れるリスクもあった（SECURITY.md の導線が Issue 作成時に示されない）。
+- **変更**: GitHub 標準規約の `pull_request_template.md`（概要/変更内容/テスト/セキュリティ影響）と `ISSUE_TEMPLATE/bug_report.md`・`feature_request.md` を日本語で追加。bug テンプレート冒頭に「脆弱性は公開 Issue に書かず SECURITY.md へ」の導線を明記（RFC 9116 security.txt と整合）。
+- **参考**: GitHub Docs "Creating a pull request template for your repository" / "Configuring issue templates"
+
 ## `.github/CODEOWNERS` の新設 (2026-09-26)
 
 - **観測**: CODEOWNERS が不在のため PR 作成時にレビュアーが自動割当されず、資金決済・認証などの高リスク経路も既定レビューなしでマージ可能な状態だった。

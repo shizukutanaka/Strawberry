@@ -501,6 +501,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
+## `.github/CODEOWNERS` の新設 (2026-09-26)
+
+- **観測**: CODEOWNERS が不在のため PR 作成時にレビュアーが自動割当されず、資金決済・認証などの高リスク経路も既定レビューなしでマージ可能な状態だった。
+- **変更**: GitHub 標準の `.github/CODEOWNERS` を新設。全体を `@shizukutanaka`（リポジトリオーナー）の既定レビュー対象とし、payment/master-auth/security/lightning-service.js の資金・認証経路は防御的に個別明示（将来オーナーを増員する際の分離点としても機能）。
+- **参考**: GitHub Docs "About code owners"（ブランチ保護の「code owner レビュー必須」と組み合わせると強制力が出る）
+
 ## docs: E2E テスト実行手順の新設（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）

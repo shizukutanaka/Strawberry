@@ -432,3 +432,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### sentry-notify の @sentry/node 遅延 require 化（2026-09-27）
 - **対応**: `scripts/sentry-notify.js` が意図的に未宣言の任意依存 `@sentry/node` をトップレベル require していたため、SENTRY_DSN 設定済み環境で service-monitor の遅延 require が MODULE_NOT_FOUND で失敗し Sentry 通知が一度も届かず警告だけを量産していた。関数内遅延 require＋`npm install @sentry/node` の手順付きエラーへ変更。require 安全性を固定するテスト3件。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

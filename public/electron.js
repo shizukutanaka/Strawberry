@@ -29,10 +29,15 @@ if (STRAWBERRY_URL) {
 }
 if (process.exitCode) app.exit(1);
 
+// 文字列前方一致だと https://host が https://host.evil.example を許してしまうため origin で比較する。
+const ALLOWED_ORIGIN = (() => {
+  try { return STRAWBERRY_URL ? new URL(STRAWBERRY_URL).origin : null; } catch (_) { return null; }
+})();
 const isAllowedUrl = (url) => {
   try {
-    if (STRAWBERRY_URL) return url.startsWith(STRAWBERRY_URL);
-    return url.startsWith('file://');
+    const target = new URL(url);
+    if (STRAWBERRY_URL) return ALLOWED_ORIGIN !== null && target.origin === ALLOWED_ORIGIN;
+    return target.protocol === 'file:';
   } catch (_) {
     return false;
   }

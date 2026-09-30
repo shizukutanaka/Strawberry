@@ -13,7 +13,8 @@ const { AXIOS_SAFE_CONFIG } = require('./http-safe-config');
 
 // 通知タイプ定義
 const NotifyType = {
-  LINE: 'line',
+  LINE: 'line',               // 廃止: LINE Notify は 2025-03-31 にサービス終了
+  LINE_MESSAGING: 'line_messaging', // 後継: LINE Messaging API（push メッセージ）
   DISCORD: 'discord',
   SLACK: 'slack',
   TELEGRAM: 'telegram',
@@ -25,13 +26,14 @@ const NotifyType = {
 const { sendEmailNotification } = require('./email');
 const fs = require('fs');
 const path = require('path');
+const { resolveDataDir } = require('../db/json/data-dir');
 
 async function sendNotification(typeOrUserId, message, options = {}) {
   // typeOrUserIdがユーザーIDの場合、多段通知
   if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
     // 設定ファイルから通知設定を取得
     const userId = typeOrUserId;
-    const settingsPath = path.resolve(__dirname, '../../data/notification-settings.json');
+    const settingsPath = path.join(resolveDataDir(), 'notification-settings.json');
     let settings = {};
     try {
       if (fs.existsSync(settingsPath)) {
@@ -87,6 +89,8 @@ async function sendNotification(typeOrUserId, message, options = {}) {
     switch (typeOrUserId) {
       case NotifyType.LINE:
         return await sendLineNotify(message, options);
+      case NotifyType.LINE_MESSAGING:
+        return await sendLineMessagingNotify(message, options);
       case NotifyType.DISCORD:
         return await sendDiscordNotify(message, options);
       case NotifyType.SLACK:
@@ -111,12 +115,27 @@ async function sendNotification(typeOrUserId, message, options = {}) {
   }
 }
 
-// LINE Notify
-async function sendLineNotify(message, { token }) {
-  if (!token) throw new Error('LINEトークン未設定');
+// LINE Notify（廃止）
+// notify-api.line.me は 2025-03-31 にサービス終了 — 呼出しても必ず失敗するため
+// HTTP 送信は行わず即座に移行案内付きのエラーを返す（呼出側の catch で通知失敗として処理される）。
+// 後継は LINE Messaging API（sendLineMessagingNotify）。
+async function sendLineNotify(message, { token } = {}) {
+  throw new Error(
+    'LINE Notify は 2025-03-31 にサービス終了しました（notify-api.line.me は応答しません）。' +
+    'LINE Messaging API へ移行してください: NotifyType.LINE_MESSAGING + { token: <channel access token>, to: <userId/groupId> }'
+  );
+}
+
+// LINE Messaging API（LINE Notify の公式後継）
+// POST https://api.line.me/v2/bot/message/push
+//   Authorization: Bearer <channel access token>
+//   { to: <userId|groupId|roomId>, messages: [{ type: 'text', text }] }
+async function sendLineMessagingNotify(message, { token, to } = {}) {
+  if (!token) throw new Error('LINE Messaging API チャネルアクセストークン未設定');
+  if (!to) throw new Error('LINE Messaging API 送信先（to: userId/groupId）未設定');
   return withRetry(async () => {
-    const res = await axios.post('https://notify-api.line.me/api/notify',
-      new URLSearchParams({ message }),
+    const res = await axios.post('https://api.line.me/v2/bot/message/push',
+      { to, messages: [{ type: 'text', text: String(message).slice(0, 5000) }] },
       { headers: { 'Authorization': `Bearer ${token}` }, ...AXIOS_SAFE_CONFIG }
     );
     return res.data;

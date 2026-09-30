@@ -6,8 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
+const { resolveDataDir } = require('../db/json/data-dir');
 
-const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
+const SETTINGS_PATH = path.join(resolveDataDir(), 'notification-settings.json');
 
 // price-watch 等で同一ユーザーイベントを複数送信するとき、通知ごとに
 // notification-settings.json を全量読み込み+パースするのを防ぐ。

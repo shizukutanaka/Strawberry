@@ -488,6 +488,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### docs/SPECIFICATION.md のステータス同期（2026-09-27）
 - **対応**: 2026-06 時点の実装ステータスが陳腐化していたため main 実態へ追随 — Escrow（btc-onchain/marketplace/escrow 配線済）・GPU アテステーション（Mock verifier 配線済）・Reputation（アテステーション/稼働統計経由で部分配線）・OTel（instrumentation 読込済）・feature-pricer（marketplace-service 経由配線済）・データ整合性（updateIf/withLock 済）を更新。open PR にのみ存在する配線は「未」のまま維持。
+- `tests/api/middleware/master-session.test.js` を追加: `master-session.js` が全 importer（master-auth.js / profit-addresses.js）へ同一インスタンスを返すシングルトン契約と、本番での秘密欠落 fail-fast を固定（ルート個別の session() 化による MemoryStore 分離回帰を防止）。
 - `src/api/middleware/ip-key.js`（レート制限キー生成）のユニットテストを追加。IPv6 の /64 畳み込み（同一割り当て単位で1バケット＝アドレス回しによる authLimiter バイパス防止）と TRUST_PROXY の hop 数セマンティクス（`true` 等を拒否し X-Forwarded-For 左端偽装を防止）の不変条件を固定。
 - `.env.example` の `METRICS_AUTH_TOKEN` コメント誤記を修正: 「未設定なら公開」→ 実際は本番で fail-closed/503。（`docs/operations.md` 側の実態同期は #103 の全面改訂へ統合済みのため本 PR からは除外）
 - `tests/db/json-repository-finders.test.js` を追加: `ReputationRepository`/`VerificationRepository` の finder→フィールド配線（`getByProviderId`→providerId、`getByJobId`→jobId）を固定 — createJsonRepository の宣言的 finders の field 名タイポによる無言の null 返却回帰を防止。

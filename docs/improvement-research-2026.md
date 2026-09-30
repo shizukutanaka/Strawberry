@@ -425,6 +425,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- 通知設定の読み込み N+1 解消（perf）: `user-notify.js` の `notifyUser` が通知送信のたびに notification-settings.json を全量読み込み+パースしていた（price-watch のウォッチャー通知等で件数ぶんの I/O）。auth-user-lookup と同じ stat(mtimeMs,size) ゲートで「ファイル変更時のみ再パース」に変更。設定保存は atomicWriteJSON（rename）のため mtime で確実に検知。
+||||||| 5c3f4ed
 - 認証パスの users.json 全量読み込み解消（perf）: jwt-auth / security / GraphQL context の3箇所が認証済みリクエスト毎に `UserRepository.getById`（全量 readFileSync+parse）を踏んでいた → `auth-user-lookup.js` 新設。users.json の (mtimeMs,size) を statSync でゲートし変更時のみ再パース、`id → {status,passwordChangedAt,sessionsRevokedAt}` の `Object.freeze` 済み最小レコードを返す。行オブジェクトを共有しないためミューテーション漏洩なし、stat 失敗時はリポジトリへフォールバック（フェイルオープンしない）。
 - 通知リトライの full jitter 化（resilience）: `notifier.js` の `withRetry` が固定指数バックオフ（1s,2s…）で、一括通知障害時に全呼び出しの再送が同期化し得た（thundering herd。AWS Architecture Blog「Exponential Backoff And Jitter」の定番対策）。遅延を `random() * min(maxDelayMs, base*2^n)` の一様乱数に変更し上限も追加。併せてユーザーIDが UUID v4 で 'user_' 始まりにならない `sendNotification` の到達不能な多段分岐を削除（多段通知は user-notify.js が担当）。
 - プロバイダ向け自動登録スクリプトの実契約化（fix/DX）: `gpu_lending_setup_auto_register.js` が存在しない `POST /api/gpu` を叩き、必須フィールド（memoryGB/clockMHz/powerWatt/pricePerHour）と arch 値（x64→x86_64 等）もスキーマ不一致で、実行しても 404/400 確定だった → `POST /api/v1/gpus` + `schemas.gpu.register` 準拠 payload へ修正、URL/トークンを環境変数化（STRAWBERRY_API_URL/STRAWBERRY_TOKEN）、非対応 GPU は早期エラーで案内。実 Joi スキーマでのドライ検証済み。

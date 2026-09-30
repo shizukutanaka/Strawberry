@@ -507,6 +507,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 `npm run test:e2e`（Playwright、7 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
 
 
+## chore: package.json の npm メタデータ整備（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-pkg-metadata` → PR 化
+
+package.json に `license`/`repository`/`bugs`/`homepage` が未記載で、npm・GitHub・各種ツールのメタデータ解決が効かなかった（`npm WARN`・パッケージ情報のリンク欠如）。LICENSE（MIT）と一致する `license: "MIT"`、`repository`/`bugs`/`homepage` を GitHub URL で宣言し、あわせて `private: true` を追加 — 本リポジトリは npm 公開を意図しないアプリケーションであり、誤 `npm publish` を構造的に防止するガードとして標準的な手段。
+
+
 ### 管理ダッシュボード SPA ページ（2026-09-27, §19 管理画面の部分対応）
 - **対応**: `/admin/stats`・`/admin/verifications`・`/admin/escrow`・`/admin/expire-orders`・`/admin/cache/purge` の admin API は実装済みだが SPA 側に利用経路がなく運用者が curl 頼みだった。`public/js/pages/admin.js` を新設（統計カード/検証監査表/エスクロー表＋状態フィルタ/スイープ・パージ操作）、api.js に admin.* ヘルパー5件、`#/admin` ルート＋admin ナビリンクを追加。フロントが架空パスを呼ぶ事故を防ぐ契約テスト3件（tests/unit/admin-page-contract.test.js）+ e2e spec（admin.spec.js）を追加。
 

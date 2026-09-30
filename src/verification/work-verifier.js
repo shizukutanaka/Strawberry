@@ -8,11 +8,21 @@ const crypto = require('crypto');
  * ジョブ単位の再実行監査サンプラ（決定論的）。
  * 一定確率で同一ジョブを別プロバイダへ再投入し出力照合する＝「無労働で課金」を抑止。
  * jobId をシードにするため監査要否は再現可能（事後検証できる）。
+ *
+ * なぜ HMAC か: 旧実装は `sha256(jobId)` の無キー決定論だった。プロバイダは
+ * 自分の jobId を知っており、同じハッシュを手元で計算して「このジョブは監査
+ * 対象外」と事前に予測できる —— 監査されないジョブだけ手を抜く選択的チートが
+ * 成立してしまう（Proof-of-Compute のランダム監査は auditee が判定を予測
+ * 不能であることが要件: arXiv:2501.05374 系のランダム再実行監査設計）。
+ * `secretKey` を渡すと HMAC-SHA256 で鍵付き判定になり、サーバ側では引き続き
+ * 完全に決定論的だがプロバイダには予測不能になる。
+ * secretKey 未指定の呼び出し（テスト等）は従来通り無キー sha256。
+ *
  * @param {string} jobId
- * @param {{auditRate?: number}} opts auditRate ∈ [0,1]
+ * @param {{auditRate?: number, secretKey?: string}} opts auditRate ∈ [0,1]
  * @returns {boolean}
  */
-function shouldAudit(jobId, { auditRate = 0.1 } = {}) {
+function shouldAudit(jobId, { auditRate = 0.1, secretKey } = {}) {
   if (typeof jobId !== 'string' || jobId.length === 0) {
     throw new Error('jobId must be a non-empty string');
   }
@@ -21,7 +31,10 @@ function shouldAudit(jobId, { auditRate = 0.1 } = {}) {
   }
   if (auditRate === 0) return false;
   if (auditRate === 1) return true;
-  const hex = crypto.createHash('sha256').update(jobId).digest('hex').slice(0, 8);
+  const hex = (secretKey != null
+    ? crypto.createHmac('sha256', String(secretKey)).update(jobId)
+    : crypto.createHash('sha256').update(jobId)
+  ).digest('hex').slice(0, 8);
   const frac = parseInt(hex, 16) / 0x100000000; // [0,1)
   return frac < auditRate;
 }

@@ -5,6 +5,7 @@ node_modules/
 logs/
 data/
 data-test/
+backups/
 openapi.json
 *.log
 .DS_Store

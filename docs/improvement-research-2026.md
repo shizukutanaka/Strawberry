@@ -503,6 +503,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### ルート SPECIFICATION.md の 2026-09 追補（2026-09-27）
 - **対応**: ルート `SPECIFICATION.md`（2026-06 実態ベース仕様書）の冒頭に追補を追加。当時の残課題だった OTel SDK 連携（D-2）が `src/telemetry/instrumentation.js` で配線済みである点、probe テストが 60 件超へ拡充、§4 表外の `/admin/*`・`/marketplace/escrow/*`・`/gpus/:id/estimate`・`/gpus/:id/watch` 追加、エスクロー状態機械の実装を明記。docs/SPECIFICATION.md（#133）とは別ファイル・非重複。
 
+### 依存脆弱性の semver-safe 一括解消 + bcrypt メジャー更新（2026-09-27）
+- **対応**: `npm audit` の残存49件のうち semver 非互換を要しない13件を `npm audit fix` で解消（axios 1.17→1.20: プロトタイプ汚染/Basic auth 注入、js-yaml、express/body-parser、morgan、joi、protobufjs、browserslist 等）。`bcrypt` を ^5.1.1→^6.0.0 へ更新（API 互換、Node18+ 要件を満たす）し、@mapbox/node-pre-gyp 経由の tar critical・node-pre-gyp high チェーンを除去。合計 49→36 件。残存は @kubernetes/client-node 2.x・aws-sdk v3・nodemailer 10・imagemin 系のメジャー更新または代替が必要なもの（#46 で却下された apollo 系を除く）。
+
+### nodemailer 6→10 メジャー更新（2026-09-27）
+- **対応**: nodemailer の high 脆弱性（Interpretation Conflict による意図しないドメインへのメール送信）は 10.0.11 でのみ修正されるため、^6.9.14→^10.0.11 へ更新。mailer.js の利用は `createTransport().sendMail()` の安定 API のみで互換性確認済み（モジュール読込み・sendMail 実在を検証）。残存 35 件。
+
 ### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
 - **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→255件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。SPA の refresh サイレント更新・Electron シェル（electron.js + preload.js）も実装済みの現状へ同期。
 

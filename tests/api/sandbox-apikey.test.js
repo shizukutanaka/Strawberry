@@ -6,8 +6,9 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { atomicWriteJSON } = require('../../src/db/json/atomicWrite');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
 
-const KEY_PATH = path.join(__dirname, '../../data/sandbox-apikeys.json');
+const KEY_PATH = path.join(resolveDataDir(), 'sandbox-apikeys.json');
 const { generateApiKey, isValidApiKey } = require('../../src/api/sandbox-apikey');
 
 describe('sandbox-apikey', () => {

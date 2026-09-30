@@ -2196,6 +2196,30 @@ describe('API Integration', () => {
       expect(res.body.minRenterRating).toBe(4);
       GpuRepository.update(gpuId, { minRenterRating: null });
     });
+
+    it('marketReference is advisory and null for unknown GPU models', async () => {
+      // 'RTX-EST' はスペック表に一致しない → marketReference は null
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.marketReference).toBeNull();
+      // 実課金フィールドは不変であること（advisory のみの追加）
+      expect(typeof res.body.totalPrice).toBe('number');
+    });
+
+    it('marketReference returns engine-suggested pricing for a known model', async () => {
+      const knownId = GpuRepository.create({
+        name: 'RTX4090 GPU', vendor: 'NVIDIA', model: 'RTX 4090', memoryGB: 24, pricePerHour: 2.0,
+        providerId: 'est-provider-1',
+      }).id;
+      const res = await request(app).get(`/api/v1/gpus/${knownId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.marketReference).not.toBeNull();
+      expect(res.body.marketReference.modelMatched).toBe(true);
+      expect(res.body.marketReference.hourly).toBeGreaterThan(0);
+      expect(res.body.marketReference.factors.base).toBeGreaterThan(0);
+      // advisory: 実課金（totalPrice）はプロバイダ価格で計算される
+      expect(res.body.totalPrice).toBeGreaterThan(0);
+    });
   });
 
   describe('Provider GPU manual block (maintenance windows) (#42)', () => {

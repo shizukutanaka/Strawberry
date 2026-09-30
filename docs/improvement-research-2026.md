@@ -477,6 +477,10 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **テスト**: `tests/scripts/sh-scripts.test.js` 新規5件 — bash -n 構文・`set -euo pipefail`・deploy.sh の非ゼロ終了・preflight の両経路（実機で両方向の終了コードを確認済み）。
 - **参考**: Google Shell Style Guide（set -euo pipefail）/ 十二因子アプリの fail-fast 設定検証
 
+### 市場価格エンジンの見積もり配線（2026-09-27）
+- **対応**: `GET /gpus/:id/estimate` に `marketReference`（advisory）を追加し、孤立していた `MarketPricingEngine`（TFLOPS/VRAM/地域/需給/時間帯係数）を配線 — このドキュメント §4 の「pricing engine をマッチングへ配線」の部分対応。実課金は従来どおり `pricePerHour × 時間`。
+- **同時修正**: `getGPUSpecs()` が未知モデルへ合成スペック（tflops=10）を返していたため `calculateGPUPrice` の `!gpuSpecs → getDefaultPrice` フォールバックがデッドコード化していた。未一致時 `null` 返却に修正し、estimate では `marketReference: null` を返す（合成価格で誤誘導しない）。
+
 ## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-timer-unref` → PR 化

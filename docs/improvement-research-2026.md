@@ -456,6 +456,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+
+### .env.example 再同期（2026-09-27・#55 後の差分）
+- **対応**: #55 マージ後に残っていた未記載の環境変数 12 件を追記 — ops スクリプト系（PROGRESS_SHEET_ID/FEEDBACK_SHEET_ID/NOTION_TOKEN/NOTION_DB_ID/GITHUB_TOKEN/GITHUB_REPO/SLACK_BOT_TOKEN/SLACK_CHANNEL/LND_PROTO_PATH/API_ENDPOINT）と e2e 系（E2E_BASE_URL/PLAYWRIGHT_CHROMIUM_PATH）。CI/DOCKER_HOST/HOME 等のシステム由来変数は対象外。
 - `responseTime` ミドルウェアに RED メトリクス（`http_requests_total` / `http_request_duration_seconds`）を実装: 従来は遅いリクエストの warn ログのみで定量観測できなかった。ラベルはルートテンプレート正規化（`/api/v1/gpus/:id`）で高カーディナリティ防止。/metrics の既存 Prometheus 配線を利用。
 - 空スタブだった `docker/docker-compose.yml`・`kubernetes/{deployment,service}.yaml` を実マニフェスト化: compose は Dockerfile.api ビルド+data/logs ボリューム永続化、deployment は /health probes・Secret 参照・readOnlyRootFilesystem・replicas=1（JSON 単一ライター前提）とした。
 - `createJsonRepository` に stat 指紋（mtime:size）ゲートの共有読み込みキャッシュを内蔵: 無変更時は `readFileSync`+`JSON.parse` を行わず複製を返す。全9リポジトリの全読み取り経路（getAll/getById/finder/書き込み前ロード）が対象で、呼び出し側ごとの局所キャッシュ（認証・通知設定・失効リスト・ポーラー等）をインフラ層に統合。返却値は `structuredClone` で隔離しキャッシュ汚染を防止、破損時は従来通り fail-closed。

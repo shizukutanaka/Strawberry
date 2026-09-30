@@ -3,8 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 const { createJsonRepository } = require('../../src/db/json/createJsonRepository');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
 
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = resolveDataDir();
 const FILE = `__updatemany_probe_${process.pid}.json`;
 const FULL = path.join(DATA_DIR, FILE);
 

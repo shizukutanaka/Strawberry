@@ -136,6 +136,13 @@ export const api = {
   approveManualPayment: (paymentId) => request(`/api/v1/payments/manual/approve/${paymentId}`, { method: 'POST' }),
   pendingManualPayments: () => request('/api/v1/payments/admin/pending'),
 
+  // --- admin ---
+  adminStats: () => request('/api/v1/admin/stats'),
+  adminVerifications: (query) => request('/api/v1/admin/verifications', { query }),
+  adminEscrow: (query) => request('/api/v1/admin/escrow', { query }),
+  adminExpireOrders: (types) => request('/api/v1/admin/expire-orders', { method: 'POST', body: types ? { types } : {} }),
+  adminCachePurge: () => request('/api/v1/admin/cache/purge', { method: 'POST' }),
+
   // --- exchange rate ---
   exchangeRate: (fresh) => request('/api/exchange-rate', { auth: false, query: fresh ? { fresh: 'true' } : undefined }),
 };

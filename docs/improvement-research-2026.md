@@ -503,6 +503,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
 - **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→249件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。Electron 未統合・SPA リフレッシュ未実装など依然正確な残課題は維持。
 
+## docs: E2E テスト実行手順の新設（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）
+
+`npm run test:e2e`（Playwright、9 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
+
+
 ## chore: package.json の npm メタデータ整備（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-pkg-metadata` → PR 化

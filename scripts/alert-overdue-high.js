@@ -1,37 +1,29 @@
 // 期限切れ＋高優先度タスクをSlackにアラート通知するスクリプト
-const fs = require('fs');
-const path = require('path');
-const { sendSlackMessage } = require('./slack-feedback-bot');
-const { readJsonArray } = require('./lib/read-json');
-
-const PRIORITY_FILE = path.join(__dirname, '../docs/feedback-priority.json');
-
-function isOverdue(due) {
-  if (!due) return false;
-  const today = new Date();
-  const dueDate = new Date(due);
-  return !isNaN(dueDate) && dueDate < today;
-}
+const { loadPriorityFeedback, isOverdue, dueOf, sendAlert } = require('./lib/alert-common');
 
 function alertOverdueHigh() {
-  if (!fs.existsSync(PRIORITY_FILE)) {
+  const feedbacks = loadPriorityFeedback();
+  if (feedbacks.length === 0) {
     console.log('優先度付きフィードバックファイルがありません');
-    return;
+    return 0;
   }
-  const feedbacks = readJsonArray(PRIORITY_FILE);
-  const overdueHigh = feedbacks.filter(fb => fb.priority === '高' && isOverdue(fb.due || fb.deadline || fb.期限 || fb.date));
+  const overdueHigh = feedbacks.filter(fb => fb.priority === '高' && isOverdue(dueOf(fb)));
   if (overdueHigh.length === 0) {
     console.log('期限切れかつ高優先度のタスクはありません');
-    return;
+    return 0;
   }
-  const msg = `【期限切れ×高優先度アラート】期限切れかつ高優先度のタスクが${overdueHigh.length}件あります\n` +
-    overdueHigh.map(fb => `- ${fb.due || fb.deadline || fb.期限 || fb.date || ''} ${fb.user || ''}: ${fb.message || ''}`).join('\n');
-  sendSlackMessage(msg);
+  sendAlert('【期限切れ×高優先度アラート】期限切れかつ高優先度のタスク', overdueHigh);
   console.log('期限切れ×高優先度アラートをSlackに通知しました');
+  return overdueHigh.length;
 }
 
 if (require.main === module) {
-  alertOverdueHigh();
+  try {
+    alertOverdueHigh();
+  } catch (e) {
+    console.error(`期限切れ×高優先度アラート通知に失敗: ${e.message}`);
+    process.exit(1);
+  }
 }
 
 module.exports = { alertOverdueHigh };

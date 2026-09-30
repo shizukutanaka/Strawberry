@@ -26,7 +26,7 @@
 > - virtual-gpu / gpu-detector / Lightning(gRPC) はロード可能に修正済（実機=Docker/k8s/LND が必要）。P2P(libp2p ESM) のみ依然無効。
 > - データ層が JSON / Prisma / pg・knex で三重化。現状は JSON のみ稼働。
 > - 既存テストの一部は未実装エンドポイントや古いAPIを参照しており失敗する（実装との不整合）。
-> - 孤立した `*-fixed.js`、Electron(preload/react-app) は未配線。
+> - `*-fixed.js` 孤立ファイルは整理済み（現存なし）。Electron シェルは `public/electron.js` + `public/preload.js` 実装済み（`npm run desktop` で起動、配布パッケージングは未配線）。
 
 ## 全体方針
 - 現金換算・監査証跡・死活監視・自動復旧・Prometheus監視・外部通知hookを全サービス/全APIで徹底

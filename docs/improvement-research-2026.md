@@ -449,6 +449,15 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - webhook.js / lightning-api.js の SSRF リダイレクト迂回とタイムアウト欠如を修正: assertPublicUrl() は最初の URL のみ検証するため、axios 既定のリダイレクト追従でガードを迂回可能だった残存経路を遮断（OWASP SSRF Prevention Cheat Sheet の「リダイレクトごとの再検証または追従禁止」準拠）。SAFE_AXIOS_CONFIG を ssrf-guard に集約し、ガードと安全設定を同所化。
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-timer-unref` → PR 化
+
+1. `AutoPerformanceOptimizer.start()` の `setInterval` が `unref` されておらず `stop()` も存在しなかった — 起動配線（open PR 参照）後は ref 済みタイマーがイベントループを生かし続け、SIGTERM での drain 不能→コンテナ環境で SIGKILL タイムアウトに化ける。unref + `stop()` 追加（service-monitor/invoice-poller と同一規約）。
+2. `MetricsCollector.startCollection()` の interval も同様に unref。
+3. **実バグ**: `src/gpu/metrics.js` のカスタム Gauge/Counter 34件が `registers` 未指定で prom-client のグローバル default registry へ登録されていた — `new MetricsCollector()` は同一プロセス内で2回目に必ず `already been registered` を throw し、MetricsCollector をそれぞれインスタンス化する auto-performance-optimizer と gpu-liveness-monitor が同居できない設計上の衝突だった。各メトリクスへ `registers: [this.register]` を付与しインスタンス registry を正とし、`registerAllMetrics()` は冪等化。`/metrics` エンドポイントは prom-client グローバルを返すが、現在どの起動経路も MetricsCollector を生成していないため main の観測出力は変化しない。
+
 - `tests/e2e` のデータ破壊を防止: `globalSetup` が `data/*.json` を無条件で `[]`/`{}` にリセットしていたため、開発者の live レコード（users/orders/payments 等）を `npm run test:e2e` の度に消去していた。リセット前に `data/.e2e-snapshot/` へ既存ファイルを退避し、新設の `globalTeardown` が実行後に復元する方式へ変更。テスト中に生成されたファイルの除去・`data/` 不存在時の完全復元・前回クラッシュ時の自動復旧（次回 setup 先頭で残存 snapshot を先に復元）にも対応。
 - `scripts/prepare-data.js` のサンプルデータを実スキーマ準拠＋非稼働へ修正: `vendor`/`apiType`/`pricePerHour`/`providerId` 欠落で `status:'available'` な GPU を種入れしており、`GET /api/v1/gpus?vendor=…` の `gpu.vendor.toLowerCase()` TypeError(500)・価格計算不能な出品・`status:'pending'` かつ `createdAt` 欠落の注文による失効スイープ/admin 統計の歪みが起き得た。実登録スキーマ適合・`status:'maintenance'`/`cancelled`・passwordHash 無しユーザー・`demo:true` マーカーに修正し、スキーマ適合を検証するガードテストを追加。
 - `data/*.json` の定期バックアップを配線: `utils/backup.js` の `backupAll` は実装済みだが呼び出し側ゼロ（手動実行以外ではバックアップ不動＝復元元が存在しないサイレント欠陥）。`core/backup-scheduler.js` を新設し `BACKUP_INTERVAL_HOURS` opt-in で起動配線。任意クラウド SDK 未導入環境では遅延 require が失敗→警告+無効化でサーバ起動を妨げない設計、単一フライト・タイマー unref・テスト環境抑止込み。

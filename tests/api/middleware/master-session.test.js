@@ -5,6 +5,8 @@
 // three-step auth state set under /master-auth/* would be invisible to the
 // other route. These tests pin the singleton contract.
 
+const { masterSessionOptions } = require('../../../src/api/middleware/master-session');
+
 describe('master-session shared singleton', () => {
   const MODULE = '../../../src/api/middleware/master-session';
   const SECRET_KEY = 'SESSION_SECRET';
@@ -42,5 +44,22 @@ describe('master-session shared singleton', () => {
     // config.js resolves JWT_SECRET first, so the thrown secret name varies;
     // the contract under test is production fail-fast, not which secret fires.
     expect(() => require(MODULE)).toThrow(/required secret/);
+  });
+});
+
+describe('master-session config', () => {
+  it('bounds the elevated session with an absolute TTL', () => {
+    const { maxAge } = masterSessionOptions.cookie;
+    expect(Number.isFinite(maxAge)).toBe(true);
+    expect(maxAge).toBeGreaterThan(0);
+    // 昇格セッションは長くても 1 時間以内に失効する
+    expect(maxAge).toBeLessThanOrEqual(60 * 60 * 1000);
+  });
+
+  it('keeps the hardened cookie attributes', () => {
+    expect(masterSessionOptions.cookie.httpOnly).toBe(true);
+    expect(masterSessionOptions.cookie.sameSite).toBe('strict');
+    expect(masterSessionOptions.resave).toBe(false);
+    expect(masterSessionOptions.saveUninitialized).toBe(false);
   });
 });

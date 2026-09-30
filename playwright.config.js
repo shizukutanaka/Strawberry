@@ -17,6 +17,7 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH
 module.exports = {
   testDir: './tests/e2e',
   globalSetup: require.resolve('./tests/e2e/globalSetup.js'),
+  globalTeardown: require.resolve('./tests/e2e/globalTeardown.js'),
   timeout: 30000,
   expect: { timeout: 5000 },
   fullyParallel: false, // shares the JSON data layer with a single running server; see jest.config.js's own note on cross-worker races

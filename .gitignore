@@ -22,3 +22,5 @@ build/
 *.tmp
 test-results/
 playwright-report/
+data-test/
+src/health.json

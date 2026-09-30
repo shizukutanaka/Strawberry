@@ -26,30 +26,35 @@ class MetricsCollector {
         this.gpuMetrics = {
             // ゲージ: 現在の値
             totalGPUs: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_gpus_total',
                 help: 'Total number of GPUs in the system',
                 labelNames: ['status', 'model']
             }),
             
             gpuUtilization: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_gpu_utilization_percent',
                 help: 'GPU utilization percentage',
                 labelNames: ['gpu_model']
             }),
 
             gpuTemperature: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_gpu_temperature_celsius',
                 help: 'GPU temperature in Celsius',
                 labelNames: ['gpu_model']
             }),
 
             gpuMemoryUsed: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_gpu_memory_used_bytes',
                 help: 'GPU memory used in bytes',
                 labelNames: ['gpu_model']
             }),
 
             gpuPowerDraw: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_gpu_power_draw_watts',
                 help: 'GPU power draw in watts',
                 labelNames: ['gpu_model']
@@ -57,6 +62,7 @@ class MetricsCollector {
             
             // ヒストグラム: 分布
             gpuAllocationDuration: new promClient.Histogram({
+                registers: [this.register],
                 name: 'strawberry_gpu_allocation_duration_seconds',
                 help: 'Duration of GPU allocations',
                 labelNames: ['gpu_model'],
@@ -67,18 +73,21 @@ class MetricsCollector {
         // レンタル関連メトリクス
         this.rentalMetrics = {
             activeRentals: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_active_rentals_total',
                 help: 'Total number of active rentals',
                 labelNames: ['gpu_model', 'region']
             }),
             
             rentalRevenue: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_rental_revenue_usd_total',
                 help: 'Total rental revenue in USD',
                 labelNames: ['gpu_model', 'payment_method']
             }),
             
             rentalDuration: new promClient.Histogram({
+                registers: [this.register],
                 name: 'strawberry_rental_duration_hours',
                 help: 'Distribution of rental durations',
                 labelNames: ['gpu_model'],
@@ -86,6 +95,7 @@ class MetricsCollector {
             }),
             
             rentalPrice: new promClient.Histogram({
+                registers: [this.register],
                 name: 'strawberry_rental_price_usd_per_hour',
                 help: 'Distribution of rental prices per hour',
                 labelNames: ['gpu_model'],
@@ -96,12 +106,14 @@ class MetricsCollector {
         // P2Pネットワークメトリクス
         this.networkMetrics = {
             connectedPeers: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_p2p_connected_peers',
                 help: 'Number of connected P2P peers',
                 labelNames: ['peer_type']
             }),
             
             networkLatency: new promClient.Histogram({
+                registers: [this.register],
                 name: 'strawberry_p2p_latency_ms',
                 help: 'P2P network latency in milliseconds',
                 labelNames: ['region'],
@@ -109,18 +121,21 @@ class MetricsCollector {
             }),
             
             messagesSent: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_p2p_messages_sent_total',
                 help: 'Total P2P messages sent',
                 labelNames: ['message_type']
             }),
             
             messagesReceived: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_p2p_messages_received_total',
                 help: 'Total P2P messages received',
                 labelNames: ['message_type']
             }),
             
             bandwidth: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_p2p_bandwidth_bytes_per_second',
                 help: 'P2P network bandwidth usage',
                 labelNames: ['direction'] // 'in' or 'out'
@@ -130,30 +145,35 @@ class MetricsCollector {
         // Lightning Network メトリクス
         this.lightningMetrics = {
             channelBalance: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_lightning_channel_balance_sats',
                 help: 'Lightning channel balance in satoshis',
                 labelNames: ['channel_id', 'balance_type'] // 'local' or 'remote'
             }),
             
             paymentVolume: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_lightning_payment_volume_sats',
                 help: 'Total Lightning payment volume',
                 labelNames: ['payment_type'] // 'sent' or 'received'
             }),
             
             paymentCount: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_lightning_payment_count',
                 help: 'Total number of Lightning payments',
                 labelNames: ['payment_type', 'status'] // 'success' or 'failed'
             }),
             
             invoiceSettleTime: new promClient.Histogram({
+                registers: [this.register],
                 name: 'strawberry_lightning_invoice_settle_time_seconds',
                 help: 'Time to settle Lightning invoices',
                 buckets: [1, 5, 10, 30, 60, 300]
             }),
             
             routingFees: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_lightning_routing_fees_sats',
                 help: 'Total routing fees collected',
                 labelNames: ['channel_id']
@@ -163,30 +183,35 @@ class MetricsCollector {
         // システムメトリクス
         this.systemMetrics = {
             cpuUsage: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_system_cpu_usage_percent',
                 help: 'System CPU usage percentage',
                 labelNames: ['cpu_core']
             }),
             
             memoryUsage: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_system_memory_usage_bytes',
                 help: 'System memory usage',
                 labelNames: ['memory_type'] // 'used', 'free', 'total'
             }),
             
             diskUsage: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_system_disk_usage_bytes',
                 help: 'System disk usage',
                 labelNames: ['disk_type', 'mount_point'] // 'used', 'free', 'total'
             }),
             
             processMetrics: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_process_metrics',
                 help: 'Node.js process metrics',
                 labelNames: ['metric_type'] // 'heap_used', 'external', 'handles', etc.
             }),
             
             errorRate: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_errors_total',
                 help: 'Total number of errors',
                 labelNames: ['error_type', 'severity']
@@ -196,24 +221,28 @@ class MetricsCollector {
         // ビジネスメトリクス
         this.businessMetrics = {
             platformRevenue: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_platform_revenue_usd',
                 help: 'Total platform revenue in USD',
                 labelNames: ['revenue_type'] // 'fees', 'subscriptions', etc.
             }),
             
             userActivity: new promClient.Counter({
+                registers: [this.register],
                 name: 'strawberry_user_activity_total',
                 help: 'User activity metrics',
                 labelNames: ['activity_type'] // 'login', 'rental_start', 'gpu_listed', etc.
             }),
             
             conversionRate: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_conversion_rate_percent',
                 help: 'Conversion rate percentage',
                 labelNames: ['conversion_type'] // 'visitor_to_user', 'user_to_renter', etc.
             }),
             
             marketDemand: new promClient.Gauge({
+                registers: [this.register],
                 name: 'strawberry_market_demand_score',
                 help: 'Market demand score by GPU model',
                 labelNames: ['gpu_model', 'region']
@@ -235,7 +264,11 @@ class MetricsCollector {
         ];
 
         allMetrics.forEach(metric => {
-            this.register.registerMetric(metric);
+            // コンストラクタの `registers: [this.register]` で登録済みのものは
+            // スキップする（registerMetric は同名2重登録を throw する）
+            if (!this.register.getSingleMetric(metric.name)) {
+                this.register.registerMetric(metric);
+            }
         });
     }
 
@@ -249,6 +282,8 @@ class MetricsCollector {
             this.collectSystemMetrics();
             this.collectProcessMetrics();
         }, interval);
+        // unref: 収集タイマーがプロセス終了を妨げない
+        if (this.collectionInterval.unref) this.collectionInterval.unref();
 
         logger.info(`Metrics collection started with ${interval}ms interval`);
     }

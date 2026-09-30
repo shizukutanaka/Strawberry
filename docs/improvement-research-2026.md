@@ -503,6 +503,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### docs/SPECIFICATION.md のステータス同期（2026-09-27）
 - **対応**: 2026-06 時点の実装ステータスが陳腐化していたため main 実態へ追随 — Escrow（btc-onchain/marketplace/escrow 配線済）・GPU アテステーション（Mock verifier 配線済）・Reputation（アテステーション/稼働統計経由で部分配線）・OTel（instrumentation 読込済）・feature-pricer（marketplace-service 経由配線済）・データ整合性（updateIf/withLock 済）を更新。open PR にのみ存在する配線は「未」のまま維持。
 
+## `.github/CODEOWNERS` の新設 (2026-09-26)
+
+- **観測**: CODEOWNERS が不在のため PR 作成時にレビュアーが自動割当されず、資金決済・認証などの高リスク経路も既定レビューなしでマージ可能な状態だった。
+- **変更**: GitHub 標準の `.github/CODEOWNERS` を新設。全体を `@shizukutanaka`（リポジトリオーナー）の既定レビュー対象とし、payment/master-auth/security/lightning-service.js の資金・認証経路は防御的に個別明示（将来オーナーを増員する際の分離点としても機能）。
+- **参考**: GitHub Docs "About code owners"（ブランチ保護の「code owner レビュー必須」と組み合わせると強制力が出る）
+
 ## docs: E2E テスト実行手順の新設（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）

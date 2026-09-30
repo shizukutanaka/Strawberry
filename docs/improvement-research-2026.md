@@ -436,3 +436,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 package.json に `license`/`repository`/`bugs`/`homepage` が未記載で、npm・GitHub・各種ツールのメタデータ解決が効かなかった（`npm WARN`・パッケージ情報のリンク欠如）。LICENSE（MIT）と一致する `license: "MIT"`、`repository`/`bugs`/`homepage` を GitHub URL で宣言し、あわせて `private: true` を追加 — 本リポジトリは npm 公開を意図しないアプリケーションであり、誤 `npm publish` を構造的に防止するガードとして標準的な手段。
 
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

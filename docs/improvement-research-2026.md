@@ -430,3 +430,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `gpu-error-history.js` の競合・証跡喪失を修正: health/liveness 両モニタからの並行 `recordGpuError` が単一 JSON への read-modify-write で lost-update（エントリ消失）し得たため `withLock` 直列化（通知送信はロック外）。破損履歴ファイルが次回保存でサイレント上書きされる問題を `.corrupt-*` 退避へ変更（解析証跡を保全）、無制限増殖する GPU キーへ `MAX_GPU_KEYS` キャップを追加。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

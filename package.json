@@ -44,7 +44,8 @@
     "prisma-migrate": "prisma migrate dev --name init",
     "prisma-studio": "prisma studio",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
-    "setup": "npm ci && npm run prisma-migrate && npm run openapi-gen && npm test"
+    "desktop": "npx -y electron@44.4.3 public/electron.js",
+    "setup": "npm ci && npm run openapi-gen && npm test"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.78.0",
@@ -60,6 +61,7 @@
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.0",
     "express-session": "^1.18.0",
+    "google-auth-library": "^11.1.0",
     "graphql": "^16.9.0",
     "helmet": "^7.1.0",
     "joi": "^17.13.3",
@@ -81,8 +83,16 @@
     "@grpc/grpc-js": "^1.11.1",
     "@grpc/proto-loader": "^0.7.13",
     "@kubernetes/client-node": "^0.21.0",
+    "@notionhq/client": "^2.3.0",
+    "@octokit/rest": "^22.0.1",
+    "@slack/web-api": "^8.1.1",
     "aws-sdk": "^2.1691.0",
+    "chart.js": "^4.5.1",
+    "chartjs-node-canvas": "^5.0.0",
     "dockerode": "^4.0.2",
+    "googleapis": "^181.0.0",
+    "i18next": "^26.4.2",
+    "i18next-fs-backend": "^2.6.8",
     "imagemin": "^8.0.1",
     "imagemin-mozjpeg": "^10.0.0",
     "imagemin-pngquant": "^9.0.2"

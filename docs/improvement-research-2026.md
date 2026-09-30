@@ -429,3 +429,5 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `scripts/version-assets.js` / `update-references.js`（fingerprinting キャッシュバスティング）の実動化: ① 実資産が置かれる `public/js`・`public/css` サブディレクトリを走査しない非再帰欠陥でパイプライン全体が無音の no-op だったのを再帰化 ② 再実行ごとに `<base>.<hash>.<hash>.js` が無限蓄積していたのを、既バージョン済みスキップ＋旧ハッシュ掃除で冪等化 ③ 境界ガードなしの正規表現で `myapp.js` が `app.js` のハッシュに誤置換され壊れた参照を書き込んでいた問題を、参照直前の文字クラス（引用符・`/`・`=`・空白等）でガード。`npm run setup` が未導入の `prisma migrate` で必ず中断していた onboarding 破損も修正（prisma は ARCHITECTURE.md 記載通り未配線のため工程から除外）。
+- `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

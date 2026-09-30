@@ -20,6 +20,18 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     logger.info('Google OAuth login', { id: profile.id, name: profile.displayName });
     return done(null, profile);
   }));
+  // Web フロー（routes/auth.js）用。passport-oauth2 は authenticate() の `state: true` では
+  // state を発行せず、Strategy 生成時の `state: true` で初めてセッションに nonce を保存・検証する。
+  // master-auth は別セッション（SameSite=Strict）で 'google' を使うため、別名で登録する。
+  passport.use('google-web', new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_CALLBACK_URL,
+    state: true,
+  }, (accessToken, refreshToken, profile, done) => {
+    logger.info('Google OAuth login', { id: profile.id, name: profile.displayName });
+    return done(null, profile);
+  }));
 } else {
   logger.warn('Google OAuth is not configured (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET not set)');
 }
@@ -30,6 +42,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     clientID: process.env.GITHUB_CLIENT_ID,
     clientSecret: process.env.GITHUB_CLIENT_SECRET,
     callbackURL: process.env.GITHUB_CALLBACK_URL,
+    state: true,
   }, (accessToken, refreshToken, profile, done) => {
     logger.info('GitHub OAuth login', { id: profile.id, name: profile.displayName });
     return done(null, profile);

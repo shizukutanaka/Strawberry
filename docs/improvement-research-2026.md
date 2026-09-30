@@ -491,6 +491,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `improvement_checklist2.md` の「カテゴリ別進捗サマリー」: 全件「実装済み」主張は一括[x]化と同時の自動生成値で実績ではない旨の注意を追加し、自己矛盾解消済み2セクションの件数を実値へ補正。
 
+### 管理ダッシュボード SPA ページ（2026-09-27, §19 管理画面の部分対応）
+- **対応**: `/admin/stats`・`/admin/verifications`・`/admin/escrow`・`/admin/expire-orders`・`/admin/cache/purge` の admin API は実装済みだが SPA 側に利用経路がなく運用者が curl 頼みだった。`public/js/pages/admin.js` を新設（統計カード/検証監査表/エスクロー表＋状態フィルタ/スイープ・パージ操作）、api.js に admin.* ヘルパー5件、`#/admin` ルート＋admin ナビリンクを追加。フロントが架空パスを呼ぶ事故を防ぐ契約テスト3件（tests/unit/admin-page-contract.test.js）+ e2e spec（admin.spec.js）を追加。
+
 ### Node バージョン下限の宣言（2026-09-27）
 - **対応**: `package.json` に `engines.node >= 20` を追加し `.nvmrc` を新設。CI は全ワークフロー Node 20/22 で検証されており下限は 20 が実態（加えて #134 の bcrypt 6 が Node 18+ を要求）。nvm/fnm/volta 利用者と npm engine チェックが機能するようになる。
 - `src/core/services.js`（任意サービスの safeLoad/requireService ゲート）のユニットテストを追加。GPU/P2P/Lightning の任意依存が未導入でも本体が起動し、無効サービスのエンドポイントが 503 を返す契約を固定。

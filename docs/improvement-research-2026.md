@@ -432,3 +432,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### alert-kpi-trend の実動化（2026-09-27）
 - **対応**: `npm run alert-kpi-trend` が生成側の単一ファイル上書き（`docs/checklist-kpi-report.md`）と食い違う「日付付き履歴2件必須」前提で常に「2つ以上必要です」で終了する構造的デッドコードだった。前回値を `data/kpi-trend-state.json`（`KPI_STATE_FILE`/`KPI_REPORT_DIR`/`KPI_ALERT_THRESHOLD` で差し替え可）へ自身で記録する方式へ変更 — 単一レポート運用で動作し、同一内容の再実行では差分ゼロなので二重通知しない。パース不能・状態ファイル破損・レポート不在の各経路を明示ハンドリング。#127（kpi-trend-graph の同型バグ）の姉妹修正。テスト5件追加。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

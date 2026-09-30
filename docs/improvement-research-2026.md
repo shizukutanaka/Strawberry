@@ -432,3 +432,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### gpu_lending_dashboard_mock.jsx を実 API 契約へ同期（2026-09-27）
 - **対応**: ルートの React モックが架空 API（`/api/gpu?owner=me`、認証ヘッダなし）と存在しないフィールド（`gpu.status`/`earningJPY`/`earningBTC`、架空の `/mock/earnings_graph.png`）を参照していた。実契約へ書き換え: `GET /api/v1/gpus/my`（JWT必須）+ `GET /orders/provider/earnings`（provider/admin）の `byGpu` 内訳で GPU 別収益を表示し、`available` フラグで稼働状況を表現。#111（cli.md）と同種のモック同期。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

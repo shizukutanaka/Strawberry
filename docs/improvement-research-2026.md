@@ -455,6 +455,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `docs/OPERATIONS.md` を新設: 起動/開発コマンド・必須 env（JWT_SECRET の fail-fast 挙動・METRICS_AUTH_TOKEN の fail-closed）・常駐ループ（メトリクス 10s / service-monitor 既定 10s / invoice-poller 15s / 注文スイープ 30s+遅延）・33 本の ops スクリプトと必須 env・通知チャネル・CI ジョブ・データ/ログ管理を一元化。各スクリプトの必須 env はコードから機械的に集約。
+- `.gitignore` に実行時生成物を追加: `data-test/`（Jest ワーカー別データ分離の出力）と `src/health.json`（`src/p2p-health.js`/`src/p2p-notify.js` が実行時に生成）。いずれもローカル実行後に untracked としてツリーを汚していた。
 
 ### .env.example 再同期（2026-09-27・#55 後の差分）
 - **対応**: #55 マージ後に残っていた未記載の環境変数 12 件を追記 — ops スクリプト系（PROGRESS_SHEET_ID/FEEDBACK_SHEET_ID/NOTION_TOKEN/NOTION_DB_ID/GITHUB_TOKEN/GITHUB_REPO/SLACK_BOT_TOKEN/SLACK_CHANNEL/LND_PROTO_PATH/API_ENDPOINT）と e2e 系（E2E_BASE_URL/PLAYWRIGHT_CHROMIUM_PATH）。CI/DOCKER_HOST/HOME 等のシステム由来変数は対象外。

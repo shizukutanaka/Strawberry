@@ -503,6 +503,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### ルート SPECIFICATION.md の 2026-09 追補（2026-09-27）
 - **対応**: ルート `SPECIFICATION.md`（2026-06 実態ベース仕様書）の冒頭に追補を追加。当時の残課題だった OTel SDK 連携（D-2）が `src/telemetry/instrumentation.js` で配線済みである点、probe テストが 60 件超へ拡充、§4 表外の `/admin/*`・`/marketplace/escrow/*`・`/gpus/:id/estimate`・`/gpus/:id/watch` 追加、エスクロー状態機械の実装を明記。docs/SPECIFICATION.md（#133）とは別ファイル・非重複。
 
+## docs: E2E テスト実行手順の新設（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）
+
+`npm run test:e2e`（Playwright、9 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
+
+
 ## chore: package.json の npm メタデータ整備（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-pkg-metadata` → PR 化

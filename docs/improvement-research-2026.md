@@ -430,6 +430,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- アカウント退会（DELETE /users/me）と payoutAddress 変更（PUT /me）に再認証を追加: JWT 所持のみで PII 匿名化＋全セッション失効、およびプロバイダ受取アドレス差替（＝次回決済の攻撃者宛送金）が可能だった。OWASP「sensitive operations require re-authentication」に倣い `verifySensitiveConfirmation` を共通化 — パスワード照合（bcrypt）を必須化し、パスワードを持たない OAuth 専用アカウントは登録メール再入力で代替。`authLimiter` 付与で確認パスワードの総当たりも防止。資金に直結しない通常プロフィール項目（username/bio 等）は再認証不要。
 - `/marketplace/auction` の権威フィールド偽装防止: 入札オブジェクトの `reputationScore`/`eligible`/`attestationPassed`/`slaUptimePct` をクライアントが供給できていたため、任意の認証済みユーザーが自陣プロバイダに満点レピュテーションを付けて優勝させたり競合を `eligible:false` で排除できた。ルートで providerId/pricePerHour のみにサニタイズし、権威値はサービス層に限定（selectProvider の上書き経路は DI/テスト用として維持）。
 - sanitizeSensitiveFields の DoS 対策: 深度無制限再帰で ~8,000 段ネスト JSON（≈48KB、body-parser 上限内）が監査ミドルウェア経由で全リクエストに作用しスタックオーバーフロー→プロセス終了が成立していた。深度 32 で打ち切り（'[TRUNCATED]'）＋WeakSet で循環参照を '[CIRCULAR]' に置換。配列は配列として複写（従来はオブジェクト化していた）。
 - LINE Notify 送信の耐障害化: `scripts/line-notify.js`（service-monitor の LINE 経路）に 10 秒タイムアウト（`LINE_NOTIFY_TIMEOUT_MS`）を追加し、失敗ログから axios エラーオブジェクトを排除 — `e.config.headers.Authorization` に含まれる `LINE_TOKEN` がログへ漏洩する経路を遮断。

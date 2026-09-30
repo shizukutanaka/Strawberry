@@ -459,6 +459,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- `README.md` の実在しない運用コマンドを実在手段へ修正: `npm run start:prometheus`/`monitor:nodes`/`benchmark`/`report:monthly` は未実装のため `/metrics`（Bearer 保護）・`gpu-failure-monitor`・`progress-report` へ置き換え、「自動本番デプロイ」は ci-cd.yml の Deploy が echo スタブである旨を明記。
 - `CONTRIBUTING.md` を実態へ同期: 「main または develop からブランチ作成」→ develop は不在（main のみ）、「CI で lint/test/openapi をチェック」の記述を実ワークフローへ具体化（build-test の lint は non-blocking、coverage 閾値70、openapi-autogen の対象パス、optimize-images、ci-cd は main push のみで Deploy はスタブ）。日英両セクション。
 - `.gitignore` に実行時生成物を追加: `data-test/`（Jest ワーカー別データ分離の出力）と `src/health.json`（`src/p2p-health.js`/`src/p2p-notify.js` が実行時に生成）。いずれもローカル実行後に untracked としてツリーを汚していた。
 

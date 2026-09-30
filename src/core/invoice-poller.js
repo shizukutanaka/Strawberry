@@ -7,10 +7,11 @@ const { logger } = require('../utils/logger');
 const PaymentRepository = require('../db/json/PaymentRepository');
 const OrderRepository = require('../db/json/OrderRepository');
 const { appendAuditLog } = require('../utils/audit-log');
+const { resolveDataDir } = require('../db/json/data-dir');
 
 const POLL_INTERVAL_MS = 15_000; // check every 15 s
 const INVOICE_EXPIRE_BUFFER_MS = 60_000; // 1 min grace after invoiceExpiresAt
-const PAYMENTS_FILE = path.resolve(__dirname, '../../data/payments.json');
+const PAYMENTS_FILE = path.join(resolveDataDir(), 'payments.json');
 
 let _timer = null;
 let _running = false;

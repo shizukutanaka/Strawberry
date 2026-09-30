@@ -14,9 +14,18 @@ const { initial, transition, applyDecision } = require('./escrow-state-machine')
 const { computeSettlement } = require('./settlement-calculator');
 const { executeActions } = require('./action-executor');
 
-function createEscrowService({ repository, lnAdapter } = {}) {
+function createEscrowService({ repository, lnAdapter, audit } = {}) {
   // 遅延 require: テスト時は repository を注入し、JSON 層を読み込まない
   const repo = repository || require('../db/json/EscrowRepository');
+
+  // 資金移動のライフサイクルを改竄検知付き監査ログ（utils/audit-log のハッシュ連鎖）へ
+  // 記録する。escrow 行内の history は差し替え可能な JSON データの一部で、監査証跡としては
+  // 書き手自身が編集できてしまう — 資金経路のイベントはこちらへも残す。
+  // appendAuditLog 自身が内部で例外を飲み込む設計のため失敗は伝播しない。
+  // audit は DI 可能（テストで発行イベントを捕捉できる）。
+  const appendAudit = audit === undefined
+    ? (action, detail) => require('../utils/audit-log').appendAuditLog(action, detail)
+    : audit;
 
   // actions を lnAdapter 経由で実行し、結果を履歴へ追記する。lnAdapter 未指定時は
   // 何もしない（呼び出し元が LN 結線をまだ持たない場合の後方互換）。
@@ -51,6 +60,9 @@ function createEscrowService({ repository, lnAdapter } = {}) {
           { event: 'LN_ACTIONS_FAILED', error: e.message, actions, at: now },
         ],
       });
+      appendAudit('escrow_ln_actions_failed', {
+        escrowId: escrow.id, orderId: escrow.orderId, actions, error: e.message,
+      });
       return null;
     }
   }
@@ -80,8 +92,19 @@ function createEscrowService({ repository, lnAdapter } = {}) {
     // repo.update（updateIf 非対応フォールバック）は更新行を直接返す。
     const saved = writeResult && typeof writeResult.ok !== 'undefined' ? writeResult.row : writeResult;
     if (!saved || (writeResult && writeResult.ok === false)) {
+      appendAudit('escrow_transition_conflict', {
+        escrowId: escrow.id, orderId: escrow.orderId, event, expectedState: escrow.state,
+      });
       throw new Error(`escrow ${escrow.id} state changed concurrently; transition '${event}' was not applied`);
     }
+    appendAudit('escrow_transition', {
+      escrowId: escrow.id,
+      orderId: escrow.orderId,
+      event,
+      from: escrow.state,
+      to: result.state,
+      actions: result.actions,
+    });
     return saved;
   }
 
@@ -116,13 +139,16 @@ function createEscrowService({ repository, lnAdapter } = {}) {
         const existing = repo.getByOrderId(orderId) || [];
         const active = existing.filter((e) => e.state !== 'CANCELED');
         if (active.length > 0) {
+          appendAudit('escrow_create_rejected', {
+            orderId, existingEscrowId: active[0].id, existingState: active[0].state,
+          });
           throw new Error(`escrow already exists for order ${orderId} (id=${active[0].id}, state=${active[0].state})`);
         }
       }
       const clampedFeeRate = typeof feeRate === 'number' && Number.isFinite(feeRate)
         ? Math.max(0, Math.min(0.99, feeRate))
         : 0;
-      return repo.create({
+      const created = repo.create({
         orderId,
         amountSats,
         feeRate: clampedFeeRate,
@@ -131,6 +157,10 @@ function createEscrowService({ repository, lnAdapter } = {}) {
         state: initial(),
         history: [],
       });
+      appendAudit('escrow_created', {
+        escrowId: created.id, orderId, amountSats, feeRate: clampedFeeRate, deadlineAt,
+      });
+      return created;
     },
 
     /** hold invoice が入金された（PENDING→HELD, preimage 秘匿）。 */
@@ -201,8 +231,18 @@ function createEscrowService({ repository, lnAdapter } = {}) {
         : { ok: true, row: repo.update(escrow.id, { settlement, updatedAt: now,
             history: [...(escrow.history || []), { event: 'SETTLEMENT_COMPUTED', settlement, state: escrow.state, at: now }] }) };
       if (!writeResult.ok) {
+        appendAudit('escrow_settlement_conflict', { escrowId: escrow.id, orderId: escrow.orderId });
         throw Object.assign(new Error('Settlement already written by a concurrent operation'), { code: 'CONCURRENT_SETTLE' });
       }
+      appendAudit('escrow_settlement_computed', {
+        escrowId: escrow.id,
+        orderId: escrow.orderId,
+        state: escrow.state,
+        providerPayoutSats: settlement.providerPayoutSats,
+        renterRefundSats: settlement.renterRefundSats,
+        operatorFeeSats: settlement.operatorFeeSats,
+        chargedSats: settlement.chargedSats,
+      });
       return { escrow: writeResult.row, settlement };
     },
 

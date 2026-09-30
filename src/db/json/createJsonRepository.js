@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { atomicWriteJSON } = require('./atomicWrite');
+const { resolveDataDir } = require('./data-dir');
 
 // プロトタイプ汚染対策（深層防御）。全リポジトリの create/update/updateIf がこの
 // チョークポイントを通るため、ここで危険キーを一括除去する。
@@ -48,7 +49,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
   ) {
     throw new Error(`[json-repo] invalid fileName: "${fileName}". Must be a plain .json filename without path separators.`);
   }
-  const filePath = path.resolve(__dirname, '../../../data', fileName);
+  const filePath = path.join(resolveDataDir(), fileName);
 
   const audit = (action, detail) => {
     if (!onAccess) return;

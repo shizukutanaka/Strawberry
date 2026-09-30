@@ -34,8 +34,8 @@ router.get('/', _erLimiter, async (req, res) => {
           if (decoded && decoded.role === 'admin') {
             const { isRevoked } = require('../middleware/token-denylist');
             const { isSessionInvalidated } = require('../utils/session-invalidation');
-            const UserRepository = require('../../db/json/UserRepository');
-            const u = UserRepository.getById(decoded.id);
+            const { getAuthUser } = require('../utils/auth-user-lookup');
+            const u = getAuthUser(decoded.id);
             const revoked = decoded.jti && isRevoked(decoded.jti);
             const invalidated = !u || u.status === 'deactivated' || isSessionInvalidated(u, decoded.iat);
             if (!revoked && !invalidated) forceFresh = true;

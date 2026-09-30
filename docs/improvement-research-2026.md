@@ -445,7 +445,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
   逐次 update の N+1 書き込み増幅を潰す。
 
 - 残存 N+1 の後始末（perf）: `payment-reminder.js` の支払いごとの `UserRepository.getById`（users.json を件数ぶん全量読込）を 1 回の `getAll` → Map 化へ置換。`order-expiry.js` の係争自動解決では `EscrowRepository.getAll` を「解決が実際に発生した時だけ構築する orderId→HELD エスクロー Map」に遅延集約（no-op スイープで無駄読みしない）。孤立 React ファイル `src/web/pages/settings/notifications.js`（React/axios 前提だがビルド系・参照ともに無し、JWT モデルと整合しない旧式実装）を削除。
-||||||| 5c3f4ed
 
 ### その他実装済（運用ドキュメント）
 - `tests/unit/test_exchange_rate.js` を `exchange-rate-fallback.test.js` へ改修: 旧ファイルは名前が jest testMatch に合わず常時スキップされ、かつ assert で実 API を呼ぶ死テストだった（「全失敗で throw」期待も非 production では誤り）。axios モック化＋NODE_ENV 分岐を正しく検証（全API失敗→DEFAULT_RATE/production throw/stale 優先・プロバイダフォールバック順・範囲外レート拒否・withTimestamp）。

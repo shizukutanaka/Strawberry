@@ -426,7 +426,6 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
 - invoice-poller の stat ゲート早期 return（perf）: 15 秒周期ポーラーが毎回 payments.json を全量読み込み+パースしていた。`fs.statSync` の (mtimeMs,size) 指紋で「ファイル不変かつ前回 pending=0」のとき全量パースをスキップ（pending>0 は外部決済の再確認が必要なので従来通り）。静寂時のファイル I/O がゼロになり、新規支払いはファイル変更で確実に検知される。stop() でゲート状態もリセット。
-||||||| 5c3f4ed
 - 通知設定の読み込み N+1 解消（perf）: `user-notify.js` の `notifyUser` が通知送信のたびに notification-settings.json を全量読み込み+パースしていた（price-watch のウォッチャー通知等で件数ぶんの I/O）。auth-user-lookup と同じ stat(mtimeMs,size) ゲートで「ファイル変更時のみ再パース」に変更。設定保存は atomicWriteJSON（rename）のため mtime で確実に検知。
 - 認証パスの users.json 全量読み込み解消（perf）: jwt-auth / security / GraphQL context の3箇所が認証済みリクエスト毎に `UserRepository.getById`（全量 readFileSync+parse）を踏んでいた → `auth-user-lookup.js` 新設。users.json の (mtimeMs,size) を statSync でゲートし変更時のみ再パース、`id → {status,passwordChangedAt,sessionsRevokedAt}` の `Object.freeze` 済み最小レコードを返す。行オブジェクトを共有しないためミューテーション漏洩なし、stat 失敗時はリポジトリへフォールバック（フェイルオープンしない）。
 - 通知リトライの full jitter 化（resilience）: `notifier.js` の `withRetry` が固定指数バックオフ（1s,2s…）で、一括通知障害時に全呼び出しの再送が同期化し得た（thundering herd。AWS Architecture Blog「Exponential Backoff And Jitter」の定番対策）。遅延を `random() * min(maxDelayMs, base*2^n)` の一様乱数に変更し上限も追加。併せてユーザーIDが UUID v4 で 'user_' 始まりにならない `sendNotification` の到達不能な多段分岐を削除（多段通知は user-notify.js が担当）。

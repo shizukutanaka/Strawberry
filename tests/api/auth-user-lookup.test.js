@@ -7,9 +7,10 @@ const path = require('path');
 const UserRepository = require('../../src/db/json/UserRepository');
 const { getAuthUser, _resetAuthUserCache } = require('../../src/api/utils/auth-user-lookup');
 
-const USERS_FILE = path.resolve(__dirname, '../../src/api/utils/../../data/users.json');
-// createJsonRepository と同じパス解決（src/db/json/../../../data）
-const REPO_USERS_FILE = path.resolve(__dirname, '../../src/db/json/../../../data/users.json');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
+
+// createJsonRepository と同じパス解決（resolveDataDir()）
+const REPO_USERS_FILE = path.join(resolveDataDir(), 'users.json');
 
 describe('auth-user-lookup', () => {
   let original;

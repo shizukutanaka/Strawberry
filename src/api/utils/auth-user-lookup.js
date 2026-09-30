@@ -15,8 +15,9 @@
 //   判定不能でフェイルオープンしない。
 const fs = require('fs');
 const path = require('path');
+const { resolveDataDir } = require('../../db/json/data-dir');
 
-const USERS_FILE = path.resolve(__dirname, '../../data/users.json');
+const USERS_FILE = path.join(resolveDataDir(), 'users.json');
 
 let cacheStamp = null; // `${mtimeMs}:${size}` — ファイル変更検知の指紋
 let cacheMap = null;   // id -> { status, passwordChangedAt, sessionsRevokedAt }

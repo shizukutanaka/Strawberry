@@ -1,0 +1,12 @@
+# CODEOWNERS — PR が開かれた際の既定レビュアー。
+# GitHub Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# リポジトリ管理者の GitHub ユーザー名を指定する。
+
+# 全ファイルの既定オーナー
+* @shizukutanaka
+
+# 資金決済・セキュリティ経路は特にレビュー必須（防御的明示）
+/src/api/routes/payment/ @shizukutanaka
+/src/api/routes/master-auth.js @shizukutanaka
+/src/security/ @shizukutanaka
+/lightning-service.js @shizukutanaka

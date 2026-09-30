@@ -7,26 +7,14 @@ const { logger } = require('./logger');
 // 送信時 SSRF ガード: ホスト名を実際に名前解決して内部/予約アドレスを遮断する。
 const { assertPublicUrl } = require('./ssrf-guard');
 
-// Webhook/外部HTTP呼び出し共通安全設定。
-// タイムアウトなし・レスポンスサイズ無制限だと、攻撃者管理のエンドポイントが
-// 無限レスポンスを返すことで Node.js ヒープを枯渇させ DoS できる。
-//
-// maxRedirects:0 が SSRF 対策上重要: assertPublicUrl() は「最初の URL」のホスト名を
-// 名前解決して内部アドレスを遮断するが、axios 既定（maxRedirects:5）だと、検証を通過した
-// 公開 URL が 30x で http://127.0.0.1/ や 169.254.169.254（クラウドメタデータ）へ
-// リダイレクトした場合に axios が自動追従し、ガードを迂回されてしまう。
-// Webhook 送信先（Discord/Slack/Telegram/汎用）は正常時 2xx を直接返しリダイレクトしないため、
-// リダイレクトを一切追わない（30x はエラー扱い）ことで攻撃面を塞ぐ。
-const AXIOS_SAFE_CONFIG = Object.freeze({
-  timeout: 10_000,               // 10 秒でタイムアウト
-  maxContentLength: 1_048_576,   // レスポンスボディ上限 1 MiB
-  maxBodyLength: 1_048_576,      // リクエストボディ上限 1 MiB
-  maxRedirects: 0,               // リダイレクト追従禁止（SSRF リダイレクト迂回を遮断）
-});
+// Webhook/外部HTTP呼び出し共通安全設定は ./http-safe-config.js に集約
+// （email.js・resilient-notify.js と同一の既定を共有する）。
+const { AXIOS_SAFE_CONFIG } = require('./http-safe-config');
 
 // 通知タイプ定義
 const NotifyType = {
-  LINE: 'line',
+  LINE: 'line',               // 廃止: LINE Notify は 2025-03-31 にサービス終了
+  LINE_MESSAGING: 'line_messaging', // 後継: LINE Messaging API（push メッセージ）
   DISCORD: 'discord',
   SLACK: 'slack',
   TELEGRAM: 'telegram',
@@ -38,13 +26,14 @@ const NotifyType = {
 const { sendEmailNotification } = require('./email');
 const fs = require('fs');
 const path = require('path');
+const { resolveDataDir } = require('../db/json/data-dir');
 
 async function sendNotification(typeOrUserId, message, options = {}) {
   // typeOrUserIdがユーザーIDの場合、多段通知
   if (typeof typeOrUserId === 'string' && typeOrUserId.startsWith('user_')) {
     // 設定ファイルから通知設定を取得
     const userId = typeOrUserId;
-    const settingsPath = path.resolve(__dirname, '../../data/notification-settings.json');
+    const settingsPath = path.join(resolveDataDir(), 'notification-settings.json');
     let settings = {};
     try {
       if (fs.existsSync(settingsPath)) {
@@ -100,6 +89,8 @@ async function sendNotification(typeOrUserId, message, options = {}) {
     switch (typeOrUserId) {
       case NotifyType.LINE:
         return await sendLineNotify(message, options);
+      case NotifyType.LINE_MESSAGING:
+        return await sendLineMessagingNotify(message, options);
       case NotifyType.DISCORD:
         return await sendDiscordNotify(message, options);
       case NotifyType.SLACK:
@@ -124,12 +115,27 @@ async function sendNotification(typeOrUserId, message, options = {}) {
   }
 }
 
-// LINE Notify
-async function sendLineNotify(message, { token }) {
-  if (!token) throw new Error('LINEトークン未設定');
+// LINE Notify（廃止）
+// notify-api.line.me は 2025-03-31 にサービス終了 — 呼出しても必ず失敗するため
+// HTTP 送信は行わず即座に移行案内付きのエラーを返す（呼出側の catch で通知失敗として処理される）。
+// 後継は LINE Messaging API（sendLineMessagingNotify）。
+async function sendLineNotify(message, { token } = {}) {
+  throw new Error(
+    'LINE Notify は 2025-03-31 にサービス終了しました（notify-api.line.me は応答しません）。' +
+    'LINE Messaging API へ移行してください: NotifyType.LINE_MESSAGING + { token: <channel access token>, to: <userId/groupId> }'
+  );
+}
+
+// LINE Messaging API（LINE Notify の公式後継）
+// POST https://api.line.me/v2/bot/message/push
+//   Authorization: Bearer <channel access token>
+//   { to: <userId|groupId|roomId>, messages: [{ type: 'text', text }] }
+async function sendLineMessagingNotify(message, { token, to } = {}) {
+  if (!token) throw new Error('LINE Messaging API チャネルアクセストークン未設定');
+  if (!to) throw new Error('LINE Messaging API 送信先（to: userId/groupId）未設定');
   return withRetry(async () => {
-    const res = await axios.post('https://notify-api.line.me/api/notify',
-      new URLSearchParams({ message }),
+    const res = await axios.post('https://api.line.me/v2/bot/message/push',
+      { to, messages: [{ type: 'text', text: String(message).slice(0, 5000) }] },
       { headers: { 'Authorization': `Bearer ${token}` }, ...AXIOS_SAFE_CONFIG }
     );
     return res.data;
@@ -181,8 +187,11 @@ async function sendEmailNotify(message, { to, subject = '通知', from, sendFunc
   return await sendFunc({ to, subject, text: message, from });
 }
 
-// 指数バックオフ付きリトライ（一時的なネットワーク障害 / 5xx に対応）
-async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
+// 指数バックオフ付きリトライ（一時的なネットワーク障害 / 5xx に対応）。
+// 遅延は full jitter（AWS Architecture Blog「Exponential Backoff And Jitter」流）。
+// 固定指数バックオフだと一括障害・一斉通知（price-watch 等）の失敗リトライが
+// 同期化してサンダリングハードを起こすため、0〜指数上限の一様乱数で分散させる。
+async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000, maxDelayMs = 30_000 } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -193,7 +202,8 @@ async function withRetry(fn, { maxAttempts = 3, baseDelayMs = 1000 } = {}) {
       const status = err.response && err.response.status;
       if (status && status >= 400 && status < 500) throw err;
       if (attempt < maxAttempts) {
-        await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt - 1)));
+        const cap = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
+        await new Promise(r => setTimeout(r, Math.random() * cap));
       }
     }
   }

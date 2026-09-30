@@ -15,7 +15,8 @@ function auditLogger(req, res, next) {
   const logEntry = {
     time: new Date().toISOString(),
     method: req.method,
-    url: req.originalUrl,
+    // クエリは別フィールドでマスキング済みのため、url にはパス部のみ残す
+    url: (req.originalUrl || '').split('?')[0],
     userId: user.id || null,
     peerId,
     ip: req.ip,

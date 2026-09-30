@@ -443,6 +443,19 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - webhook.js / lightning-api.js の SSRF リダイレクト迂回とタイムアウト欠如を修正: assertPublicUrl() は最初の URL のみ検証するため、axios 既定のリダイレクト追従でガードを迂回可能だった残存経路を遮断（OWASP SSRF Prevention Cheat Sheet の「リダイレクトごとの再検証または追従禁止」準拠）。SAFE_AXIOS_CONFIG を ssrf-guard に集約し、ガードと安全設定を同所化。
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## fix(utils): gpu-monitor の三重実害修正とタイマー健全化（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-gpu-monitor-fix` → PR 化
+
+`src/utils/gpu-monitor.js`（GPU 死活→自動リカバリ）が呼び出せば必ず失敗する三重の実害を修正:
+
+1. `OrderRepository.updateStatus` — 存在しないメソッド（正は `update`）を destructure → TypeError クラッシュ
+2. 状態値 `'auto_recovered'` — `state-checker` の ORDER_STATES/遷移表に非登録で、書き込まれた注文は永久に遷移不能 → 有効値 `cancelled` へ
+3. `PaymentRepository.getByOrderId`（many:true=配列）を単体扱い + `refundPayment`（存在しない）呼び出し → 配列反復 + `update(id,{status:'refunded'})` へ（gpu-auto-recovery と同規約）
+
+あわせて `startGpuMonitor` を unref 済み・単一フライト・多重起動防止 + `stopGpuMonitor` 追加（service-monitor と同規約 — #150 のタイマー健全性と同クラス）。
+
 - notification-settings の SSRF チェックを共有 ssrf-guard へ集約 + 登録時 DNS 事前検証を追加: 旧 regex 方式は userinfo 混在（http://x@127.0.0.1/）・数値IPv4（2130706433/0x7f000001/127.1）・IPv4埋め込みIPv6 を素通りし、FQDN の解決結果も検証していなかった。WHATWG URL パース後の hostname を isPrivateIp で分類する形へ統一し、SSRF_ALLOW_PRIVATE_WEBHOOKS の登録側不整合（送信は許可・登録は常時拒否）を解消。DNS 解決失敗は登録を許容（送信時の assertPublicUrl が権威）。
 - `src/utils/anomaly-detector.js` の堅牢化 — `logs/` は gitignore 済みで新規 clone には存在しないため、`reportAnomaly` の `appendFileSync(logs/anomaly.log)` が mkdir 無しで ENOENT を投げ呼び出し元（gpu-monitor）が初回異常報告でクラッシュしていた（wired バグ）。mkdir + 書込失敗の非致命化を追加。あわせて `detectRequestAnomaly` の IP カウンタがユニーク IP 毎に永久蓄積する無制限増殖（#58 同型）を TTL スイープ+10k 上限でバウンド化。`google-calendar.js` の `defaultConfig` 宣言漏れ（暗黙グローバル）と googleapis トップレベル require（未導入で require 自体クラッシュ）を遅延化、`ai-benchmark.js` の axios に timeout/maxContentLength/maxRedirects を付与（#151 同型の未防御外向き呼出し）。
 - Electron デスクトップシェルを実装: `public/electron.js` は1行コメントのみのスタブ、`preload.js` は `contextBridge` 未インポートで起動即 ReferenceError だった。contextIsolation/sandbox/no-nodeIntegration 前提のメインプロセス（外部リンクは OS ブラウザ、will-navigate を起点 URL に制限、監査 IPC 受信）と、sandbox 互換 preload（監査は ipcRenderer で main へ転送）へ実装。`npm run desktop`（npx で electron@44.4.3 をオンデマンド取得、依存には追加せず npm ci を重くしない）。

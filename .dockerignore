@@ -2,9 +2,12 @@
 .github
 node_modules
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 logs
 *.log
 data
+backups
 coverage
 tests
 docs
@@ -13,4 +16,12 @@ docs
 .env.*
 !.env.example
 .vscode
+.idea
 .DS_Store
+*.swp
+*.bak
+*.tmp
+test-results
+playwright-report
+dist
+build

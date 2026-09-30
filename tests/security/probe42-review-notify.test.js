@@ -79,14 +79,19 @@ describe('renter-profile: ratingAverage clamped to [1, 5]', () => {
 
 // ─── 42b-1/42b-2: notifier AXIOS_SAFE_CONFIG usage ───────────────────────
 describe('notifier: AXIOS_SAFE_CONFIG applied to all axios calls', () => {
-  it('notifier.js: AXIOS_SAFE_CONFIG defined with timeout and size limits', () => {
+  it('AXIOS_SAFE_CONFIG (shared http-safe-config.js) defined with timeout and size limits', () => {
+    // 設定本体は http-safe-config.js へ集約済み。notifier は共有モジュールを参照する。
     const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/notifier.js'), 'utf-8'
+      require.resolve('../../src/utils/http-safe-config.js'), 'utf-8'
     );
     expect(src).toMatch(/AXIOS_SAFE_CONFIG/);
     expect(src).toMatch(/timeout.*10.?000|10_000.*timeout/s);
     expect(src).toMatch(/maxContentLength/);
     expect(src).toMatch(/maxBodyLength/);
+    const notifier = require('fs').readFileSync(
+      require.resolve('../../src/utils/notifier.js'), 'utf-8'
+    );
+    expect(notifier).toMatch(/AXIOS_SAFE_CONFIG.*require\('\.\/http-safe-config'\)/);
   });
 
   it('notifier.js: sendDiscordNotify uses AXIOS_SAFE_CONFIG', () => {
@@ -111,10 +116,13 @@ describe('notifier: AXIOS_SAFE_CONFIG applied to all axios calls', () => {
     expect(src).toMatch(/axios\.post\(url,\s*\{[^}]*chat_id[^}]*\},\s*AXIOS_SAFE_CONFIG\)/s);
   });
 
-  it('notifier.js: sendLineNotify uses AXIOS_SAFE_CONFIG', () => {
+  it('notifier.js: LINE Messaging API send uses AXIOS_SAFE_CONFIG', () => {
+    // LINE Notify（notify-api.line.me）は 2025-03-31 サービス終了。
+    // 後継の Messaging API パスに Bearer 認証 + AXIOS_SAFE_CONFIG が必要。
     const src = require('fs').readFileSync(
       require.resolve('../../src/utils/notifier.js'), 'utf-8'
     );
+    expect(src).toMatch(/api\.line\.me\/v2\/bot\/message\/push/);
     expect(src).toMatch(/AXIOS_SAFE_CONFIG.*Authorization|Authorization.*AXIOS_SAFE_CONFIG/s);
   });
 

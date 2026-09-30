@@ -41,8 +41,10 @@ module.exports = function(req, res, next) {
     }
     // パスワード変更・全セッション失効（リフレッシュ再利用検知等）後のトークンを拒否
     // （security.js / GraphQL / refresh と同一ポリシーを共有ヘルパーに集約）。
-    const UserRepository = require('../../db/json/UserRepository');
-    const tokenUser = UserRepository.getById(payload.id);
+    // リクエスト毎の users.json 全量読み込みを避けるため stat ゲートの
+    // 認証専用キャッシュ経由でルックアップする。
+    const { getAuthUser } = require('../utils/auth-user-lookup');
+    const tokenUser = getAuthUser(payload.id);
     if (!tokenUser || tokenUser.status === 'deactivated') {
       return res.status(401).json({ error: '無効なトークン' });
     }

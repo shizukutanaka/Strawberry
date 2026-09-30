@@ -7,21 +7,46 @@ const { uploadToS3, uploadToGoogleDrive, uploadToDropbox } = require('./cloud-st
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
 const { appendAuditLog } = require('./audit-log');
+const { resolveDataDir } = require('../db/json/data-dir');
 
 // バックアップ対象ファイルリスト（実データは data/ に格納）
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = resolveDataDir();
 // ローカルバックアップは data/ と同じディレクトリに置かず専用フォルダに隔離する。
 // data/ に .bak-* ファイルが混在すると、他エンドポイントの path-traversal やディレクトリ
 // リスティングで平文の取引データ・資格情報が読み取られるリスクがある。
 const BACKUP_DIR = path.resolve(__dirname, '../../backups');
+// バックアップ対象 = data/ 配下の永続化 JSON 全件。新しいリポジトリファイルが
+// 追加された際に個別列挙から漏れると、そのデータだけ復元不能になるため、
+// 列挙漏れ防止として data/*.json を実行時に走査して拾う（TARGET_FILES は
+// テスト用に凍結した固定名一覧。実行時は _targetFiles() が動的に列挙する）。
 const TARGET_FILES = [
   'orders.json',
   'payments.json',
   'gpus.json',
-  'users.json',      // パスワードハッシュ・API キーを含む — 流出しないよう BACKUP_DIR に隔離
-  'escrows.json',
+  'users.json',             // パスワードハッシュ・API キーを含む — 流出しないよう BACKUP_DIR に隔離
+  'escrows.json',           // 資金ロック状態
   'reputations.json',
+  'profit-addresses.json',  // 運営利益の送金先 — 消失すると利益経路が止まる
+  'revoked-tokens.json',    // 失効トークン — 消失すると logout 済み JWT が復活する
+  'notification-settings.json',
+  'watches.json',
+  'uptime.json',
+  'sla.json',
+  'verifications.json',
+  'bids.json',
+  'sandbox-apikeys.json',
 ];
+
+// 実行時は data/ 直下の *.json をすべて対象化（新規ファイルの列挙漏れ対策）。
+// data/ 内の .bak・一時ファイルは対象外（.json 拡張のみ）。
+function _targetFiles() {
+  try {
+    const found = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+    return found.length > 0 ? found : TARGET_FILES;
+  } catch (_) {
+    return TARGET_FILES;
+  }
+}
 
 // 世代付きローカル自動バックアップ（専用 BACKUP_DIR に書き込む）
 function backupLocalWithGeneration(filePath) {
@@ -53,7 +78,7 @@ function restoreFromLatestBackup(filePath) {
 }
 
 async function backupAll() {
-  for (const file of TARGET_FILES) {
+  for (const file of _targetFiles()) {
     const filePath = path.join(DATA_DIR, file);
     if (!fs.existsSync(filePath)) continue;
     // ローカル世代付きバックアップ
@@ -128,5 +153,8 @@ if (require.main === module) {
 
 module.exports = {
   backupAll,
+  backupLocalWithGeneration,
   restoreFromLatestBackup,
+  TARGET_FILES,
+  _targetFiles,
 };

@@ -120,6 +120,14 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// data/*.json の定期バックアップ（BACKUP_INTERVAL_HOURS 設定時のみ有効。
+// 内部でテスト環境抑止・任意クラウド SDK 欠落時の無効化を行う）
+try {
+  require('../core/backup-scheduler').startBackupScheduler();
+} catch (e) {
+  logger.warn(`backup-scheduler: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

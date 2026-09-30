@@ -47,16 +47,61 @@ function isPrivateIp(ip) {
   }
 
   if (kind === 6) {
-    const low = lowered;
-    if (low === '::1') return true;        // loopback
-    if (low === '::') return true;         // unspecified
-    if (low.startsWith('fe80')) return true; // link-local fe80::/10
-    if (low.startsWith('fc') || low.startsWith('fd')) return true; // unique-local fc00::/7
-    if (low.startsWith('ff')) return true; // multicast ff00::/8
+    const g = expandIpv6(addr);
+    if (!g) return true;
+    if (g.every((x) => x === 0)) return true;                       // :: unspecified
+    if (g[7] === 1 && g.slice(0, 7).every((x) => x === 0)) return true; // ::1 loopback
+    // IPv4-compatible (::/96) と IPv4-mapped (::ffff:0:0/96): 末尾32bitを
+    // IPv4 として再分類する。'::7f00:1' や '::ffff:0a00:1'（16進テール形式）の
+    // ようなループバック/RFC1918 埋め込みを検出するため。
+    if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0
+        && (g[5] === 0 || g[5] === 0xffff)) {
+      const v4 = `${g[6] >>> 8}.${g[6] & 255}.${g[7] >>> 8}.${g[7] & 255}`;
+      return isPrivateIp(v4);
+    }
+    if ((g[0] & 0xffc0) === 0xfe80) return true;  // link-local fe80::/10 (fe80〜febf)
+    if ((g[0] & 0xffc0) === 0xfec0) return true;  // site-local fec0::/10 (deprecated)
+    if ((g[0] & 0xfe00) === 0xfc00) return true;  // unique-local fc00::/7
+    if ((g[0] & 0xff00) === 0xff00) return true;  // multicast ff00::/8
+    // IPv4 を埋め込む遷移機構・予約済み特殊用途: 到達側で内部 IPv4 に化けるため全遮断。
+    if (g[0] === 0x2002) return true;             // 6to4 2002::/16
+    if (g[0] === 0x2001 && g[1] === 0) return true;         // Teredo 2001:0::/32
+    if (g[0] === 0x2001 && g[1] === 0xdb8) return true;     // documentation 2001:db8::/32
+    if (g[0] === 0x64 && g[1] === 0xff9b
+        && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0) return true; // NAT64 64:ff9b::/96
     return false;
   }
 
   return true; // 有効な IP として解釈できない → ブロック
+}
+
+// IPv6 アドレスを 8 つの 16bit グループへ展開する。'::' 圧縮とドット4系テール
+// （'::ffff:127.0.0.1' 形式）の両方に対応。解釈不能なら null（呼び出し側でブロック）。
+function expandIpv6(addr) {
+  let a = addr.toLowerCase();
+  // ドット4系テールを2グループの16進へ変換（net.isIP 検証済みの前提だが一応検査）。
+  const m = a.match(/^(.*):(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const v4 = `${m[2]}.${m[3]}.${m[4]}.${m[5]}`;
+    if (net.isIP(v4) !== 4) return null;
+    const [b1, b2, b3, b4] = v4.split('.').map(Number);
+    a = `${m[1]}:${((b1 << 8) | b2).toString(16)}:${((b3 << 8) | b4).toString(16)}`;
+  }
+  const halves = a.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] === '' ? [] : halves[0].split(':');
+  let groups;
+  if (halves.length === 1) {
+    if (left.length !== 8) return null;
+    groups = left;
+  } else {
+    const right = halves[1] === '' ? [] : halves[1].split(':');
+    const missing = 8 - left.length - right.length;
+    if (missing < 1) return null;
+    groups = [...left, ...new Array(missing).fill('0'), ...right];
+  }
+  if (groups.length !== 8 || groups.some((x) => !/^[0-9a-f]{1,4}$/.test(x))) return null;
+  return groups.map((x) => parseInt(x, 16));
 }
 
 // URL のホスト名を解決し、得られた全 IP が公開アドレスであることを保証する。

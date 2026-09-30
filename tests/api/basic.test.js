@@ -11,6 +11,16 @@ describe('API基本テスト', () => {
     expect(res.text).toContain('# HELP');
   });
 
+  it('GET /.well-known/security.txt で RFC 9116 の連絡先を text/plain で返す', async () => {
+    // .well-known はドット始まりセグメントのため express.static の既定では届かない
+    // （SPA キャッチオールが index.html を返す）。明示ルートの回帰テスト。
+    const res = await request(app).get('/.well-known/security.txt');
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/plain/);
+    expect(res.text).toContain('Contact:');
+    expect(res.text).toContain('Expires:');
+  });
+
   it('保護された API は未認証だと 401 を返す', async () => {
     // /gpus は公開（マーケットプレイスブラウジング用）。/orders は認証必須。
     const res = await request(app).post('/api/v1/orders').send({});

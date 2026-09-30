@@ -101,8 +101,24 @@ describe('btc-onchain payout recipient resolution (#anti-spoof)', () => {
   it('lets a provider register a payoutAddress via PUT /users/me', async () => {
     const res = await request(app).put('/api/v1/users/me')
       .set('Authorization', `Bearer ${provider.token}`)
-      .send({ payoutAddress: PROVIDER_WALLET });
+      .send({ payoutAddress: PROVIDER_WALLET, password: 'Test1234!' });
     expect(res.statusCode).toBe(200);
     expect(UserRepository.getById(provider.id).payoutAddress).toBe(PROVIDER_WALLET);
+  });
+
+  it('rejects payoutAddress change without password re-confirmation (401)', async () => {
+    const res = await request(app).put('/api/v1/users/me')
+      .set('Authorization', `Bearer ${provider.token}`)
+      .send({ payoutAddress: 'bc1qattackercontrolled0000000000000000000000' });
+    expect(res.statusCode).toBe(401);
+    // unchanged
+    expect(UserRepository.getById(provider.id).payoutAddress).not.toBe('bc1qattackercontrolled0000000000000000000000');
+  });
+
+  it('does not require re-confirmation for non-financial profile fields', async () => {
+    const res = await request(app).put('/api/v1/users/me')
+      .set('Authorization', `Bearer ${provider.token}`)
+      .send({ bio: 'GPU provider bio' });
+    expect(res.statusCode).toBe(200);
   });
 });

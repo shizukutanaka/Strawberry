@@ -29,6 +29,10 @@ function logAudit(event) {
   } catch (e) {}
 }
 
+// health.json は p2p-health が 10 秒ごとに書き込む。更新が止まった場合は
+// ピア切断ではなく「ノード/監視プロセス自体の停止」なのでアラートを分ける。
+const HEALTH_STALE_MS = 60 * 1000;
+
 async function checkHealthFile() {
   if (!fs.existsSync(HEALTH_FILE)) return;
   let health;
@@ -37,7 +41,11 @@ async function checkHealthFile() {
   } catch (_) {
     return;
   }
-  if (health.peerCount === 0) {
+  const ts = new Date(health.timestamp || 0).getTime();
+  if (!Number.isFinite(ts) || Date.now() - ts > HEALTH_STALE_MS) {
+    const last = Number.isFinite(ts) ? new Date(ts).toLocaleString() : 'unknown';
+    await notifyAll(`【P2Pノード障害検知】\n死活監視データが更新されていません（最終: ${last}）。ノードまたは監視プロセスが停止している可能性`, 'NODE_MONITOR_STALE');
+  } else if (health.peerCount === 0) {
     const msg = `【P2Pノード障害検知】\nピア接続がありません（${health.peerId}）\n${new Date(health.timestamp).toLocaleString()}`;
     await notifyAll(msg, 'NODE_DOWN');
   }
@@ -68,12 +76,32 @@ async function notifyAll(msg, type = 'ALERT') {
   logAudit({ type, message: msg });
 }
 
-function startNotifyLoop() {
-  setInterval(() => { checkHealthFile(); checkExternalTargets(); }, 15000); // 15秒ごとに全監視
+// 非同期チェックの多重起動を防ぐ単一フライトガード。
+// checkExternalTargets は対象ごとに最大 7s の axios timeout を持ち、
+// MONITOR_TARGETS が複数あると 1 tick が 15s を超え得る。そのままだと
+// 前の tick が生きている間に次の tick が走り、障害中はアラートが二重化する。
+let tickRunning = false;
+function startNotifyLoop(intervalMs = 15000) {
+  setInterval(async () => {
+    if (tickRunning) return;
+    tickRunning = true;
+    try {
+      await checkHealthFile();
+      await checkExternalTargets();
+    } catch (e) {
+      logAudit({ type: 'TICK_ERROR', error: e.message });
+    } finally {
+      tickRunning = false;
+    }
+  }, intervalMs);
 }
 
 if (require.main === module) {
-  healthMain();
+  // P2P ヘルス監視は libp2p 導入環境でのみ有効。未導入でも外部 API 監視
+  // （MONITOR_TARGETS）は単独で動作させる（README 記載の運用コマンド）。
+  Promise.resolve()
+    .then(() => healthMain())
+    .catch(e => console.warn(`P2P ヘルス監視をスキップします: ${e.message}`));
   startNotifyLoop();
 }
 

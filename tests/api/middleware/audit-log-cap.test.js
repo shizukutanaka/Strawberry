@@ -90,7 +90,7 @@ describe('sanitizeSensitiveFields depth cap', () => {
     const out = sanitizeSensitiveFields(deep);
     // 例外なく返り、最深部は '[TRUNCATED]' で打ち止め
     let cur = out;
-    for (let i = 0; i < 32; i++) cur = cur.a;
+    for (let i = 0; i <= 32; i++) cur = cur.a; // MAX_SANITIZE_DEPTH=32 を超えた深度 33 で打ち止め
     expect(cur).toBe('[TRUNCATED]');
   });
 });

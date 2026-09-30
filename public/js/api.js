@@ -1,5 +1,5 @@
 // public/js/api.js — fetch wrapper + typed endpoint helpers.
-import { getToken, clearSession } from './auth.js';
+import { getToken, getRefreshToken, getUser, setSession, clearSession } from './auth.js';
 
 export class ApiError extends Error {
   constructor(message, status, type) {
@@ -10,7 +10,36 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, auth = true, query } = {}) {
+// アクセストークン期限切れ（401）時のリフレッシュ。
+// refresh token はサーバ側でローテーションされるため、並行リクエストが各自で
+// /refresh を叩くと2回目が「再利用検知」となり全セッションが失効する。
+// そのため実行中の refresh をモジュールスコープで直列化（deduplicate）する。
+let _refreshInFlight = null;
+function tryRefreshSession() {
+  if (_refreshInFlight) return _refreshInFlight;
+  _refreshInFlight = (async () => {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return false;
+    try {
+      const res = await fetch('/api/v1/users/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => null);
+      if (!data || typeof data.token !== 'string') return false;
+      // ローテーション後の新 refreshToken も保存（古いものはサーバで失効済み）
+      setSession(data.token, getUser(), data.refreshToken);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  })().finally(() => { _refreshInFlight = null; });
+  return _refreshInFlight;
+}
+
+async function request(path, { method = 'GET', body, auth = true, query, _retried = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (auth) {
     const token = getToken();
@@ -41,6 +70,13 @@ async function request(path, { method = 'GET', body, auth = true, query } = {}) 
   }
 
   if (res.status === 401 && auth) {
+    // まず refresh token でセッション更新を試みる（アクセストークン TTL 1h
+    // 切れのたびに強制再ログインさせない）。更新に成功したら元リクエストを
+    // 1 度だけ再試行する。失敗（refresh 失効・未保持）のみ従来通り
+    // セッションを破棄してログインへ遷移する。
+    if (!_retried && await tryRefreshSession()) {
+      return request(path, { method, body, auth, query, _retried: true });
+    }
     clearSession();
     const next = encodeURIComponent(location.hash.slice(1) || '/market');
     if (!location.hash.startsWith('#/login')) {

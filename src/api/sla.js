@@ -4,8 +4,9 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const { authenticateJWT, checkRole } = require('./middleware/security');
+const { resolveDataDir } = require('../db/json/data-dir');
 
-const SLA_PATH = path.join(__dirname, '../../data/sla.json');
+const SLA_PATH = path.join(resolveDataDir(), 'sla.json');
 const ANOMALY_HISTORY_PATH = path.join(__dirname, '../../logs/anomaly-history.json');
 
 // SLA統計取得API（認証必須 — 内部稼働状況のため）

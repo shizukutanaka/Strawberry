@@ -42,23 +42,44 @@ fi
 
 ---
 
-## 2. ノード登録API例
+## 2. ノード登録API例（実装済みエンドポイント）
 
-### `/api/owner/register`（POST）
+実際の API は `/api/v1` プレフィックス配下です。登録は JWT 認証 + `provider`/`admin` ロールが必要です。
+
+### `POST /api/v1/gpus`（GPU 登録）
+
 ```json
 {
-  "owner_id": "user123",
-  "gpu_vendor": "AMD",
-  "gpu_model": "Radeon RX 6800",
-  "driver_version": "23.5.2",
-  "api_type": "ROCm",
-  "wallet_address": "bc1q...",
-  "os": "Windows 11"
+  "name": "My RX 6800",
+  "vendor": "AMD",
+  "model": "Radeon RX 6800",
+  "apiType": "ROCm",
+  "driverVersion": "23.5.2",
+  "os": "Windows 11",
+  "arch": "x86_64",
+  "memoryGB": 16,
+  "clockMHz": 2100,
+  "powerWatt": 250,
+  "pricePerHour": 0.35
 }
 ```
 
-### `/api/owner/gpu_status`（GET）
-- ベンダー・モデル・API種別ごとに貸出状況・稼働状況・エラーを返す
+必須フィールド: `vendor`(NVIDIA/AMD/Intel)・`model`・`apiType`(CUDA/ROCm/oneAPI/OpenCL)・`driverVersion`・`os`・`arch`・`memoryGB`・`clockMHz`・`powerWatt`・`pricePerHour`。任意: `availability`・`features`・`capabilities`・`location`・`minRenterRating` 等（詳細は `src/utils/validator.js` の `schemas.gpu.register`）。
+
+### `GET /api/v1/gpus`（一覧・検索）
+`?vendor=NVIDIA&apiType=CUDA&minMemoryGB=8&maxPrice=0.5&country=JP&search=rtx` でフィルタ・検索可能（`features={"cudaSupport":true}` の JSON 指定も可）。
+
+### `GET /api/v1/gpus/my`（自分の貸出GPU一覧・要 JWT）
+プロバイダ自身の登録 GPU と稼働状況を返します。
+
+### その他の実装済み API
+- `PUT /api/v1/gpus/:id` — 登録内容の更新（オーナー/admin）
+- `DELETE /api/v1/gpus/:id` — 登録削除（オーナー/admin）
+- `POST /api/v1/gpus/bulk` — 複数台一括登録
+- `POST /api/v1/gpus/:id/clone` — 既存登録の複製
+- `GET /api/v1/gpus/:id/market-rate` — 同一モデル内の価格分布
+- `GET /api/v1/gpus/:id/history` — 利用履歴（要 JWT）
+- `POST /api/v1/gpus/:id/block` / `DELETE /api/v1/gpus/:id/block/:blockId` — メンテナンス枠（手動ブロック）管理
 
 ---
 

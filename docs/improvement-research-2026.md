@@ -431,6 +431,19 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - SLA トラッカーの配線 + 滞留防止（reliability）: `sla-tracker.js` の `startSLATracker` が誰からも呼ばれておらず sla.json が一切書かれず `GET /api/sla` は常に既定値を返していた。server.js へ配線（タイマー抑止はモジュール側の NODE_ENV ガード）。加えて 3 つの運用欠陥を修正: ①`checkAlive` の fetch にタイムアウトが無く応答滞留で以後の全周期が停止 ②updateSLA に再入ガードが無く checkAlive 滞留中の周期重複で load→save の RMW 競合 ③通知失敗が updateSLA へ伝播するのを catch。unref+stop も追加。
 - token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。
 
+## 実装済みメモ（ドキュメント外の実測改善）
+
+- **稼働統計の書き込みバッチ化**（本PR）: `recordProviderHeartbeat`/`recordSlaBreach` が
+  呼ばれるたびに `uptime.json` を `getByProviderId` の load + `update` の load+write
+  で計3回全量 I/O していたのを、プロセス内 pending 差分 + `UPTIME_FLUSH_INTERVAL_MS`
+  （既定30s）ごとの一括 `updateMany`（1 load + 1 write）へ変更。読み取り側
+  `getReliability` は pending を上乗せして返すため即時性は維持。落ちた場合の
+  喪失窓は1フラッシュ周期（best-effort 統計として許容）。
+- **リポジトリの `updateMany` プリミティブ**: 複数行の部分更新を 1 load + 1
+  atomicWrite に束ねる。ポーラー・バッチフラッシュ等の N 行更新経路で
+  逐次 update の N+1 書き込み増幅を潰す。
+||||||| 5c3f4ed
+
 ### その他実装済（運用ドキュメント）
 - `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。
 - `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。

@@ -448,6 +448,8 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - 残存 N+1 の後始末（perf）: `payment-reminder.js` の支払いごとの `UserRepository.getById`（users.json を件数ぶん全量読込）を 1 回の `getAll` → Map 化へ置換。`order-expiry.js` の係争自動解決では `EscrowRepository.getAll` を「解決が実際に発生した時だけ構築する orderId→HELD エスクロー Map」に遅延集約（no-op スイープで無駄読みしない）。孤立 React ファイル `src/web/pages/settings/notifications.js`（React/axios 前提だがビルド系・参照ともに無し、JWT モデルと整合しない旧式実装）を削除。
 
 ### その他実装済（運用ドキュメント）
+- `provider-uptime` の直接ユニットテスト追加（0カバレッジだった信頼性スコア算出）: beats/gapEvents/sessions の累計・GAP_THRESHOLD 超過での gap 判定・再起動後初回ビートの偽 gap 抑制・MIN_BEATS 未満の measuring・breach があれば measuring で隠さない・disruptionRate+ペナルティでの減点。11件。
+- `cache.js` の直接ユニットテスト追加: 2xx のみキャッシュ・非2xx は次リクエストでハンドラ再実行（500 を 60 秒 200 で replay する旧バグの回帰固定）・perUser は userId:role でキー分離（他ユーザーデータ漏洩防止）・invalidateUserCache/ByUrlPattern/purgeCache の境界検証。8件。
 - `instrumentation.js` の OTel ゲーティング不変条件をテスト固定: `OTEL_EXPORTER_OTLP_ENDPOINT` 未設定時に @opentelemetry/* を一切 require しないこと・シグナルハンドラを登録しないことを検証（無条件化の回帰防止 — server.js の最初の require のため誤って無条件化すると全起動で ~140 パッケージ読み込みのコストが発生）。
 - `tests/unit/test_exchange_rate.js` を `exchange-rate-fallback.test.js` へ改修: 旧ファイルは名前が jest testMatch に合わず常時スキップされ、かつ assert で実 API を呼ぶ死テストだった（「全失敗で throw」期待も非 production では誤り）。axios モック化＋NODE_ENV 分岐を正しく検証（全API失敗→DEFAULT_RATE/production throw/stale 優先・プロバイダフォールバック順・範囲外レート拒否・withTimestamp）。
 - `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。

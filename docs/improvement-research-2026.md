@@ -500,6 +500,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
+### docs/SPECIFICATION.md のステータス同期（2026-09-27）
+- **対応**: 2026-06 時点の実装ステータスが陳腐化していたため main 実態へ追随 — Escrow（btc-onchain/marketplace/escrow 配線済）・GPU アテステーション（Mock verifier 配線済）・Reputation（アテステーション/稼働統計経由で部分配線）・OTel（instrumentation 読込済）・feature-pricer（marketplace-service 経由配線済）・データ整合性（updateIf/withLock 済）を更新。open PR にのみ存在する配線は「未」のまま維持。
+
 ### ルート SPECIFICATION.md の 2026-09 追補（2026-09-27）
 - **対応**: ルート `SPECIFICATION.md`（2026-06 実態ベース仕様書）の冒頭に追補を追加。当時の残課題だった OTel SDK 連携（D-2）が `src/telemetry/instrumentation.js` で配線済みである点、probe テストが 60 件超へ拡充、§4 表外の `/admin/*`・`/marketplace/escrow/*`・`/gpus/:id/estimate`・`/gpus/:id/watch` 追加、エスクロー状態機械の実装を明記。docs/SPECIFICATION.md（#133）とは別ファイル・非重複。
 

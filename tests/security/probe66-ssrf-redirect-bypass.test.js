@@ -80,18 +80,19 @@ describe('axios maxRedirects:0 blocks redirect following (SSRF bypass defense)',
 // ── Source guards: both notify modules must carry maxRedirects:0 ────────────────
 
 describe('notify modules disable redirect following in their shared axios config', () => {
-  it('notifier.js AXIOS_SAFE_CONFIG sets maxRedirects:0', () => {
+  // AXIOS_SAFE_CONFIG は http-safe-config.js へ集約済み — notifier / resilient-notify /
+  // email は同じ凍結設定を共有する。本体の定義と各モジュールの参照を両方検証する。
+  it('http-safe-config.js AXIOS_SAFE_CONFIG sets maxRedirects:0', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/notifier.js'), 'utf-8'
+      require.resolve('../../src/utils/http-safe-config.js'), 'utf-8'
     );
     expect(src).toMatch(/AXIOS_SAFE_CONFIG\s*=\s*Object\.freeze\(\{[\s\S]*maxRedirects:\s*0[\s\S]*\}\)/);
   });
 
-  it('resilient-notify.js SAFE_CONFIG sets maxRedirects:0', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/utils/resilient-notify.js'), 'utf-8'
-    );
-    expect(src).toMatch(/SAFE_CONFIG\s*=\s*Object\.freeze\(\{[\s\S]*maxRedirects:\s*0[\s\S]*\}\)/);
+  it('notifier.js / resilient-notify.js import the shared AXIOS_SAFE_CONFIG', () => {
+    const read = (f) => require('fs').readFileSync(require.resolve(`../../src/utils/${f}`), 'utf-8');
+    expect(read('notifier.js')).toMatch(/AXIOS_SAFE_CONFIG.*require\('\.\/http-safe-config'\)/);
+    expect(read('resilient-notify.js')).toMatch(/AXIOS_SAFE_CONFIG.*require\('\.\/http-safe-config'\)/);
   });
 
   it('resilient-notify.js applies SAFE_CONFIG to every axios.post call', () => {

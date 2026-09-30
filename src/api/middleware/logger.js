@@ -2,6 +2,28 @@
 const morgan = require('morgan');
 const { logger } = require('../../utils/logger');
 
+// :body トークンへ書き出す前にクレデンシャル系フィールドを [REDACTED] へ
+// 置き換える。対象はキー名で判定 — password/token/paymentRequest だけでは
+// refreshToken・idToken（Google）・currentPassword/newPassword・code（メール
+// 認証コード）・apiKey 等が平文で dev ログへ残ってしまう。セッションを盗む
+// 資格情報・秘密値に限る（payoutAddress 等のプロフィール値は対象外）。
+const SENSITIVE_BODY_KEY = /^(password|currentPassword|newPassword|token|refreshToken|accessToken|idToken|paymentRequest|code|mailCode|apiKey|totp|secret|peerKey)$/i;
+// 配列ボディ（POST /gpus/bulk 等）やネストしたオブジェクト内の資格情報も
+// 漏れないよう再帰する。深度上限で循環参照・病的に深い入力で無限再帰しない。
+const MAX_REDACT_DEPTH = 5;
+function redactBodyForLog(body, depth = 0) {
+  if (!body || typeof body !== 'object') return body;
+  if (depth >= MAX_REDACT_DEPTH) return '[REDACTED]';
+  if (Array.isArray(body)) {
+    return body.map((v) => redactBodyForLog(v, depth + 1));
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(body)) {
+    out[key] = SENSITIVE_BODY_KEY.test(key) ? '[REDACTED]' : redactBodyForLog(value, depth + 1);
+  }
+  return out;
+}
+
 // URL 内の機密クエリパラメータをマスクする。
 // 監査ミドルウェア（middleware/audit.js）は req.query を sanitizeSensitiveFields で
 // マスクしているが、こちらが記録する req.originalUrl にはクエリ文字列が生のまま
@@ -21,14 +43,7 @@ morgan.token('id', (req) => req.id);
 morgan.token('user', (req) => (req.user ? req.user.id : 'anonymous'));
 morgan.token('body', (req) => {
   // 機密情報をマスク
-  const body = { ...req.body };
-  
-  // パスワードなどの機密情報をマスク
-  if (body.password) body.password = '[REDACTED]';
-  if (body.token) body.token = '[REDACTED]';
-  if (body.paymentRequest) body.paymentRequest = '[REDACTED]';
-  
-  return JSON.stringify(body);
+  return JSON.stringify(redactBodyForLog(req.body));
 });
 
 // リクエストIDを生成するミドルウェア。
@@ -119,5 +134,6 @@ module.exports = {
   devRequestLogger,
   responseTime,
   errorLogger,
+  redactBodyForLog,
   redactUrlQuery
 };

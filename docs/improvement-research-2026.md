@@ -436,3 +436,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **変更**: `arrayFiles` に `watches` を追加。`sla` は配列ではないため新設した `defaultFiles` マップで `loadSLA()` と同一の初期形状にリセット（`'[]'`/`'{}'` だと `sla.history.push` が TypeError で監視クラッシュする）。
 - **テスト**: `tests/globalSetup-coverage.test.js` 新規3件 — ① `src/db/json/*.js` 内の `createJsonRepository('X.json')` を走査し globalSetup のリセット対象との網羅性を構造的に検証（将来のリポジトリ追加で漏れを捕捉）② 汚れた watches.json が空配列へリセットされる ③ sla.json が正しい初期オブジェクト形状でリセットされる。全緑 + probe61（47件）緑で回帰なし。
 - **参考**: Jest globalSetup 公式ガイド / Heroku "test fixtures isolation" 系の共有フィクスチャ衛生
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

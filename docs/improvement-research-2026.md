@@ -436,3 +436,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **罠**: `public/.well-known/` にファイルを置くだけでは `express.static` の既定 `dotfiles: 'ignore'` がドット始まりセグメントを拒否し、リクエストは SPA キャッチオールへ流れて index.html (200/HTML) を返す — スキャナからは「security.txt 不在」どころか誤った 200 応答に見える。
 - **変更**: `public/.well-known/security.txt`（Contact=GitHub Security Advisory、Policy=SECURITY.md、Preferred-Languages、Expires）を新設し、`server.js` に static より前の明示ルート `GET /.well-known/security.txt` を追加。`tests/api/basic.test.js` に 200・text/plain・必須フィールドの回帰テストを追加。
 - **参考**: RFC 9116 / GitHub "Adding a security policy" / securitytxt.org
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

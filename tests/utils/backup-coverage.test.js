@@ -35,7 +35,7 @@ describe('backup target coverage', () => {
   });
 
   it('_targetFiles enumerates every *.json actually present in data/', () => {
-    const dataDir = path.resolve(__dirname, '../../data');
+    const dataDir = require('../../src/db/json/data-dir').resolveDataDir();
     fs.mkdirSync(dataDir, { recursive: true });
     const probe = 'zz-backup-coverage-probe.json';
     fs.writeFileSync(path.join(dataDir, probe), '{}');

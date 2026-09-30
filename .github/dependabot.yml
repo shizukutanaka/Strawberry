@@ -8,7 +8,9 @@ updates:
     directory: "/"
     allow:
       - dependency-type: "direct"
-    automerge:
-      - dependency-type: "direct"
+    # 注意: dependabot.yml に `automerge` キーは存在しない（GitHub が未知のキーを
+    # 含む設定ファイル全体を検証エラーで拒否し、npm 側の更新 PR も一切開かれなくなる）。
+    # 自動マージはリポジトリ設定（Settings → General → Allow auto-merge）と
+    # 別途 GitHub Actions（dependabot/fetch-metadata + gh pr merge --auto）で実現する。
     schedule:
       interval: "weekly"

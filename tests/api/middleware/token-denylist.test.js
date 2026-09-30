@@ -4,7 +4,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const DENYLIST = path.resolve(__dirname, '../../../data/revoked-tokens.json');
+const { resolveDataDir } = require('../../../src/db/json/data-dir');
+const DENYLIST = path.join(resolveDataDir(), 'revoked-tokens.json');
 const { revoke, isRevoked } = require('../../../src/api/middleware/token-denylist');
 
 describe('token-denylist', () => {

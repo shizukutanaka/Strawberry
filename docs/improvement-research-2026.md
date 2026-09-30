@@ -425,9 +425,160 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- 認証パスの users.json 全量読み込み解消（perf）: jwt-auth / security / GraphQL context の3箇所が認証済みリクエスト毎に `UserRepository.getById`（全量 readFileSync+parse）を踏んでいた → `auth-user-lookup.js` 新設。users.json の (mtimeMs,size) を statSync でゲートし変更時のみ再パース、`id → {status,passwordChangedAt,sessionsRevokedAt}` の `Object.freeze` 済み最小レコードを返す。行オブジェクトを共有しないためミューテーション漏洩なし、stat 失敗時はリポジトリへフォールバック（フェイルオープンしない）。
+- 通知リトライの full jitter 化（resilience）: `notifier.js` の `withRetry` が固定指数バックオフ（1s,2s…）で、一括通知障害時に全呼び出しの再送が同期化し得た（thundering herd。AWS Architecture Blog「Exponential Backoff And Jitter」の定番対策）。遅延を `random() * min(maxDelayMs, base*2^n)` の一様乱数に変更し上限も追加。併せてユーザーIDが UUID v4 で 'user_' 始まりにならない `sendNotification` の到達不能な多段分岐を削除（多段通知は user-notify.js が担当）。
+- プロバイダ向け自動登録スクリプトの実契約化（fix/DX）: `gpu_lending_setup_auto_register.js` が存在しない `POST /api/gpu` を叩き、必須フィールド（memoryGB/clockMHz/powerWatt/pricePerHour）と arch 値（x64→x86_64 等）もスキーマ不一致で、実行しても 404/400 確定だった → `POST /api/v1/gpus` + `schemas.gpu.register` 準拠 payload へ修正、URL/トークンを環境変数化（STRAWBERRY_API_URL/STRAWBERRY_TOKEN）、非対応 GPU は早期エラーで案内。実 Joi スキーマでのドライ検証済み。
+- SLA トラッカーの配線 + 滞留防止（reliability）: `sla-tracker.js` の `startSLATracker` が誰からも呼ばれておらず sla.json が一切書かれず `GET /api/sla` は常に既定値を返していた。server.js へ配線（タイマー抑止はモジュール側の NODE_ENV ガード）。加えて 3 つの運用欠陥を修正: ①`checkAlive` の fetch にタイムアウトが無く応答滞留で以後の全周期が停止 ②updateSLA に再入ガードが無く checkAlive 滞留中の周期重複で load→save の RMW 競合 ③通知失敗が updateSLA へ伝播するのを catch。unref+stop も追加。
+- token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。
+
+## 実装済みメモ（ドキュメント外の実測改善）
+
+- **稼働統計の書き込みバッチ化**（本PR）: `recordProviderHeartbeat`/`recordSlaBreach` が
+  呼ばれるたびに `uptime.json` を `getByProviderId` の load + `update` の load+write
+  で計3回全量 I/O していたのを、プロセス内 pending 差分 + `UPTIME_FLUSH_INTERVAL_MS`
+  （既定30s）ごとの一括 `updateMany`（1 load + 1 write）へ変更。読み取り側
+  `getReliability` は pending を上乗せして返すため即時性は維持。落ちた場合の
+  喪失窓は1フラッシュ周期（best-effort 統計として許容）。
+- **リポジトリの `updateMany` プリミティブ**: 複数行の部分更新を 1 load + 1
+  atomicWrite に束ねる。ポーラー・バッチフラッシュ等の N 行更新経路で
+  逐次 update の N+1 書き込み増幅を潰す。
+||||||| 5c3f4ed
 
 ### その他実装済（運用ドキュメント）
+- `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。
+- `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。
+- `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- Dockerfile.api に HEALTHCHECK を追加: 30 秒間隔・5 秒タイムアウト・3 回連続失敗で unhealthy。Node のグローバル fetch で `/health` を叩き、ハングしたコンテナを Docker の restart ポリシーが検知できるようにした。
+- `gpu-failure-monitor.monitor()` を Promise 返却化: fire-and-forget だったため非同期通知が呼出元の完了後に走り、テストで「Cannot log after tests are done」警告の原因になっていた。テストを child_process/Slack モック化して正常・障害・実行失敗の3経路を決定的に検証するよう刷新。
+- `docker/Dockerfile.gpu-worker` を実装（従来はコメントのみのスタブで、`virtual-gpu-manager` が参照する `strawberry/gpu-worker:latest` がビルド不能だった）。nvidia/cuda runtime ベース・非 root ユーザー・nvidia-smi ヘルスチェック・既定 CMD は exec 投入前提の待機。
+- Googleカレンダー連携のログ汚染修正: `googleapis` が依存未収録で require が必ず失敗するのに、注文作成のたび `Cannot find module` の ERROR ログを吐いていた。`GCAL_REFRESH_TOKEN` 設定済み環境のみ読み込む形に環境ゲート化し、未導入時は warn に降格。あわせて `defaultConfig` の暗黙グローバル漏洩（const 欠落）を修正。
+- Jest ワーカー別データ分離でテスト並列化: `src/db/json/data-dir.js` の `resolveDataDir()` を新設し data/ 解決を一元化（Jest ワーカー内では `data-test/worker-N` を返却）。jest.config にあった「正しい長期修正は JEST_WORKER_ID によるワーカー別データ分離」という既知課題を解消し、`maxWorkers: 1` → `'50%'` で全スイートが約 86s → 約 30s（ローカル実測）に短縮。`STRAWBERRY_DATA_DIR` env によるデータ dir 上書きも同時に提供（運用面の副次効果）。globalSetup の単一プロセス制約に対応するため、ワーカー別シードは `setupFiles` (tests/setupWorkerData.js) で実施。
+- Google OAuth ログインのトークンペア発行: `/auth/google` が access token のみを返し refresh token を発行していなかった（OAuth ユーザーは 1h ごと強制再ログイン・ローテーション/サーバ側失効経路に非対応）。パスワードログインと同じ `signAccessToken`+`signRefreshToken`（ati 紐付け）+`lastLogin` 更新へ揃えた。あわせて `google-auth-library` を dependencies に追加（未収録で require が必ず MODULE_NOT_FOUND→503 となり、設定済みでも実質デッドだった）。
+- SPA の refresh token セッション継続: ログイン時に refreshToken を破棄していたためアクセストークン（1h）切れのたび強制再ログインだった。`strawberry.refreshToken` に保持し、401 受信時に直列化された `/users/refresh`（ローテーション再利用検知を防ぐため並行 401 は 1 本に集約）で更新→元リクエストを再試行。ログアウト時にサーバ側失効（/users/logout へ refreshToken 送信）も配線。Playwright e2e で実ブラウザ検証。
+- `errorMiddleware` に `res.headersSent` ガードを追加: レスポンス送信済みでエラーが起きた場合（sendFile のストリーム途中障害等）に `res.json()` への二重送信を試みてハンドラ内例外になる問題を、Express 公式推奨パターン（既定ハンドラへ委譲して接続を閉じる）で修正。
+- サービス死活監視の外部通知を状態遷移ベース化（`src/core/service-monitor.js`）: 不健全 tick ごとに Slack/Sentry/LINE へ送っていた service_down / service_restart_failed を、不健全エッジ1回 + 継続中は `SERVICE_MONITOR_RENOTIFY_MS`（既定5分）間隔の再通知のみに絞り、復帰時は `service_recovered` を1回送信。監査ログ・メトリクスは従来通り毎 tick 記録。あわせて tick 重なり防止（再入ガード）と startMonitor 二重起動ガードを追加。根拠: Nagios の state-change notification + re-notification interval、PagerDuty の alert dedup、Google SRE Book「Monitoring Distributed Systems」のアラート疲弊対策。
+- Slack Webhook 送信の耐障害化: `scripts/slack-feedback-bot.js` の `sendSlackMessage`（gpu-failure-monitor・alert-* 等の共有通知経路）に 10 秒タイムアウト（`SLACK_WEBHOOK_TIMEOUT_MS` で調整可）・不正 URL/非 https の拒否・レスポンスのドレイン（ソケット解放）を追加。`slack-notify.js` の重複 HTTP 実装は共有実装に集約。
+- ops スクリプト群の未宣言依存を optionalDependencies に宣言: `progress-report`/`*-to-sheets`/`*-to-notion`/`checklist-to-issues`/`slack-notify-graph`/`kpi-trend-graph`/`sample` が `googleapis`・`@notionhq/client`・`@octokit/rest`・`@slack/web-api`・`chartjs-node-canvas`・`i18next` 等を package.json 未宣言のまま require し、`npm run <script>` が `Cannot find module` で即死していたのを修正。あわせて (a) 3本に複製されていた Google OAuth `authorize()` を `scripts/google-sheets-auth.js` に集約し credentials/token 未配置・形式不正を手順付きエラー化、(b) 全対象スクリプトに必須 env の事前検査（`PROGRESS_SHEET_ID`/`FEEDBACK_SHEET_ID`/`NOTION_TOKEN`/`NOTION_DB_ID`）と失敗時 exit(1) を追加、(c) `slack-notify-graph` を廃止済み `files.upload` から `filesUploadV2` へ移行（@slack/web-api v8 で旧メソッドは削除済み）。`@notionhq/client` はスクリプトが `databases.query`/`pages.create` を使うため API 互換の v2 系に固定。`tests/scripts/script-deps.test.js` で scripts/*.js の全 bare require が宣言済みであることを検査する回帰ガードを追加。
+- `scripts/version-assets.js` / `update-references.js`（fingerprinting キャッシュバスティング）の実動化: ① 実資産が置かれる `public/js`・`public/css` サブディレクトリを走査しない非再帰欠陥でパイプライン全体が無音の no-op だったのを再帰化 ② 再実行ごとに `<base>.<hash>.<hash>.js` が無限蓄積していたのを、既バージョン済みスキップ＋旧ハッシュ掃除で冪等化 ③ 境界ガードなしの正規表現で `myapp.js` が `app.js` のハッシュに誤置換され壊れた参照を書き込んでいた問題を、参照直前の文字クラス（引用符・`/`・`=`・空白等）でガード。`npm run setup` が未導入の `prisma migrate` で必ず中断していた onboarding 破損も修正（prisma は ARCHITECTURE.md 記載通り未配線のため工程から除外）。
+- config.json マージの深いマージ化: `getConfig()` が `fileConfig || envConfig` でファイル存在時に環境変数オーバーライド（PORT 等）を丸ごと破棄し、`loadFromFile` の浅い spread で部分ファイルが兄弟既定値を全消ししていた問題を `deepMergeConfig`（キー単位の再帰マージ、__proto__ 系キー除外）で修正。
+- マスター3段階認証の昇格セッションに絶対 TTL を追加: `cookie.maxAge` 未設定で MemoryStore の `masterAuth` 状態が事実上永続化していた（昇格状態が無期限 → セッション乗っ取りで資金アドレス操作へ直行するリスク）。`MASTER_SESSION_TTL_MS`（既定30分、GitHub sudo モード等の昇格認証慣例）でクライアント Cookie とサーバ側ストアの双方に期限を付与。
+- 注文タイムアウト失効時のエスクロー孤立解消: `expireStaleOrders`/`expireStaleMatchedOrders`/`expireStaleActiveOrders` は注文を cancelled へ遷移するが HELD 状態のエスクローを精算せず、支払済み資金が永久ロックされる経路があった。`releaseEscrowsOnTimeout` を新設し pending/matched 失効は HELD→CANCELED で借り手返金、active 失効は /stop と同じ壁時計フォールバックの deliveredRatio で HELD→SETTLED の出来高払いにした。
+- 検証監査抽出の予測不能化: `shouldAudit` が無キー `sha256(jobId)` で決定していたため、プロバイダが自ジョブの監査要否を事前計算し「監査されないジョブだけ手を抜く」選択的チートが成立していた（Proof-of-Compute のランダム監査は auditee 予測不能が要件）。HMAC-SHA256 鍵付き判定へ変更（`VERIFICATION_AUDIT_SECRET` env → 未設定時はプロセス生成のエフェメラル鍵。監査要否は open 時に永続化済みのため再起動でも整合）。
+- 監査ログミドルウェアの耐性化: 全 API の body/query/response を全文記録していたものを 2KB 上限 + `{_truncated,bytes}` 記録へ（監査ログ急膨張と stringify+再帰マスクのリクエスト処理コストを抑止）。`sanitizeSensitiveFields` に深度上限 32 を追加し深ネスト JSON によるスタックオーバーフロー DoS を防止。mkdirSync を初回のみへ。
+- 追記型ログのローテーション化: `appendFileSync` で手動追記する高頻度ログ（access-audit.log は認証済み全リクエスト、db-access.log は UserRepository 全アクセス、gpu-events.log）にサイズ上限がなく無制限肥大・ディスク枯渇リスクがあった。`appendRotated` ヘルパー（statSync→超過で .1 退避の 1 世代ローテーション）を新設して適用。ハッシュチェーン監査ログ（audit.log）は改ざん検知との整合のため対象外。
+- 秘密値比較を共有 `safeTokenEqual` へ集約: `/metrics` の Bearer 照合が生の `!==`（タイミングオラクル）だったため、Double-HMAC（nonce+HMAC-SHA256→timingSafeEqual）ヘルパーを `src/utils/safe-compare.js` に新設し /metrics・`authenticateAPIKey`・`apiKeyAuth`（security.js 内の重複実装2箇所）へ適用。空文字どうしの誤認証を防ぐガード付き。
+- 利益送金先ストアのパスバグ修正: `src/api/utils/profit-addresses.js` の `../../data/` は `src/data/` を指しており、ランタイムデータがソースツリーに書き込まれる + リポジトリ同梱のシードアドレス（BIP-173 例示アドレス等）が新規デプロイで実送金先として選択され得る問題を修正。ルート `data/` へ移し、旧パスからの移行時は同梱シードを除外して引き継ぐ。
+- master-auth TOTP の隣接ウィンドウリプレイ対策: リプレイ防止が「現在カウンタとの比較」だけだったため、window:1（±30秒）で受理される前ウィンドウのコードを次ウィンドウで再提示すると素通りした。受理済みコード値を `lastTotpToken` に記録して同一値の再提示を拒否。
+- アカウント退会（DELETE /users/me）と payoutAddress 変更（PUT /me）に再認証を追加: JWT 所持のみで PII 匿名化＋全セッション失効、およびプロバイダ受取アドレス差替（＝次回決済の攻撃者宛送金）が可能だった。OWASP「sensitive operations require re-authentication」に倣い `verifySensitiveConfirmation` を共通化 — パスワード照合（bcrypt）を必須化し、パスワードを持たない OAuth 専用アカウントは登録メール再入力で代替。`authLimiter` 付与で確認パスワードの総当たりも防止。資金に直結しない通常プロフィール項目（username/bio 等）は再認証不要。
+- `/marketplace/auction` の権威フィールド偽装防止: 入札オブジェクトの `reputationScore`/`eligible`/`attestationPassed`/`slaUptimePct` をクライアントが供給できていたため、任意の認証済みユーザーが自陣プロバイダに満点レピュテーションを付けて優勝させたり競合を `eligible:false` で排除できた。ルートで providerId/pricePerHour のみにサニタイズし、権威値はサービス層に限定（selectProvider の上書き経路は DI/テスト用として維持）。
+- sanitizeSensitiveFields の DoS 対策: 深度無制限再帰で ~8,000 段ネスト JSON（≈48KB、body-parser 上限内）が監査ミドルウェア経由で全リクエストに作用しスタックオーバーフロー→プロセス終了が成立していた。深度 32 で打ち切り（'[TRUNCATED]'）＋WeakSet で循環参照を '[CIRCULAR]' に置換。配列は配列として複写（従来はオブジェクト化していた）。
+- LINE Notify 送信の耐障害化: `scripts/line-notify.js`（service-monitor の LINE 経路）に 10 秒タイムアウト（`LINE_NOTIFY_TIMEOUT_MS`）を追加し、失敗ログから axios エラーオブジェクトを排除 — `e.config.headers.Authorization` に含まれる `LINE_TOKEN` がログへ漏洩する経路を遮断。
+- Web OAuth フロー（GET /auth/google|github）の login-CSRF 対策とログイン完結: `passport.authenticate` に `state: true` を付与（共有 masterSession を web フロー2ルートにのみ適用し passport-oauth2 のステートストアを成立）。コールバックは従来 OAuth プロフィールを echo するだけでトークンを発行していなかったのを、RESTful /auth/google と同一ポリシー（email_verified 必須・同一メール既存アカウントは暗黙リンクせず 409・access+refresh ペア発行+ati 紐付け+lastLogin 更新）でログインを完結させ、`UserRepository.getByGithubId` ファインダを追加。
+- webhook.js / lightning-api.js の SSRF リダイレクト迂回とタイムアウト欠如を修正: assertPublicUrl() は最初の URL のみ検証するため、axios 既定のリダイレクト追従でガードを迂回可能だった残存経路を遮断（OWASP SSRF Prevention Cheat Sheet の「リダイレクトごとの再検証または追従禁止」準拠）。SAFE_AXIOS_CONFIG を ssrf-guard に集約し、ガードと安全設定を同所化。
+- メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `src/gpu/` 監視モジュールの健全性修正 — `gpu-health-monitor` の `execSync(nvidia-smi)` にタイムアウト無し（ドライバハングでイベントループ全体が停止）・同一異常の毎 tick 再通知（アラート嵐）・unref/stop 無しを修正（シグネチャ dedup + 回復後の再通知化）。`gpu-liveness-monitor` も同様に unref+stop+単一フライト化し、`recordGpuError`（内部で多段通知済み）と呼び出し側の二重通知を解消。あわせて未使用の `MetricsCollector` 即時生成を遅延化（コンストラクタでの Prometheus メトリクス登録を回避）。
+- `test` ジョブ（test-coverage-check.yml）のカバレッジ閾値チェックが全 PR で落ちていた問題を jest.config.js 側で修正: (a) 閾値チェックが読む `coverage/coverage-summary.json` を生成する `json-summary` レポーターが未設定で MODULE_NOT_FOUND でクラッシュしていたのを `coverageReporters` に追加して解消、(b) 実カバレッジ 68.1% が閾値 70 を下回っていた件は、libp2p 未導入・Docker/k8s・実 GPU 前提で CI 上で実行不能な経路しか持たない 3 ファイル（`p2p-network.js`・`virtual-gpu-manager.js`・`gpu-detector-extended.js`、計 737 未カバー行）を `coveragePathIgnorePatterns` で除外し 75.5% に。既定の「ロード済みファイルのみ計測」セマンティクスを保つため `collectCoverageFrom` ではなく ignorePatterns を採用。
+- `src/payments/escrow-service.js` の資金移動ライフサイクルを改竄検知付き監査ログへ記録 — escrow 行内 `history` は書き手自身が編集できる JSON データの一部で監査証跡にならず、payments 層全体（escrow/FSM/action-executor/settlement）に `appendAuditLog` がゼロだった。`create`（escrow_created: orderId/amountSats/feeRate）、状態遷移成功（escrow_transition: event/from/to/actions）、CAS 競合（escrow_transition_conflict）、二重作成拒否（escrow_create_rejected）、精算（escrow_settlement_computed: payout/refund/fee 内訳）、LN 実行失敗（escrow_ln_actions_failed）をハッシュ連鎖ログへ出力。`audit` は DI 可能（テストは捕捉関数を注入）。呼び出し側5箇所（order routes / SLA sweep / gpu-auto-recovery）へ個別配線せず service 層で網羅。参考: PCI-DSS 10.2「全ての個々のユーザーアクセス/カード会員データへのアクセス記録」、OWASP Logging Cheat Sheet（金融イベントの完全性要件）、Google SRE「Monitoring Distributed Systems」（資金移動は監査対象イベント）。
+- Slack アラート系 ops スクリプトの共有化と堅牢化: `alert-high-priority.js` / `alert-overdue.js` / `alert-overdue-high.js` が「feedback-priority.json 読込→フィルタ→Slack 送信」をガード無しで各々複製していたため `scripts/lib/alert-common.js` に集約 — 破損 JSON はファイル名付き例外、非配列拒否、非オブジェクト要素除去、期限キー（due/deadline/期限/date）の順序参照を一本化、3000 文字分割送信。各スクリプトに `FEEDBACK_PRIORITY_PATH` env 差し替えと require.main のエラーハンドリングを追加。
+- `.github/dependabot.yml` の `automerge` キー（Dependabot 非対応フィールド）を除去 — GitHub は未知キーを含む設定ファイル全体を検証エラーで拒否するため、npm/github-actions 両方の更新 PR が一切開かれない状態だった。自動マージの正しい実現経路（リポジトリ設定 + fetch-metadata ワークフロー）をコメントで明記。
+- ops スクリプトの JSON 読み込みを堅牢化: `scripts/lib/read-json.js` を新設し、`alert-high-priority`/`alert-overdue`/`alert-overdue-high`/`priority-to-notion`/`progress-report` の裸 `JSON.parse(readFileSync)`（docs/feedback-priority.json 等の破損や未作成で cron チェーンごとクラッシュ、オブジェクト書込時は .filter で TypeError）を ENOENT/破損/非配列に耐性のある共通ヘルパーへ置き換え。progress-report は credentials/token 欠損時に明確なエラーメッセージで終了するよう改善。
+- `src/utils/notifier.js` の LINE Notify 対応をサービス終了に合わせて更新 — LINE Notify（notify-api.line.me）は 2025-03-31 に公式終了し全呼出が必ず失敗するため、`NotifyType.LINE` は HTTP を発行せず移行案内付きエラーを即返すよう変更。後継の LINE Messaging API（`api.line.me/v2/bot/message/push`、channel access token + to: userId/groupId、5000文字上限）を `NotifyType.LINE_MESSAGING` として実装。`resilient-notify` の line チャネルは `LINE_NOTIFY_URL` が明示設定された場合のみ有効なため無改変（カスタムエンドポイント運用は継続可能）。参考: LINE Notify 終了公式告知（notify-bot.line.me）、LINE Messaging API リファレンス。
+- `slack-notify-checklist-kpi.js`: `.env` 未読込で `slack-feedback-bot` が require 時に捕捉する `SLACK_WEBHOOK_URL` が常に空となり `npm run slack-notify-checklist-kpi` の通知が無言スキップされる不具合を修正（dotenv を require 前に読み込み。`slack-notify-notion` と同型）。サブプロセス経由の回帰テストを追加。
+- `scripts/sample.js`（i18next 多言語デモ）の任意依存ハンドリング: i18next/i18next-fs-backend は package.json 未宣言のため未導入環境で MODULE_NOT_FOUND 即死していた。遅延 require + require.main ガード + 導入案内（`npm i i18next i18next-fs-backend`）でライブラリ的 require も安全化。
+- `tests/e2e/helpers.js` の `promoteToAdmin` を原子書込み化: 起動中の e2e webServer が読む `data/users.json` を非アトミック `writeFileSync` で更新しており、書込み途中の半壊 JSON をサーバが読むと以降の UserRepository 呼出しが連鎖失敗し得た。アプリ側と同じ `atomicWriteJSON` を使用。
+- `checklist-to-issues.js` の堅牢化: ①require 時に env 未設定だと `process.exit(1)` でホストプロセスを殺していた副作用を除去（検証は呼び出し時へ）。②`@octokit/rest` を呼び出し時遅延 require に変更（optionalDeps 未導入で import 自体が MODULE_NOT_FOUND にならない）。③`GITHUB_REPO` の `owner/repo` 形式検証（`split('/')` のみでは repo 未定義で API が不可解に失敗）。④open issue の取得を `octokit.paginate` 全ページ化（per_page:100 単発では 100 件超の既存 issue を見落とし重複作成）。⑤付与ラベルがリポジトリに無いと `issues.create` が 422 で全件失敗するため `createLabel` を冪等実行（422=既存は無視）。⑥1件の作成失敗で残り全件を捨てないよう per-issue try/catch + 件数サマリ返却。⑦チェックリスト不在の明示エラーと `CHECKLIST_ISSUES_PATH` env 差し替え。
+- `lightning-service.js` のイベントストリーム再接続を堅牢化（`_setupResilientStream` 集約）: 旧実装は gRPC ストリーム切断時の error/end/close 連鎖発火それぞれが個別に `setTimeout` を積み、1回の切断で3本の再購読が並走（invoice:paid 二重 emit・リスナー蓄積）。再接続をストリーム毎1タイマーへ単一化、再購読前に旧ストリームを `cancel()`（cancel 起因の同期 close が再接続を積み直さないよう superseded ガード）、指数バックオフ 5s→5分キャップ＋データ到着でリセット。監査/通知のイベント名（invoice_stream_error 等）は従来タグを維持。
+
+## scripts/*.sh スタブの正直な実装化 (2026-09-26)
+
+- **観測**: `build.sh`・`deploy.sh`・`setup-production.sh` は shebang+コメントのみの2行スタブで、呼ばれても exit 0 で無言成功する。CI や手動運用から参照された場合「成功したが何も起きなかった」と誤認される構造（いずれも現在参照ゼロ）。
+- **変更**:
+  - `build.sh`: Node サーバにコンパイル工程はないため「ビルド」を正直に定義 — `npm ci` + `npm run openapi-gen`（生成物の最新化）。
+  - `setup-production.sh`: `config.js` の `requireSecret` が本番で fail-fast する必須シークレット（JWT_SECRET≥32 / SESSION_SECRET・ENCRYPTION_KEY≥16）を事前検査し、未設定なら具体的な案内とともに exit 1。`--check` で npm ci を伴わない検査のみ実行可能（テスト可否のため）。検査通過後は `npm ci --omit=dev`。
+  - `deploy.sh`: デプロイ経路が未構成（ci-cd.yml の Deploy は echo スタブ）である旨を stderr で説明し exit 1 — 無言成功による誤認を防止。
+- **テスト**: `tests/scripts/sh-scripts.test.js` 新規5件 — bash -n 構文・`set -euo pipefail`・deploy.sh の非ゼロ終了・preflight の両経路（実機で両方向の終了コードを確認済み）。
+- **参考**: Google Shell Style Guide（set -euo pipefail）/ 十二因子アプリの fail-fast 設定検証
+
+### 市場価格エンジンの見積もり配線（2026-09-27）
+- **対応**: `GET /gpus/:id/estimate` に `marketReference`（advisory）を追加し、孤立していた `MarketPricingEngine`（TFLOPS/VRAM/地域/需給/時間帯係数）を配線 — このドキュメント §4 の「pricing engine をマッチングへ配線」の部分対応。実課金は従来どおり `pricePerHour × 時間`。
+- **同時修正**: `getGPUSpecs()` が未知モデルへ合成スペック（tflops=10）を返していたため `calculateGPUPrice` の `!gpuSpecs → getDefaultPrice` フォールバックがデッドコード化していた。未一致時 `null` 返却に修正し、estimate では `marketReference: null` を返す（合成価格で誤誘導しない）。
+
+### alert-kpi-trend の実動化（2026-09-27）
+- **対応**: `npm run alert-kpi-trend` が生成側の単一ファイル上書き（`docs/checklist-kpi-report.md`）と食い違う「日付付き履歴2件必須」前提で常に「2つ以上必要です」で終了する構造的デッドコードだった。前回値を `data/kpi-trend-state.json`（`KPI_STATE_FILE`/`KPI_REPORT_DIR`/`KPI_ALERT_THRESHOLD` で差し替え可）へ自身で記録する方式へ変更 — 単一レポート運用で動作し、同一内容の再実行では差分ゼロなので二重通知しない。パース不能・状態ファイル破損・レポート不在の各経路を明示ハンドリング。#127（kpi-trend-graph の同型バグ）の姉妹修正。テスト5件追加。
+
+## RFC 9116 `security.txt` の配信 (2026-09-26)
+
+- **観測**: リポジトリに `SECURITY.md`（開示ポリシー）があるが、デプロイされたサービスから機械可読な連絡先を取得する経路がなかった。RFC 9116 は `/.well-known/security.txt` を標準化しており、セキュリティ研究者・脆弱性スキャナはここを最初に参照する（GitHub/GitLab/Certificate Transparency のスキャン連携も同規格）。
+- **罠**: `public/.well-known/` にファイルを置くだけでは `express.static` の既定 `dotfiles: 'ignore'` がドット始まりセグメントを拒否し、リクエストは SPA キャッチオールへ流れて index.html (200/HTML) を返す — スキャナからは「security.txt 不在」どころか誤った 200 応答に見える。
+- **変更**: `public/.well-known/security.txt`（Contact=GitHub Security Advisory、Policy=SECURITY.md、Preferred-Languages、Expires）を新設し、`server.js` に static より前の明示ルート `GET /.well-known/security.txt` を追加。`tests/api/basic.test.js` に 200・text/plain・必須フィールドの回帰テストを追加。
+- **参考**: RFC 9116 / GitHub "Adding a security policy" / securitytxt.org
+
+### gpu_lending_dashboard_mock.jsx を実 API 契約へ同期（2026-09-27）
+- **対応**: ルートの React モックが架空 API（`/api/gpu?owner=me`、認証ヘッダなし）と存在しないフィールド（`gpu.status`/`earningJPY`/`earningBTC`、架空の `/mock/earnings_graph.png`）を参照していた。実契約へ書き換え: `GET /api/v1/gpus/my`（JWT必須）+ `GET /orders/provider/earnings`（provider/admin）の `byGpu` 内訳で GPU 別収益を表示し、`available` フラグで稼働状況を表現。#111（cli.md）と同種のモック同期。
+
+## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-timer-unref` → PR 化
+
+1. `AutoPerformanceOptimizer.start()` の `setInterval` が `unref` されておらず `stop()` も存在しなかった — 起動配線（open PR 参照）後は ref 済みタイマーがイベントループを生かし続け、SIGTERM での drain 不能→コンテナ環境で SIGKILL タイムアウトに化ける。unref + `stop()` 追加（service-monitor/invoice-poller と同一規約）。
+2. `MetricsCollector.startCollection()` の interval も同様に unref。
+3. **実バグ**: `src/gpu/metrics.js` のカスタム Gauge/Counter 34件が `registers` 未指定で prom-client のグローバル default registry へ登録されていた — `new MetricsCollector()` は同一プロセス内で2回目に必ず `already been registered` を throw し、MetricsCollector をそれぞれインスタンス化する auto-performance-optimizer と gpu-liveness-monitor が同居できない設計上の衝突だった。各メトリクスへ `registers: [this.register]` を付与しインスタンス registry を正とし、`registerAllMetrics()` は冪等化。`/metrics` エンドポイントは prom-client グローバルを返すが、現在どの起動経路も MetricsCollector を生成していないため main の観測出力は変化しない。
+
+- `tests/e2e` のデータ破壊を防止: `globalSetup` が `data/*.json` を無条件で `[]`/`{}` にリセットしていたため、開発者の live レコード（users/orders/payments 等）を `npm run test:e2e` の度に消去していた。リセット前に `data/.e2e-snapshot/` へ既存ファイルを退避し、新設の `globalTeardown` が実行後に復元する方式へ変更。テスト中に生成されたファイルの除去・`data/` 不存在時の完全復元・前回クラッシュ時の自動復旧（次回 setup 先頭で残存 snapshot を先に復元）にも対応。
+- `scripts/prepare-data.js` のサンプルデータを実スキーマ準拠＋非稼働へ修正: `vendor`/`apiType`/`pricePerHour`/`providerId` 欠落で `status:'available'` な GPU を種入れしており、`GET /api/v1/gpus?vendor=…` の `gpu.vendor.toLowerCase()` TypeError(500)・価格計算不能な出品・`status:'pending'` かつ `createdAt` 欠落の注文による失効スイープ/admin 統計の歪みが起き得た。実登録スキーマ適合・`status:'maintenance'`/`cancelled`・passwordHash 無しユーザー・`demo:true` マーカーに修正し、スキーマ適合を検証するガードテストを追加。
+- `data/*.json` の定期バックアップを配線: `utils/backup.js` の `backupAll` は実装済みだが呼び出し側ゼロ（手動実行以外ではバックアップ不動＝復元元が存在しないサイレント欠陥）。`core/backup-scheduler.js` を新設し `BACKUP_INTERVAL_HOURS` opt-in で起動配線。任意クラウド SDK 未導入環境では遅延 require が失敗→警告+無効化でサーバ起動を妨げない設計、単一フライト・タイマー unref・テスト環境抑止込み。
+- `src/utils/exchange-rate.js` の外向き axios に共通安全設定（`maxContentLength: 64KiB`・`maxRedirects: 0`）を追加 — notifier/resilient-notify と同型の inline config。ティッカー JSON は ~1KB 未満しか期待しないため、ハイジャック・プロキシ混入時の巨大レスポンス（OOM DoS）と 302 経由の SSRF リダイレクト迂回を遮断。`exchange-rate-swr.test.js` に全4プロバイダ呼出への設定適用を検証する回帰テストを追加。
+- report 系 ops スクリプトの堅牢化: `kpi-trend-graph.js` は生成側が日付なし `progress-report.md` のみ出力するのに `progress-report_YYYY-MM-DD.md` だけを読んでおり常に空だったため、最新スナップショットを mtime 日付で履歴末尾へ併用＋chartjs-node-canvas を遅延 require（optionalDependencies 未導入でも MODULE_NOT_FOUND で死なない）＋parseInt NaN ガード＋env パス差し替え。`assignee-progress-report.js` は破損 JSON の明示エラー・非文字列 status の正規化・Slack 障害時もレポート生成を成功扱いに。`checklist-kpi-report.js` はチェックリスト不在時の明示エラー＋require.main エラーハンドリング。
+- `src/utils/backup.js` のバックアップ網羅性を修正 — `TARGET_FILES` が 6 件固定で、`profit-addresses.json`（運営利益の送金先）・`revoked-tokens.json`（失効 JWT — 消失でログアウト済みトークン復活）・`notification-settings.json`・`uptime.json`・`sla.json`・`verifications.json`・`bids.json`・`watches.json`・`sandbox-apikeys.json` が一切バックアップされず消失時に復元不能だった。実行時に data/*.json を動的走査する `_targetFiles()` 化で将来の新規ファイルも自動捕捉。あわせて `backups/`（users.json 等の平文コピー出力先）が .gitignore 未登録だったのを追加 — 未対処だと git add でパスワードハッシュ入りバックアップがコミットされる。
+- `lightning-service.js` の LND unary RPC に既定 deadline を付与（gRPC service_config の methodConfig.timeout、既定 60s・LND_RPC_TIMEOUT_MS で可変）。deadline 未設定だと LND が TCP 接続を保ったまま応答を返さない障害時に AddInvoice/SendPaymentSync/SettleInvoice 等の資金移動呼出が無期限滞留し、Express のタイムアウト層が応答を返しても gRPC 側の処理は残存していた。ストリーム系（SubscribeInvoices/CloseChannel 等）は長寿命のためメソッド名個別列挙で対象外。
+
+### P2P MVP スクリプトの任意依存遅延 require 化（2026-09-27）
+- **対応**: `src/p2p-{node,sync,notify}.js`・`src/cli.js` が package.json 未収録の libp2p 系/ipfs-core/orbit-db をトップレベル require し、README 記載の `node src/cli.js`・`node src/p2p-notify.js` が MODULE_NOT_FOUND で即死していた。遅延 require + 手順付きエラー化し、`p2p-notify` は libp2p 未導入でも外部 API 監視（MONITOR_TARGETS）が単独動作するよう変更（実機検証済み）。
+- **同時修正**: 監視 tick の単一フライト化（複数監視対象で 1 tick が 15s 超過時のアラート二重化を防止）、stale health.json は NODE_DOWN ではなく NODE_MONITOR_STALE として区別（監視プロセス停止とピア切断を分離）。
+- `src/core/gpu-detector-extended.js` の三重実害を修正 — ① `GET /gpus/system/detected` が存在しない `detectAllGPUs()` を呼び管理者呼出が常に TypeError→500 だったため実装（AMD+Intel を Promise.all で併合）② ROCm と sysfs が同一物理 GPU を別 uuid で二重列挙していたため PCI busId で重複排除（ROCm 側を優先）③ 検出のたびに `rocm-bandwidth-test --quick`/`ze_peak`/`level-zero-info`/`rocm-smi -d` を実行し stdout を解析せず破棄 — 貸出中テナントの GPU 帯域を占有する副作用を除去しゼロ値プレースホルダへ。あわせて全 exec（rocm-smi/intel_gpu_top/clinfo/modinfo/PowerShell/wmic）へ timeout 15s+maxBuffer を付与しドライバ異常時の永久滞留を防止。参考: Kubernetes device-plugin の health-check 設計（検出系は side-effect free で bounded）、OOB hardware enumeration のベストプラクティス。
+- feedback パイプライン（priority/checklist/sheets/report）の読込み経路を共有 `scripts/lib/feedback-store.js` へ集約。各スクリプトの独自 JSON.parse(readFileSync) は破損ログで全段クラッシュ・非文字列フィールドで TypeError・report/checklist は require 副作用でファイル書込みという欠陥があった。ローダーは破損時にファイル名付きの明示エラー＋エントリ正規化、各スクリプトに require.main ガード・env パス差し替え・エラーハンドリングを追加し、sheets は credentials/token/FEEDBACK_SHEET_ID の事前検証を追加。priority 出力を atomicWriteJSON 化。
+- `src/gpu/` 監視モジュールの健全性修正 — `gpu-health-monitor` の `execSync(nvidia-smi)` にタイムアウト無し（ドライバハングでイベントループ全体が停止）・同一異常の毎 tick 再通知（アラート嵐）・unref/stop 無しを修正（シグネチャ dedup + 回復後の再通知化）。`gpu-liveness-monitor` も同様に unref+stop+単一フライト化し、`recordGpuError`（内部で多段通知済み）と呼び出し側の二重通知を解消。あわせて未使用の `MetricsCollector` 即時生成を遅延化（コンストラクタでの Prometheus メトリクス登録を回避）。
+- `cloud-storage.js` の任意クラウド SDK を遅延 require 化: トップレベル require の `googleapis`/`dropbox` が未宣言だったため未導入環境で require('utils/backup') 自体が MODULE_NOT_FOUND で落ち、ローカル世代バックアップ・リストアも全滅していた。AWS SDK（aws-sdk）・googleapis・dropbox を各 upload 関数内でのみ解決し、未導入時は `npm i <pkg>` の手順付きエラーに変更。`backupLocalWithGeneration` を export 化し、世代バックアップ→破損→リストアの往復テストを追加。
+
+### sentry-notify の @sentry/node 遅延 require 化（2026-09-27）
+- **対応**: `scripts/sentry-notify.js` が意図的に未宣言の任意依存 `@sentry/node` をトップレベル require していたため、SENTRY_DSN 設定済み環境で service-monitor の遅延 require が MODULE_NOT_FOUND で失敗し Sentry 通知が一度も届かず警告だけを量産していた。関数内遅延 require＋`npm install @sentry/node` の手順付きエラーへ変更。require 安全性を固定するテスト3件。
+
+## fix(utils): gpu-monitor の三重実害修正とタイマー健全化（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-gpu-monitor-fix` → PR 化
+
+`src/utils/gpu-monitor.js`（GPU 死活→自動リカバリ）が呼び出せば必ず失敗する三重の実害を修正:
+
+1. `OrderRepository.updateStatus` — 存在しないメソッド（正は `update`）を destructure → TypeError クラッシュ
+2. 状態値 `'auto_recovered'` — `state-checker` の ORDER_STATES/遷移表に非登録で、書き込まれた注文は永久に遷移不能 → 有効値 `cancelled` へ
+3. `PaymentRepository.getByOrderId`（many:true=配列）を単体扱い + `refundPayment`（存在しない）呼び出し → 配列反復 + `update(id,{status:'refunded'})` へ（gpu-auto-recovery と同規約）
+
+あわせて `startGpuMonitor` を unref 済み・単一フライト・多重起動防止 + `stopGpuMonitor` 追加（service-monitor と同規約 — #150 のタイマー健全性と同クラス）。
+
+- notification-settings の SSRF チェックを共有 ssrf-guard へ集約 + 登録時 DNS 事前検証を追加: 旧 regex 方式は userinfo 混在（http://x@127.0.0.1/）・数値IPv4（2130706433/0x7f000001/127.1）・IPv4埋め込みIPv6 を素通りし、FQDN の解決結果も検証していなかった。WHATWG URL パース後の hostname を isPrivateIp で分類する形へ統一し、SSRF_ALLOW_PRIVATE_WEBHOOKS の登録側不整合（送信は許可・登録は常時拒否）を解消。DNS 解決失敗は登録を許容（送信時の assertPublicUrl が権威）。
+- `src/utils/anomaly-detector.js` の堅牢化 — `logs/` は gitignore 済みで新規 clone には存在しないため、`reportAnomaly` の `appendFileSync(logs/anomaly.log)` が mkdir 無しで ENOENT を投げ呼び出し元（gpu-monitor）が初回異常報告でクラッシュしていた（wired バグ）。mkdir + 書込失敗の非致命化を追加。あわせて `detectRequestAnomaly` の IP カウンタがユニーク IP 毎に永久蓄積する無制限増殖（#58 同型）を TTL スイープ+10k 上限でバウンド化。`google-calendar.js` の `defaultConfig` 宣言漏れ（暗黙グローバル）と googleapis トップレベル require（未導入で require 自体クラッシュ）を遅延化、`ai-benchmark.js` の axios に timeout/maxContentLength/maxRedirects を付与（#151 同型の未防御外向き呼出し）。
+- Electron デスクトップシェルを実装: `public/electron.js` は1行コメントのみのスタブ、`preload.js` は `contextBridge` 未インポートで起動即 ReferenceError だった。contextIsolation/sandbox/no-nodeIntegration 前提のメインプロセス（外部リンクは OS ブラウザ、will-navigate を起点 URL に制限、監査 IPC 受信）と、sandbox 互換 preload（監査は ipcRenderer で main へ転送）へ実装。`npm run desktop`（npx で electron@44.4.3 をオンデマンド取得、依存には追加せず npm ci を重くしない）。
+- `scripts/feedback-bot.js` の堅牢化: 破損した `docs/feedback-log.json` で JSON.parse が全投稿をクラッシュさせる問題を「破損ファイルの退避 + 新規開始」に修正、非アトミック `writeFileSync` を共有 `atomicWriteJSON` へ置換（中断時のログ半壊防止）、user/message の型・長さ検証（128/4000 字）と CLI 入口のエラーハンドリング、`FEEDBACK_LOG_PATH` によるファイル差し替えを追加。回帰テスト5件。
+
+## fix(utils): 外向き axios 安全設定の共有化と未適用経路の塞ぎ（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-http-safe-config` → PR 化
+
+notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedirects:0 の SSRF 迂回遮断）を `src/utils/http-safe-config.js` へ集約し共有化。同値を複製していた resilient-notify.js を共用に揃え、安全設定が付いていなかった2経路を塞いだ:
+
+- `src/utils/email.js`（SendGrid/Mailgun — notifier.js 経由で配線済み）: axios.post に timeout 無し — SendGrid 接続の半開き滞留が通知パスを永久ブロックし得た
+- `src/utils/gpu-price-compare.js`: AWS EC2 オファー index（非圧縮1GB超）を timeout・サイズ上限なしで全量メモリ展開 — 呼び出せばほぼ確実に OOM。timeout 30s + maxContentLength 256MiB で有界エラー化（同時に、全 index 取得方式自体の限界をコメントで明記）
+
+- `devRequestLogger` の資格情報漏洩を修正: NODE_ENV=development でリクエストボディをログへ流す際のマスク対象が password/token/paymentRequest の3件のみで、refreshToken・idToken・currentPassword/newPassword・code（メール認証コード）・apiKey 等の live クレデンシャルが平文で dev ログへ残っていた。キー名ベースの再帰 `redactBodyForLog`（配列ボディ・ネスト対応・深度上限で循環安全）へ置き換え、新規8テストで固定。
+- `middleware/logger.js` のクエリ秘匿漏れを修正: `req.originalUrl` を生記録していた3系統（morgan アクセスログ/低速警告/エラーログ）に `redactUrlQuery` を適用し、`?token=`/`?api_key=` 等の機密クエリを `[MASKED]` 化。監査ミドルウェアの `query` マスキング・error-handler の `req.path` サニタイズと一貫させた（キー集合は sanitize.js と同一 + snake_case 包含）。
+- `src/security-audit.js` の `exec('npm audit --json')` を堅牢化: タイムアウト無し（レジストリ障害時に監視プロセスが永久滞留）と maxBuffer 既定 1MB（脆弱性多数時の大きな JSON が切断され「パース失敗」のみ記録され通知が永久に届かない）を修正（timeout 120s・maxBuffer 32MB）。パース失敗時に exec エラー/stderr も記録して原因診断可能に。exec モックの回帰テスト4件追加。
+- `src/api/routes/payment/btc-onchain.js` のエスクロー CAS 競合を fail-closed 化 — tx1 送信後に期限切れスイープ等が PENDING→CANCELED へ遷移すると `updateIf` が condition_failed を返すが、従来は戻り値を無視して tx2 まで進み、証跡の残らない資金移動＋再送時の新規エスクロー作成（tx1 再送＝借り手二重課金）になり得た。CAS 失敗時は txid 証跡を行へ追記・`payment_escrow_cas_failed` 監査・500+手動照合で停止し、txid 持ち CANCELED エスクローへの再送は 409 で拒否。回帰テスト2件追加。
+- `virtual-gpu-manager.js` のプロビジョニング config をサニタイズ: `createVirtualGPU` の `config.computePercentage` 等が生成される MPS シェルスクリプト（`start-mps.sh` を `exec` 実行）・Docker/k8s env・manifest へ生のまま埋め込まれており、`"50; <任意コマンド>"` 形式の値でコマンドインジェクションとなり得た。`clampPercentage`（数値化＋0-100クランプ）・`safeK8sQuantity`（quantity 形式検証＋既定値フォールバック）・`safePositiveNumber`（Docker Memory/CpuShares 用）を新設し全挿入箇所へ適用。docker/k8s/native 各経路で生成物がサニタイズ済みであることを検証するテスト6件を追加。
+- `middleware/audit.js` の監査 url フィールドに生クエリが残る問題を修正: `req.originalUrl` をそのまま記録していたため `?token=`/`?api_key=` が平文残留し得た。query フィールドは既にマスキング済みのため url はパス部のみ記録へ変更（OWASP ロギング基準の二重防御）。併せて `scripts/slack-notify-notion.js` が `.env` を読まず SLACK_WEBHOOK_URL が常に空だった問題を修正（dotenv を slack-feedback-bot より先に読み込み — 同モジュールは require 時点で env を定数捕捉するため順序が必須）。
+- `gpu-error-history.js` の競合・証跡喪失を修正: health/liveness 両モニタからの並行 `recordGpuError` が単一 JSON への read-modify-write で lost-update（エントリ消失）し得たため `withLock` 直列化（通知送信はロック外）。破損履歴ファイルが次回保存でサイレント上書きされる問題を `.corrupt-*` 退避へ変更（解析証跡を保全）、無制限増殖する GPU キーへ `MAX_GPU_KEYS` キャップを追加。
+- `src/security/gpu-attestation-verifier.js` の mandatory チェックを fail-closed 化: 全フィールドが Joi optional であるのに対し mandatory の `freshness`（timestamp）と `memory_match`（report.memoryGB）がフィールド欠落時に `pass` していたため、欠落・パース不能・大きな未来時刻を不合格に修正（軽い未来ズレは 5 分スキュー内で受理）。欠落のままだと「一度取得した正当レポートの無期限再提示」（リプレイ）と「容量をアテストしないスペック申告」が必須チェックを素通りしていた。
+- `src/utils/ssrf-guard.js` の IPv6 分類を 8 グループ展開＋数値判定へ書換え: 旧実装の `startsWith('fe80')` では fe80::/10 の fe90〜febf リンクローカルが素通りし、`::7f00:1`（IPv4-compatible ループバック）・`::ffff:0a00:1`（16進テールの mapped）・`2002:7f00:1::`（6to4）・`64:ff9b::7f00:1`（NAT64）等の IPv4 埋め込み遷移機構経由で内部アドレスへ SSRF 可能だった。fec0::/10 site-local・2001:db8::/32・2001:0::/32 Teredo も遮断対象に追加（PortSwigger SSRF cheat sheet 系の既知バイパス対応）。
+- `src/api/utils/mailer.js`（master-auth メール認証コード送信経路）の SMTP 安全性を修正: 従来 `secure:false` で STARTTLS が opportunistic（非対応サーバへ SMTP_USER/PASS を平文送信し得る）かつタイムアウト無しだった。`requireTLS`（587系）/ `secure`（465）の適正化 + connection/greeting/socket 3系統タイムアウト + env 未設定時の明確なエラー + transporter 遅延生成。utils/email.js（SendGrid/Mailgun 系、#79 で済）とは別系統の残存ギャップ。
 - `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

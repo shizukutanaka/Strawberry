@@ -2,10 +2,13 @@
 const fs = require('fs');
 const path = require('path');
 
-const CHECKLIST_FILE = path.join(__dirname, '../improvement_checklist2.md');
-const REPORT_FILE = path.join(__dirname, '../docs/checklist-kpi-report.md');
+const CHECKLIST_FILE = process.env.KPI_CHECKLIST_PATH || path.join(__dirname, '../improvement_checklist2.md');
+const REPORT_FILE = process.env.KPI_CHECKLIST_REPORT_PATH || path.join(__dirname, '../docs/checklist-kpi-report.md');
 
 function parseChecklist() {
+  if (!fs.existsSync(CHECKLIST_FILE)) {
+    throw new Error(`${CHECKLIST_FILE} がありません（チェックリスト未生成）`);
+  }
   const text = fs.readFileSync(CHECKLIST_FILE, 'utf8');
   const lines = text.split('\n');
   let total = 0, done = 0, wip = 0, todo = 0;
@@ -51,7 +54,12 @@ function main() {
 }
 
 if (require.main === module) {
-  main();
+  try {
+    main();
+  } catch (e) {
+    console.error(`チェックリスト進捗KPIレポート生成に失敗: ${e.message}`);
+    process.exit(1);
+  }
 }
 
-module.exports = { main };
+module.exports = { main, parseChecklist, renderReport };

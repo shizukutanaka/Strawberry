@@ -1,6 +1,6 @@
 // p2p-sync.js - OrbitDBベースのP2P分散同期枠組み（orders/payments/gpus/health）
-const IPFS = require('ipfs-core');
-const OrbitDB = require('orbit-db');
+// ipfs-core / orbit-db は package.json 未収録の任意依存。トップレベル require だと
+// MODULE_NOT_FOUND で即死するため、main() 内で遅延 require して手順付きエラーにする。
 const fs = require('fs');
 const path = require('path');
 
@@ -8,10 +8,26 @@ const DB_NAMES = ['orders', 'payments', 'gpus', 'health'];
 const LOCAL_DIR = path.join(__dirname);
 
 const { atomicWriteJSON } = require('./db/json/atomicWrite');
-const { restoreFromLatestBackup } = require('./utils/backup');
+// backup.js は任意クラウド SDK（aws-sdk/googleapis/dropbox、package.json 未収録）を
+// 遅延 require する utils/cloud-storage.js を引き込む。ここでも遅延化しておかないと
+// p2p-sync の require 自体が MODULE_NOT_FOUND で落ちる。
+let _restoreFromLatestBackup;
+function restoreFromLatestBackup(filePath) {
+  if (!_restoreFromLatestBackup) {
+    _restoreFromLatestBackup = require('./utils/backup').restoreFromLatestBackup;
+  }
+  return _restoreFromLatestBackup(filePath);
+}
 const { logger } = require('./utils/logger');
 
 async function main() {
+  let IPFS, OrbitDB;
+  try {
+    IPFS = require('ipfs-core');
+    OrbitDB = require('orbit-db');
+  } catch (e) {
+    throw new Error(`P2P 分散同期には ipfs-core / orbit-db が必要です: npm i ipfs-core orbit-db (原因: ${e.message})`);
+  }
   const ipfs = await IPFS.create({
     config: { Bootstrap: [] }, // 明示的なピア探索も許可
     EXPERIMENTAL: { pubsub: true }

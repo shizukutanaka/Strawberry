@@ -448,6 +448,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - 残存 N+1 の後始末（perf）: `payment-reminder.js` の支払いごとの `UserRepository.getById`（users.json を件数ぶん全量読込）を 1 回の `getAll` → Map 化へ置換。`order-expiry.js` の係争自動解決では `EscrowRepository.getAll` を「解決が実際に発生した時だけ構築する orderId→HELD エスクロー Map」に遅延集約（no-op スイープで無駄読みしない）。孤立 React ファイル `src/web/pages/settings/notifications.js`（React/axios 前提だがビルド系・参照ともに無し、JWT モデルと整合しない旧式実装）を削除。
 
 ### その他実装済（運用ドキュメント）
+- `sandbox-apikey.js` の直接ユニットテストを追加: `generateApiKey` の 48hex 形式・一意性、`isValidApiKey` の永続化往復・不在/破損ファイル時のクラッシュ無し false を固定（開発/テスト専用の API キー機構 — 本番 404 ゲート付き）。
 - `improvement_checklist2.md` の「既知の未完了」内の陳腐記述を修正: 「孤立した `*-fixed.js`」は現存せず、「Electron(preload/react-app) は未配線」も `public/electron.js` + `preload.js` 実装済み（配布パッケージングのみ未配線）の現状へ同期。
 - `provider-uptime` の直接ユニットテスト追加（0カバレッジだった信頼性スコア算出）: beats/gapEvents/sessions の累計・GAP_THRESHOLD 超過での gap 判定・再起動後初回ビートの偽 gap 抑制・MIN_BEATS 未満の measuring・breach があれば measuring で隠さない・disruptionRate+ペナルティでの減点。11件。
 - `cache.js` の直接ユニットテスト追加: 2xx のみキャッシュ・非2xx は次リクエストでハンドラ再実行（500 を 60 秒 200 で replay する旧バグの回帰固定）・perUser は userId:role でキー分離（他ユーザーデータ漏洩防止）・invalidateUserCache/ByUrlPattern/purgeCache の境界検証。8件。

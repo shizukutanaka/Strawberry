@@ -35,6 +35,32 @@ function sanitizeId(value) {
   return s;
 }
 
+// 割合指定（vram/compute/bandwidth percentage）は生成される MPS シェル
+// スクリプトやコンテナ env にそのまま埋め込まれるため、必ず数値化して
+// 0-100 にクランプする。文字列のまま埋め込むと `"50; <任意コマンド>"` の
+// ような値がシェル行として実行され得る（コマンドインジェクション防止）。
+function clampPercentage(value, fallback = 50) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(100, Math.max(0, n));
+}
+
+// Kubernetes の quantity フィールド（memory/cpu limit）と Docker の数値
+// リソースを検証する。想定外の文字列は既定値へフォールバックする
+// （壊れた Pod spec の生成や、将来 manifest がテンプレート化された際の
+// 注入を防止）。
+const K8S_QUANTITY_RE = /^\d+(\.\d+)?(m|Ki|Mi|Gi|Ti|k|M|G|T|E|Pi|Ei)?$/;
+function safeK8sQuantity(value, fallback) {
+  const s = String(value ?? '');
+  return K8S_QUANTITY_RE.test(s) ? s : fallback;
+}
+
+// Docker リソース（Memory バイト数 / CpuShares）の有限数検証。
+function safePositiveNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
 class VirtualGPUManager extends EventEmitter {
     /**
      * サービス死活判定: 初期化状態とプラットフォーム API の応答で判定する。
@@ -337,14 +363,14 @@ class VirtualGPUManager extends EventEmitter {
                     resources: {
                         limits: {
                             'nvidia.com/gpu': this.calculateGPUFraction(physicalGPU, config),
-                            memory: `${config.memoryLimit || '8Gi'}`,
-                            cpu: `${config.cpuLimit || '4'}`
+                            memory: safeK8sQuantity(config.memoryLimit, '8Gi'),
+                            cpu: safeK8sQuantity(config.cpuLimit, '4')
                         }
                     },
                     env: [
                         { name: 'VGPU_ID', value: vgpuId },
                         { name: 'PHYSICAL_GPU_ID', value: physicalGPU.id },
-                        { name: 'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', value: String(config.computePercentage || 50) }
+                        { name: 'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE', value: String(clampPercentage(config.computePercentage)) }
                     ],
                     volumeMounts: [{
                         name: 'gpu-config',
@@ -394,7 +420,7 @@ class VirtualGPUManager extends EventEmitter {
                 `VGPU_ID=${vgpuId}`,
                 `PHYSICAL_GPU_ID=${physicalGPU.id}`,
                 `CUDA_VISIBLE_DEVICES=${this.getGPUIndex(physicalGPU.id)}`,
-                `CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${config.computePercentage || 50}`
+                `CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${clampPercentage(config.computePercentage)}`
             ],
             HostConfig: {
                 Runtime: 'nvidia',
@@ -406,8 +432,8 @@ class VirtualGPUManager extends EventEmitter {
                             'nvidia.com/gpu': String(this.getGPUIndex(physicalGPU.id))
                         }
                     }],
-                    Memory: config.memoryLimit || 8 * 1024 * 1024 * 1024,
-                    CpuShares: (config.cpuLimit || 4) * 1024
+                    Memory: safePositiveNumber(config.memoryLimit, 8 * 1024 * 1024 * 1024),
+                    CpuShares: safePositiveNumber(config.cpuLimit, 4) * 1024
                 },
                 Mounts: [{
                     Type: 'bind',
@@ -515,7 +541,7 @@ class VirtualGPUManager extends EventEmitter {
 export CUDA_VISIBLE_DEVICES=${this.getGPUIndex(physicalGPU.id)}
 export CUDA_MPS_PIPE_DIRECTORY=${mpsDir}/pipe
 export CUDA_MPS_LOG_DIRECTORY=${mpsDir}/log
-export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${config.computePercentage || 50}
+export CUDA_MPS_ACTIVE_THREAD_PERCENTAGE=${clampPercentage(config.computePercentage)}
 
 mkdir -p $CUDA_MPS_PIPE_DIRECTORY
 mkdir -p $CUDA_MPS_LOG_DIRECTORY
@@ -531,7 +557,7 @@ nvidia-cuda-mps-control -d
             return {
                 type: 'mps',
                 mpsDirectory: mpsDir,
-                threadPercentage: config.computePercentage || 50
+                threadPercentage: clampPercentage(config.computePercentage)
             };
             
         } catch (error) {
@@ -961,14 +987,14 @@ nvidia-cuda-mps-control -d
     calculateVRAMAllocation(physicalGPU, config) {
         // VRAM割り当て計算
         const totalVRAM = physicalGPU.vram;
-        const percentage = config.vramPercentage || 50;
+        const percentage = clampPercentage(config.vramPercentage);
         
         return Math.floor(totalVRAM * (percentage / 100));
     }
 
     calculateComputeAllocation(physicalGPU, config) {
         // 計算リソース割り当て計算
-        const percentage = config.computePercentage || 50;
+        const percentage = clampPercentage(config.computePercentage);
         
         return {
             percentage: percentage,
@@ -980,14 +1006,14 @@ nvidia-cuda-mps-control -d
     calculateBandwidthAllocation(physicalGPU, config) {
         // 帯域幅割り当て計算
         const totalBandwidth = physicalGPU.memoryBandwidth || 0;
-        const percentage = config.bandwidthPercentage || 50;
+        const percentage = clampPercentage(config.bandwidthPercentage);
         
         return Math.floor(totalBandwidth * (percentage / 100));
     }
 
     calculateGPUFraction(physicalGPU, config) {
         // Kubernetes GPU分数計算
-        const percentage = config.computePercentage || 50;
+        const percentage = clampPercentage(config.computePercentage);
         
         if (percentage >= 90) return '1';
         if (percentage >= 40) return '0.5';
@@ -1205,4 +1231,4 @@ nvidia-cuda-mps-control -d
     }
 }
 
-module.exports = { VirtualGPUManager };
+module.exports = { VirtualGPUManager, clampPercentage, safeK8sQuantity, safePositiveNumber };

@@ -3,6 +3,17 @@
 > P2P GPU マーケットプレイス — Node.js / Express バックエンド
 > 最終更新: 2026-06-21 / 対象ブランチ: `claude/deepresearch-ultrathink-improvement-NEMJb`
 
+> **2026-09 追補**: 本文は 2026-06 サイクルの記録として保持している。同サイクル以降の
+> main での主な変化: OpenTelemetry SDK（`src/telemetry/instrumentation.js`）が
+> `server.js` 先頭で配線済み（D-2 の「外部トレースバックエンド連携」残課題を解消。
+> `OTEL_EXPORTER_OTLP_ENDPOINT` 未設定時は完全 no-op）、probe 系セキュリティテストは
+> 60 件超へ拡充（§5「probe 01〜50」は当時の数）、§4 表「抜粋」外に `/admin/*`
+> （stats/verifications/escrow/expire-orders/cache-purge）・`/marketplace/escrow/*`・
+> `/gpus/:id/estimate`（価格参照）・`/gpus/:id/watch`（値下げ通知）等が追加済み。
+> エスクローは `src/payments/escrow-*` + `EscrowRepository` で状態機械として実装済み
+> （LN hold-invoice の実機アダプタ配線のみ残）。未マージ PR にのみ存在する機能は
+> 「実装済み」には含めていない。
+
 本書は Strawberry の **実態に基づく** 仕様書である。README / `improvement_checklist2.md` の
 「実装済み」表記には実態と乖離があるため、本書はソースコードを一次情報として記述する。
 末尾に **長所・短所・改善点** を洗い出し、本サイクルで実装した改善を明記する。

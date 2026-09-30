@@ -17,7 +17,17 @@ class AutoPerformanceOptimizer {
   start(intervalMs = 60000) {
     if (this.interval) clearInterval(this.interval);
     this.interval = setInterval(() => this.optimize(), intervalMs);
+    // unref: 監視タイマーがプロセス終了を妨げない（SIGTERM 後の drain を待たせない）
+    if (this.interval.unref) this.interval.unref();
     logger.info(`AutoPerformanceOptimizer started (interval: ${intervalMs}ms)`);
+  }
+
+  stop() {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+      logger.info('AutoPerformanceOptimizer stopped');
+    }
   }
 
   async optimize() {

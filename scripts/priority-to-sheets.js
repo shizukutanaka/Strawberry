@@ -2,21 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { authorize } = require('./google-sheets-auth');
 
 const PRIORITY_FILE = path.join(__dirname, '../docs/feedback-priority.json');
-const CREDENTIALS_PATH = path.join(__dirname, '../scripts/credentials.json');
-const TOKEN_PATH = path.join(__dirname, '../scripts/token.json');
 const SPREADSHEET_ID = process.env.PROGRESS_SHEET_ID; // .envで指定
 const SHEET_NAME = 'ProgressBoard';
-
-async function authorize() {
-  const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
-  const { client_secret, client_id, redirect_uris } = credentials.installed;
-  const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
-  const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
-  oAuth2Client.setCredentials(token);
-  return oAuth2Client;
-}
 
 async function appendBoard(auth) {
   if (!fs.existsSync(PRIORITY_FILE)) return;
@@ -35,7 +25,13 @@ async function appendBoard(auth) {
 }
 
 if (require.main === module) {
-  authorize().then(auth => appendBoard(auth));
+  if (!SPREADSHEET_ID) {
+    console.error('PROGRESS_SHEET_IDが未設定です (.env でスプレッドシートIDを指定してください)');
+    process.exit(1);
+  }
+  authorize()
+    .then(auth => appendBoard(auth))
+    .catch((e) => { console.error(e.message); process.exit(1); });
 }
 
 module.exports = { appendBoard };

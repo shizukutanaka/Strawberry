@@ -432,3 +432,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### docs/SPECIFICATION.md のステータス同期（2026-09-27）
 - **対応**: 2026-06 時点の実装ステータスが陳腐化していたため main 実態へ追随 — Escrow（btc-onchain/marketplace/escrow 配線済）・GPU アテステーション（Mock verifier 配線済）・Reputation（アテステーション/稼働統計経由で部分配線）・OTel（instrumentation 読込済）・feature-pricer（marketplace-service 経由配線済）・データ整合性（updateIf/withLock 済）を更新。open PR にのみ存在する配線は「未」のまま維持。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

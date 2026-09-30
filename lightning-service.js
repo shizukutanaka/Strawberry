@@ -7,6 +7,32 @@ const path = require('path');
 const crypto = require('crypto');
 const { logger } = require('./src/utils/logger');
 
+// unary RPC に既定 deadline を付けるチャネルオプションを構築する
+// （gRPC service config の methodConfig.timeout）。deadline 未設定だと、LND が
+// TCP 接続を保ったまま応答を返さない障害で addInvoice/sendPaymentSync/
+// settleInvoice 等の資金移動 RPC が無期限に滞留する。
+// ストリーミング系（SubscribeInvoices/SubscribeChannelEvents/CloseChannel）は
+// 長寿命のため対象外 — unary メソッド名を個別列挙する。
+// LND_RPC_TIMEOUT_MS で可変（既定 60000ms。sendPaymentSync の実送金は LND 内部で
+// ルーティング待機し得るため控えめに大きく取る）。
+const LND_UNARY_METHODS = [
+    'GetInfo', 'AddInvoice', 'LookupInvoice', 'SendPaymentSync',
+    'DecodePayReq', 'ListChannels', 'ChannelBalance', 'SettleInvoice',
+    'CancelInvoice', 'OpenChannelSync', 'PendingChannels',
+];
+function buildLndChannelOptions(timeoutMs) {
+    const raw = Number(timeoutMs !== undefined ? timeoutMs : process.env.LND_RPC_TIMEOUT_MS);
+    const ms = Number.isFinite(raw) && raw > 0 ? raw : 60000;
+    const sec = Math.max(1, ms / 1000);
+    const serviceConfig = {
+        methodConfig: [{
+            name: LND_UNARY_METHODS.map(m => ({ service: 'lnrpc.Lightning', method: m })),
+            timeout: `${sec}s`,
+        }],
+    };
+    return { 'grpc.service_config': JSON.stringify(serviceConfig) };
+}
+
 class LightningService extends EventEmitter {
     /**
      * サービス死活判定: gRPC接続状態・イベントストリーム・initializedを総合判定
@@ -153,8 +179,8 @@ class LightningService extends EventEmitter {
             });
             // 認証情報結合
             const creds = grpc.credentials.combineChannelCredentials(sslCreds, macaroonCreds);
-            // LNDクライアント作成
-            this.lnd = new lnrpc.Lightning(this.config.host, creds);
+            // LNDクライアント作成（unary RPC に既定 deadline: buildLndChannelOptions 参照）
+            this.lnd = new lnrpc.Lightning(this.config.host, creds, buildLndChannelOptions());
             // 接続テスト
             await this.getInfo();
             logger.info('Connected to LND successfully', { certInfo, macaroonInfo });
@@ -1086,4 +1112,4 @@ class LightningService extends EventEmitter {
     }
 }
 
-module.exports = { LightningService };
+module.exports = { LightningService, buildLndChannelOptions, LND_UNARY_METHODS };

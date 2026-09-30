@@ -38,32 +38,40 @@ describe('mailer.js の SMTP トランスポート設定', () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  function getCreateArg() {
+  // mailer.js は transporter を初回 sendMail 時に遅延生成するため、送信を1回行って
+  // createTransport の引数を取得する（実送信はモックで遮断）。
+  async function getCreateArg() {
+    Object.assign(process.env, {
+      SMTP_HOST: 'smtp.example.com', SMTP_USER: 'u', SMTP_PASS: 'p', MASTER_EMAIL_FROM: 'from@x.jp',
+    });
+    delete process.env.SMTP_PORT;
     const nodemailer = require('nodemailer');
-    jest.spyOn(nodemailer, 'createTransport');
-    require('../../src/api/utils/mailer');
+    jest.spyOn(nodemailer, 'createTransport').mockReturnValue({
+      sendMail: jest.fn().mockResolvedValue({ messageId: 'x' }),
+    });
+    await require('../../src/api/utils/mailer').sendMail('a@b.c', 's', 'h');
     return nodemailer.createTransport.mock.calls[0][0];
   }
 
-  it('タイムアウト3種と requireTLS（既定）を設定する', () => {
+  it('タイムアウト3種と requireTLS（既定）を設定する', async () => {
     delete process.env.SMTP_REQUIRE_TLS;
     delete process.env.SMTP_TIMEOUT_MS;
-    const arg = getCreateArg();
+    const arg = await getCreateArg();
     expect(arg.connectionTimeout).toBeGreaterThan(0);
     expect(arg.greetingTimeout).toBeGreaterThan(0);
     expect(arg.socketTimeout).toBeGreaterThan(0);
     expect(arg.requireTLS).toBe(true);
   });
 
-  it('SMTP_REQUIRE_TLS=false で明示的に緩和できる', () => {
+  it('SMTP_REQUIRE_TLS=false で明示的に緩和できる', async () => {
     process.env.SMTP_REQUIRE_TLS = 'false';
-    const arg = getCreateArg();
+    const arg = await getCreateArg();
     expect(arg.requireTLS).toBe(false);
   });
 
-  it('SMTP_TIMEOUT_MS でタイムアウトを調整できる', () => {
+  it('SMTP_TIMEOUT_MS でタイムアウトを調整できる', async () => {
     process.env.SMTP_TIMEOUT_MS = '3000';
-    const arg = getCreateArg();
+    const arg = await getCreateArg();
     expect(arg.connectionTimeout).toBe(3000);
   });
 });

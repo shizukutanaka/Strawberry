@@ -2196,6 +2196,30 @@ describe('API Integration', () => {
       expect(res.body.minRenterRating).toBe(4);
       GpuRepository.update(gpuId, { minRenterRating: null });
     });
+
+    it('marketReference is advisory and null for unknown GPU models', async () => {
+      // 'RTX-EST' はスペック表に一致しない → marketReference は null
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.marketReference).toBeNull();
+      // 実課金フィールドは不変であること（advisory のみの追加）
+      expect(typeof res.body.totalPrice).toBe('number');
+    });
+
+    it('marketReference returns engine-suggested pricing for a known model', async () => {
+      const knownId = GpuRepository.create({
+        name: 'RTX4090 GPU', vendor: 'NVIDIA', model: 'RTX 4090', memoryGB: 24, pricePerHour: 2.0,
+        providerId: 'est-provider-1',
+      }).id;
+      const res = await request(app).get(`/api/v1/gpus/${knownId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.marketReference).not.toBeNull();
+      expect(res.body.marketReference.modelMatched).toBe(true);
+      expect(res.body.marketReference.hourly).toBeGreaterThan(0);
+      expect(res.body.marketReference.factors.base).toBeGreaterThan(0);
+      // advisory: 実課金（totalPrice）はプロバイダ価格で計算される
+      expect(res.body.totalPrice).toBeGreaterThan(0);
+    });
   });
 
   describe('Provider GPU manual block (maintenance windows) (#42)', () => {
@@ -3540,6 +3564,48 @@ describe('API Integration', () => {
         throw err;
       }, { maxAttempts: 3, baseDelayMs: 1 })).rejects.toThrow();
       expect(calls).toBe(1);
+    });
+
+    it('backoff delay is jittered within the exponential cap', async () => {
+      // full jitter: delay は [0, baseDelayMs * 2^(attempt-1)] の一様乱数。
+      // fake timers で「cap 分進めれば必ず再試行される」ことと、
+      // cap 未満のままでは完了しない可能性がある（乱数依存）ことの境界を検証する。
+      jest.useFakeTimers();
+      try {
+        let calls = 0;
+        const promise = withRetry(async () => {
+          calls++;
+          if (calls === 1) throw Object.assign(new Error('boom'), { code: 'ECONNREFUSED' });
+          return 'ok';
+        }, { maxAttempts: 2, baseDelayMs: 1000 });
+        // 1回目の失敗は同期済み・タイマーはまだ未発火（ジッターで即時再試行しないことを確認）
+        expect(calls).toBe(1);
+        // cap 分進めれば必ず再試行される
+        await jest.advanceTimersByTimeAsync(1000);
+        await expect(promise).resolves.toBe('ok');
+        expect(calls).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('maxDelayMs caps the jitter window', async () => {
+      jest.useFakeTimers();
+      try {
+        let calls = 0;
+        const promise = withRetry(async () => {
+          calls++;
+          throw Object.assign(new Error('boom'), { code: 'ECONNREFUSED' });
+        }, { maxAttempts: 3, baseDelayMs: 60_000, maxDelayMs: 5 });
+        promise.catch(() => {});
+        // 各リトライ間隔は maxDelayMs で上限化: 全3回は 3*cap 内に必ず尽きる
+        // （cap なしなら 60s+120s かかる）
+        await jest.advanceTimersByTimeAsync(3 * 5);
+        await expect(promise).rejects.toThrow('boom');
+        expect(calls).toBe(3);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('delivers to a real localhost HTTP webhook server', async () => {

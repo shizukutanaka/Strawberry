@@ -63,12 +63,59 @@ describe('web-flow hardening (source guards)', () => {
 
   it('passes state:true to passport.authenticate (login-CSRF protection)', () => {
     // 開始・コールバック両方の authenticate 呼出しに state:true が必要
-    const calls = src.match(/passport\.authenticate\('(?:google|github)'[^)]*\)/g) || [];
+    const calls = src.match(/passport\.authenticate\('(?:google-web|github)'[^)]*\)/g) || [];
     expect(calls.length).toBeGreaterThanOrEqual(4);
     for (const c of calls) expect(c).toMatch(/state:\s*true/);
   });
 
   it('mounts a session middleware so passport-oauth2 state store works', () => {
-    expect(src).toMatch(/masterSession/);
+    expect(src).toMatch(/oauthSession = \[oauthStateSession\]/);
+  });
+
+  it('uses a SameSite=Lax state cookie so the cross-site provider callback carries it', () => {
+    const msSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../src/api/middleware/master-session.js'), 'utf-8');
+    const block = msSrc.slice(msSrc.indexOf('const oauthStateSession'));
+    expect(block).toMatch(/sameSite:\s*'lax'/);
+    expect(block).toMatch(/name:\s*'strawberry\.oauth'/);
+  });
+});
+
+describe('web-flow state enforcement (runtime)', () => {
+  const express = require('express');
+  const request = require('supertest');
+  const saved = {};
+  const keys = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_CALLBACK_URL'];
+  let app;
+
+  beforeAll(() => {
+    for (const k of keys) saved[k] = process.env[k];
+    process.env.GOOGLE_CLIENT_ID = 'test-client';
+    process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
+    process.env.GOOGLE_CALLBACK_URL = 'http://localhost/auth/google/callback';
+    jest.isolateModules(() => {
+      const passport = require('../../src/api/middleware/oauth');
+      app = express();
+      app.use(passport.initialize());
+      app.use('/auth', require('../../src/api/routes/auth'));
+    });
+  });
+
+  afterAll(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+  });
+
+  it('issues a state parameter bound to a SameSite=Lax cookie and rejects a mismatched state', async () => {
+    const start = await request(app).get('/auth/google');
+    expect(start.status).toBe(302);
+    expect(new URL(start.headers.location).searchParams.get('state')).toBeTruthy();
+    const setCookie = (start.headers['set-cookie'] || []).find((c) => c.startsWith('strawberry.oauth='));
+    expect(setCookie).toMatch(/SameSite=Lax/);
+    const cb = await request(app)
+      .get('/auth/google/callback?code=abc&state=forged')
+      .set('Cookie', setCookie.split(';')[0]);
+    expect(cb.status).toBe(403);
   });
 });

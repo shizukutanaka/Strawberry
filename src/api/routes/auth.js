@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const passport = require('../middleware/oauth');
-const { masterSession } = require('../middleware/master-session');
+const { oauthStateSession } = require('../middleware/master-session');
 const UserRepository = require('../../db/json/UserRepository');
 const { v4: uuidv4 } = require('uuid');
 const { signAccessToken, signRefreshToken } = require('../utils/tokens');
@@ -10,12 +10,12 @@ const { asyncHandler } = require('../../utils/error-handler');
 
 // --- OAuth Web フローのセッション/CSRF 対策 ---
 // passport-oauth2 の `state: true` は req.session（ステートストア）を必要とする。
-// session なしで state を有効にすると strategy が例外を投げるため、web フローの
-// 2ルートにのみ共有インスタンス masterSession を適用する（saveUninitialized:false
-// なので state 書き込み時のみ Cookie が発行され、API リクエストには影響しない）。
+// web フローの2ルートにのみ state 保存専用セッション oauthStateSession を適用する
+// （SameSite=Lax: プロバイダからのクロスサイト callback でも Cookie が送られる。
+// saveUninitialized:false なので state 書き込み時のみ Cookie が発行される）。
 // state が無いと login-CSRF が成立する: 攻撃者が開始した OAuth フローの callback を
 // 被害者に踏ませ、被害者ブラウザが攻撃者アカウントのセッションを受け取る。
-const oauthSession = [masterSession];
+const oauthSession = [oauthStateSession];
 
 const providerEnabled = {
   google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
@@ -89,9 +89,9 @@ function completeOAuthLogin(provider, profile) {
 
 // Google OAuth (Webフロー)
 router.get('/google', oauthSession, ensureProviderEnabled('google'),
-  (req, res, next) => passport.authenticate('google', { scope: ['profile', 'email'], session: false, state: true })(req, res, next));
+  (req, res, next) => passport.authenticate('google-web', { scope: ['profile', 'email'], session: false, state: true })(req, res, next));
 router.get('/google/callback', oauthSession, ensureProviderEnabled('google'),
-  (req, res, next) => passport.authenticate('google', { session: false, state: true })(req, res, next),
+  (req, res, next) => passport.authenticate('google-web', { session: false, state: true })(req, res, next),
   asyncHandler(async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Google authentication failed' });

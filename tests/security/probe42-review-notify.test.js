@@ -116,10 +116,13 @@ describe('notifier: AXIOS_SAFE_CONFIG applied to all axios calls', () => {
     expect(src).toMatch(/axios\.post\(url,\s*\{[^}]*chat_id[^}]*\},\s*AXIOS_SAFE_CONFIG\)/s);
   });
 
-  it('notifier.js: sendLineNotify uses AXIOS_SAFE_CONFIG', () => {
+  it('notifier.js: LINE Messaging API send uses AXIOS_SAFE_CONFIG', () => {
+    // LINE Notify（notify-api.line.me）は 2025-03-31 サービス終了。
+    // 後継の Messaging API パスに Bearer 認証 + AXIOS_SAFE_CONFIG が必要。
     const src = require('fs').readFileSync(
       require.resolve('../../src/utils/notifier.js'), 'utf-8'
     );
+    expect(src).toMatch(/api\.line\.me\/v2\/bot\/message\/push/);
     expect(src).toMatch(/AXIOS_SAFE_CONFIG.*Authorization|Authorization.*AXIOS_SAFE_CONFIG/s);
   });
 

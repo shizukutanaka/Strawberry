@@ -67,7 +67,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 6. 精算: ✅ **従量按分の精算計算実装済**（`src/payments/settlement-calculator.js`。実使用量(heartbeat)＋SLA で payout/refund/fee を分割。最低課金・SLA ペナルティ・整数 sats 保存則。`escrow-service.settle`／`marketplace-service.settleByUsage`）
 
 ### F2. 信頼基盤（最優先トリオ）
-- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。**ルート配線・実ジョブ収集は未**。
+- **計算検証 Proof-of-Compute**: 🟡 `src/verification/work-verifier.js`（純関数）＋ `src/verification/verification-service.js`（監査要否/consensus/ゼロ負荷で verdict 確定）＋ `src/db/json/VerificationRepository.js`（永続化）実装済。finalize は escrow.evaluate へ渡せる ctx を返し reputation へ反映。admin 閲覧 API（`/api/v1/admin/verifications`）配線済。**実ジョブ収集・order スコープの検証 API は未**。
 - **Lightning エスクロー**: 🟡 `src/payments/escrow-state-machine.js`（FSM）＋ `src/payments/escrow-service.js`（オーケストレーション＋`lnAdapter` DI で `action-executor` を実行）＋ `src/db/json/EscrowRepository.js`（永続化）実装済。order ルート（stop/SLA/係争）から呼ばれる。**残るは実 LND/CLN アダプタを呼び出し側へ注入する結線のみ**。
 - **GPU アテステーション**: 🟡 `src/security/gpu-attestation-verifier.js`（申告 vs 計測, Mock verifier）が POST /gpus に配線済。nvtrust 実機連携は未（カテゴリ3）。
 
@@ -85,7 +85,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | 秘密鍵管理 | 本番 fail-fast、ハードコード禁止 | ✅ |
 | マスター認証 | 3要素(Google+TOTP+メール)、暗号乱数/定時間比較/TTL | ✅(Math.random/timing/await バグ修正済) |
 | CORS | 仕様準拠(ワイルドカード時 credentials 無効) | ✅(修正済) |
-| P2P | libp2p で分散。peer scoring/signed records | ❌(libp2p ESM で無効) |
+| P2P | libp2p で分散。peer scoring/signed records | ❌(libp2p 系パッケージ未導入 — 未導入時は p2p-network が degrade) |
 | テスト | `npm test` 完走 | ✅(137スイート/1219テスト green, 2 skip=env依存・139中2スイート) |
 | データ整合性 | 注文/決済/残高のトランザクション | 🟡(JSON層＋プロセス内 `withLock` 直列化・temp+rename 原子書込み・FSM 楽観 CAS は実装済。クロスプロセス排他（flock 等）は未対応 — PM2 クラスタ等で運用する場合は要対応) |
 

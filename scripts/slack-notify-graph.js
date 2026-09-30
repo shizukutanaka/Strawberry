@@ -21,8 +21,11 @@ async function uploadGraph() {
     return;
   }
   try {
-    await web.files.upload({
-      channels: SLACK_CHANNEL,
+    // files.upload は Slack 側で 2025-11 に廃止（新規アプリでは method 自体が
+    // エラーを返す）。後継の filesUploadV2（files.getUploadURLExternal +
+    // files.completeUploadExternal の合成ヘルパ）を使う。
+    await web.filesUploadV2({
+      channel_id: SLACK_CHANNEL,
       file: fs.createReadStream(FILE_PATH),
       filename: 'kpi-trend.png',
       title: 'KPI推移グラフ',

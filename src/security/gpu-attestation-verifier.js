@@ -63,15 +63,22 @@ async function verifyAttestation(claimed, report, opts = {}) {
   checks.push({ name: 'vendor_match', passed: vendorOk, weight: 2 });
   if (!vendorOk) findings.push(`vendor mismatch: claimed="${claimed.vendor}", attested="${report.vendor}"`);
 
-  // 3. メモリ容量（許容誤差内）
+  // 3. メモリ容量（許容誤差内）— memory_match は mandatory チェックのため、
+  //    レポート側が容量を主張していない（フィールド欠落・非数値）場合は fail-closed。
+  //    欠落を pass にすると「申告だけしてアテストしない」詐称が mandatory を素通りする。
   let memoryOk = true;
-  if (typeof report.memoryGB === 'number' && typeof claimed.memoryGB === 'number') {
-    const pct = Math.abs(report.memoryGB - claimed.memoryGB) / claimed.memoryGB * 100;
-    memoryOk = pct <= memoryTolerancePct;
-    if (!memoryOk) {
-      findings.push(
-        `memory mismatch: claimed=${claimed.memoryGB}GB, attested=${report.memoryGB}GB (${pct.toFixed(1)}% diff)`,
-      );
+  if (typeof claimed.memoryGB === 'number') {
+    if (typeof report.memoryGB !== 'number') {
+      memoryOk = false;
+      findings.push('memory not attested: report lacks memoryGB');
+    } else {
+      const pct = Math.abs(report.memoryGB - claimed.memoryGB) / claimed.memoryGB * 100;
+      memoryOk = pct <= memoryTolerancePct;
+      if (!memoryOk) {
+        findings.push(
+          `memory mismatch: claimed=${claimed.memoryGB}GB, attested=${report.memoryGB}GB (${pct.toFixed(1)}% diff)`,
+        );
+      }
     }
   }
   checks.push({ name: 'memory_match', passed: memoryOk, weight: 2 });
@@ -86,14 +93,26 @@ async function verifyAttestation(claimed, report, opts = {}) {
   checks.push({ name: 'cert_chain', passed: certOk, weight: 1 });
   if (!certOk) findings.push('certificate chain missing or empty');
 
-  // 6. レポート新鮮性（リプレイ攻撃防止）
-  let freshOk = true;
-  if (report.timestamp) {
+  // 6. レポート新鮮性（リプレイ攻撃防止）— freshness は mandatory チェックのため、
+  //    timestamp 欠落・パース不能は fail-closed（欠落を許すと一度きりの正当レポートが
+  //    期限なしで再提示し放題になる）。
+  //    わずかな未来時刻はプロバイダ側クロックスキューとして MAX_FUTURE_SKEW まで受理する。
+  const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+  let freshOk = false;
+  if (!report.timestamp) {
+    findings.push('report timestamp missing; freshness cannot be verified');
+  } else {
     const ageMs = Date.now() - new Date(report.timestamp).getTime();
-    freshOk = ageMs >= 0 && ageMs <= maxAgeSec * 1000;
-    if (!freshOk) {
-      const ageSec = Math.round(ageMs / 1000);
-      findings.push(`report too old: age=${ageSec}s exceeds maxAgeSec=${maxAgeSec}s`);
+    if (!Number.isFinite(ageMs)) {
+      findings.push('report timestamp is not a valid date');
+    } else if (ageMs < -MAX_FUTURE_SKEW_MS) {
+      findings.push(
+        `report timestamp is ${Math.round(-ageMs / 1000)}s in the future (exceeds ${MAX_FUTURE_SKEW_MS / 1000}s skew allowance)`,
+      );
+    } else if (ageMs > maxAgeSec * 1000) {
+      findings.push(`report too old: age=${Math.round(ageMs / 1000)}s exceeds maxAgeSec=${maxAgeSec}s`);
+    } else {
+      freshOk = true;
     }
   }
   checks.push({ name: 'freshness', passed: freshOk, weight: 1 });

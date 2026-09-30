@@ -504,7 +504,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 **ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）
 
-`npm run test:e2e`（Playwright、7 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
+`npm run test:e2e`（Playwright、9 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
 
 
 ## chore: package.json の npm メタデータ整備（2026-09-26 追加）

@@ -8,7 +8,7 @@
 
 ### 1. Node.jsと依存パッケージのインストール
 - Node.js公式サイトからインストール
-- 必要に応じて `npm install axios` で依存追加
+- リポジトリルートで `npm install`（axios は dependencies に含まれます）
 
 ### 2. 自動登録スクリプトの実行
 ```sh
@@ -16,7 +16,12 @@ node gpu_lending_setup_auto_register.js
 ```
 
 - 実行するとGPUベンダー・モデル・API種別を自動検出し、Strawberryサーバへ登録
-- JWTトークンやAPIエンドポイントは環境に合わせて編集
+- **実行前にスクリプト内の2箇所を編集してください:**
+  - `API_URL` → `http://<サーバ>:3000/api/v1/gpus`（実 API は `/api/v1` プレフィックス配下）
+  - `TOKEN` → `POST /api/v1/users/login` で取得した JWT（`provider` または `admin` ロール必須）
+- 登録には必須フィールドがあります: `vendor`(NVIDIA/AMD/Intel)・`model`・`apiType`(CUDA/ROCm/oneAPI/OpenCL)・`driverVersion`・`os`・`arch`(x86_64/arm64/aarch64/x86/arm)・`memoryGB`・`clockMHz`・`powerWatt`・`pricePerHour`
+  - 注意: `os.arch()` の返り値（`x64` など）は API が受理する `arch` 値と異なるため、x86_64 等へマッピングが必要です
+  - `memoryGB`/`clockMHz`/`powerWatt`/`pricePerHour` はスクリプト内の仮値を実機値へ修正してください
 
 ---
 
@@ -37,7 +42,7 @@ A. NVIDIA/AMD/Intelの主要GPUに対応。自動検出・登録されます。
 A. セットアップ時に自動で検出・案内。必要に応じてインストールガイドを表示。
 
 **Q. 貸出状況や収益はどこで見られますか？**  
-A. Webダッシュボードまたは `/api/gpu` で確認できます。
+A. Webダッシュボードまたは `GET /api/v1/gpus`（一覧）で確認できます。
 
 ---
 

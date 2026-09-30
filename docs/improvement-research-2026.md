@@ -500,6 +500,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
+### ルート SPECIFICATION.md の 2026-09 追補（2026-09-27）
+- **対応**: ルート `SPECIFICATION.md`（2026-06 実態ベース仕様書）の冒頭に追補を追加。当時の残課題だった OTel SDK 連携（D-2）が `src/telemetry/instrumentation.js` で配線済みである点、probe テストが 60 件超へ拡充、§4 表外の `/admin/*`・`/marketplace/escrow/*`・`/gpus/:id/estimate`・`/gpus/:id/watch` 追加、エスクロー状態機械の実装を明記。docs/SPECIFICATION.md（#133）とは別ファイル・非重複。
+
 ### 依存脆弱性の semver-safe 一括解消 + bcrypt メジャー更新（2026-09-27）
 - **対応**: `npm audit` の残存49件のうち semver 非互換を要しない13件を `npm audit fix` で解消（axios 1.17→1.20: プロトタイプ汚染/Basic auth 注入、js-yaml、express/body-parser、morgan、joi、protobufjs、browserslist 等）。`bcrypt` を ^5.1.1→^6.0.0 へ更新（API 互換、Node18+ 要件を満たす）し、@mapbox/node-pre-gyp 経由の tar critical・node-pre-gyp high チェーンを除去。合計 49→36 件。残存は @kubernetes/client-node 2.x・aws-sdk v3・nodemailer 10・imagemin 系のメジャー更新または代替が必要なもの（#46 で却下された apollo 系を除く）。
 

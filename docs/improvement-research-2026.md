@@ -503,6 +503,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
 - **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→249件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。Electron 未統合・SPA リフレッシュ未実装など依然正確な残課題は維持。
 
+## `.github/CODEOWNERS` の新設 (2026-09-26)
+
+- **観測**: CODEOWNERS が不在のため PR 作成時にレビュアーが自動割当されず、資金決済・認証などの高リスク経路も既定レビューなしでマージ可能な状態だった。
+- **変更**: GitHub 標準の `.github/CODEOWNERS` を新設。全体を `@shizukutanaka`（リポジトリオーナー）の既定レビュー対象とし、payment/master-auth/security/lightning-service.js の資金・認証経路は防御的に個別明示（将来オーナーを増員する際の分離点としても機能）。
+- **参考**: GitHub Docs "About code owners"（ブランチ保護の「code owner レビュー必須」と組み合わせると強制力が出る）
+
 ## docs: E2E テスト実行手順の新設（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）

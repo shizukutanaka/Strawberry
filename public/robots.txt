@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /api/
+Disallow: /admin
+
+# Marketplace SPA pages are indexable; API and admin surfaces are not.

@@ -6,8 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const { sendNotification, NotifyType } = require('./notifier');
 const { logger } = require('./logger');
+const { resolveDataDir } = require('../db/json/data-dir');
 
-const SETTINGS_PATH = path.join(__dirname, '../../data/notification-settings.json');
+const SETTINGS_PATH = path.join(resolveDataDir(), 'notification-settings.json');
 
 function loadAllSettings() {
   try {

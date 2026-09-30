@@ -506,6 +506,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **変更**: GitHub 標準規約の `pull_request_template.md`（概要/変更内容/テスト/セキュリティ影響）と `ISSUE_TEMPLATE/bug_report.md`・`feature_request.md` を日本語で追加。bug テンプレート冒頭に「脆弱性は公開 Issue に書かず SECURITY.md へ」の導線を明記（RFC 9116 security.txt と整合）。
 - **参考**: GitHub Docs "Creating a pull request template for your repository" / "Configuring issue templates"
 
+## docs: E2E テスト実行手順の新設（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）
+
+`npm run test:e2e`（Playwright、9 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
+
+
 ## chore: package.json の npm メタデータ整備（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-pkg-metadata` → PR 化

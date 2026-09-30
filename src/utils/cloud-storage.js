@@ -1,14 +1,39 @@
 // cloud-storage.js - クラウドストレージ連携（AWS S3, Google Drive, Dropbox）
 // 成果物やバックアップデータを外部クラウドに保存するための共通ラッパー
 
-const AWS = require('aws-sdk');
-const { google } = require('googleapis');
-const Dropbox = require('dropbox').Dropbox;
 const fs = require('fs');
 const { logger } = require('./logger');
 
+// クラウド SDK は重い任意依存のため遅延 require する（未導入環境でも本モジュールの
+// require 自体は成功させる。services.js の「absent → disabled, not broken」方針と同型）。
+// 以前はトップレベルで require していたため googleapis/dropbox 未インストールの環境で
+// require('cloud-storage') 自体が MODULE_NOT_FOUND で落ち、これを取り込む
+// utils/backup.js まで巻き込んでローカル世代バックアップすら動かなかった。
+function loadAWS() {
+  try {
+    return require('aws-sdk');
+  } catch (e) {
+    throw new Error('S3 upload requires the optional dependency "aws-sdk" (npm i aws-sdk)');
+  }
+}
+function loadGoogleApis() {
+  try {
+    return require('googleapis').google;
+  } catch (e) {
+    throw new Error('Google Drive upload requires the optional dependency "googleapis" (npm i googleapis)');
+  }
+}
+function loadDropbox() {
+  try {
+    return require('dropbox').Dropbox;
+  } catch (e) {
+    throw new Error('Dropbox upload requires the optional dependency "dropbox" (npm i dropbox)');
+  }
+}
+
 // S3アップロード
 async function uploadToS3(localPath, remotePath, options = {}) {
+  const AWS = loadAWS();
   const s3 = new AWS.S3({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -32,6 +57,7 @@ async function uploadToS3(localPath, remotePath, options = {}) {
 
 // Google Driveアップロード（OAuth2認証済みトークン必須）
 async function uploadToGoogleDrive(localPath, remoteName, oauth2Client, folderId) {
+  const google = loadGoogleApis();
   const drive = google.drive({ version: 'v3', auth: oauth2Client });
   const fileMetadata = { name: remoteName, parents: folderId ? [folderId] : undefined };
   const media = { mimeType: 'application/octet-stream', body: fs.createReadStream(localPath) };
@@ -47,6 +73,7 @@ async function uploadToGoogleDrive(localPath, remoteName, oauth2Client, folderId
 
 // Dropboxアップロード
 async function uploadToDropbox(localPath, remotePath, accessToken) {
+  const Dropbox = loadDropbox();
   const dbx = new Dropbox({ accessToken });
   const fileContent = fs.readFileSync(localPath);
   try {

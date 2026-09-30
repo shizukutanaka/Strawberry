@@ -110,6 +110,30 @@ router.post('/', authenticateJWT, async (req, res) => {
     // 完了・進行中の最新エスクロー（CANCELED は無視して再開可能にする）
     let escrow = existingEscrows.find(e => e.state !== 'CANCELED') || null;
 
+    // CANCELED でも txid を持つエスクローは「資金移動後にスイープ等で取消された」
+    // 証跡。ここで新規エスクローを開いて tx1 を再送すると借り手の二重課金になるため、
+    // 自動リトライを拒否して手動照合へ回す。
+    if (!escrow) {
+      const moved = existingEscrows.find(e => e.txBorrowerToOperator || e.txOperatorToLender);
+      if (moved) {
+        appendAuditLog('payment_escrow_orphaned_retry_rejected', {
+          orderId, escrowId: moved.id, state: moved.state,
+          txBorrowerToOperator: moved.txBorrowerToOperator,
+          txOperatorToLender: moved.txOperatorToLender,
+        });
+        logger.error('[CRITICAL] Escrow was canceled after funds moved; refusing to create a fresh escrow (double-charge risk)', {
+          orderId, escrowId: moved.id,
+        });
+        return res.status(409).json({
+          message: 'A prior payment attempt moved funds but its escrow was canceled. Manual reconciliation required — do not retry.',
+          orderId,
+          escrowId: moved.id,
+          txBorrowerToOperator: moved.txBorrowerToOperator ? { txid: moved.txBorrowerToOperator } : undefined,
+          retryable: false,
+        });
+      }
+    }
+
     if (escrow && escrow.state === 'SETTLED') {
       // 既に決済完了 — tx を一切実行せずキャッシュ結果を返す
       return res.json({
@@ -156,12 +180,40 @@ router.post('/', authenticateJWT, async (req, res) => {
         });
       }
       tx1Txid = tx1.txid;
-      // PENDING → HELD: tx1 txid を永続化してからリトライ安全状態へ
-      EscrowRepository.updateIf(
+      // PENDING → HELD: tx1 txid を永続化してからリトライ安全状態へ。
+      // CAS 失敗（= 並行スイープ等が CANCELED へ遷移）なら資金は動いたが証跡を
+      // 残せない — tx2 を送らず停止し、手動照合を要求する。再送時は上の
+      // 「txid 持ち CANCELED」ガードが二重課金を防ぐ。
+      const cas1 = EscrowRepository.updateIf(
         escrow.id,
         (e) => e.state === 'PENDING',
         { state: 'HELD', txBorrowerToOperator: tx1Txid, updatedAt: new Date().toISOString() }
       );
+      if (!cas1.ok) {
+        const currentState = cas1.current ? cas1.current.state : 'missing';
+        // 証跡だけは現在の行へ追記する（state は変えない）。これにより再送時の
+        // 「txid 持ち CANCELED」ガードが発火し、tx1 再送による二重課金を防ぐ。
+        try {
+          EscrowRepository.update(escrow.id, { txBorrowerToOperator: tx1Txid });
+        } catch (e) {
+          logger.error('[btc-onchain] Failed to persist tx1 txid onto escrow row', { orderId, escrowId: escrow.id, error: e.message });
+        }
+        appendAuditLog('payment_escrow_cas_failed', {
+          orderId, escrowId: escrow.id, stage: 'PENDING->HELD',
+          reason: cas1.reason, currentState, txBorrowerToOperator: tx1Txid,
+        });
+        logger.error('[CRITICAL] tx1 broadcast succeeded but escrow state update failed (funds moved, proof not persisted). Manual reconciliation required.', {
+          orderId, escrowId: escrow.id, currentState, tx1Txid,
+        });
+        return res.status(500).json({
+          message: 'Payment broadcast succeeded but escrow bookkeeping failed. Manual reconciliation required — do not retry automatically.',
+          stage: 'escrow_state_lost',
+          orderId,
+          escrowId: escrow.id,
+          txBorrowerToOperator: { txid: tx1Txid },
+          retryable: false,
+        });
+      }
     } else {
       // HELD: tx1 は既に完了している（部分決済から再開）
       tx1Txid = escrow.txBorrowerToOperator;
@@ -194,11 +246,28 @@ router.post('/', authenticateJWT, async (req, res) => {
     }
 
     // HELD → SETTLED: tx2 txid を原子的に記録
-    EscrowRepository.updateIf(
+    const cas2 = EscrowRepository.updateIf(
       escrow.id,
       (e) => e.state === 'HELD',
       { state: 'SETTLED', txOperatorToLender: tx2Txid, updatedAt: new Date().toISOString() }
     );
+    if (!cas2.ok) {
+      // tx2 は既にブロードキャスト済み（貸し手へ資金移動済み）。状態だけ残す。
+      const currentState = cas2.current ? cas2.current.state : 'missing';
+      try {
+        EscrowRepository.update(escrow.id, { txOperatorToLender: tx2Txid });
+      } catch (e) {
+        logger.error('[btc-onchain] Failed to persist tx2 txid onto escrow row', { orderId, escrowId: escrow.id, error: e.message });
+      }
+      appendAuditLog('payment_escrow_cas_failed', {
+        orderId, escrowId: escrow.id, stage: 'HELD->SETTLED',
+        reason: cas2.reason, currentState,
+        txBorrowerToOperator: tx1Txid, txOperatorToLender: tx2Txid,
+      });
+      logger.error('[CRITICAL] tx2 broadcast succeeded but escrow SETTLED transition failed (funds fully moved). Manual reconciliation required.', {
+        orderId, escrowId: escrow.id, currentState, tx1Txid, tx2Txid,
+      });
+    }
 
     // PaymentRepository に paid レコードを書く。/orders/:id/start・/stop・/dispute の
     // hasPaidPayment ゲートは PaymentRepository を参照するため、このレコードがないと
@@ -233,6 +302,7 @@ router.post('/', authenticateJWT, async (req, res) => {
       txBorrowerToOperator: { txid: tx1Txid },
       txOperatorToLender: { txid: tx2Txid },
       escrowId: escrow.id,
+      ...(cas2.ok ? {} : { warning: 'Escrow state did not reach SETTLED despite completed settlement — manual reconciliation recommended.' }),
     });
     }); // end withLock
   } catch (err) {

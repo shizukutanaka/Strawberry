@@ -68,15 +68,16 @@ const sanitizeBid = (b) => ({
   pricePerHour: b && typeof b === 'object' ? b.pricePerHour : undefined,
 });
 router.post('/auction', (req, res) => {
-  const { bids } = req.body || {};
-  if (!Array.isArray(bids)) {
+  const { bids: rawBids } = req.body || {};
+  if (!Array.isArray(rawBids)) {
     return res.status(400).json({ error: 'bids array is required' });
   }
-  if (bids.length > MAX_MARKETPLACE_BATCH) {
+  if (rawBids.length > MAX_MARKETPLACE_BATCH) {
     return res.status(400).json({ error: `bids may not contain more than ${MAX_MARKETPLACE_BATCH} entries per request` });
   }
   try {
-    return res.json(marketplace.selectProvider(bids.map(sanitizeBid), {}));
+    const bids = rawBids.map(sanitizeBid);
+    return res.json(marketplace.selectProvider(bids, {}));
   } catch (e) {
     return res.status(400).json({ error: clientError(e) });
   }

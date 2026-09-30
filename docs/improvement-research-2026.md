@@ -428,6 +428,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。
 
 ### その他実装済（運用ドキュメント）
+- `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - 利益送金先ストアのパスバグ修正: `src/api/utils/profit-addresses.js` の `../../data/` は `src/data/` を指しており、ランタイムデータがソースツリーに書き込まれる + リポジトリ同梱のシードアドレス（BIP-173 例示アドレス等）が新規デプロイで実送金先として選択され得る問題を修正。ルート `data/` へ移し、旧パスからの移行時は同梱シードを除外して引き継ぐ。
 - master-auth TOTP の隣接ウィンドウリプレイ対策: リプレイ防止が「現在カウンタとの比較」だけだったため、window:1（±30秒）で受理される前ウィンドウのコードを次ウィンドウで再提示すると素通りした。受理済みコード値を `lastTotpToken` に記録して同一値の再提示を拒否。

@@ -35,6 +35,32 @@ describe('isPrivateIp', () => {
     expect(isPrivateIp('2606:4700:4700::1111')).toBe(false); // public (cloudflare)
   });
 
+  it('blocks the full fe80::/10 link-local range, not just the fe80: prefix', () => {
+    // fe80::/10 covers fe80〜febf. A startsWith('fe80') check under-matches
+    // fe90/fea0/feb0 link-local targets.
+    for (const ip of ['fe80::1', 'fe90::1', 'fea0::1', 'febf::ffff:1', 'febf:0:0:0:0:0:0:1']) {
+      expect(isPrivateIp(ip)).toBe(true);
+    }
+  });
+
+  it('blocks IPv4-compatible / mapped / transition IPv6 embeddings of private IPv4', () => {
+    expect(isPrivateIp('::7f00:1')).toBe(true);            // IPv4-compatible 127.0.0.1
+    expect(isPrivateIp('::ffff:0a00:1')).toBe(true);       // mapped, hex-tail form of 10.0.0.1
+    expect(isPrivateIp('64:ff9b::7f00:1')).toBe(true);     // NAT64 embedding 127.0.0.1
+    expect(isPrivateIp('64:ff9b::127.0.0.1')).toBe(true);  // NAT64, dotted-quad tail
+    expect(isPrivateIp('2002:7f00:1::')).toBe(true);       // 6to4 embedding 127.0.0.1
+    expect(isPrivateIp('2001:0::ffff:ffff')).toBe(true);   // Teredo 2001:0::/32
+  });
+
+  it('blocks other reserved IPv6 ranges while keeping public IPv6 reachable', () => {
+    expect(isPrivateIp('fec0::1')).toBe(true);            // deprecated site-local
+    expect(isPrivateIp('ff02::1')).toBe(true);            // multicast
+    expect(isPrivateIp('2001:db8::1')).toBe(true);        // documentation range
+    expect(isPrivateIp('2606:4700:4700::1111')).toBe(false);
+    expect(isPrivateIp('2001:4860:4860::8888')).toBe(false); // Google public DNS
+    expect(isPrivateIp('2001:470::1')).toBe(false);
+  });
+
   it('blocks malformed / non-IP input defensively', () => {
     expect(isPrivateIp('')).toBe(true);
     expect(isPrivateIp('not-an-ip')).toBe(true);

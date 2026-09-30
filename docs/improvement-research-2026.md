@@ -487,6 +487,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
+
+### Node バージョン下限の宣言（2026-09-27）
+- **対応**: `package.json` に `engines.node >= 20` を追加し `.nvmrc` を新設。CI は全ワークフロー Node 20/22 で検証されており下限は 20 が実態（加えて #134 の bcrypt 6 が Node 18+ を要求）。nvm/fnm/volta 利用者と npm engine チェックが機能するようになる。
 - `src/core/services.js`（任意サービスの safeLoad/requireService ゲート）のユニットテストを追加。GPU/P2P/Lightning の任意依存が未導入でも本体が起動し、無効サービスのエンドポイントが 503 を返す契約を固定。
 - `src/api/utils/btc-payment.js` の直接ユニットテストを追加: 送金経路の金額計算（calcTotalWithFee/calcFee/calcPayout の Satoshi 丸めと total=payout+fee 整合性）、BTC_FEE_RATE の起動時 fail-fast 検証、sendBTC の資金安全不変条件（Lightning API が txid を返さない場合にダミー成功を返さず例外へ伝播）を網羅。従来は送金系ユーティリティに直接テストが無かった。
 - `tests/api/middleware/master-session.test.js` を追加: `master-session.js` が全 importer（master-auth.js / profit-addresses.js）へ同一インスタンスを返すシングルトン契約と、本番での秘密欠落 fail-fast を固定（ルート個別の session() 化による MemoryStore 分離回帰を防止）。

@@ -6,6 +6,7 @@ const {
   getReliability,
   GAP_THRESHOLD_MS,
   MIN_BEATS_FOR_SCORE,
+  _flushPending,
   _resetVolatileState,
 } = require('../../src/reputation/provider-uptime');
 const UptimeRepository = require('../../src/db/json/UptimeRepository');
@@ -21,6 +22,7 @@ describe('recordProviderHeartbeat', () => {
   it('creates a record on first beat and increments beats', () => {
     recordProviderHeartbeat(PID, 'order-1', 1000);
     recordProviderHeartbeat(PID, 'order-1', 2000);
+    _flushPending();
     const rec = UptimeRepository.getByProviderId(PID);
     expect(rec.beats).toBe(2);
     expect(rec.sessions).toBe(1); // same orderId = one session
@@ -29,6 +31,7 @@ describe('recordProviderHeartbeat', () => {
   it('counts a gap event when interval exceeds GAP_THRESHOLD_MS', () => {
     recordProviderHeartbeat(PID, 'order-1', 1000);
     recordProviderHeartbeat(PID, 'order-1', 1000 + GAP_THRESHOLD_MS + 1);
+    _flushPending();
     const rec = UptimeRepository.getByProviderId(PID);
     expect(rec.gapEvents).toBe(1);
   });
@@ -37,11 +40,12 @@ describe('recordProviderHeartbeat', () => {
     recordProviderHeartbeat(PID, 'order-1', 1000);
     _resetVolatileState(); // simulate restart — volatile map cleared
     recordProviderHeartbeat(PID, 'order-1', 1000 + GAP_THRESHOLD_MS * 10);
+    _flushPending();
     const rec = UptimeRepository.getByProviderId(PID);
     // First post-restart beat must not register a false gap…
     expect(rec.gapEvents).toBe(0);
-    // …but sessions increments because the order was re-counted.
-    expect(rec.sessions).toBe(2);
+    // …and the same order is not double-counted as a new session.
+    expect(rec.sessions).toBe(1);
   });
 
   it('fails open: never throws on bad input or repo errors', () => {
@@ -62,6 +66,7 @@ describe('recordSlaBreach', () => {
     recordProviderHeartbeat(PID, 'order-1');
     recordSlaBreach(PID);
     recordSlaBreach(PID);
+    _flushPending();
     expect(UptimeRepository.getByProviderId(PID).breaches).toBe(2);
   });
 });

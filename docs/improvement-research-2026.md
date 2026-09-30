@@ -506,6 +506,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **変更**: GitHub 標準の `.github/CODEOWNERS` を新設。全体を `@shizukutanaka`（リポジトリオーナー）の既定レビュー対象とし、payment/master-auth/security/lightning-service.js の資金・認証経路は防御的に個別明示（将来オーナーを増員する際の分離点としても機能）。
 - **参考**: GitHub Docs "About code owners"（ブランチ保護の「code owner レビュー必須」と組み合わせると強制力が出る）
 
+## chore: package.json の npm メタデータ整備（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-pkg-metadata` → PR 化
+
+package.json に `license`/`repository`/`bugs`/`homepage` が未記載で、npm・GitHub・各種ツールのメタデータ解決が効かなかった（`npm WARN`・パッケージ情報のリンク欠如）。LICENSE（MIT）と一致する `license: "MIT"`、`repository`/`bugs`/`homepage` を GitHub URL で宣言し、あわせて `private: true` を追加 — 本リポジトリは npm 公開を意図しないアプリケーションであり、誤 `npm publish` を構造的に防止するガードとして標準的な手段。
+
+
 ### 管理ダッシュボード SPA ページ（2026-09-27, §19 管理画面の部分対応）
 - **対応**: `/admin/stats`・`/admin/verifications`・`/admin/escrow`・`/admin/expire-orders`・`/admin/cache/purge` の admin API は実装済みだが SPA 側に利用経路がなく運用者が curl 頼みだった。`public/js/pages/admin.js` を新設（統計カード/検証監査表/エスクロー表＋状態フィルタ/スイープ・パージ操作）、api.js に admin.* ヘルパー5件、`#/admin` ルート＋admin ナビリンクを追加。フロントが架空パスを呼ぶ事故を防ぐ契約テスト3件（tests/unit/admin-page-contract.test.js）+ e2e spec（admin.spec.js）を追加。
 

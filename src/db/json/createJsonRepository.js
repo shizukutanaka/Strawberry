@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { atomicWriteJSON } = require('./atomicWrite');
+const { resolveDataDir } = require('./data-dir');
 
 // プロトタイプ汚染対策（深層防御）。全リポジトリの create/update/updateIf がこの
 // チョークポイントを通るため、ここで危険キーを一括除去する。
@@ -48,15 +49,32 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
   ) {
     throw new Error(`[json-repo] invalid fileName: "${fileName}". Must be a plain .json filename without path separators.`);
   }
-  const filePath = path.resolve(__dirname, '../../../data', fileName);
+  const filePath = path.join(resolveDataDir(), fileName);
 
   const audit = (action, detail) => {
     if (!onAccess) return;
     try { onAccess(action, detail); } catch (e) { /* 監査失敗はサイレント */ }
   };
 
-  function load() {
-    if (!fs.existsSync(filePath)) return [];
+  // ファイル内容の stat 指紋キャッシュ。
+  // リクエスト毎に複数の getById/getAll が走るが、書き込みは全て atomicWriteJSON の
+  // temp+rename 経由なので mtime/size の指紋で他プロセス更新も確実に検出できる。
+  // 返却値は必ず複製する: 呼び出し側が取得レコードを書き換えても（update の
+  // rows[idx] 代入、finder 結果のフィールド改変など）キャッシュ本体を汚さないため。
+  let _cache = null;
+  let _cacheStamp = null;
+
+  function fileStamp() {
+    try {
+      const s = fs.statSync(filePath);
+      return `${s.mtimeMs}:${s.size}`;
+    } catch (_) {
+      // ファイル不在・stat 失敗時はキャッシュを使わない（毎回実読み）
+      return null;
+    }
+  }
+
+  function readFromDisk() {
     let raw;
     try {
       raw = fs.readFileSync(filePath, 'utf-8');
@@ -86,6 +104,36 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
     }
   }
 
+  function load() {
+    // stat を read より先に取る: 読み取り中に別プロセスが rename した場合、
+    // 記録する指紋は実内容より古い側に倒れ、次回 load が再読みする（保守側）。
+    const stamp = fileStamp();
+    if (_cache !== null && stamp !== null && stamp === _cacheStamp) {
+      return structuredClone(_cache);
+    }
+    if (!fs.existsSync(filePath)) {
+      // 不在ファイルはキャッシュしない（作成直後の stat を必ず通すため）
+      _cache = null;
+      _cacheStamp = null;
+      return [];
+    }
+    const rows = readFromDisk();
+    if (stamp !== null) {
+      _cache = rows;
+      _cacheStamp = stamp;
+    } else {
+      _cache = null;
+      _cacheStamp = null;
+    }
+    return structuredClone(rows);
+  }
+
+  function persist(rows) {
+    atomicWriteJSON(filePath, rows);
+    _cache = null;
+    _cacheStamp = null;
+  }
+
   const repo = {
     getAll: () => {
       const rows = load();
@@ -102,7 +150,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       const safeRec = stripDangerousKeys(rec);
       const row = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
       rows.push(row);
-      atomicWriteJSON(filePath, rows);
+      persist(rows);
       audit('create', { id: row.id });
       return row;
     },
@@ -114,9 +162,29 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         return null;
       }
       rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
-      atomicWriteJSON(filePath, rows);
+      persist(rows);
       audit('update', { id, updates });
       return rows[idx];
+    },
+    // 複数レコードの部分更新を 1 load + 1 write に束ねる。ポーラーやハートビート
+    // 集計の定期フラッシュのように、一度に複数行を直す経路で呼ぶと
+    // 逐次 update の N 回 write が 1 回になる。見つからない id はスキップする
+    // （全部外れても write は走らせない）。
+    updateMany: (entries) => {
+      if (!Array.isArray(entries) || entries.length === 0) return { updated: 0, rows: [] };
+      const rows = load();
+      const indexById = new Map(rows.map((r, i) => [r.id, i]));
+      const updatedRows = [];
+      for (const entry of entries) {
+        if (!entry || entry.id === undefined) continue;
+        const idx = indexById.get(entry.id);
+        if (idx === undefined) continue;
+        rows[idx] = { ...rows[idx], ...stripDangerousKeys(entry.updates) };
+        updatedRows.push(rows[idx]);
+      }
+      if (updatedRows.length > 0) persist(rows);
+      audit('updateMany', { count: updatedRows.length });
+      return { updated: updatedRows.length, rows: updatedRows };
     },
     // Atomic compare-and-swap: loads, checks predicate, and writes in one synchronous
     // section (no await between load and write), preventing TOCTOU race conditions.
@@ -133,7 +201,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         return { ok: false, reason: 'condition_failed', current: rows[idx] };
       }
       rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
-      atomicWriteJSON(filePath, rows);
+      persist(rows);
       audit('updateIf', { id, updates });
       return { ok: true, row: rows[idx] };
     },
@@ -141,7 +209,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       const rows = load();
       const remaining = rows.filter((r) => r.id !== id);
       const deleted = remaining.length < rows.length;
-      atomicWriteJSON(filePath, remaining);
+      persist(remaining);
       audit('delete', { id, deleted });
       return deleted;
     },

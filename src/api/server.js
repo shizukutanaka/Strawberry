@@ -11,6 +11,7 @@ const profitAddressesRouter = require('./routes/profit-addresses');
 const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
+const { safeTokenEqual } = require('../utils/safe-compare');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
 const {
   securityHeaders,
@@ -119,6 +120,22 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// SLA 稼働率トラッカー（1分間隔で /health を叩き uptime を集計。GET /api/sla の供給源）
+// テスト環境でのタイマー抑止は startSLATracker 側で行う（invoice-poller と同じ方針）。
+try {
+  require('../utils/sla-tracker').startSLATracker();
+} catch (e) {
+  logger.warn(`sla-tracker: failed to start: ${e.message}`);
+}
+
+// data/*.json の定期バックアップ（BACKUP_INTERVAL_HOURS 設定時のみ有効。
+// 内部でテスト環境抑止・任意クラウド SDK 欠落時の無効化を行う）
+try {
+  require('../core/backup-scheduler').startBackupScheduler();
+} catch (e) {
+  logger.warn(`backup-scheduler: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
@@ -135,7 +152,8 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   }
   const authHeader = req.headers.authorization || '';
   const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!provided || provided !== metricsToken) {
+  // 定数時間比較: `!==` では応答時間でトークン内容の推測を許すタイミングオラクルになる
+  if (!safeTokenEqual(provided, metricsToken)) {
     return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
   }
   next();
@@ -178,7 +196,7 @@ app.get('/ready', readyLimiter, (req, res) => {
 
   // 1) data ディレクトリの書き込み可否（atomicWriteJSON と同じ依存）
   try {
-    const dataDir = path.join(__dirname, '../../data');
+    const dataDir = require('../db/json/data-dir').resolveDataDir();
     const probe = path.join(dataDir, `.ready-probe-${process.pid}-${Date.now()}`);
     fs.writeFileSync(probe, 'ok');
     fs.unlinkSync(probe);
@@ -260,6 +278,13 @@ if (config.security.rateLimitEnabled) {
 // ボディパーサー
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// /.well-known/security.txt（RFC 9116）。パスにドット始まりのセグメントを含むため
+// express.static の既定（dotfiles: 'ignore'）では 404 になる。明示ルートで提供する。
+app.get('/.well-known/security.txt', (req, res) => {
+  res.type('text/plain; charset=utf-8');
+  res.sendFile(path.join(__dirname, '../../public/.well-known/security.txt'));
+});
 
 // 静的ファイル
 app.use(express.static(path.join(__dirname, '../../public')));

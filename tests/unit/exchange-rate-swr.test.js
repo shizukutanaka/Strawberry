@@ -143,4 +143,27 @@ describe('exchange-rate stale-while-revalidate', () => {
     expect(result.rate).toBe(STALE_RATE); // served stale on error
     expect(result.isCache).toBe(true);
   });
+
+  it('passes the shared axios safe-config (size cap + no redirects) on every provider call', async () => {
+    // SSRF/DoS regression guard: the fetch path must always apply
+    // maxContentLength + maxRedirects:0 — without them a hijacked or
+    // misbehaving ticker endpoint could stream an unbounded body (OOM) or
+    // 302-redirect to internal addresses.
+    er._resetCacheForTest();
+    axios.get
+      .mockRejectedValueOnce(new Error('coingecko down'))
+      .mockRejectedValueOnce(new Error('cryptocompare down'))
+      .mockRejectedValueOnce(new Error('bitflyer down'))
+      .mockResolvedValue({ data: { price: String(FRESH_RATE) } }); // binance shape: data.price
+
+    const result = await getBTCtoJPYRate(false, true);
+    expect(result.rate).toBe(FRESH_RATE);
+    // All 4 providers were tried, each with the safe config applied.
+    expect(axios.get).toHaveBeenCalledTimes(4);
+    for (const [, opts] of axios.get.mock.calls) {
+      expect(opts.maxContentLength).toBe(65_536);
+      expect(opts.maxRedirects).toBe(0);
+      expect(typeof opts.timeout).toBe('number');
+    }
+  });
 });

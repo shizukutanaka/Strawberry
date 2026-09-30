@@ -506,6 +506,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### nodemailer 6→10 メジャー更新（2026-09-27）
 - **対応**: nodemailer の high 脆弱性（Interpretation Conflict による意図しないドメインへのメール送信）は 10.0.11 でのみ修正されるため、^6.9.14→^10.0.11 へ更新。mailer.js の利用は `createTransport().sendMail()` の安定 API のみで互換性確認済み（モジュール読込み・sendMail 実在を検証）。残存 35 件。
 
+## docs: E2E テスト実行手順の新設（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-e2e-doc` → PR 化（`docs/E2E_TESTING.md`）
+
+`npm run test:e2e`（Playwright、9 spec）が package.json に存在する一方、実行手順を説明するドキュメントがリポジトリ内に皆無だった（CONTRIBUTING/README/faq/OPERATIONS いずれにも言及なし — `npx playwright install chromium` の事前要件、data/ の破壊的リセット、PORT 3010 分離、E2E_BASE_URL 差し替えなど、初見では分からない前提が多い）。実 config（playwright.config.js・globalSetup・helpers）を照合した正確な手順書を新設した。
+
+
 ## chore: package.json の npm メタデータ整備（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-pkg-metadata` → PR 化

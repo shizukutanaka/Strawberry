@@ -430,3 +430,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `middleware/audit.js` の監査 url フィールドに生クエリが残る問題を修正: `req.originalUrl` をそのまま記録していたため `?token=`/`?api_key=` が平文残留し得た。query フィールドは既にマスキング済みのため url はパス部のみ記録へ変更（OWASP ロギング基準の二重防御）。併せて `scripts/slack-notify-notion.js` が `.env` を読まず SLACK_WEBHOOK_URL が常に空だった問題を修正（dotenv を slack-feedback-bot より先に読み込み — 同モジュールは require 時点で env を定数捕捉するため順序が必須）。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

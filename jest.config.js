@@ -3,19 +3,17 @@
 // JSON data files that accumulate across test runs and can grow large.
 // globalSetup resets data files before every run so they don't grow unboundedly.
 //
-// maxWorkers: 1 — run suites serially. The JSON data layer (src/db/json/*) and a
-// few modules read/write shared files under data/ (users.json, orders.json,
-// escrows.json, …). Parallel jest workers race on those files: two workers load
-// the same array, append different rows, and the second write clobbers the
-// first's row — surfacing as non-deterministic failures that move between suites
-// run to run (a user that "vanishes" before login, an escrow that isn't found).
-// Serial execution makes the suite deterministic. The correct long-term fix is
-// per-worker data isolation (a configurable data dir keyed by JEST_WORKER_ID);
-// until then, reliability is worth the slower wall-clock time.
+// maxWorkers: 各 Jest ワーカーは専用のデータ dir (data-test/worker-N,
+// src/db/json/data-dir.js 参照) を持つため、共有 data/*.json をめぐる
+// ロストアップデート競合は解消済み。'50%' で CPU コア数に応じて並列化し
+// スイートの wall-clock を短縮する。globalSetup は従来どおり data/ を
+// リセットしつつ data-test/ を一括除去し、ワーカー dir のシードは
+// setupFiles (tests/setupWorkerData.js) が各ワーカーで行う。
 module.exports = {
   testTimeout: 30000,
   globalSetup: './tests/globalSetup.js',
-  maxWorkers: 1,
+  setupFiles: ['./tests/setupWorkerData.js'],
+  maxWorkers: '50%',
   // test-coverage-check.yml の閾値チェックは coverage/coverage-summary.json を
   // 読むが、既定 reporters (json/lcov/text/clover) は json-summary を出力せず
   // ジョブが MODULE_NOT_FOUND で落ちていた。json-summary を追加して修正。

@@ -24,6 +24,28 @@ const { appendAuditLog } = require('../../../utils/audit-log');
 // 価格ウォッチ（値下げアラート）
 const WatchRepository = require('../../../db/json/WatchRepository');
 const { notifyPriceWatchers, notifyWatchJustCreated } = require('../../../services/price-watch');
+const { MarketPricingEngine } = require('../../../core/market-pricing-engine');
+// 市場価格エンジンはステートレスな計算器のためシングルトンで共有。
+// （価格キャッシュ Map はインスタンス内に持つが、計算自体は純粋なので共有で問題ない）
+const _marketPricingEngine = new MarketPricingEngine();
+
+// estimate エンドポイント用: MarketPricingEngine の参考価格を advisory として返す。
+// スペック表に一致しないモデルでは null（合成スペックの価格で誤誘導しない）。
+function marketReferenceFor(gpu, durationMinutes) {
+  const specs = _marketPricingEngine.getGPUSpecs(gpu.model);
+  if (!specs) return null;
+  const r = _marketPricingEngine.calculateGPUPrice(gpu.model, {
+    rentalDuration: Math.max(1, durationMinutes / 60),
+  });
+  return {
+    modelMatched: true,
+    hourly: r.price.hourly,
+    daily: r.price.daily,
+    weekly: r.price.weekly,
+    monthly: r.price.monthly,
+    factors: r.factors,
+  };
+}
 
 // Short-lived cache for per-GPU rating aggregation (O(n) order scan).
 // TTL: 3 minutes — stale long enough to cut DoS load, fresh enough for display.
@@ -879,6 +901,16 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
   const rateInfo = await fetchRateInfo();
   const pricing = computeOrderPricing({ gpuId, durationMinutes: durationRaw, pricePerHour: gpu.pricePerHour }, rateInfo);
 
+  // 市場参考価格（advisory — 実際の課金額は gpu.pricePerHour × 時間で確定済み）。
+  // 孤立していた MarketPricingEngine（TFLOPS/VRAM/需給/時間帯係数）を見積もりへ配線。
+  // モデルが既知スペック表に一致しない場合は null（合成価格で誤誘導しない）。
+  let marketReference = null;
+  try {
+    marketReference = marketReferenceFor(gpu, durationRaw);
+  } catch (e) {
+    logger.warn(`estimate: market reference price failed for ${gpuId}: ${e.message}`);
+  }
+
   // 空き状況チェック（見積もり時点の参考情報 — 確定は注文作成時に行う）
   const OrderRepository = require('../../../db/json/OrderRepository');
   const BLOCKING = new Set(['pending', 'matched', 'active']);
@@ -903,6 +935,7 @@ router.get('/:id/estimate', asyncHandler(async (req, res) => {
     exchangeRateTimestamp: rateInfo.timestamp,
     availableAtRequestedTime: !conflicting,
     minRenterRating: gpu.minRenterRating || null,
+    marketReference,
   });
 }));
 

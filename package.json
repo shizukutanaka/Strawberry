@@ -41,6 +41,7 @@
     "prisma-migrate": "prisma migrate dev --name init",
     "prisma-studio": "prisma studio",
     "gpu-failure-monitor": "node scripts/gpu-failure-monitor.js",
+    "desktop": "npx -y electron@44.4.3 public/electron.js",
     "setup": "npm ci && npm run prisma-migrate && npm run openapi-gen && npm test"
   },
   "dependencies": {

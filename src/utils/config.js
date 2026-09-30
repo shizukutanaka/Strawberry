@@ -176,16 +176,40 @@ function loadFromEnv() {
 }
 
 // 設定ファイルから読み込み (オプション)
+// 従来は { ...defaultConfig, ...fileConfig } の浅いマージで、例えば
+// {"server": {"port": 4000}} だけのファイルが server の他既定値
+// (host/apiPrefix/corsOrigins/rateLimitMax) を丸ごと失わせていた。
+// ここではパース結果のみ返し、マージは getConfig 側の深いマージに委ねる。
 function loadFromFile(configPath) {
   try {
     if (fs.existsSync(configPath)) {
-      const fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      return { ...defaultConfig, ...fileConfig };
+      return JSON.parse(fs.readFileSync(configPath, 'utf8'));
     }
   } catch (error) {
     logger.error(`Failed to load config from ${configPath}:`, error);
   }
   return null;
+}
+
+// プレーンオブジェクト判定（配列は上書き対象であってマージしない）
+function _isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+// 深いマージ: ネストしたキー単位で override を base へ適用する。
+// __proto__/constructor/prototype はスキップしてプロトタイプ汚染を防ぐ
+// （config.json はローカルファイルだが、JSON.parse は __proto__ を own プロパティ
+// として持ち得るため防御的に除外）。
+function deepMergeConfig(base, override) {
+  const out = { ...base };
+  for (const key of Object.keys(override || {})) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+    const v = override[key];
+    out[key] = _isPlainObject(v) && _isPlainObject(base[key])
+      ? deepMergeConfig(base[key], v)
+      : v;
+  }
+  return out;
 }
 
 // 最終的な設定を取得
@@ -198,10 +222,14 @@ function getConfig() {
   const fileConfig = loadFromFile(customConfigPath);
   
   // 設定をマージ (ファイル設定 > 環境変数設定 > デフォルト設定)
-  return fileConfig || envConfig;
+  // 従来 `fileConfig || envConfig` はファイルが存在すると環境変数オーバーライド
+  // （PORT 等）を丸ごと捨てていた。深いマージでキー単位の優先順位にする。
+  return fileConfig ? deepMergeConfig(envConfig, fileConfig) : envConfig;
 }
 
 const config = getConfig();
 logger.info('Configuration loaded');
 
 module.exports = { config, requireSecret };
+// テスト用に内部マージ関数を公開
+module.exports._deepMergeConfig = deepMergeConfig;

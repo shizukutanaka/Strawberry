@@ -11,6 +11,7 @@ const profitAddressesRouter = require('./routes/profit-addresses');
 const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
+const { safeTokenEqual } = require('../utils/safe-compare');
 const { errorMiddleware, notFoundMiddleware } = require('../utils/error-handler');
 const {
   securityHeaders,
@@ -127,6 +128,14 @@ try {
   logger.warn(`sla-tracker: failed to start: ${e.message}`);
 }
 
+// data/*.json の定期バックアップ（BACKUP_INTERVAL_HOURS 設定時のみ有効。
+// 内部でテスト環境抑止・任意クラウド SDK 欠落時の無効化を行う）
+try {
+  require('../core/backup-scheduler').startBackupScheduler();
+} catch (e) {
+  logger.warn(`backup-scheduler: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
@@ -143,7 +152,8 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   }
   const authHeader = req.headers.authorization || '';
   const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!provided || provided !== metricsToken) {
+  // 定数時間比較: `!==` では応答時間でトークン内容の推測を許すタイミングオラクルになる
+  if (!safeTokenEqual(provided, metricsToken)) {
     return res.status(401).set('WWW-Authenticate', 'Bearer realm="metrics"').end('Unauthorized');
   }
   next();

@@ -6,8 +6,9 @@
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
+const { resolveDataDir } = require('../../db/json/data-dir');
 
-const DENYLIST_PATH = path.resolve(__dirname, '../../../data/revoked-tokens.json');
+const DENYLIST_PATH = path.join(resolveDataDir(), 'revoked-tokens.json');
 
 // jti -> expiryMs（エポックミリ秒）
 let denylist = null;

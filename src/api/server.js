@@ -120,6 +120,14 @@ try {
   logger.warn(`invoice-poller: failed to start: ${e.message}`);
 }
 
+// SLA 稼働率トラッカー（1分間隔で /health を叩き uptime を集計。GET /api/sla の供給源）
+// テスト環境でのタイマー抑止は startSLATracker 側で行う（invoice-poller と同じ方針）。
+try {
+  require('../utils/sla-tracker').startSLATracker();
+} catch (e) {
+  logger.warn(`sla-tracker: failed to start: ${e.message}`);
+}
+
 // data/*.json の定期バックアップ（BACKUP_INTERVAL_HOURS 設定時のみ有効。
 // 内部でテスト環境抑止・任意クラウド SDK 欠落時の無効化を行う）
 try {
@@ -188,7 +196,7 @@ app.get('/ready', readyLimiter, (req, res) => {
 
   // 1) data ディレクトリの書き込み可否（atomicWriteJSON と同じ依存）
   try {
-    const dataDir = path.join(__dirname, '../../data');
+    const dataDir = require('../db/json/data-dir').resolveDataDir();
     const probe = path.join(dataDir, `.ready-probe-${process.pid}-${Date.now()}`);
     fs.writeFileSync(probe, 'ok');
     fs.unlinkSync(probe);

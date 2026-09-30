@@ -501,6 +501,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
+### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
+- **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→255件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。SPA の refresh サイレント更新・Electron シェル（electron.js + preload.js）も実装済みの現状へ同期。
+
 ## GitHub PR/Issue テンプレートの新設 (2026-09-26)
 
 - **観測**: `.github/` にワークフローと dependabot.yml はあるが、`pull_request_template.md` と `ISSUE_TEMPLATE/` が不在。PR 本文が毎回バラバラで、脆弱性報告が公開 Issue に流れるリスクもあった（SECURITY.md の導線が Issue 作成時に示されない）。

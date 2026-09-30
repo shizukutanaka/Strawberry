@@ -152,6 +152,7 @@ if (require.main === module) {
 
 module.exports = {
   backupAll,
+  backupLocalWithGeneration,
   restoreFromLatestBackup,
   TARGET_FILES,
   _targetFiles,

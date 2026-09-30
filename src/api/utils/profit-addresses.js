@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
+const { resolveDataDir } = require('../../db/json/data-dir');
 const { withLock } = require('../../utils/async-lock');
 const { logger } = require('../../utils/logger');
 // 従来 `../../data/...` は src/data/profit-addresses.json を指していた
@@ -9,7 +10,7 @@ const { logger } = require('../../utils/logger');
 // git 追跡済みの同梱プレースホルダが出荷され、新規デプロイで例示アドレスが
 // 実送金先として選択され得た（BIP-173 例示アドレスは BTC パターンを通過する）。
 // 他リポジトリ同様、ランタイムデータはリポジトリルートの data/ に置く。
-const ADDR_FILE = path.join(__dirname, '../../../data/profit-addresses.json');
+const ADDR_FILE = path.join(resolveDataDir(), 'profit-addresses.json');
 // 移行元（旧バグパス）。残っている場合のみ内容を引き継ぐ。
 const LEGACY_ADDR_FILE = path.join(__dirname, '../../data/profit-addresses.json');
 // リポジトリにコミットされていたプレースホルダ（ダミー + BIP-173 例示アドレス）。

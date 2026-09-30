@@ -495,6 +495,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **変更**: `public/.well-known/security.txt`（Contact=GitHub Security Advisory、Policy=SECURITY.md、Preferred-Languages、Expires）を新設し、`server.js` に static より前の明示ルート `GET /.well-known/security.txt` を追加。`tests/api/basic.test.js` に 200・text/plain・必須フィールドの回帰テストを追加。
 - **参考**: RFC 9116 / GitHub "Adding a security policy" / securitytxt.org
 
+### gpu_lending_dashboard_mock.jsx を実 API 契約へ同期（2026-09-27）
+- **対応**: ルートの React モックが架空 API（`/api/gpu?owner=me`、認証ヘッダなし）と存在しないフィールド（`gpu.status`/`earningJPY`/`earningBTC`、架空の `/mock/earnings_graph.png`）を参照していた。実契約へ書き換え: `GET /api/v1/gpus/my`（JWT必須）+ `GET /orders/provider/earnings`（provider/admin）の `byGpu` 内訳で GPU 別収益を表示し、`available` フラグで稼働状況を表現。#111（cli.md）と同種のモック同期。
+
 ## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-timer-unref` → PR 化

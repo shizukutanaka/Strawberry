@@ -501,6 +501,12 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `improvement_checklist2.md` の「品質・テスト・CI/CD」節: コードに存在しない機能を実装済み `[x]` と主張する19項目（AI生成系9/18/19/23/28・多リージョン17・カオス24・自動ロールバック13・CI自己修復12・ナレッジ自動化20/22/25/26/27/29/30・コスト最適化15・環境分離自動デプロイ2 — デプロイはechoスタブ）を未完了 `[ ]` へ補正。Joi/OpenAPI・E2E・モックLND・dependabot 等が実在する項目は `[x]` のまま維持。
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
+## GitHub PR/Issue テンプレートの新設 (2026-09-26)
+
+- **観測**: `.github/` にワークフローと dependabot.yml はあるが、`pull_request_template.md` と `ISSUE_TEMPLATE/` が不在。PR 本文が毎回バラバラで、脆弱性報告が公開 Issue に流れるリスクもあった（SECURITY.md の導線が Issue 作成時に示されない）。
+- **変更**: GitHub 標準規約の `pull_request_template.md`（概要/変更内容/テスト/セキュリティ影響）と `ISSUE_TEMPLATE/bug_report.md`・`feature_request.md` を日本語で追加。bug テンプレート冒頭に「脆弱性は公開 Issue に書かず SECURITY.md へ」の導線を明記（RFC 9116 security.txt と整合）。
+- **参考**: GitHub Docs "Creating a pull request template for your repository" / "Configuring issue templates"
+
 ## `.github/CODEOWNERS` の新設 (2026-09-26)
 
 - **観測**: CODEOWNERS が不在のため PR 作成時にレビュアーが自動割当されず、資金決済・認証などの高リスク経路も既定レビューなしでマージ可能な状態だった。

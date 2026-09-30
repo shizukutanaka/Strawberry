@@ -7,8 +7,9 @@
 const fs = require('fs');
 const path = require('path');
 const { createJsonRepository } = require('../../src/db/json/createJsonRepository');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
 
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = resolveDataDir();
 const FILE = `__cache_probe_${process.pid}.json`;
 const FULL = path.join(DATA_DIR, FILE);
 
@@ -72,5 +73,19 @@ describe('createJsonRepository: stat-gated read cache', () => {
     fs.writeFileSync(FULL, '{ broken', 'utf-8');
     const repo = createJsonRepository(FILE);
     expect(() => repo.getAll()).toThrow(/corrupt/i);
+  });
+
+  it('never serves a pre-write snapshot after its own write, even if the fingerprint is unchanged', () => {
+    writeFile([{ id: 'a', s: 'locked' }]);
+    const repo = createJsonRepository(FILE);
+    const realStat = fs.statSync;
+    const frozen = realStat(FULL);
+    // coarse-mtime FS: a same-size rewrite within the timestamp granularity keeps (mtimeMs, size)
+    jest.spyOn(fs, 'statSync').mockImplementation((p, ...rest) =>
+      (String(p) === FULL ? frozen : realStat(p, ...rest)));
+    expect(repo.getById('a').s).toBe('locked');
+    repo.update('a', { s: 'funded' });
+    expect(repo.getById('a').s).toBe('funded');
+    expect(repo.updateIf('a', (r) => r.s === 'locked', { s: 'x' }).ok).toBe(false);
   });
 });

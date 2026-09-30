@@ -128,6 +128,12 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
     return structuredClone(rows);
   }
 
+  function persist(rows) {
+    atomicWriteJSON(filePath, rows);
+    _cache = null;
+    _cacheStamp = null;
+  }
+
   const repo = {
     getAll: () => {
       const rows = load();
@@ -144,7 +150,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       const safeRec = stripDangerousKeys(rec);
       const row = { ...safeRec, id: uuidv4(), createdAt: (rec && rec.createdAt) || new Date().toISOString() };
       rows.push(row);
-      atomicWriteJSON(filePath, rows);
+      persist(rows);
       audit('create', { id: row.id });
       return row;
     },
@@ -156,7 +162,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         return null;
       }
       rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
-      atomicWriteJSON(filePath, rows);
+      persist(rows);
       audit('update', { id, updates });
       return rows[idx];
     },
@@ -176,7 +182,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         rows[idx] = { ...rows[idx], ...stripDangerousKeys(entry.updates) };
         updatedRows.push(rows[idx]);
       }
-      if (updatedRows.length > 0) atomicWriteJSON(filePath, rows);
+      if (updatedRows.length > 0) persist(rows);
       audit('updateMany', { count: updatedRows.length });
       return { updated: updatedRows.length, rows: updatedRows };
     },
@@ -195,7 +201,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         return { ok: false, reason: 'condition_failed', current: rows[idx] };
       }
       rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
-      atomicWriteJSON(filePath, rows);
+      persist(rows);
       audit('updateIf', { id, updates });
       return { ok: true, row: rows[idx] };
     },
@@ -203,7 +209,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
       const rows = load();
       const remaining = rows.filter((r) => r.id !== id);
       const deleted = remaining.length < rows.length;
-      atomicWriteJSON(filePath, remaining);
+      persist(remaining);
       audit('delete', { id, deleted });
       return deleted;
     },

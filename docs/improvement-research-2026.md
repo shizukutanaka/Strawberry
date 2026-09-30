@@ -481,6 +481,9 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - **対応**: `GET /gpus/:id/estimate` に `marketReference`（advisory）を追加し、孤立していた `MarketPricingEngine`（TFLOPS/VRAM/地域/需給/時間帯係数）を配線 — このドキュメント §4 の「pricing engine をマッチングへ配線」の部分対応。実課金は従来どおり `pricePerHour × 時間`。
 - **同時修正**: `getGPUSpecs()` が未知モデルへ合成スペック（tflops=10）を返していたため `calculateGPUPrice` の `!gpuSpecs → getDefaultPrice` フォールバックがデッドコード化していた。未一致時 `null` 返却に修正し、estimate では `marketReference: null` を返す（合成価格で誤誘導しない）。
 
+### alert-kpi-trend の実動化（2026-09-27）
+- **対応**: `npm run alert-kpi-trend` が生成側の単一ファイル上書き（`docs/checklist-kpi-report.md`）と食い違う「日付付き履歴2件必須」前提で常に「2つ以上必要です」で終了する構造的デッドコードだった。前回値を `data/kpi-trend-state.json`（`KPI_STATE_FILE`/`KPI_REPORT_DIR`/`KPI_ALERT_THRESHOLD` で差し替え可）へ自身で記録する方式へ変更 — 単一レポート運用で動作し、同一内容の再実行では差分ゼロなので二重通知しない。パース不能・状態ファイル破損・レポート不在の各経路を明示ハンドリング。#127（kpi-trend-graph の同型バグ）の姉妹修正。テスト5件追加。
+
 ## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
 
 **ブランチ**: `devin/<ts>-timer-unref` → PR 化

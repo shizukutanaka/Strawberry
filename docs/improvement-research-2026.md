@@ -447,6 +447,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - 残存 N+1 の後始末（perf）: `payment-reminder.js` の支払いごとの `UserRepository.getById`（users.json を件数ぶん全量読込）を 1 回の `getAll` → Map 化へ置換。`order-expiry.js` の係争自動解決では `EscrowRepository.getAll` を「解決が実際に発生した時だけ構築する orderId→HELD エスクロー Map」に遅延集約（no-op スイープで無駄読みしない）。孤立 React ファイル `src/web/pages/settings/notifications.js`（React/axios 前提だがビルド系・参照ともに無し、JWT モデルと整合しない旧式実装）を削除。
 
 ### その他実装済（運用ドキュメント）
+- `instrumentation.js` の OTel ゲーティング不変条件をテスト固定: `OTEL_EXPORTER_OTLP_ENDPOINT` 未設定時に @opentelemetry/* を一切 require しないこと・シグナルハンドラを登録しないことを検証（無条件化の回帰防止 — server.js の最初の require のため誤って無条件化すると全起動で ~140 パッケージ読み込みのコストが発生）。
 - `tests/unit/test_exchange_rate.js` を `exchange-rate-fallback.test.js` へ改修: 旧ファイルは名前が jest testMatch に合わず常時スキップされ、かつ assert で実 API を呼ぶ死テストだった（「全失敗で throw」期待も非 production では誤り）。axios モック化＋NODE_ENV 分岐を正しく検証（全API失敗→DEFAULT_RATE/production throw/stale 優先・プロバイダフォールバック順・範囲外レート拒否・withTimestamp）。
 - `.gitattributes` 新設: `*.sh`/`*.bash` を `text eol=lf` に固定（`core.autocrlf=true` の Windows チェックアウトで `#!/usr/bin/env bash` が `bash\r` として解釈されスクリプトが起動不能になるのを防止）。`* text=auto` でテキスト正規化、画像を `binary` 指定で誤変換防止、`package-lock.json` を `linguist-generated` で PR diff 折りたたみ。
 - `lightning-service.js` 定期タスクの健全化: `startPeriodicTasks` が生成する3本の `setInterval`（channels 5分/クリーンアップ 10分/nodeInfo 30分）がハンドル未保持・`unref` 未適用・`shutdown()` で未解除で、`initialize()` 再呼出し（service-monitor の restart・失敗後リトライ）毎にタイマーが3本ずつ積み上がり、shutdown 後も切断済み gRPC へ発火し続けエラーログを垂れ流していた。`_periodicTimers` 追跡・`stopPeriodicTasks()`・start 時の既存解除・`unref()`・shutdown/initialized リセットを追加。

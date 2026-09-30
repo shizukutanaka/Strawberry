@@ -133,13 +133,7 @@ module.exports = {
   requestLogger,
   devRequestLogger,
   responseTime,
-<<<<<<< HEAD
   errorLogger,
-  redactBodyForLog
-||||||| 67c131a
-  errorLogger
-=======
-  errorLogger,
+  redactBodyForLog,
   redactUrlQuery
->>>>>>> origin/main
 };

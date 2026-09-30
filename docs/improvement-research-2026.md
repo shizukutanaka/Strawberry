@@ -433,3 +433,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### P2P MVP スクリプトの任意依存遅延 require 化（2026-09-27）
 - **対応**: `src/p2p-{node,sync,notify}.js`・`src/cli.js` が package.json 未収録の libp2p 系/ipfs-core/orbit-db をトップレベル require し、README 記載の `node src/cli.js`・`node src/p2p-notify.js` が MODULE_NOT_FOUND で即死していた。遅延 require + 手順付きエラー化し、`p2p-notify` は libp2p 未導入でも外部 API 監視（MONITOR_TARGETS）が単独動作するよう変更（実機検証済み）。
 - **同時修正**: 監視 tick の単一フライト化（複数監視対象で 1 tick が 15s 超過時のアラート二重化を防止）、stale health.json は NODE_DOWN ではなく NODE_MONITOR_STALE として区別（監視プロセス停止とピア切断を分離）。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

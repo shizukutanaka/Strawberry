@@ -491,6 +491,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### nodemailer 6→10 メジャー更新（2026-09-27）
 - **対応**: nodemailer の high 脆弱性（Interpretation Conflict による意図しないドメインへのメール送信）は 10.0.11 でのみ修正されるため、^6.9.14→^10.0.11 へ更新。mailer.js の利用は `createTransport().sendMail()` の安定 API のみで互換性確認済み（モジュール読込み・sendMail 実在を検証）。残存 35 件。
+- `tests/api/middleware/master-session.test.js` を追加: `master-session.js` が全 importer（master-auth.js / profit-addresses.js）へ同一インスタンスを返すシングルトン契約と、本番での秘密欠落 fail-fast を固定（ルート個別の session() 化による MemoryStore 分離回帰を防止）。
 - `src/api/middleware/ip-key.js`（レート制限キー生成）のユニットテストを追加。IPv6 の /64 畳み込み（同一割り当て単位で1バケット＝アドレス回しによる authLimiter バイパス防止）と TRUST_PROXY の hop 数セマンティクス（`true` 等を拒否し X-Forwarded-For 左端偽装を防止）の不変条件を固定。
 - `.env.example` の `METRICS_AUTH_TOKEN` コメント誤記を修正: 「未設定なら公開」→ 実際は本番で fail-closed/503。（`docs/operations.md` 側の実態同期は #103 の全面改訂へ統合済みのため本 PR からは除外）
 - `tests/db/json-repository-finders.test.js` を追加: `ReputationRepository`/`VerificationRepository` の finder→フィールド配線（`getByProviderId`→providerId、`getByJobId`→jobId）を固定 — createJsonRepository の宣言的 finders の field 名タイポによる無言の null 返却回帰を防止。

@@ -112,4 +112,29 @@ describe('verification-service', () => {
     const settled = escrow.evaluate(e.id, v.verificationCtx);
     expect(settled.escrow.state).toBe(STATES.SETTLED);
   });
+
+  describe('audit sampling secret (auditee-unpredictable)', () => {
+    it('service sampling is keyed — not the public sha256(jobId) decision', () => {
+      // 公開アルゴリズム（無キー sha256）だとプロバイダが自ジョブの監査要否を
+      // 事前計算できる。サービスは鍵付きで判定するため、少なくとも一部の jobId で
+      // 公開判定と異なる audited を出力することを確認する。
+      const s = svc({ auditRate: 0.5, auditSecret: 'srv-secret' });
+      let differ = 0;
+      for (let i = 0; i < 30; i++) {
+        const jobId = `job-${i}`;
+        const publicDecision = require('../../src/verification/work-verifier')
+          .shouldAudit(jobId, { auditRate: 0.5 }); // 無キー = プロバイダ視点
+        if (s.open(jobId).audited !== publicDecision) differ++;
+      }
+      expect(differ).toBeGreaterThan(0);
+    });
+
+    it('decisions are reproducible for the same secret across service instances', () => {
+      const a = svc({ auditRate: 0.5, auditSecret: 'same-key' });
+      const b = svc({ auditRate: 0.5, auditSecret: 'same-key' });
+      for (let i = 0; i < 10; i++) {
+        expect(a.open(`job-${i}`).audited).toBe(b.open(`job-${i}`).audited);
+      }
+    });
+  });
 });

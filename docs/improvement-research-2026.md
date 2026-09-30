@@ -430,6 +430,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
+- config.json マージの深いマージ化: `getConfig()` が `fileConfig || envConfig` でファイル存在時に環境変数オーバーライド（PORT 等）を丸ごと破棄し、`loadFromFile` の浅い spread で部分ファイルが兄弟既定値を全消ししていた問題を `deepMergeConfig`（キー単位の再帰マージ、__proto__ 系キー除外）で修正。
 - マスター3段階認証の昇格セッションに絶対 TTL を追加: `cookie.maxAge` 未設定で MemoryStore の `masterAuth` 状態が事実上永続化していた（昇格状態が無期限 → セッション乗っ取りで資金アドレス操作へ直行するリスク）。`MASTER_SESSION_TTL_MS`（既定30分、GitHub sudo モード等の昇格認証慣例）でクライアント Cookie とサーバ側ストアの双方に期限を付与。
 - 注文タイムアウト失効時のエスクロー孤立解消: `expireStaleOrders`/`expireStaleMatchedOrders`/`expireStaleActiveOrders` は注文を cancelled へ遷移するが HELD 状態のエスクローを精算せず、支払済み資金が永久ロックされる経路があった。`releaseEscrowsOnTimeout` を新設し pending/matched 失効は HELD→CANCELED で借り手返金、active 失効は /stop と同じ壁時計フォールバックの deliveredRatio で HELD→SETTLED の出来高払いにした。
 - 検証監査抽出の予測不能化: `shouldAudit` が無キー `sha256(jobId)` で決定していたため、プロバイダが自ジョブの監査要否を事前計算し「監査されないジョブだけ手を抜く」選択的チートが成立していた（Proof-of-Compute のランダム監査は auditee 予測不能が要件）。HMAC-SHA256 鍵付き判定へ変更（`VERIFICATION_AUDIT_SECRET` env → 未設定時はプロセス生成のエフェメラル鍵。監査要否は open 時に永続化済みのため再起動でも整合）。

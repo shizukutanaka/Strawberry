@@ -58,6 +58,7 @@ async function uploadToS3(localPath, remotePath, options = {}) {
 // Google Driveアップロード（OAuth2認証済みトークン必須）
 async function uploadToGoogleDrive(localPath, remoteName, oauth2Client, folderId) {
   const google = loadGoogleApis();
+  fs.accessSync(localPath, fs.constants.R_OK);
   const drive = google.drive({ version: 'v3', auth: oauth2Client });
   const fileMetadata = { name: remoteName, parents: folderId ? [folderId] : undefined };
   const media = { mimeType: 'application/octet-stream', body: fs.createReadStream(localPath) };

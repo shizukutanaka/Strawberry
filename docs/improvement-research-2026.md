@@ -458,6 +458,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - webhook.js / lightning-api.js の SSRF リダイレクト迂回とタイムアウト欠如を修正: assertPublicUrl() は最初の URL のみ検証するため、axios 既定のリダイレクト追従でガードを迂回可能だった残存経路を遮断（OWASP SSRF Prevention Cheat Sheet の「リダイレクトごとの再検証または追従禁止」準拠）。SAFE_AXIOS_CONFIG を ssrf-guard に集約し、ガードと安全設定を同所化。
 - メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- Slack アラート系 ops スクリプトの共有化と堅牢化: `alert-high-priority.js` / `alert-overdue.js` / `alert-overdue-high.js` が「feedback-priority.json 読込→フィルタ→Slack 送信」をガード無しで各々複製していたため `scripts/lib/alert-common.js` に集約 — 破損 JSON はファイル名付き例外、非配列拒否、非オブジェクト要素除去、期限キー（due/deadline/期限/date）の順序参照を一本化、3000 文字分割送信。各スクリプトに `FEEDBACK_PRIORITY_PATH` env 差し替えと require.main のエラーハンドリングを追加。
 - `.github/dependabot.yml` の `automerge` キー（Dependabot 非対応フィールド）を除去 — GitHub は未知キーを含む設定ファイル全体を検証エラーで拒否するため、npm/github-actions 両方の更新 PR が一切開かれない状態だった。自動マージの正しい実現経路（リポジトリ設定 + fetch-metadata ワークフロー）をコメントで明記。
 - ops スクリプトの JSON 読み込みを堅牢化: `scripts/lib/read-json.js` を新設し、`alert-high-priority`/`alert-overdue`/`alert-overdue-high`/`priority-to-notion`/`progress-report` の裸 `JSON.parse(readFileSync)`（docs/feedback-priority.json 等の破損や未作成で cron チェーンごとクラッシュ、オブジェクト書込時は .filter で TypeError）を ENOENT/破損/非配列に耐性のある共通ヘルパーへ置き換え。progress-report は credentials/token 欠損時に明確なエラーメッセージで終了するよう改善。
 - `src/utils/notifier.js` の LINE Notify 対応をサービス終了に合わせて更新 — LINE Notify（notify-api.line.me）は 2025-03-31 に公式終了し全呼出が必ず失敗するため、`NotifyType.LINE` は HTTP を発行せず移行案内付きエラーを即返すよう変更。後継の LINE Messaging API（`api.line.me/v2/bot/message/push`、channel access token + to: userId/groupId、5000文字上限）を `NotifyType.LINE_MESSAGING` として実装。`resilient-notify` の line チャネルは `LINE_NOTIFY_URL` が明示設定された場合のみ有効なため無改変（カスタムエンドポイント運用は継続可能）。参考: LINE Notify 終了公式告知（notify-bot.line.me）、LINE Messaging API リファレンス。
@@ -476,6 +477,13 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
   - `deploy.sh`: デプロイ経路が未構成（ci-cd.yml の Deploy は echo スタブ）である旨を stderr で説明し exit 1 — 無言成功による誤認を防止。
 - **テスト**: `tests/scripts/sh-scripts.test.js` 新規5件 — bash -n 構文・`set -euo pipefail`・deploy.sh の非ゼロ終了・preflight の両経路（実機で両方向の終了コードを確認済み）。
 - **参考**: Google Shell Style Guide（set -euo pipefail）/ 十二因子アプリの fail-fast 設定検証
+
+### 市場価格エンジンの見積もり配線（2026-09-27）
+- **対応**: `GET /gpus/:id/estimate` に `marketReference`（advisory）を追加し、孤立していた `MarketPricingEngine`（TFLOPS/VRAM/地域/需給/時間帯係数）を配線 — このドキュメント §4 の「pricing engine をマッチングへ配線」の部分対応。実課金は従来どおり `pricePerHour × 時間`。
+- **同時修正**: `getGPUSpecs()` が未知モデルへ合成スペック（tflops=10）を返していたため `calculateGPUPrice` の `!gpuSpecs → getDefaultPrice` フォールバックがデッドコード化していた。未一致時 `null` 返却に修正し、estimate では `marketReference: null` を返す（合成価格で誤誘導しない）。
+
+### alert-kpi-trend の実動化（2026-09-27）
+- **対応**: `npm run alert-kpi-trend` が生成側の単一ファイル上書き（`docs/checklist-kpi-report.md`）と食い違う「日付付き履歴2件必須」前提で常に「2つ以上必要です」で終了する構造的デッドコードだった。前回値を `data/kpi-trend-state.json`（`KPI_STATE_FILE`/`KPI_REPORT_DIR`/`KPI_ALERT_THRESHOLD` で差し替え可）へ自身で記録する方式へ変更 — 単一レポート運用で動作し、同一内容の再実行では差分ゼロなので二重通知しない。パース不能・状態ファイル破損・レポート不在の各経路を明示ハンドリング。#127（kpi-trend-graph の同型バグ）の姉妹修正。テスト5件追加。
 
 ## fix(core): デーモンタイマーの unref 化と MetricsCollector の多重生成クラッシュ修正（2026-09-26 追加）
 

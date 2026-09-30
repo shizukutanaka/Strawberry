@@ -12,6 +12,12 @@ const GpuRepository = require('../../src/db/json/GpuRepository');
 const UserRepository = require('../../src/db/json/UserRepository');
 const { logger } = require('../../src/utils/logger');
 
+// googleapis の導入有無に依存せず「設定済みだが依存が読めない」状況を再現する
+// （実 Google API へは接続しない）。
+jest.mock('../../src/utils/google-calendar', () => {
+  throw new Error("Cannot find module 'googleapis'");
+});
+
 afterAll(() => {
   const { server } = require('../../src/api/server');
   return new Promise(done => {

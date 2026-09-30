@@ -432,3 +432,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 
 ### 管理ダッシュボード SPA ページ（2026-09-27, §19 管理画面の部分対応）
 - **対応**: `/admin/stats`・`/admin/verifications`・`/admin/escrow`・`/admin/expire-orders`・`/admin/cache/purge` の admin API は実装済みだが SPA 側に利用経路がなく運用者が curl 頼みだった。`public/js/pages/admin.js` を新設（統計カード/検証監査表/エスクロー表＋状態フィルタ/スイープ・パージ操作）、api.js に admin.* ヘルパー5件、`#/admin` ルート＋admin ナビリンクを追加。フロントが架空パスを呼ぶ事故を防ぐ契約テスト3件（tests/unit/admin-page-contract.test.js）+ e2e spec（admin.spec.js）を追加。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

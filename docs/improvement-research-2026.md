@@ -425,9 +425,60 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - DDP-SA: Scalable Privacy-Preserving FL via Distributed DP and Secure Aggregation — https://arxiv.org/pdf/2604.07125
 - Detecting Multiple Seller Collusive Shill Bidding — https://arxiv.org/abs/1812.10868
 - Shill Bidding Prevention in Decentralized Auctions Using Smart Contracts — https://arxiv.org/html/2506.00282v1
+- token-denylist のクロスプロセス失効伝播（security）: 失効 jti マップが初回ロード後プロセス内に固定され、別プロセス（CLI・別ワーカー・pm2 クラスタ）が revoked-tokens.json に追記してもこのプロセスの `isRevoked` は古いマップを見続けて失効トークンを受理し続けた。stat(mtimeMs,size) ゲートで「ファイル変更時のみ再読込」へ。永続化は atomicWriteJSON（rename）のため mtime で確実に検知。stat 失敗時は現行マップ維持（revoke→isRevoked の即時整合を壊さない）、パース失敗時も指紋は記録して壊れたファイルの再パース連発を防ぐ。
 
 ### その他実装済（運用ドキュメント）
+- `.dockerignore` の欠落補完: `Dockerfile.api` が `COPY . .` でビルドコンテキスト全体を同梱するのに `backups/`（backup.js が data/*.json を平文コピーする出力先 — users.json のパスワードハッシュ・revoked-tokens・profit-addresses を含む）が除外されておらず、バックアップ済みホストでの `docker build` がイメージへ機密データを焼き込む経路だった。併せて `.gitignore` と対称に `test-results`/`playwright-report`/`dist`/`build`/`*.bak`/`*.tmp`/`.idea`/`*.swp`/`yarn-debug` 系を追加。
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - 注文タイムアウト失効時のエスクロー孤立解消: `expireStaleOrders`/`expireStaleMatchedOrders`/`expireStaleActiveOrders` は注文を cancelled へ遷移するが HELD 状態のエスクローを精算せず、支払済み資金が永久ロックされる経路があった。`releaseEscrowsOnTimeout` を新設し pending/matched 失効は HELD→CANCELED で借り手返金、active 失効は /stop と同じ壁時計フォールバックの deliveredRatio で HELD→SETTLED の出来高払いにした。
+- 監査ログミドルウェアの耐性化: 全 API の body/query/response を全文記録していたものを 2KB 上限 + `{_truncated,bytes}` 記録へ（監査ログ急膨張と stringify+再帰マスクのリクエスト処理コストを抑止）。`sanitizeSensitiveFields` に深度上限 32 を追加し深ネスト JSON によるスタックオーバーフロー DoS を防止。mkdirSync を初回のみへ。
+- 追記型ログのローテーション化: `appendFileSync` で手動追記する高頻度ログ（access-audit.log は認証済み全リクエスト、db-access.log は UserRepository 全アクセス、gpu-events.log）にサイズ上限がなく無制限肥大・ディスク枯渇リスクがあった。`appendRotated` ヘルパー（statSync→超過で .1 退避の 1 世代ローテーション）を新設して適用。ハッシュチェーン監査ログ（audit.log）は改ざん検知との整合のため対象外。
+- 秘密値比較を共有 `safeTokenEqual` へ集約: `/metrics` の Bearer 照合が生の `!==`（タイミングオラクル）だったため、Double-HMAC（nonce+HMAC-SHA256→timingSafeEqual）ヘルパーを `src/utils/safe-compare.js` に新設し /metrics・`authenticateAPIKey`・`apiKeyAuth`（security.js 内の重複実装2箇所）へ適用。空文字どうしの誤認証を防ぐガード付き。
+- 利益送金先ストアのパスバグ修正: `src/api/utils/profit-addresses.js` の `../../data/` は `src/data/` を指しており、ランタイムデータがソースツリーに書き込まれる + リポジトリ同梱のシードアドレス（BIP-173 例示アドレス等）が新規デプロイで実送金先として選択され得る問題を修正。ルート `data/` へ移し、旧パスからの移行時は同梱シードを除外して引き継ぐ。
+- master-auth TOTP の隣接ウィンドウリプレイ対策: リプレイ防止が「現在カウンタとの比較」だけだったため、window:1（±30秒）で受理される前ウィンドウのコードを次ウィンドウで再提示すると素通りした。受理済みコード値を `lastTotpToken` に記録して同一値の再提示を拒否。
+- アカウント退会（DELETE /users/me）と payoutAddress 変更（PUT /me）に再認証を追加: JWT 所持のみで PII 匿名化＋全セッション失効、およびプロバイダ受取アドレス差替（＝次回決済の攻撃者宛送金）が可能だった。OWASP「sensitive operations require re-authentication」に倣い `verifySensitiveConfirmation` を共通化 — パスワード照合（bcrypt）を必須化し、パスワードを持たない OAuth 専用アカウントは登録メール再入力で代替。`authLimiter` 付与で確認パスワードの総当たりも防止。資金に直結しない通常プロフィール項目（username/bio 等）は再認証不要。
+- `/marketplace/auction` の権威フィールド偽装防止: 入札オブジェクトの `reputationScore`/`eligible`/`attestationPassed`/`slaUptimePct` をクライアントが供給できていたため、任意の認証済みユーザーが自陣プロバイダに満点レピュテーションを付けて優勝させたり競合を `eligible:false` で排除できた。ルートで providerId/pricePerHour のみにサニタイズし、権威値はサービス層に限定（selectProvider の上書き経路は DI/テスト用として維持）。
+- sanitizeSensitiveFields の DoS 対策: 深度無制限再帰で ~8,000 段ネスト JSON（≈48KB、body-parser 上限内）が監査ミドルウェア経由で全リクエストに作用しスタックオーバーフロー→プロセス終了が成立していた。深度 32 で打ち切り（'[TRUNCATED]'）＋WeakSet で循環参照を '[CIRCULAR]' に置換。配列は配列として複写（従来はオブジェクト化していた）。
+- LINE Notify 送信の耐障害化: `scripts/line-notify.js`（service-monitor の LINE 経路）に 10 秒タイムアウト（`LINE_NOTIFY_TIMEOUT_MS`）を追加し、失敗ログから axios エラーオブジェクトを排除 — `e.config.headers.Authorization` に含まれる `LINE_TOKEN` がログへ漏洩する経路を遮断。
+- Web OAuth フロー（GET /auth/google|github）の login-CSRF 対策とログイン完結: `passport.authenticate` に `state: true` を付与（共有 masterSession を web フロー2ルートにのみ適用し passport-oauth2 のステートストアを成立）。コールバックは従来 OAuth プロフィールを echo するだけでトークンを発行していなかったのを、RESTful /auth/google と同一ポリシー（email_verified 必須・同一メール既存アカウントは暗黙リンクせず 409・access+refresh ペア発行+ati 紐付け+lastLogin 更新）でログインを完結させ、`UserRepository.getByGithubId` ファインダを追加。
+- webhook.js / lightning-api.js の SSRF リダイレクト迂回とタイムアウト欠如を修正: assertPublicUrl() は最初の URL のみ検証するため、axios 既定のリダイレクト追従でガードを迂回可能だった残存経路を遮断（OWASP SSRF Prevention Cheat Sheet の「リダイレクトごとの再検証または追従禁止」準拠）。SAFE_AXIOS_CONFIG を ssrf-guard に集約し、ガードと安全設定を同所化。
+- メール送信経路のハードニング（`src/utils/email.js`/`src/api/utils/mailer.js`）: SendGrid/Mailgun 呼出にタイムアウト・サイズ上限・maxRedirects:0（残余のタイムアウト未設定外向き呼出）、nodemailer に connectionTimeout/greetingTimeout/socketTimeout と `requireTLS` 既定化（587/STARTTLS の opportunistic TLS で SMTP 認証情報が平文送信されうる問題。社内リレー向けに SMTP_REQUIRE_TLS=false で opt-out）。
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+
+## fix(utils): gpu-monitor の三重実害修正とタイマー健全化（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-gpu-monitor-fix` → PR 化
+
+`src/utils/gpu-monitor.js`（GPU 死活→自動リカバリ）が呼び出せば必ず失敗する三重の実害を修正:
+
+1. `OrderRepository.updateStatus` — 存在しないメソッド（正は `update`）を destructure → TypeError クラッシュ
+2. 状態値 `'auto_recovered'` — `state-checker` の ORDER_STATES/遷移表に非登録で、書き込まれた注文は永久に遷移不能 → 有効値 `cancelled` へ
+3. `PaymentRepository.getByOrderId`（many:true=配列）を単体扱い + `refundPayment`（存在しない）呼び出し → 配列反復 + `update(id,{status:'refunded'})` へ（gpu-auto-recovery と同規約）
+
+あわせて `startGpuMonitor` を unref 済み・単一フライト・多重起動防止 + `stopGpuMonitor` 追加（service-monitor と同規約 — #150 のタイマー健全性と同クラス）。
+
+- notification-settings の SSRF チェックを共有 ssrf-guard へ集約 + 登録時 DNS 事前検証を追加: 旧 regex 方式は userinfo 混在（http://x@127.0.0.1/）・数値IPv4（2130706433/0x7f000001/127.1）・IPv4埋め込みIPv6 を素通りし、FQDN の解決結果も検証していなかった。WHATWG URL パース後の hostname を isPrivateIp で分類する形へ統一し、SSRF_ALLOW_PRIVATE_WEBHOOKS の登録側不整合（送信は許可・登録は常時拒否）を解消。DNS 解決失敗は登録を許容（送信時の assertPublicUrl が権威）。
+- `src/utils/anomaly-detector.js` の堅牢化 — `logs/` は gitignore 済みで新規 clone には存在しないため、`reportAnomaly` の `appendFileSync(logs/anomaly.log)` が mkdir 無しで ENOENT を投げ呼び出し元（gpu-monitor）が初回異常報告でクラッシュしていた（wired バグ）。mkdir + 書込失敗の非致命化を追加。あわせて `detectRequestAnomaly` の IP カウンタがユニーク IP 毎に永久蓄積する無制限増殖（#58 同型）を TTL スイープ+10k 上限でバウンド化。`google-calendar.js` の `defaultConfig` 宣言漏れ（暗黙グローバル）と googleapis トップレベル require（未導入で require 自体クラッシュ）を遅延化、`ai-benchmark.js` の axios に timeout/maxContentLength/maxRedirects を付与（#151 同型の未防御外向き呼出し）。
+- Electron デスクトップシェルを実装: `public/electron.js` は1行コメントのみのスタブ、`preload.js` は `contextBridge` 未インポートで起動即 ReferenceError だった。contextIsolation/sandbox/no-nodeIntegration 前提のメインプロセス（外部リンクは OS ブラウザ、will-navigate を起点 URL に制限、監査 IPC 受信）と、sandbox 互換 preload（監査は ipcRenderer で main へ転送）へ実装。`npm run desktop`（npx で electron@44.4.3 をオンデマンド取得、依存には追加せず npm ci を重くしない）。
+- `scripts/feedback-bot.js` の堅牢化: 破損した `docs/feedback-log.json` で JSON.parse が全投稿をクラッシュさせる問題を「破損ファイルの退避 + 新規開始」に修正、非アトミック `writeFileSync` を共有 `atomicWriteJSON` へ置換（中断時のログ半壊防止）、user/message の型・長さ検証（128/4000 字）と CLI 入口のエラーハンドリング、`FEEDBACK_LOG_PATH` によるファイル差し替えを追加。回帰テスト5件。
+
+## fix(utils): 外向き axios 安全設定の共有化と未適用経路の塞ぎ（2026-09-26 追加）
+
+**ブランチ**: `devin/<ts>-http-safe-config` → PR 化
+
+notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedirects:0 の SSRF 迂回遮断）を `src/utils/http-safe-config.js` へ集約し共有化。同値を複製していた resilient-notify.js を共用に揃え、安全設定が付いていなかった2経路を塞いだ:
+
+- `src/utils/email.js`（SendGrid/Mailgun — notifier.js 経由で配線済み）: axios.post に timeout 無し — SendGrid 接続の半開き滞留が通知パスを永久ブロックし得た
+- `src/utils/gpu-price-compare.js`: AWS EC2 オファー index（非圧縮1GB超）を timeout・サイズ上限なしで全量メモリ展開 — 呼び出せばほぼ確実に OOM。timeout 30s + maxContentLength 256MiB で有界エラー化（同時に、全 index 取得方式自体の限界をコメントで明記）
+
+- `devRequestLogger` の資格情報漏洩を修正: NODE_ENV=development でリクエストボディをログへ流す際のマスク対象が password/token/paymentRequest の3件のみで、refreshToken・idToken・currentPassword/newPassword・code（メール認証コード）・apiKey 等の live クレデンシャルが平文で dev ログへ残っていた。キー名ベースの再帰 `redactBodyForLog`（配列ボディ・ネスト対応・深度上限で循環安全）へ置き換え、新規8テストで固定。
+- `middleware/logger.js` のクエリ秘匿漏れを修正: `req.originalUrl` を生記録していた3系統（morgan アクセスログ/低速警告/エラーログ）に `redactUrlQuery` を適用し、`?token=`/`?api_key=` 等の機密クエリを `[MASKED]` 化。監査ミドルウェアの `query` マスキング・error-handler の `req.path` サニタイズと一貫させた（キー集合は sanitize.js と同一 + snake_case 包含）。
+- `src/security-audit.js` の `exec('npm audit --json')` を堅牢化: タイムアウト無し（レジストリ障害時に監視プロセスが永久滞留）と maxBuffer 既定 1MB（脆弱性多数時の大きな JSON が切断され「パース失敗」のみ記録され通知が永久に届かない）を修正（timeout 120s・maxBuffer 32MB）。パース失敗時に exec エラー/stderr も記録して原因診断可能に。exec モックの回帰テスト4件追加。
+- `src/api/routes/payment/btc-onchain.js` のエスクロー CAS 競合を fail-closed 化 — tx1 送信後に期限切れスイープ等が PENDING→CANCELED へ遷移すると `updateIf` が condition_failed を返すが、従来は戻り値を無視して tx2 まで進み、証跡の残らない資金移動＋再送時の新規エスクロー作成（tx1 再送＝借り手二重課金）になり得た。CAS 失敗時は txid 証跡を行へ追記・`payment_escrow_cas_failed` 監査・500+手動照合で停止し、txid 持ち CANCELED エスクローへの再送は 409 で拒否。回帰テスト2件追加。
+- `virtual-gpu-manager.js` のプロビジョニング config をサニタイズ: `createVirtualGPU` の `config.computePercentage` 等が生成される MPS シェルスクリプト（`start-mps.sh` を `exec` 実行）・Docker/k8s env・manifest へ生のまま埋め込まれており、`"50; <任意コマンド>"` 形式の値でコマンドインジェクションとなり得た。`clampPercentage`（数値化＋0-100クランプ）・`safeK8sQuantity`（quantity 形式検証＋既定値フォールバック）・`safePositiveNumber`（Docker Memory/CpuShares 用）を新設し全挿入箇所へ適用。docker/k8s/native 各経路で生成物がサニタイズ済みであることを検証するテスト6件を追加。
+- `middleware/audit.js` の監査 url フィールドに生クエリが残る問題を修正: `req.originalUrl` をそのまま記録していたため `?token=`/`?api_key=` が平文残留し得た。query フィールドは既にマスキング済みのため url はパス部のみ記録へ変更（OWASP ロギング基準の二重防御）。併せて `scripts/slack-notify-notion.js` が `.env` を読まず SLACK_WEBHOOK_URL が常に空だった問題を修正（dotenv を slack-feedback-bot より先に読み込み — 同モジュールは require 時点で env を定数捕捉するため順序が必須）。
+- `gpu-error-history.js` の競合・証跡喪失を修正: health/liveness 両モニタからの並行 `recordGpuError` が単一 JSON への read-modify-write で lost-update（エントリ消失）し得たため `withLock` 直列化（通知送信はロック外）。破損履歴ファイルが次回保存でサイレント上書きされる問題を `.corrupt-*` 退避へ変更（解析証跡を保全）、無制限増殖する GPU キーへ `MAX_GPU_KEYS` キャップを追加。
+- `src/security/gpu-attestation-verifier.js` の mandatory チェックを fail-closed 化: 全フィールドが Joi optional であるのに対し mandatory の `freshness`（timestamp）と `memory_match`（report.memoryGB）がフィールド欠落時に `pass` していたため、欠落・パース不能・大きな未来時刻を不合格に修正（軽い未来ズレは 5 分スキュー内で受理）。欠落のままだと「一度取得した正当レポートの無期限再提示」（リプレイ）と「容量をアテストしないスペック申告」が必須チェックを素通りしていた。
+- `src/utils/ssrf-guard.js` の IPv6 分類を 8 グループ展開＋数値判定へ書換え: 旧実装の `startsWith('fe80')` では fe80::/10 の fe90〜febf リンクローカルが素通りし、`::7f00:1`（IPv4-compatible ループバック）・`::ffff:0a00:1`（16進テールの mapped）・`2002:7f00:1::`（6to4）・`64:ff9b::7f00:1`（NAT64）等の IPv4 埋め込み遷移機構経由で内部アドレスへ SSRF 可能だった。fec0::/10 site-local・2001:db8::/32・2001:0::/32 Teredo も遮断対象に追加（PortSwigger SSRF cheat sheet 系の既知バイパス対応）。
+- `src/api/utils/mailer.js`（master-auth メール認証コード送信経路）の SMTP 安全性を修正: 従来 `secure:false` で STARTTLS が opportunistic（非対応サーバへ SMTP_USER/PASS を平文送信し得る）かつタイムアウト無しだった。`requireTLS`（587系）/ `secure`（465）の適正化 + connection/greeting/socket 3系統タイムアウト + env 未設定時の明確なエラー + transporter 遅延生成。utils/email.js（SendGrid/Mailgun 系、#79 で済）とは別系統の残存ギャップ。
 - `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

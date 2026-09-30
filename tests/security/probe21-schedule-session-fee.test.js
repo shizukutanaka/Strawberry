@@ -77,7 +77,8 @@ describe('DELETE /me: sessionsRevokedAt invalidates sibling tokens', () => {
 
   it('after DELETE /me with token2, token1 (sibling) is also rejected', async () => {
     const delRes = await request(app).delete('/api/v1/users/me')
-      .set('Authorization', `Bearer ${token2}`);
+      .set('Authorization', `Bearer ${token2}`)
+      .send({ password: 'Test1234!' });
     expect(delRes.statusCode).toBe(200);
 
     // token1 was issued before sessionsRevokedAt — must now be rejected

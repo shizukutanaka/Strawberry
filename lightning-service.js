@@ -80,6 +80,8 @@ class LightningService extends EventEmitter {
         this.maxChannels = 500;
         this.invoiceRetentionMs = 24 * 60 * 60 * 1000; // 24h
         this.paymentRetentionMs = 24 * 60 * 60 * 1000; // 24h
+        // 定期タスクのタイマーハンドル（shutdown/re-initialize で解放する）
+        this._periodicTimers = [];
     }
 
     async initialize() {
@@ -945,14 +947,17 @@ class LightningService extends EventEmitter {
     }
 
     startPeriodicTasks() {
+        // initialize() は service-monitor の restart 経路・失敗後リトライ等で
+        // 再呼出しされるため、先に既存タイマーを解除して重複を防ぐ。
+        this.stopPeriodicTasks();
         // チャネルバランス更新（5分ごと）
-        setInterval(() => {
+        this._periodicTimers.push(setInterval(() => {
             this.updateChannels().catch(error => {
                 logger.error('Failed to update channels:', error);
             });
-        }, 5 * 60 * 1000);
+        }, 5 * 60 * 1000));
         // 期限切れ請求書のクリーンアップ（10分ごと）＋Map自動クリーニング
-        setInterval(() => {
+        this._periodicTimers.push(setInterval(() => {
             const now = Date.now();
             // 期限切れ請求書
             for (const [hash, invoice] of this.invoices) {
@@ -963,13 +968,23 @@ class LightningService extends EventEmitter {
             }
             // Map件数・期間クリーニング
             this.cleanMaps();
-        }, 10 * 60 * 1000);
+        }, 10 * 60 * 1000));
         // ノード情報更新（30分ごと）
-        setInterval(() => {
+        this._periodicTimers.push(setInterval(() => {
             this.updateNodeInfo().catch(error => {
                 logger.error('Failed to update node info:', error);
             });
-        }, 30 * 60 * 1000);
+        }, 30 * 60 * 1000));
+        // unref: これらタイマー単体ではプロセス終了を妨げない（server.js が
+        // 繰り返し require される Jest 環境や shutdown 後の残留発火を防ぐ）
+        for (const t of this._periodicTimers) {
+            if (t.unref) t.unref();
+        }
+    }
+
+    stopPeriodicTasks() {
+        for (const t of this._periodicTimers) clearInterval(t);
+        this._periodicTimers = [];
     }
 
     // Map自動クリーニング（LRU/最大件数/期間ベース）
@@ -1099,7 +1114,12 @@ class LightningService extends EventEmitter {
     async shutdown() {
         try {
             logger.info('Shutting down Lightning service...');
-            
+
+            // 定期タスクを停止（shutdown 後も interval が発火し続けて
+            // updateChannels がエラーログを吐き続けるのを防ぐ）
+            this.stopPeriodicTasks();
+            this.initialized = false;
+
             // イベントストリームのクリーンアップ
             // (実装省略)
             

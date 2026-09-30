@@ -24,8 +24,12 @@ describe('cloud-storage の遅延 require', () => {
     // googleapis / dropbox は package.json 未宣言（任意依存）のためこの環境では解決不可。
     // aws-sdk は optionalDependencies 宣言済みのため存在する場合は要求失敗になり得る —
     // その場合でも「require エラーでなく設定系エラー」を主張したいので緩めに検証。
+    // googleapis は optionalDependencies 宣言済みのため、導入済みなら SDK 要求エラーでなく
+    // 読み込めないローカルファイルの ENOENT で reject される（未処理 stream error で落ちない）ことを検証。
+    let hasGoogleApis = true;
+    try { require.resolve('googleapis'); } catch (_) { hasGoogleApis = false; }
     await expect(cloudStorage.uploadToGoogleDrive('/tmp/nope', 'x', null))
-      .rejects.toThrow(/googleapis/);
+      .rejects.toThrow(hasGoogleApis ? /ENOENT/ : /googleapis/);
     await expect(cloudStorage.uploadToDropbox('/tmp/nope', '/x', 'tok'))
       .rejects.toThrow(/dropbox/);
   });

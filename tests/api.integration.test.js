@@ -1428,7 +1428,8 @@ describe('API Integration', () => {
       const user = await freshUser('del');
       const res = await request(app)
         .delete('/api/v1/users/me')
-        .set('Authorization', `Bearer ${user.token}`);
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
       expect(res.statusCode).toBe(200);
       const rec = UserRepository.getById(user.id);
       expect(rec.status).toBe('deactivated');
@@ -1438,7 +1439,7 @@ describe('API Integration', () => {
 
     it('a deactivated account cannot log in (401)', async () => {
       const user = await freshUser('dl2');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       // original email is anonymized → login fails
       const login = await request(app).post('/api/v1/users/login')
         .send({ email: user.email, password: 'Test1234!' });
@@ -1447,7 +1448,7 @@ describe('API Integration', () => {
 
     it('a deactivated account cannot refresh its token (401)', async () => {
       const user = await freshUser('dl3');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       const refresh = await request(app).post('/api/v1/users/refresh')
         .send({ refreshToken: user.refreshToken });
       expect(refresh.statusCode).toBe(401);
@@ -1455,17 +1456,17 @@ describe('API Integration', () => {
 
     it('the current access token is revoked after self-deactivation (subsequent /me → 401)', async () => {
       const user = await freshUser('dl4');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       const me = await request(app).get('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
       expect(me.statusCode).toBe(401);
     });
 
     it('double deactivation → 409', async () => {
       const user = await freshUser('dl5');
-      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       // token is revoked; mint a path by directly checking the repo guard via a fresh login is impossible,
       // so assert idempotency guard at the repo level isn't reachable twice with same token (401 now).
-      const again = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`);
+      const again = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${user.token}`).send({ password: 'Test1234!' });
       expect(again.statusCode).toBe(401); // revoked token blocks re-entry
     });
 
@@ -1487,7 +1488,7 @@ describe('API Integration', () => {
           UserRepository.update(other.id, { status: 'deactivated' });
         }
       }
-      const res = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${token}`);
+      const res = await request(app).delete('/api/v1/users/me').set('Authorization', `Bearer ${token}`).send({ password: 'Test1234!' });
       for (const sid of suspended) UserRepository.update(sid, { status: 'active' });
       expect(res.statusCode).toBe(400);
       expect(res.body.error).toMatch(/admin/i);
@@ -1505,7 +1506,8 @@ describe('API Integration', () => {
       expect(order.statusCode).toBe(201);
 
       const res = await request(app).delete('/api/v1/users/me')
-        .set('Authorization', `Bearer ${user.token}`);
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
       expect(res.statusCode).toBe(409);
       expect(res.body.openOrderCount).toBeGreaterThanOrEqual(1);
 
@@ -1513,8 +1515,43 @@ describe('API Integration', () => {
       await request(app).delete(`/api/v1/orders/${order.body.order.id}`)
         .set('Authorization', `Bearer ${user.token}`);
       const ok = await request(app).delete('/api/v1/users/me')
-        .set('Authorization', `Bearer ${user.token}`);
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
       expect(ok.statusCode).toBe(200);
+    });
+
+    it('requires password re-confirmation: missing/wrong password → 401, correct → 200', async () => {
+      const user = await freshUser('dlre');
+      const noPw = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({});
+      expect(noPw.statusCode).toBe(401);
+      const wrongPw = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'WrongPass1!' });
+      expect(wrongPw.statusCode).toBe(401);
+      // still active after failed attempts
+      expect(UserRepository.getById(user.id).status).not.toBe('deactivated');
+      const ok = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ password: 'Test1234!' });
+      expect(ok.statusCode).toBe(200);
+    });
+
+    it('OAuth-only account (no password) confirms via account email', async () => {
+      const { signAccessToken } = require('../src/api/utils/tokens');
+      const email = `oauthdel${unique}@example.com`;
+      const oauthUser = UserRepository.create({ googleId: `g-${unique}`, email, name: 'OAuth U', role: 'user' });
+      const token = signAccessToken(oauthUser);
+      const bad = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ confirmEmail: 'someone-else@example.com' });
+      expect(bad.statusCode).toBe(403);
+      const ok = await request(app).delete('/api/v1/users/me')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ confirmEmail: email });
+      expect(ok.statusCode).toBe(200);
+      expect(UserRepository.getById(oauthUser.id).status).toBe('deactivated');
     });
   });
 
@@ -2158,6 +2195,30 @@ describe('API Integration', () => {
       expect(res.statusCode).toBe(200);
       expect(res.body.minRenterRating).toBe(4);
       GpuRepository.update(gpuId, { minRenterRating: null });
+    });
+
+    it('marketReference is advisory and null for unknown GPU models', async () => {
+      // 'RTX-EST' はスペック表に一致しない → marketReference は null
+      const res = await request(app).get(`/api/v1/gpus/${gpuId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.marketReference).toBeNull();
+      // 実課金フィールドは不変であること（advisory のみの追加）
+      expect(typeof res.body.totalPrice).toBe('number');
+    });
+
+    it('marketReference returns engine-suggested pricing for a known model', async () => {
+      const knownId = GpuRepository.create({
+        name: 'RTX4090 GPU', vendor: 'NVIDIA', model: 'RTX 4090', memoryGB: 24, pricePerHour: 2.0,
+        providerId: 'est-provider-1',
+      }).id;
+      const res = await request(app).get(`/api/v1/gpus/${knownId}/estimate?durationMinutes=60`);
+      expect(res.statusCode).toBe(200);
+      expect(res.body.marketReference).not.toBeNull();
+      expect(res.body.marketReference.modelMatched).toBe(true);
+      expect(res.body.marketReference.hourly).toBeGreaterThan(0);
+      expect(res.body.marketReference.factors.base).toBeGreaterThan(0);
+      // advisory: 実課金（totalPrice）はプロバイダ価格で計算される
+      expect(res.body.totalPrice).toBeGreaterThan(0);
     });
   });
 
@@ -3503,6 +3564,48 @@ describe('API Integration', () => {
         throw err;
       }, { maxAttempts: 3, baseDelayMs: 1 })).rejects.toThrow();
       expect(calls).toBe(1);
+    });
+
+    it('backoff delay is jittered within the exponential cap', async () => {
+      // full jitter: delay は [0, baseDelayMs * 2^(attempt-1)] の一様乱数。
+      // fake timers で「cap 分進めれば必ず再試行される」ことと、
+      // cap 未満のままでは完了しない可能性がある（乱数依存）ことの境界を検証する。
+      jest.useFakeTimers();
+      try {
+        let calls = 0;
+        const promise = withRetry(async () => {
+          calls++;
+          if (calls === 1) throw Object.assign(new Error('boom'), { code: 'ECONNREFUSED' });
+          return 'ok';
+        }, { maxAttempts: 2, baseDelayMs: 1000 });
+        // 1回目の失敗は同期済み・タイマーはまだ未発火（ジッターで即時再試行しないことを確認）
+        expect(calls).toBe(1);
+        // cap 分進めれば必ず再試行される
+        await jest.advanceTimersByTimeAsync(1000);
+        await expect(promise).resolves.toBe('ok');
+        expect(calls).toBe(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('maxDelayMs caps the jitter window', async () => {
+      jest.useFakeTimers();
+      try {
+        let calls = 0;
+        const promise = withRetry(async () => {
+          calls++;
+          throw Object.assign(new Error('boom'), { code: 'ECONNREFUSED' });
+        }, { maxAttempts: 3, baseDelayMs: 60_000, maxDelayMs: 5 });
+        promise.catch(() => {});
+        // 各リトライ間隔は maxDelayMs で上限化: 全3回は 3*cap 内に必ず尽きる
+        // （cap なしなら 60s+120s かかる）
+        await jest.advanceTimersByTimeAsync(3 * 5);
+        await expect(promise).rejects.toThrow('boom');
+        expect(calls).toBe(3);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('delivers to a real localhost HTTP webhook server', async () => {

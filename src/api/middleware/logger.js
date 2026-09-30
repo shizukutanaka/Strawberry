@@ -2,19 +2,48 @@
 const morgan = require('morgan');
 const { logger } = require('../../utils/logger');
 
+// :body トークンへ書き出す前にクレデンシャル系フィールドを [REDACTED] へ
+// 置き換える。対象はキー名で判定 — password/token/paymentRequest だけでは
+// refreshToken・idToken（Google）・currentPassword/newPassword・code（メール
+// 認証コード）・apiKey 等が平文で dev ログへ残ってしまう。セッションを盗む
+// 資格情報・秘密値に限る（payoutAddress 等のプロフィール値は対象外）。
+const SENSITIVE_BODY_KEY = /^(password|currentPassword|newPassword|token|refreshToken|accessToken|idToken|paymentRequest|code|mailCode|apiKey|totp|secret|peerKey)$/i;
+// 配列ボディ（POST /gpus/bulk 等）やネストしたオブジェクト内の資格情報も
+// 漏れないよう再帰する。深度上限で循環参照・病的に深い入力で無限再帰しない。
+const MAX_REDACT_DEPTH = 5;
+function redactBodyForLog(body, depth = 0) {
+  if (!body || typeof body !== 'object') return body;
+  if (depth >= MAX_REDACT_DEPTH) return '[REDACTED]';
+  if (Array.isArray(body)) {
+    return body.map((v) => redactBodyForLog(v, depth + 1));
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(body)) {
+    out[key] = SENSITIVE_BODY_KEY.test(key) ? '[REDACTED]' : redactBodyForLog(value, depth + 1);
+  }
+  return out;
+}
+
+// URL 内の機密クエリパラメータをマスクする。
+// 監査ミドルウェア（middleware/audit.js）は req.query を sanitizeSensitiveFields で
+// マスクしているが、こちらが記録する req.originalUrl にはクエリ文字列が生のまま
+// 含まれるため、`GET /x?token=abc` のようなリクエストがアクセス/エラーログへ
+// 平文で残ってしまう。キー集合は utils/sanitize.js の機密フィールド定義と同一
+// （クエリ名は api_key 等のスネークケースもあり得るためそれを包含）。
+const SENSITIVE_QUERY_KEY = /([?&])(password|secret|token|api_?key|private_?key|email|refresh_?token|access_?token|jwt|macaroon|mnemonic|seed)=([^&]*)/gi;
+function redactUrlQuery(url) {
+  return typeof url === 'string'
+    ? url.replace(SENSITIVE_QUERY_KEY, (m, sep, key) => `${sep}${key}=[MASKED]`)
+    : url;
+}
+
 // カスタムトークン定義
+morgan.token('safeUrl', (req) => redactUrlQuery(req.originalUrl));
 morgan.token('id', (req) => req.id);
 morgan.token('user', (req) => (req.user ? req.user.id : 'anonymous'));
 morgan.token('body', (req) => {
   // 機密情報をマスク
-  const body = { ...req.body };
-  
-  // パスワードなどの機密情報をマスク
-  if (body.password) body.password = '[REDACTED]';
-  if (body.token) body.token = '[REDACTED]';
-  if (body.paymentRequest) body.paymentRequest = '[REDACTED]';
-  
-  return JSON.stringify(body);
+  return JSON.stringify(redactBodyForLog(req.body));
 });
 
 // リクエストIDを生成するミドルウェア。
@@ -42,7 +71,7 @@ const requestId = (req, res, next) => {
 
 // リクエストロガー
 const requestLogger = morgan(
-  ':id :remote-addr - :user ":method :url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" - :response-time ms',
+  ':id :remote-addr - :user ":method :safeUrl HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" - :response-time ms',
   {
     stream: {
       write: (message) => {
@@ -54,7 +83,7 @@ const requestLogger = morgan(
 
 // 詳細なリクエストロガー（開発環境用）
 const devRequestLogger = morgan(
-  ':id :method :url :status :response-time ms - :body',
+  ':id :method :safeUrl :status :response-time ms - :body',
   {
     stream: {
       write: (message) => {
@@ -74,7 +103,7 @@ const responseTime = (req, res, next) => {
     
     // 遅いレスポンスを警告
     if (duration > 1000) {
-      logger.warn(`Slow response: ${req.method} ${req.originalUrl} - ${duration}ms`);
+      logger.warn(`Slow response: ${req.method} ${redactUrlQuery(req.originalUrl)} - ${duration}ms`);
     }
     
     // メトリクス収集（将来的に拡張）
@@ -89,7 +118,7 @@ const errorLogger = (err, req, res, next) => {
   // エラーの詳細をログに記録
   logger.error(`${err.name || 'Error'}: ${err.message}`, {
     requestId: req.id,
-    path: req.originalUrl,
+    path: redactUrlQuery(req.originalUrl),
     method: req.method,
     statusCode: err.statusCode || 500,
     stack: err.stack,
@@ -104,5 +133,7 @@ module.exports = {
   requestLogger,
   devRequestLogger,
   responseTime,
-  errorLogger
+  errorLogger,
+  redactBodyForLog,
+  redactUrlQuery
 };

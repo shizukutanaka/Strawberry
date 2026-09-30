@@ -67,3 +67,30 @@ describe('invoice-poller underpayment guard', () => {
     expect(OrderRepository.getById(order.id).status).toBe('pending');
   });
 });
+
+describe('invoice-poller stat-gated idle skip', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    poller.stop();
+  });
+
+  it('skips the full payments parse while the file is unchanged and nothing is pending', async () => {
+    poller.start(makeLightning({}));
+    // start() の即時スキャンで pending=0 と指紋が確定済み
+    const spy = jest.spyOn(PaymentRepository, 'getAll');
+    await poller.pollOnce();
+    await poller.pollOnce();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('re-reads payments.json once it changes', async () => {
+    poller.start(makeLightning({}));
+    const spy = jest.spyOn(PaymentRepository, 'getAll');
+    PaymentRepository.create({
+      method: 'lightning', status: 'pending', paymentHash: `chg-${Date.now()}`,
+      amount: 1, orderId: null, userId: 'u1',
+    });
+    await poller.pollOnce();
+    expect(spy).toHaveBeenCalled();
+  });
+});

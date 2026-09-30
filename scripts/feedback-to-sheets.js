@@ -2,39 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { authorize } = require('./google-sheets-auth');
 const { loadFeedback } = require('./lib/feedback-store');
 
-const CREDENTIALS_PATH = path.join(__dirname, '../scripts/credentials.json');
-const TOKEN_PATH = path.join(__dirname, '../scripts/token.json');
 const SPREADSHEET_ID = process.env.FEEDBACK_SHEET_ID; // .envで指定
 const SHEET_NAME = 'Feedback';
-
-function readJsonOrThrow(filePath, hint) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`${filePath} がありません。${hint}`);
-  }
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (e) {
-    throw new Error(`${filePath} の JSON が破損しています: ${e.message}`);
-  }
-}
-
-async function authorize() {
-  const credentials = readJsonOrThrow(
-    CREDENTIALS_PATH,
-    'Google Cloud Console から OAuth クライアント（installed app）の credentials.json を取得してください。'
-  );
-  const installed = credentials && credentials.installed;
-  if (!installed || !installed.client_id || !installed.client_secret) {
-    throw new Error('credentials.json に installed.client_id / client_secret がありません。');
-  }
-  const { client_secret, client_id, redirect_uris } = installed;
-  const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
-  const token = readJsonOrThrow(TOKEN_PATH, 'OAuth フローを実行して token.json を生成してください。');
-  oAuth2Client.setCredentials(token);
-  return oAuth2Client;
-}
 
 async function appendFeedback(auth) {
   if (!SPREADSHEET_ID) {

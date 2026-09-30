@@ -196,7 +196,7 @@ app.get('/ready', readyLimiter, (req, res) => {
 
   // 1) data ディレクトリの書き込み可否（atomicWriteJSON と同じ依存）
   try {
-    const dataDir = path.join(__dirname, '../../data');
+    const dataDir = require('../db/json/data-dir').resolveDataDir();
     const probe = path.join(dataDir, `.ready-probe-${process.pid}-${Date.now()}`);
     fs.writeFileSync(probe, 'ok');
     fs.unlinkSync(probe);

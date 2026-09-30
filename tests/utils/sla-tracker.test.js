@@ -5,7 +5,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const SLA_PATH = path.resolve(__dirname, '../../data/sla.json');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
+const SLA_PATH = path.join(resolveDataDir(), 'sla.json');
 const tracker = require('../../src/utils/sla-tracker');
 
 function readSLA() {

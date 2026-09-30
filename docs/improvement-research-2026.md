@@ -431,3 +431,4 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
 - `scripts/sample.js`（i18next 多言語デモ）の任意依存ハンドリング: i18next/i18next-fs-backend は package.json 未宣言のため未導入環境で MODULE_NOT_FOUND 即死していた。遅延 require + require.main ガード + 導入案内（`npm i i18next i18next-fs-backend`）でライブラリ的 require も安全化。
 - `tests/e2e/helpers.js` の `promoteToAdmin` を原子書込み化: 起動中の e2e webServer が読む `data/users.json` を非アトミック `writeFileSync` で更新しており、書込み途中の半壊 JSON をサーバが読むと以降の UserRepository 呼出しが連鎖失敗し得た。アプリ側と同じ `atomicWriteJSON` を使用。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

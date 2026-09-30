@@ -429,3 +429,5 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 ### その他実装済（運用ドキュメント）
 - `.env.example` をコード実態に同期: ソース中で使用されるが未記載だった 72 変数（レート制限・注文タイムアウト・稼働率スコア・監査ログ・LN 代替プロバイダ・外部通知/連携）を機能別セクションに整理して追加し、コード上の既定値をコメントに明記。
 - 仕様/アーキテクチャドキュメントをコード実態へ同期（`docs/SPECIFICATION.md`/`ARCHITECTURE.md`）: 「エスクロー無し」「アテステーション無し」「特徴量価格未配線」「executeActions 未呼出」「テスト約半数 green」など、実装が進んだ後も古いままだったステータス記述を実測値（137/139 suites green、escrow lnAdapter DI、/marketplace/quote 配線、GPU 登録時 attestation 記録、OTel env ゲート実装）に修正。ドキュメントの陳腐化はコードより新規貢献者・レビューアの判断を誤らせる（Google eng-practices「ドキュメントはコードと共に更新する」）。
+- `gpu_lending_setup_cli.md` を実 API 契約へ同期: `/api/gpu`→`/api/v1/gpus`、JWT 取得経路（POST /api/v1/users/login、provider/admin ロール必須）・登録必須フィールド一覧・`os.arch()` 返り値(x64)と受理 arch 値(x86_64)の不一致注意を明記。「npm install axios 個別追加」→ npm install に修正。
+- `MAX_AUDIT_LOG_MB` の NaN フォールバックを修正: env がタイポ等で数値でない場合 parseInt が NaN を返し `NaN * 1MB` でサイズ比較が全て false → 監査ログ上限が無言で無効化されディスク枯渇 DoS が復活していた。NaN/負値は既定50MBへフォールバック（明示的0は監査停止として残す）。新規4テストで固定。

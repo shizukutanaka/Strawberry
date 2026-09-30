@@ -1,14 +1,14 @@
 // セキュリティインシデント検知・通知・証跡管理ユーティリティ雛形
-const fs = require('fs');
 const path = require('path');
 const { recordComplianceEvent } = require('./compliance');
+const { appendRotated, ensureLogDir } = require('../utils/log-rotate');
 const INCIDENT_LOG_PATH = path.resolve(__dirname, '../../logs/security-incident.log');
 
 function recordIncident(type, detail) {
   try {
-    fs.mkdirSync(path.dirname(INCIDENT_LOG_PATH), { recursive: true });
+    ensureLogDir(INCIDENT_LOG_PATH);
     const entry = { timestamp: new Date().toISOString(), type, detail };
-    fs.appendFileSync(INCIDENT_LOG_PATH, JSON.stringify(entry) + '\n');
+    appendRotated(INCIDENT_LOG_PATH, JSON.stringify(entry) + '\n');
     recordComplianceEvent('security_incident', { type, detail });
   } catch (e) {/* ログ失敗時はサイレント */}
 }

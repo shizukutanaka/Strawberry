@@ -764,6 +764,7 @@ flowchart LR
   node src/p2p-notify.js
   ```
 - ピア接続が0になった場合、LINEで即時通知
+- libp2p 系パッケージ未導入の環境でも外部 API 監視（`MONITOR_TARGETS`）は単独で動作します。P2P ヘルス監視部分には上記 libp2p 系パッケージの追加が必要です。
 
 ---
 

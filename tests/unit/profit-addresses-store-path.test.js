@@ -11,7 +11,8 @@ const REPO_ROOT = path.join(__dirname, '../..');
 describe('profit-addresses store location', () => {
   it('ADDR_FILE はリポジトリルートの data/ を指す（src/data ではない）', () => {
     const { _ADDR_FILE } = require('../../src/api/utils/profit-addresses');
-    expect(_ADDR_FILE).toBe(path.join(REPO_ROOT, 'data', 'profit-addresses.json'));
+    const { resolveDataDir } = require('../../src/db/json/data-dir');
+    expect(_ADDR_FILE).toBe(path.join(resolveDataDir(), 'profit-addresses.json'));
     expect(_ADDR_FILE.includes(`${path.sep}src${path.sep}`)).toBe(false);
   });
 

@@ -501,7 +501,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `src/utils/state-checker.js` の直接ユニットテストを追加（テストカバレッジの穴埋め）。注文状態遷移の強制ゲート（PUT /orders/:id が依存）でありながら遷移表の回帰を直接検証するテストが無かった。正常遷移・終端拒否・逆行/スキップ拒否・未知状態拒否・自己遷移拒否・ORDER_STATES/GPU_STATES 整合性を7件で検証。
 
 ### PRODUCT_ANALYSIS.md の数値・フロントエンド評価同期（2026-09-27）
-- **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→249件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。Electron 未統合・SPA リフレッシュ未実装など依然正確な残課題は維持。
+- **対応**: `docs/PRODUCT_ANALYSIS.md` の陳腐化した定量記述を実値へ更新 — 統合テスト 18件→255件（実測全緑）、総評のスイート規模、短所④「フロントエンドが未配線」を「最小 SPA 実装済み（pages/*・Playwright e2e 付き）」へ訂正。SPA の refresh サイレント更新・Electron シェル（electron.js + preload.js）も実装済みの現状へ同期。
 
 ## `.github/CODEOWNERS` の新設 (2026-09-26)
 

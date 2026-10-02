@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { resolveDataDir } = require('../../src/db/json/data-dir');
-const { resolveChannels, _loadAllSettings: loadAllSettings, _resetSettingsCache } = require('../../src/utils/user-notify');
+const { notifyUser, resolveChannels, _loadAllSettings: loadAllSettings, _resetSettingsCache } = require('../../src/utils/user-notify');
 const { NotifyType } = require('../../src/utils/notifier');
 
 describe('resolveChannels', () => {
@@ -106,5 +106,30 @@ describe('loadAllSettings', () => {
     const future = new Date(Date.now() + 10_000);
     fs.utimesSync(settingsPath, future, future);
     expect(loadAllSettings()).toEqual({});
+  });
+});
+
+// notifyUser 本体の契約（設定なしの no-op・stat ゲートによる再パース抑制）を固定。
+describe('notifyUser', () => {
+  beforeEach(() => _resetSettingsCache());
+  afterEach(() => _resetSettingsCache());
+
+  it('is a safe no-op for users without settings', () => {
+    expect(notifyUser('no-such-user-id', 'order_created', 'msg')).toBe(0);
+    expect(notifyUser(undefined, 'order_created', 'msg')).toBe(0);
+  });
+
+  it('repeated calls parse the settings file at most once per change', () => {
+    const spy = jest.spyOn(fs, 'readFileSync');
+    try {
+      notifyUser('u1', 'order_created', 'm');
+      notifyUser('u2', 'order_created', 'm');
+      notifyUser('u3', 'order_created', 'm');
+      const settingsReads = spy.mock.calls
+        .filter((c) => String(c[0]).includes('notification-settings.json'));
+      expect(settingsReads.length).toBeLessThanOrEqual(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

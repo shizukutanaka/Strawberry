@@ -1,7 +1,6 @@
 // Google Sheets進捗ボードからKPI集計・週次レポート自動生成
 const fs = require('fs');
 const path = require('path');
-const { google } = require('googleapis');
 const { authorize } = require('./google-sheets-auth');
 
 const SPREADSHEET_ID = process.env.PROGRESS_SHEET_ID;
@@ -9,6 +8,8 @@ const SHEET_NAME = 'ProgressBoard';
 const REPORT_FILE = path.join(__dirname, '../docs/progress-report.md');
 
 async function fetchBoard(auth) {
+  // optionalDependencies の googleapis は engines 不適合環境で未導入となり得るため遅延 require
+  const { google } = require('googleapis');
   const sheets = google.sheets({ version: 'v4', auth });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,

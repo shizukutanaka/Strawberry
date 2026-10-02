@@ -1,19 +1,26 @@
 // Notion進捗ボードからKPI自動集計・週次レポート生成（@notionhq/client利用）
 const fs = require('fs');
 const path = require('path');
-const { Client } = require('@notionhq/client');
-
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DB_ID = process.env.NOTION_DB_ID;
 const REPORT_FILE = path.join(__dirname, '../docs/notion-progress-report.md');
 
-const notion = new Client({ auth: NOTION_TOKEN });
+// @notionhq/client は optionalDependencies — engines 不適合・未導入環境でも
+// NOTION_* 未設定の明示エラーが先に出るよう遅延初期化する。
+let notion = null;
+function getNotion() {
+  if (!notion) {
+    const { Client } = require('@notionhq/client');
+    notion = new Client({ auth: NOTION_TOKEN });
+  }
+  return notion;
+}
 
 async function fetchAllPages() {
   let results = [];
   let cursor = undefined;
   while (true) {
-    const res = await notion.databases.query({
+    const res = await getNotion().databases.query({
       database_id: NOTION_DB_ID,
       start_cursor: cursor,
       page_size: 100,

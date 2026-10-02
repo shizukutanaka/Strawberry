@@ -149,17 +149,23 @@ async function apiCompleteOrderCycle(request, baseURL, { providerToken, renterTo
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../src/db/json/atomicWrite');
-const DATA_USERS = path.join(__dirname, '../../data/users.json');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
+
+function dataUsersPath() {
+  return path.join(resolveDataDir(), 'users.json');
+}
 
 async function promoteToAdmin(request, baseURL, email, password) {
-  const users = JSON.parse(fs.readFileSync(DATA_USERS, 'utf8'));
+  const usersFile = dataUsersPath();
+  fs.mkdirSync(path.dirname(usersFile), { recursive: true });
+  const users = JSON.parse(fs.readFileSync(usersFile, 'utf8'));
   const idx = users.findIndex((u) => u.email === email);
-  if (idx === -1) throw new Error(`user ${email} not found in data/users.json`);
+  if (idx === -1) throw new Error(`user ${email} not found in ${usersFile}`);
   users[idx].role = 'admin';
-  // 起動中の webServer が同じ data/users.json を読む。非アトミックな writeFileSync
+  // 起動中の webServer が同じ users.json を読む。非アトミックな writeFileSync
   // で書き込み中にサーバ側の読み込みが重なると、半分書かれた JSON を parse して
   // 以降の UserRepository 呼出しが全滅するため、アプリ側と同じ原子書込みを使う。
-  atomicWriteJSON(DATA_USERS, users);
+  atomicWriteJSON(usersFile, users);
   const loginRes = await request.post(`${baseURL}/api/v1/users/login`, { data: { email, password } });
   const body = await loginRes.json();
   return body.token;

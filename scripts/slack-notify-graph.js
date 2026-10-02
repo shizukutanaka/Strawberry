@@ -1,7 +1,6 @@
 // KPI推移グラフ画像をSlackに投稿するスクリプト（@slack/web-api利用）
 const fs = require('fs');
 const path = require('path');
-const { WebClient } = require('@slack/web-api');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const SLACK_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -13,14 +12,15 @@ if (!SLACK_TOKEN || !SLACK_CHANNEL) {
   process.exit(1);
 }
 
-const web = new WebClient(SLACK_TOKEN);
-
 async function uploadGraph() {
   if (!fs.existsSync(FILE_PATH)) {
     console.log('KPI推移グラフがありません');
     return;
   }
   try {
+    // @slack/web-api は optionalDependencies — 未導入環境でもファイル不在の早期 return まで動くよう遅延 require
+    const { WebClient } = require('@slack/web-api');
+    const web = new WebClient(SLACK_TOKEN);
     // files.upload は Slack 側で 2025-11 に廃止（新規アプリでは method 自体が
     // エラーを返す）。後継の filesUploadV2（files.getUploadURLExternal +
     // files.completeUploadExternal の合成ヘルパ）を使う。

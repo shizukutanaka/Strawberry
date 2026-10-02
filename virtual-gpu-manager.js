@@ -41,7 +41,8 @@ function sanitizeId(value) {
 // ような値がシェル行として実行され得る（コマンドインジェクション防止）。
 function clampPercentage(value, fallback = 50) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
+  // null/'' は Number() で 0 になるため先に排除する（未設定が 0% 割当と誤解釈されるのを防ぐ）。
+  if (value == null || (typeof value === 'string' && value.trim() === '') || !Number.isFinite(n)) return fallback;
   return Math.min(100, Math.max(0, n));
 }
 
@@ -1231,4 +1232,4 @@ nvidia-cuda-mps-control -d
     }
 }
 
-module.exports = { VirtualGPUManager, clampPercentage, safeK8sQuantity, safePositiveNumber };
+module.exports = { VirtualGPUManager, sanitizeId, clampPercentage, safeK8sQuantity, safePositiveNumber };

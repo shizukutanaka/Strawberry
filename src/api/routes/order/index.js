@@ -715,8 +715,9 @@ router.put('/:id',
           }
         }
       } catch (e) {
+        logger.error(`Order cancel: escrow cancellation failed (order=${order.id}): ${e.message}`);
         throw new APIError(ErrorTypes.INTERNAL,
-          `Cannot cancel order: escrow cancellation failed (${e.message}). Retry or resolve escrow manually.`,
+          'Cannot cancel order: escrow cancellation failed. Retry or resolve escrow manually.',
           502);
       }
     }
@@ -812,8 +813,9 @@ router.delete('/:id',
     } catch (e) {
       if (e.name === 'APIError') throw e;
       // Escrow lookup failure or HELD cancel failure — block the order cancellation.
+      logger.error(`Order cancel: escrow operation failed (order=${order.id}): ${e.message}`);
       throw new APIError(ErrorTypes.INTERNAL,
-        `Cannot cancel order: escrow operation failed (${e.message}). Retry or contact support.`,
+        'Cannot cancel order: escrow operation failed. Retry or contact support.',
         502);
     }
     // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。

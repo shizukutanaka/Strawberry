@@ -570,9 +570,14 @@ router.get('/:id',
       const rateInfo = await fetchRateInfo();
       // 借り手プロフィール（プロバイダが承認/拒否判断に使えるよう注文詳細に同梱）
       const renterOrders = OrderRepository.getAll().filter(o => o.userId === order.userId && o.renterReview);
-      const renterReviewCount = renterOrders.length;
+      // 集計は書込み経路と同じ検証（整数 1-5）を適用する。`|| 1` や isFinite+クランプでは
+      // null→0→1点・"99"→5点 のように破損レコードが借り手プロフィールを歪めてしまう。
+      const renterValidRatings = renterOrders
+        .map(o => o.renterReview.rating)
+        .filter(r => Number.isInteger(r) && r >= 1 && r <= 5);
+      const renterReviewCount = renterValidRatings.length;
       const renterRatingAverage = renterReviewCount > 0
-        ? Math.round((renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount) * 10) / 10
+        ? Math.round((renterValidRatings.reduce((s, r) => s + r, 0) / renterReviewCount) * 10) / 10
         : null;
       // ステータス変遷タイムライン（既存タイムスタンプを時系列に整列）
       const timeline = [

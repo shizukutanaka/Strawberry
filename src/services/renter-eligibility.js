@@ -15,13 +15,14 @@
  */
 function computeRenterRating(allOrders, renterId) {
   const reviewed = allOrders.filter(o => o.userId === renterId && o.renterReview);
-  const count = reviewed.length;
+  // 集計は書込み経路と同じ検証（整数 1-5）を適用する。`|| 1` や isFinite+クランプでは
+  // null→0→1点・"99"→5点 のように破損レコードが平均・件数を歪めてしまう。
+  const validRatings = reviewed
+    .map(o => o.renterReview.rating)
+    .filter(r => Number.isInteger(r) && r >= 1 && r <= 5);
+  const count = validRatings.length;
   if (count === 0) return { average: null, count: 0, hasHistory: false };
-  const sum = reviewed.reduce(
-    (s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)),
-    0
-  );
-  const average = Math.round((sum / count) * 10) / 10;
+  const average = Math.round((validRatings.reduce((s, r) => s + r, 0) / count) * 10) / 10;
   return { average, count, hasHistory: true };
 }
 

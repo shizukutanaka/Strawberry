@@ -4,6 +4,7 @@ const { sendNotification, NotifyType } = require('./utils/notifier');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { appendRotated } = require('./utils/log-rotate');
 
 const HEALTH_FILE = path.join(__dirname, 'health.json');
 // 死活監視アラートの記録先。改ざん検知ハッシュチェーンが管理する logs/audit.log とは
@@ -25,7 +26,7 @@ const MONITOR_TARGETS = (process.env.MONITOR_TARGETS || 'http://localhost:3000/a
 function logAudit(event) {
   try {
     fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-    fs.appendFileSync(LOG_PATH, JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n');
+    appendRotated(LOG_PATH, JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n');
   } catch (e) {}
 }
 

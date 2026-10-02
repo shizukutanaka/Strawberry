@@ -45,6 +45,23 @@ describe('gpu-monitor monitorAndRecover', () => {
 
     expect(OrderRepository.getById(order.id).status).toBe('active');
   });
+
+  it('1 tick での GPU 参照は注文数に関わらず getAll 1回のみ（N+1 回帰）', async () => {
+    for (const name of ['g1', 'g2', 'g3']) {
+      const gpu = GpuRepository.create({
+        name, providerId: 'p1', pricePerHour: 100,
+        lastHeartbeat: new Date().toISOString(),
+      });
+      OrderRepository.create({
+        userId: 'u1', gpuId: gpu.id, status: 'active',
+        durationMinutes: 60, totalPrice: 100,
+      });
+    }
+    const getAllSpy = jest.spyOn(GpuRepository, 'getAll');
+    await monitorAndRecover();
+    expect(getAllSpy).toHaveBeenCalledTimes(1);
+    getAllSpy.mockRestore();
+  });
 });
 
 describe('gpu-monitor タイマー', () => {

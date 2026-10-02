@@ -1,6 +1,6 @@
 // GPU貸出/借入監視の自動リカバリ・自己修復ユーティリティ
 const { getAll: getOrders, update: updateOrder } = require('../db/json/OrderRepository');
-const { getById: getGPUById } = require('../db/json/GpuRepository');
+const GpuRepository = require('../db/json/GpuRepository');
 const PaymentRepository = require('../db/json/PaymentRepository');
 const { resilientNotify } = require('./resilient-notify');
 const { appendAuditLog } = require('./audit-log');
@@ -11,11 +11,14 @@ const CHECK_INTERVAL = 60 * 1000; // 1分ごと
 
 async function monitorAndRecover() {
   const orders = await getOrders();
+  // 死活監視の GPU 参照は tick 冒頭で1回だけ読む — 旧実装は order 毎に
+  // getGPUById しており、1分毎に active 注文数ぶんの gpus.json 全量パースが走っていた
+  const gpuById = new Map(GpuRepository.getAll().map(gpu => [gpu.id, gpu]));
   const now = Date.now();
   for (const order of orders) {
     if (order.status !== 'active') continue;
     // GPUの死活監視
-    const gpu = await getGPUById(order.gpuId);
+    const gpu = gpuById.get(order.gpuId);
     let alive = true;
     if (!gpu) alive = false;
     if (gpu && gpu.lastHeartbeat && now - new Date(gpu.lastHeartbeat).getTime() > 2 * 60 * 1000) alive = false; // 2分以上応答なし

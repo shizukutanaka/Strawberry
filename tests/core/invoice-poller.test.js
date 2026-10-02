@@ -129,4 +129,23 @@ describe('invoice-poller N+1 batching', () => {
       expect(PaymentRepository.getById(p.id).status).toBe('paid');
     }
   });
+
+  it('期限切れでも tick 中に他経路が paid へ進めた決済は failed に回帰させない（CAS）', async () => {
+    poller.start(makeLightning({}));
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', paymentHash: `exp-${Date.now()}`,
+      amount: 100, orderId: 'o1', userId: 'u1',
+      invoiceExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    poller.stop();
+    // checkInvoice の await 中に「別プロセスの手動承認」が paid へ書き換えた状況を再現
+    poller.start({
+      checkInvoice: async () => {
+        PaymentRepository.update(payment.id, { status: 'paid', paidAt: new Date().toISOString() });
+        return null; // settled ではない → expired 分岐へ
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(PaymentRepository.getById(payment.id).status).toBe('paid');
+  });
 });

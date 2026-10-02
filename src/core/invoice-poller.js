@@ -168,14 +168,27 @@ async function pollOnce() {
             }
           }
         } else if (_isExpired(payment)) {
-          // Invoice expired without payment — mark failed
-          PaymentRepository.update(payment.id, {
-            status: 'failed',
-            failedAt: new Date().toISOString(),
-            failReason: 'invoice_expired'
-          });
-          appendAuditLog('payment_expired', { paymentId: payment.id, orderId: payment.orderId });
-          logger.warn(`Invoice expired without payment: paymentId=${payment.id}`);
+          // Invoice expired without payment — mark failed.
+          // 他経路（手動承認/on-chain/別 tick の settled 処理）が pending を終端へ
+          // 進めた直後にこの書き込みが走ると paid→failed へ回帰させるため、
+          // pending 前提の CAS でのみ failed 化する。
+          const writeResult = PaymentRepository.updateIf(
+            payment.id,
+            (p) => p.status === 'pending',
+            {
+              status: 'failed',
+              failedAt: new Date().toISOString(),
+              failReason: 'invoice_expired'
+            }
+          );
+          if (writeResult && writeResult.ok) {
+            appendAuditLog('payment_expired', { paymentId: payment.id, orderId: payment.orderId });
+            logger.warn(`Invoice expired without payment: paymentId=${payment.id}`);
+          } else {
+            const curStatus = writeResult && writeResult.current && writeResult.current.status;
+            logger.warn(`Invoice expired but payment already terminal (status=${curStatus}); skipping fail. paymentId=${payment.id}`);
+            appendAuditLog('payment_expire_race_skipped', { paymentId: payment.id, status: curStatus });
+          }
         }
       } catch (err) {
         // Per-invoice errors should not crash the whole poll cycle

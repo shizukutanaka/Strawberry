@@ -38,12 +38,26 @@ async function pollOnce() {
     // この経路は使わない — 静寂時の I/O をゼロにするための早期 return）
     const stamp = _fileStamp();
     if (stamp !== null && stamp === _lastStamp && _lastPending === 0) return;
-    const pending = PaymentRepository.getAll().filter(
+    const allPayments = PaymentRepository.getAll();
+    const pending = allPayments.filter(
       (p) => p.method === 'lightning' && p.status === 'pending' && p.paymentHash
     );
     _lastStamp = stamp;
     _lastPending = pending.length;
     if (pending.length === 0) return;
+
+    // ループ内の注文/支払い参照は tick 冒頭のスナップショットで解決する —
+    // インボイスごとの getById/getByOrderId は同一 JSON の全量パース再実行だった。
+    // 最終的な状態遷移は updateIf の CAS が原子的に再検証するため、参照側の
+    // 鮮度が tick 開始時点でも安全性は変わらない。
+    const orderById = new Map(OrderRepository.getAll().map(o => [o.id, o]));
+    const paymentsByOrder = new Map();
+    for (const p of allPayments) {
+      if (!p.orderId) continue;
+      const list = paymentsByOrder.get(p.orderId) || [];
+      list.push(p);
+      paymentsByOrder.set(p.orderId, list);
+    }
 
     for (const payment of pending) {
       try {
@@ -82,7 +96,7 @@ async function pollOnce() {
           // Lightning インボイスは注文がキャンセルされた後も外部で決済できるため、
           // ポーラー側で注文状態を再確認して孤立 paid レコードの生成を防ぐ。
           if (payment.orderId) {
-            const currentOrder = OrderRepository.getById(payment.orderId);
+            const currentOrder = orderById.get(payment.orderId);
             const PAYABLE = new Set(['pending', 'matched']);
             if (!currentOrder || !PAYABLE.has(currentOrder.status)) {
               PaymentRepository.update(payment.id, {
@@ -100,7 +114,7 @@ async function pollOnce() {
             }
             // クロスメソッド二重支払いガード: 別の方式（BTC on-chain/手動）が
             // 既に settled している場合、Lightning の paid 記録を作成しない。
-            const alreadyPaid = (PaymentRepository.getByOrderId(payment.orderId) || [])
+            const alreadyPaid = (paymentsByOrder.get(payment.orderId) || [])
               .filter(p => p.status === 'paid' && p.method !== 'lightning');
             if (alreadyPaid.length > 0) {
               PaymentRepository.update(payment.id, {

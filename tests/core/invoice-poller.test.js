@@ -94,3 +94,39 @@ describe('invoice-poller stat-gated idle skip', () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+describe('invoice-poller N+1 batching', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    poller.stop();
+  });
+
+  it('settled インボイスが複数あっても注文/支払い参照は tick あたり1回の一括読込', async () => {
+    // 空 lightning で start() — 即時スキャンは pending=0 で await を踏まず同期完了する
+    poller.start(makeLightning({}));
+    const payments = [1, 2, 3].map((i) => {
+      const order = OrderRepository.create({ status: 'pending' });
+      return PaymentRepository.create({
+        method: 'lightning', status: 'pending', paymentHash: `n1-${i}-${Date.now()}`,
+        amount: 100, orderId: order.id, userId: 'u1',
+      });
+    });
+    const getAllSpy = jest.spyOn(OrderRepository, 'getAll');
+    const getByIdSpy = jest.spyOn(OrderRepository, 'getById');
+    const getByOrderIdSpy = jest.spyOn(PaymentRepository, 'getByOrderId');
+    // stop→start で _lightning を差し替えつつ即時 pollOnce が走る（マップ構築は start() 内で同期実行）
+    poller.stop();
+    poller.start(makeLightning(Object.fromEntries(
+      payments.map((p) => [p.paymentHash, { settled: true, value: 100, amountPaid: 100, settleDate: Date.now() }])
+    )));
+    // インフライトの run は microtask のみで完走するため macrotask 1つ分待つ
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(getAllSpy).toHaveBeenCalledTimes(1);
+    expect(getByIdSpy).not.toHaveBeenCalled();
+    expect(getByOrderIdSpy).not.toHaveBeenCalled();
+    for (const p of payments) {
+      expect(PaymentRepository.getById(p.id).status).toBe('paid');
+    }
+  });
+});

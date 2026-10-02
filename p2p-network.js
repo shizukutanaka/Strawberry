@@ -37,6 +37,7 @@ class P2PNetwork extends EventEmitter {
     constructor() {
         super();
         this.node = null;
+        this.initialized = false;
         this.peers = new Map();
         this.gpuRegistry = new Map();
         this.messageHandlers = new Map();
@@ -56,6 +57,7 @@ class P2PNetwork extends EventEmitter {
 
     async start() {
         try {
+            if (this.initialized) return; // 再呼出しでノード・タイマーを再生成しない
             logger.info('Starting P2P network...');
             
             // PeerID生成または読み込み
@@ -121,7 +123,9 @@ class P2PNetwork extends EventEmitter {
             
             // 定期タスク開始
             this.startPeriodicTasks();
-            
+
+            this.initialized = true;
+
             this.emit('started', { peerId: peerId.toB58String(), addresses });
             
         } catch (error) {
@@ -850,6 +854,7 @@ class P2PNetwork extends EventEmitter {
             this.peers.clear();
             this.gpuRegistry.clear();
             this.latencyCache.clear();
+            this.initialized = false;
             
             logger.info('P2P network stopped');
             

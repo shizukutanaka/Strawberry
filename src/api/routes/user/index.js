@@ -46,6 +46,10 @@ const _DUMMY_HASH = bcrypt.hashSync('strawberry-timing-guard', config.security.b
 const _loginFailures = new Map(); // email → { count, windowStart }
 const _LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const _LOGIN_MAX_FAILURES = 10;
+// キーは未認証リクエストの任意メールのため、存在しないアドレスへの一撃失敗でも
+// エントリが残り無制限に増殖し得る。anomaly-detector と同じ挿入順 amortized
+// プルーニングで上限化する（エントリ数十バイト × 1万件 ≒ 1MB 未満）。
+const _LOGIN_FAILURES_MAX_KEYS = 10_000;
 function _recordLoginFailure(email) {
   const now = Date.now();
   const entry = _loginFailures.get(email) || { count: 0, windowStart: now };
@@ -54,6 +58,9 @@ function _recordLoginFailure(email) {
     entry.windowStart = now;
   }
   entry.count += 1;
+  if (!_loginFailures.has(email) && _loginFailures.size >= _LOGIN_FAILURES_MAX_KEYS) {
+    _loginFailures.delete(_loginFailures.keys().next().value);
+  }
   _loginFailures.set(email, entry);
   return entry.count;
 }
@@ -1069,3 +1076,6 @@ function invalidateReputationCache(userId) {
 
 module.exports = router;
 module.exports.invalidateReputationCache = invalidateReputationCache;
+// テスト用フック: ログイン失敗カウンタの上限プルーニングを直接検証する。
+module.exports._loginFailures = _loginFailures;
+module.exports._recordLoginFailure = _recordLoginFailure;

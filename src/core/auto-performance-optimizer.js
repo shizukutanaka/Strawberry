@@ -1,8 +1,8 @@
 // サービス全体のパフォーマンス自動最適化モジュール
 const { logger } = require('../utils/logger');
 const { MetricsCollector } = require('../gpu/metrics');
+const { appendRotated, ensureLogDir } = require('../utils/log-rotate');
 const os = require('os');
-const fs = require('fs');
 const path = require('path');
 
 const PERF_LOG_PATH = path.join(__dirname, '../../logs/perf-optimizer.log');
@@ -35,10 +35,11 @@ class AutoPerformanceOptimizer {
       const cpuLoad = os.loadavg()[0];
       const freeMem = os.freemem() / os.totalmem();
       const gpuStats = this.metrics.gpuMetrics;
-      // 例: GPU使用率
-      const gpuUsage = gpuStats.utilization ? gpuStats.utilization.get().values[0]?.value : null;
-      // 例: P2P帯域
-      const bandwidth = gpuStats.bandwidth ? gpuStats.bandwidth.get().values[0]?.value : null;
+      // 例: GPU使用率（gauge は labelNames 付きなので values[0]?.value で参照）
+      const gpuUsage = gpuStats.gpuUtilization ? gpuStats.gpuUtilization.get().values[0]?.value : null;
+      // 例: P2P帯域（networkMetrics 側の gauge）
+      const netStats = this.metrics.networkMetrics;
+      const bandwidth = netStats && netStats.bandwidth ? netStats.bandwidth.get().values[0]?.value : null;
       // 最適化戦略例
       let actions = [];
       if (cpuLoad > 4) {
@@ -58,8 +59,9 @@ class AutoPerformanceOptimizer {
         time: new Date().toISOString(),
         cpuLoad, freeMem, gpuUsage, bandwidth, actions
       };
-      fs.appendFileSync(PERF_LOG_PATH, JSON.stringify(logEntry) + '\n');
-      logger.performanceMetric('auto_optimize', actions, logEntry);
+      ensureLogDir(PERF_LOG_PATH);
+      appendRotated(PERF_LOG_PATH, JSON.stringify(logEntry) + '\n');
+      logger.info('auto_optimize', logEntry);
       // 実際のアクションは各サービスに通知・実行する設計（例: pub/sub, イベント）
       // ここではログのみ
     } catch (e) {

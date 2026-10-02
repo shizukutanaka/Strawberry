@@ -12,7 +12,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `npm run dev` | 開発起動（nodemon 再読み込み） |
 | `npm test` | 全テスト（jest --forceExit） |
 | `npm run coverage` | カバレッジ付きテスト（`coverage/coverage-summary.json` を生成） |
-| `npm run lint` | ESLint 全件走査 |
+| `npm run lint` | 全 .js ファイルの `node --check` 構文検査（eslint は依存に含まれないためゼロ依存実装） |
 | `npm run openapi` | `openapi.json` を実ルート走査から再生成 |
 | `npm run setup` | 新規環境の一括セットアップ（`npm ci` → openapi-gen → test） |
 

@@ -42,7 +42,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 
 - `GET /health` — 静的 `ok` + uptime。プロセス稼働確認用（LB / k8s probe 参照先）。
 - `GET /ready` — データ層の疎通を検証する readiness probe。
-- `GET /metrics` — Prometheus テキスト形式（Lightning チャネル容量・支払い失敗・キャッシュ等）。本番では `METRICS_AUTH_TOKEN` による Bearer 認証必須（未設定 → 503 fail-closed で非公開）。
+- `GET /metrics` — Prometheus テキスト形式（Lightning チャネル容量・支払い失敗・キャッシュ・vGPU 割当状況等）。本番では `METRICS_AUTH_TOKEN` による Bearer 認証必須（未設定 → 503 fail-closed で非公開）。vGPU 系: `vgpu_instances{status}`（available/allocating/allocated 等のインスタンス数）と `vgpu_allocations_active`（active アロケーション数）— 閾値超過アラートは Prometheus 側で `vgpu_allocations_active / sum(vgpu_instances)` 等のルールとして設定する。
 - 監査ログ — `src/utils/audit-log.js` がハッシュ連鎖の append-only ログを `logs/` 配下へ記録（改ざん検知用）。
 
 ## 運用スクリプト（`scripts/` → `npm run <name>`）

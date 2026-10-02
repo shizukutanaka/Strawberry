@@ -46,6 +46,28 @@ const channelCapacityGauge = new client.Gauge({ name: 'lightning_channel_total_c
 const paymentFailureCounter = new client.Counter({ name: 'lightning_payment_failure_total', help: 'Total number of payment failures' });
 const reconnectCounter = new client.Counter({ name: 'lightning_reconnect_total', help: 'Total number of Lightning gRPC reconnects' });
 
+// 仮想GPUプールの運用メトリクス（割当状況の可視化 — Prometheus/Grafana 向け）
+const vgpuStatusGauge = new client.Gauge({ name: 'vgpu_instances', help: 'Virtual GPU instances by status', labelNames: ['status'] });
+const vgpuActiveAllocationsGauge = new client.Gauge({ name: 'vgpu_allocations_active', help: 'Virtual GPU allocations currently active' });
+
+function updateVgpuMetrics() {
+  // vgpuManager は任意依存（docker/k8s 不在環境では null）
+  const { vgpuManager } = require('../core/services');
+  if (!vgpuManager || typeof vgpuManager.getMetricsSnapshot !== 'function') return;
+  const snapshot = vgpuManager.getMetricsSnapshot();
+  // 消えた status の時系列を残さないため一旦リセットしてから全件 set する
+  vgpuStatusGauge.reset();
+  for (const [status, count] of Object.entries(snapshot.byStatus)) {
+    vgpuStatusGauge.set({ status }, count);
+  }
+  vgpuActiveAllocationsGauge.set(snapshot.activeAllocations);
+}
+
+async function updateOperationalMetrics() {
+  await updateLightningMetrics();
+  updateVgpuMetrics();
+}
+
 // メトリクス更新関数
 async function updateLightningMetrics() {
   if (lightningService && lightningService.channels) {
@@ -65,11 +87,11 @@ async function updateLightningMetrics() {
 // 135 スイート分積み上がると 10 秒周期の Lightning メトリクス更新が延々と
 // 発火し、後続スイートの supertest リクエストが 30 秒のテストタイムアウトを
 // 超える（単体実行では PASS するのに全体実行だけ落ちる、の原因）。
-// /metrics ハンドラは毎回 updateLightningMetrics() を await するので、
+// /metrics ハンドラは毎回 updateOperationalMetrics() を await するので、
 // このタイマーが無くてもテストのメトリクス値は正しい。
 const metricsInterval = process.env.NODE_ENV === 'test'
   ? null
-  : setInterval(updateLightningMetrics, 10000);
+  : setInterval(updateOperationalMetrics, 10000);
 if (metricsInterval && metricsInterval.unref) metricsInterval.unref();
 
 // Expressアプリケーション初期化
@@ -158,7 +180,7 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   }
   next();
 }, async (req, res) => {
-  await updateLightningMetrics();
+  await updateOperationalMetrics();
   // cacheHitCounter, cacheMissCounter, cachePurgeCounterはprom-clientに自動登録されている
   res.set('Content-Type', client.register.contentType);
   res.end(await client.register.metrics());

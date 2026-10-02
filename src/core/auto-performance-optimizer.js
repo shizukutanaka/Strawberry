@@ -35,11 +35,17 @@ class AutoPerformanceOptimizer {
       const cpuLoad = os.loadavg()[0];
       const freeMem = os.freemem() / os.totalmem();
       const gpuStats = this.metrics.gpuMetrics;
-      // 例: GPU使用率（gauge は labelNames 付きなので values[0]?.value で参照）
-      const gpuUsage = gpuStats.gpuUtilization ? gpuStats.gpuUtilization.get().values[0]?.value : null;
+      // prom-client v15: metric.get() は {} を返し、実値は hashMap のラベル別
+      // エントリ（{value, labels}）に保持される。先頭ラベル値を代表値として参照。
+      const firstGaugeValue = m => {
+        const e = m && Object.values(m.hashMap || {})[0];
+        return e && typeof e.value === 'number' ? e.value : null;
+      };
+      // 例: GPU使用率（gpuMetrics.gpuUtilization gauge）
+      const gpuUsage = firstGaugeValue(gpuStats.gpuUtilization);
       // 例: P2P帯域（networkMetrics 側の gauge）
       const netStats = this.metrics.networkMetrics;
-      const bandwidth = netStats && netStats.bandwidth ? netStats.bandwidth.get().values[0]?.value : null;
+      const bandwidth = firstGaugeValue(netStats && netStats.bandwidth);
       // 最適化戦略例
       let actions = [];
       if (cpuLoad > 4) {

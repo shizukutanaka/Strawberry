@@ -16,7 +16,8 @@ const { appendRotated, ensureLogDir } = require('../../src/utils/log-rotate');
 const { AutoPerformanceOptimizer } = require('../../src/core/auto-performance-optimizer');
 const { logger } = require('../../src/utils/logger');
 
-const gauge = (value) => ({ get: () => ({ values: value === null ? [] : [{ value }] }) });
+// prom-client v15 の gauge 形状（hashMap のラベル別エントリ {value, labels}）を模す。
+const gauge = (value) => ({ hashMap: value === null ? {} : { 'k:': { value, labels: {} } } });
 
 let metricSpy;
 beforeEach(() => {

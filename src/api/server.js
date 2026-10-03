@@ -133,6 +133,18 @@ try {
   logger.warn(`backup-scheduler: failed to start: ${e.message}`);
 }
 
+// vGPU コンテナの自動修復（GPU_AUTO_HEAL_INTERVAL_MS 設定時のみ有効。
+// 連続プローブ失敗で release→destroy→再作成→再割当を行う。テスト抑止は内部で実施）
+try {
+  const { vgpuManager } = require('../core/services');
+  if (vgpuManager) {
+    const GpuRepository = require('../db/json/GpuRepository');
+    require('../gpu/gpu-auto-heal').startGpuAutoHeal(vgpuManager, { gpuRepository: GpuRepository });
+  }
+} catch (e) {
+  logger.warn(`gpu-auto-heal: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

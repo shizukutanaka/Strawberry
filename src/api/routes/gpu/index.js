@@ -214,11 +214,12 @@ router.get('/', asyncHandler(async (req, res) => {
   const reviewMap = new Map(); // gpuId → { sum, count }
   for (const o of allOrders) {
     if (o.review && o.gpuId) {
-      const raw = Number(o.review.rating);
-      if (!Number.isFinite(raw)) continue;
-      const clamped = Math.min(5, Math.max(1, raw));
+      const r = o.review.rating;
+      // 書込み経路と同じ検証（整数 1-5 の数値）。isFinite+クランプでは
+      // null→0→1点・"99"→5点 のように破損レコードが平均を歪める。
+      if (!Number.isInteger(r) || r < 1 || r > 5) continue;
       const cur = reviewMap.get(o.gpuId) || { sum: 0, count: 0 };
-      cur.sum += clamped;
+      cur.sum += r;
       cur.count++;
       reviewMap.set(o.gpuId, cur);
     }

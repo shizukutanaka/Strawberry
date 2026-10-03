@@ -15,6 +15,17 @@ const message = {
 // max は関数を渡すとリクエスト毎に評価され、env での動的変更が可能。
 const isTest = () => process.env.NODE_ENV === 'test';
 
+// RFC 9110 §10.2.3: 429 応答には Retry-After を付ける（standardHeaders は
+// RateLimit-* のみで Retry-After は付かない）。resetTime が取れなければウィンドウ秒数。
+const makeHandler = (windowMs) => (req, res) => {
+  const reset = req.rateLimit && req.rateLimit.resetTime;
+  const retryAfterSec = reset instanceof Date
+    ? Math.max(1, Math.ceil((reset.getTime() - Date.now()) / 1000))
+    : Math.ceil(windowMs / 1000);
+  res.set('Retry-After', String(retryAfterSec));
+  res.status(429).json(message);
+};
+
 // 全エンドポイント共通: 1分間60リクエスト
 const limiter = rateLimit({
   windowMs: 60 * 1000,
@@ -22,7 +33,8 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  message
+  message,
+  handler: makeHandler(60 * 1000)
 });
 
 // 認証エンドポイント専用: 15分間10リクエスト（ブルートフォース対策）
@@ -32,7 +44,8 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: rateLimitKeyGenerator,
-  message
+  message,
+  handler: makeHandler(15 * 60 * 1000)
 });
 
 module.exports = limiter;

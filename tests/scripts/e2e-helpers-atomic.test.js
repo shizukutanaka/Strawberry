@@ -11,9 +11,12 @@ jest.mock('../../src/db/json/atomicWrite', () => ({
 }));
 
 const { atomicWriteJSON } = require('../../src/db/json/atomicWrite');
+const { resolveDataDir } = require('../../src/db/json/data-dir');
 const { promoteToAdmin } = require('../e2e/helpers');
 
-const DATA_USERS = path.join(__dirname, '../../data/users.json');
+// resolveDataDir() は Jest ワーカーでは data-test/worker-N を返す —
+// live data/ への書き込み（ユーザー全消去）を防ぎ、data/ 未作成の CI でも動く。
+const DATA_USERS = path.join(resolveDataDir(), 'users.json');
 
 const fakeRequest = (token = 'tok') => ({
   post: jest.fn(async () => ({ json: async () => ({ token }) })),

@@ -81,7 +81,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | マスター認証 | 3要素(Google+TOTP+メール)、暗号乱数/定時間比較/TTL | ✅(Math.random/timing/await バグ修正済) |
 | CORS | 仕様準拠(ワイルドカード時 credentials 無効) | ✅(修正済) |
 | P2P | libp2p で分散。peer scoring/signed records | ❌(libp2p 系パッケージ未導入＋旧APIのまま。p2p-network は未導入時 degrade) |
-| テスト | `npm test` 完走、コア green | ✅(40スイート/215テスト green, 2 skip=env依存) |
+| テスト | `npm test` 完走、コア green | ✅(209スイート/1688テスト green, 3 skip=env依存, 2026-10 時点) |
 | データ整合性 | 注文/決済/残高のトランザクション | 🟡(`updateIf` CAS・`withLock` プロセス内直列化・atomicWrite 済。クロスプロセスロック/実 DB 移行は未) |
 
 ## 6. 不足部分の実装計画（優先順）
@@ -97,7 +97,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
    実ジョブの出力/利用率収集**。← 次の山
 3. **永続化エンティティは全て実装済**（Escrow / Provider reputation / Verification record）。将来 Prisma へ移行。
 4. GPU アテステーション（nvtrust）、libp2p ESM 対応、OTel トレース、カーボン配置。
-   監査ログ Merkle アンカリングは `merkle-anchor.js` 実装済（残るは OTS への実提出と audit.js 結線）。
+   監査ログ Merkle アンカリングは `merkle-anchor.js`＋`audit-anchor.js` 実装済・audit.js 結線済（残るは OTS への実提出のみ）。
 
 ---
 

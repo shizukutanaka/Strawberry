@@ -136,6 +136,14 @@ try {
   logger.warn(`backup-scheduler: failed to start: ${e.message}`);
 }
 
+// 監査ログ Merkle アンカーの定期生成（AUDIT_ANCHOR_INTERVAL_HOURS 設定時のみ有効。
+// audit-anchor は実装済みだが呼び出し側が無く、アンカーが一切生成されなかった）
+try {
+  require('../core/audit-anchor-scheduler').startAuditAnchorScheduler();
+} catch (e) {
+  logger.warn(`audit-anchor-scheduler: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

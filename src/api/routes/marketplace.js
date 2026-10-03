@@ -7,6 +7,7 @@ const router = express.Router();
 const marketplace = require('../../marketplace/default');
 const rbac = require('../middleware/rbac');
 const { withLock } = require('../../utils/async-lock');
+const { asyncHandler } = require('../../utils/error-handler');
 
 const isProd = process.env.NODE_ENV === 'production';
 // バリデーション由来の想定内エラー（400）は e.message をそのまま返す。
@@ -135,7 +136,7 @@ router.post('/escrow/:id/pay', adminOnly, (req, res) => {
 
 // ジョブ結果を検証してエスクローを解放/係争へ
 // withLock で同一エスクローへの並行呼び出しによる二重遷移・二重払い出しを防ぐ
-router.post('/escrow/:id/verify', adminOnly, async (req, res) => {
+router.post('/escrow/:id/verify', adminOnly, asyncHandler(async (req, res) => {
   const { jobId, providerId, primaryOutput, utilSamples, replicas, auditRate } = req.body || {};
   if (!jobId) return res.status(400).json({ error: 'jobId is required' });
   try {
@@ -152,11 +153,11 @@ router.post('/escrow/:id/verify', adminOnly, async (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: internalError(e) });
   }
-});
+}));
 
 // 係争の解決（settle / refund）
 // withLock で同一エスクローへの並行呼び出しによる二重 reputation slash を防ぐ（/verify と同様）
-router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
+router.post('/escrow/:id/resolve', adminOnly, asyncHandler(async (req, res) => {
   const { decision, providerId } = req.body || {};
   if (decision !== 'settle' && decision !== 'refund') {
     return res.status(400).json({ error: "decision must be 'settle' or 'refund'" });
@@ -181,7 +182,7 @@ router.post('/escrow/:id/resolve', adminOnly, async (req, res) => {
     const status = e.status || 500;
     return res.status(status).json({ error: status < 500 ? e.message : internalError(e) });
   }
-});
+}));
 
 // パブリック市場統計（認証不要 — マーケットブラウジング用）
 // GET /marketplace/stats — GPU 供給・需要・価格帯の概要

@@ -94,3 +94,58 @@ describe('invoice-poller stat-gated idle skip', () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+describe('invoice-poller N+1 batching', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    poller.stop();
+  });
+
+  it('settled インボイスが複数あっても注文/支払い参照は tick あたり1回の一括読込', async () => {
+    // 空 lightning で start() — 即時スキャンは pending=0 で await を踏まず同期完了する
+    poller.start(makeLightning({}));
+    const payments = [1, 2, 3].map((i) => {
+      const order = OrderRepository.create({ status: 'pending' });
+      return PaymentRepository.create({
+        method: 'lightning', status: 'pending', paymentHash: `n1-${i}-${Date.now()}`,
+        amount: 100, orderId: order.id, userId: 'u1',
+      });
+    });
+    const getAllSpy = jest.spyOn(OrderRepository, 'getAll');
+    const getByIdSpy = jest.spyOn(OrderRepository, 'getById');
+    const getByOrderIdSpy = jest.spyOn(PaymentRepository, 'getByOrderId');
+    // stop→start で _lightning を差し替えつつ即時 pollOnce が走る（マップ構築は start() 内で同期実行）
+    poller.stop();
+    poller.start(makeLightning(Object.fromEntries(
+      payments.map((p) => [p.paymentHash, { settled: true, value: 100, amountPaid: 100, settleDate: Date.now() }])
+    )));
+    // インフライトの run は microtask のみで完走するため macrotask 1つ分待つ
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(getAllSpy).toHaveBeenCalledTimes(1);
+    expect(getByIdSpy).not.toHaveBeenCalled();
+    expect(getByOrderIdSpy).not.toHaveBeenCalled();
+    for (const p of payments) {
+      expect(PaymentRepository.getById(p.id).status).toBe('paid');
+    }
+  });
+
+  it('期限切れでも tick 中に他経路が paid へ進めた決済は failed に回帰させない（CAS）', async () => {
+    poller.start(makeLightning({}));
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', paymentHash: `exp-${Date.now()}`,
+      amount: 100, orderId: 'o1', userId: 'u1',
+      invoiceExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    poller.stop();
+    // checkInvoice の await 中に「別プロセスの手動承認」が paid へ書き換えた状況を再現
+    poller.start({
+      checkInvoice: async () => {
+        PaymentRepository.update(payment.id, { status: 'paid', paidAt: new Date().toISOString() });
+        return null; // settled ではない → expired 分岐へ
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(PaymentRepository.getById(payment.id).status).toBe('paid');
+  });
+});

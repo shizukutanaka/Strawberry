@@ -764,9 +764,10 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
   const ratingByReviewer = new Map();
   for (const o of reviewed) {
     const rid = (o.review && o.review.reviewerId) || o.userId;
-    const raw = Number(o.review.rating);
-    if (!Number.isFinite(raw)) continue;
-    const r = Math.min(5, Math.max(1, raw));
+    const r = o.review.rating;
+    // 書込み経路と同じ検証（整数 1-5 の数値）。isFinite+クランプでは
+    // null→0→1点・"99"→5点 のように破損レコードが平均を歪める。
+    if (!Number.isInteger(r) || r < 1 || r > 5) continue;
     const cur = ratingByReviewer.get(rid) || { sum: 0, n: 0 };
     cur.sum += r; cur.n += 1;
     ratingByReviewer.set(rid, cur);
@@ -785,9 +786,8 @@ router.get('/:id/reputation', asyncHandler(async (req, res) => {
   const renterByReviewer = new Map();
   for (const o of asRenter) {
     const rid = (o.renterReview && o.renterReview.reviewerId) || o.providerId;
-    const raw = Number(o.renterReview.rating);
-    if (!Number.isFinite(raw)) continue;
-    const r = Math.min(5, Math.max(1, raw));
+    const r = o.renterReview.rating;
+    if (!Number.isInteger(r) || r < 1 || r > 5) continue;
     const cur = renterByReviewer.get(rid) || { sum: 0, n: 0 };
     cur.sum += r; cur.n += 1;
     renterByReviewer.set(rid, cur);
@@ -842,13 +842,12 @@ router.get('/:id/renter-profile', asyncHandler(async (req, res) => {
 
   const OrderRepository = require('../../../db/json/OrderRepository');
   const renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview);
-  // 不正な rating（null/非数値）は `|| 1` で 1 に丸めず件数から除外する。旧実装は
-  // 不正データを 1 点として合算に含めてしまい、レガシー破損レコードが平均を
-  // 不当に押し下げていた（reputation-service の同種計算と同じ Number.isFinite 方式に統一）。
+  // 不正な rating は `|| 1` や isFinite+クランプで数えず、書込み経路と同じ
+  // 検証（整数 1-5）で件数から除外する。破損レコード（null→0→1点、"99"→5点）が
+  // 平均・件数を歪めるのを防ぐ（reputation 集計全域と同じ方式に統一）。
   const validRatings = renterOrders
-    .map(o => Number(o.renterReview.rating))
-    .filter(r => Number.isFinite(r))
-    .map(r => Math.min(5, Math.max(1, r)));
+    .map(o => o.renterReview.rating)
+    .filter(r => Number.isInteger(r) && r >= 1 && r <= 5);
   const reviewCount = validRatings.length;
   const ratingAverage = reviewCount > 0
     ? Math.round((validRatings.reduce((s, r) => s + r, 0) / reviewCount) * 10) / 10

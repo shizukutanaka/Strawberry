@@ -31,6 +31,33 @@ describe('gpu-monitor monitorAndRecover', () => {
     expect(PaymentRepository.getById(payment.id).status).toBe('refunded');
   });
 
+  it('tick 中に注文が終端へ進んだ場合は cancelled へ回帰させない（CAS）', async () => {
+    const gpu = GpuRepository.create({
+      name: 'dead-gpu-2', providerId: 'p1', pricePerHour: 100,
+      lastHeartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    });
+    const order = OrderRepository.create({
+      userId: 'u1', gpuId: gpu.id, status: 'active',
+      durationMinutes: 60, totalPrice: 100,
+    });
+    const payment = PaymentRepository.create({
+      orderId: order.id, userId: 'u1', status: 'paid', amount: 100,
+    });
+    // getOrders のスナップショット時点では active — その後の GPU 一括読込の隙間に
+    // 「利用停止」で completed へ進んだ状況を getAll 内の副作用として再現
+    const realGetAll = GpuRepository.getAll.bind(GpuRepository);
+    jest.spyOn(GpuRepository, 'getAll').mockImplementationOnce(() => {
+      OrderRepository.update(order.id, { status: 'completed', completedAt: new Date().toISOString() });
+      return realGetAll();
+    });
+
+    await monitorAndRecover();
+    jest.restoreAllMocks();
+
+    expect(OrderRepository.getById(order.id).status).toBe('completed');
+    expect(PaymentRepository.getById(payment.id).status).toBe('paid');
+  });
+
   it('鮮度のある GPU の active 注文は触らない', async () => {
     const gpu = GpuRepository.create({
       name: 'alive-gpu', providerId: 'p1', pricePerHour: 100,
@@ -44,6 +71,23 @@ describe('gpu-monitor monitorAndRecover', () => {
     await monitorAndRecover();
 
     expect(OrderRepository.getById(order.id).status).toBe('active');
+  });
+
+  it('1 tick での GPU 参照は注文数に関わらず getAll 1回のみ（N+1 回帰）', async () => {
+    for (const name of ['g1', 'g2', 'g3']) {
+      const gpu = GpuRepository.create({
+        name, providerId: 'p1', pricePerHour: 100,
+        lastHeartbeat: new Date().toISOString(),
+      });
+      OrderRepository.create({
+        userId: 'u1', gpuId: gpu.id, status: 'active',
+        durationMinutes: 60, totalPrice: 100,
+      });
+    }
+    const getAllSpy = jest.spyOn(GpuRepository, 'getAll');
+    await monitorAndRecover();
+    expect(getAllSpy).toHaveBeenCalledTimes(1);
+    getAllSpy.mockRestore();
   });
 });
 

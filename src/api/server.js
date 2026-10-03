@@ -81,9 +81,6 @@ const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./midd
 // サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
 const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
 
-// 新規為替レートAPIルート
-app.use('/api/exchange-rate', exchangeRateRouter);
-
 // コアサービス参照のセットと監視起動
 try {
   const { lightning, p2pNetwork, vgpuManager } = require('../core/services');
@@ -306,6 +303,11 @@ app.use('/master-auth', masterAuthRouter.router);
 
 // 運営利益受取アドレス管理（admin 認証必須。ルータ側で jwtAuth + rbac('admin') を適用）
 app.use('/api/profit-addresses', profitAddressesRouter);
+
+// 為替レート API。ミドルウェア群より前にマウントされていると、時限データである
+// レート応答が no-store/セキュリティヘッダーなしで配信され、ブラウザや中間
+// キャッシュが陳腐なレートを返し続けうる（その他のルートと同じ処遇を受ける位置へ）。
+app.use('/api/exchange-rate', exchangeRateRouter);
 
 // リクエストロギング
 app.use(responseTime);

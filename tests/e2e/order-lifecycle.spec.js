@@ -3,7 +3,7 @@
 // driven through the real order-detail state machine in the UI (not just the
 // API), across two accounts (renter + provider) switching sessions mid-flow.
 const { test, expect } = require('@playwright/test');
-const { registerAndLoginUI, loginUI, apiRegisterAndLogin, apiCreateGpu, uniqueId, trackConsoleErrors } = require('./helpers');
+const { registerAndLoginUI, loginUI, apiRegisterAndLogin, apiCreateGpu, uniqueId, trackConsoleErrors, promoteToAdmin } = require('./helpers');
 
 test.describe('order lifecycle', () => {
   test('full cycle via UI: create, accept, pay (bank transfer), start, heartbeat, stop, review', async ({ page, request, baseURL }) => {
@@ -46,15 +46,9 @@ test.describe('order lifecycle', () => {
     }).then((r) => r.json());
     const pendingPayment = paymentInfo.payments.find((p) => p.status === 'pending');
     const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'lcadmin' });
-    const fs = require('fs');
-    const path = require('path');
-    const usersPath = path.join(__dirname, '../../data/users.json');
-    const users = JSON.parse(fs.readFileSync(usersPath, 'utf8'));
-    users[users.findIndex((u) => u.email === admin.email)].role = 'admin';
-    fs.writeFileSync(usersPath, JSON.stringify(users, null, 2));
-    const adminLogin = await request.post(`${baseURL}/api/v1/users/login`, { data: { email: admin.email, password: admin.password } }).then((r) => r.json());
+    const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
     await request.post(`${baseURL}/api/v1/payments/manual/approve/${pendingPayment.id}`, {
-      headers: { Authorization: `Bearer ${adminLogin.token}` },
+      headers: { Authorization: `Bearer ${adminToken}` },
     });
 
     // Renter's UI poll picks up the approval without a manual reload.
@@ -101,14 +95,8 @@ test.describe('order lifecycle', () => {
     });
     const { paymentId } = await payRes.json();
     const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'nostopadmin' });
-    const fs = require('fs');
-    const path = require('path');
-    const usersPath = path.join(__dirname, '../../data/users.json');
-    const users = JSON.parse(fs.readFileSync(usersPath, 'utf8'));
-    users[users.findIndex((u) => u.email === admin.email)].role = 'admin';
-    fs.writeFileSync(usersPath, JSON.stringify(users, null, 2));
-    const adminLogin = await request.post(`${baseURL}/api/v1/users/login`, { data: { email: admin.email, password: admin.password } }).then((r) => r.json());
-    await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`, { headers: { Authorization: `Bearer ${adminLogin.token}` } });
+    const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
+    await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`, { headers: { Authorization: `Bearer ${adminToken}` } });
     await request.post(`${baseURL}/api/v1/orders/${orderId}/start`, { headers: { Authorization: `Bearer ${renter.token}` } });
 
     await loginUI(page, provider.email, provider.password);

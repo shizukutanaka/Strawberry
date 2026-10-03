@@ -1,6 +1,8 @@
 // Google Sheetsへフィードバックを自動転記するサンプル（Google API認証情報が必要）
 const fs = require('fs');
 const path = require('path');
+// googleapis は optionalDependencies — 未導入環境での MODULE_NOT_FOUND を避けるため遅延 require。
+const { requireOptional } = require('./lib/optional-dep');
 const { authorize } = require('./google-sheets-auth');
 const { loadFeedback } = require('./lib/feedback-store');
 
@@ -13,8 +15,7 @@ async function appendFeedback(auth) {
   }
   const feedbacks = loadFeedback();
   if (feedbacks.length === 0) return;
-  // optionalDependencies の googleapis は engines 不適合環境で未導入となり得るため遅延 require
-  const { google } = require('googleapis');
+  const { google } = requireOptional('googleapis');
   const sheets = google.sheets({ version: 'v4', auth });
   const values = feedbacks.map(fb => [fb.timestamp, fb.user, fb.message]);
   const resource = { values };

@@ -6,6 +6,7 @@ const { appendAuditLog } = require('../../../utils/audit-log');
 const { logger } = require('../../../utils/logger');
 const { withLock } = require('../../../utils/async-lock');
 const { authenticateJWT } = require('../../middleware/security');
+const { asyncHandler } = require('../../../utils/error-handler');
 const PaymentRepository = require('../../../db/json/PaymentRepository');
 
 /**
@@ -19,7 +20,7 @@ const PaymentRepository = require('../../../db/json/PaymentRepository');
  * これにより tx2 の一時障害で資金が運営に滞留した場合、呼び出し元が同じリクエストを
  * 再送するだけで自動回復できる（手動照合不要）。
  */
-router.post('/', authenticateJWT, async (req, res) => {
+router.post('/', authenticateJWT, asyncHandler(async (req, res) => {
   try {
     const { orderId, borrowerWallet } = req.body;
     // Note: bodyLenderWallet is intentionally NOT destructured. The provider's
@@ -309,6 +310,6 @@ router.post('/', authenticateJWT, async (req, res) => {
     logger.error('BTC on-chain payment error:', err);
     return res.status(500).json({ message: 'Payment processing failed', error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message });
   }
-});
+}));
 
 module.exports = router;

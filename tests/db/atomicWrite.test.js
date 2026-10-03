@@ -120,3 +120,54 @@ describe('atomicWriteJSON', () => {
     expect(JSON.parse(fs.readFileSync(target, 'utf-8'))).toEqual(rows);
   });
 });
+
+// Crash orphans: a killed writer leaves `<file>.<pid>.<rand>.tmp` behind and
+// the error path only unlinks on a caught error — the sweep in durableWrite
+// reaps siblings older than the stale window on subsequent writes.
+describe('atomicWrite stale .tmp sweep', () => {
+  let dir;
+  beforeEach(() => { dir = mkTmpDir(); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  const plantTmp = (target, mtimeAgoMs) => {
+    const p = `${target}.999999.deadbeef.tmp`;
+    fs.writeFileSync(p, 'orphan');
+    const old = new Date(Date.now() - mtimeAgoMs);
+    fs.utimesSync(p, old, old);
+    return p;
+  };
+
+  it('reaps orphaned .tmp siblings older than 10 minutes on the next write', () => {
+    const target = path.join(dir, 'data.json');
+    const orphan = plantTmp(target, 11 * 60 * 1000);
+    atomicWriteJSON(target, { a: 1 });
+    expect(fs.existsSync(orphan)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(target, 'utf-8'))).toEqual({ a: 1 });
+  });
+
+  it('does not touch a fresh .tmp file (within stale window = treated as in-flight)', () => {
+    const target = path.join(dir, 'data.json');
+    const fresh = `${target}.1234.aa11bb22.tmp`;
+    fs.writeFileSync(fresh, 'in-flight');
+    atomicWriteJSON(target, { a: 1 });
+    expect(fs.existsSync(fresh)).toBe(true);
+  });
+
+  it('only sweeps .tmp siblings of the same basename (other files untouched)', () => {
+    const target = path.join(dir, 'data.json');
+    const other = path.join(dir, 'other.json.1.aa22cc33.tmp');
+    fs.writeFileSync(other, 'other');
+    const old = new Date(Date.now() - 11 * 60 * 1000);
+    fs.utimesSync(other, old, old);
+    atomicWriteJSON(target, { a: 1 });
+    expect(fs.existsSync(other)).toBe(true);
+  });
+
+  it('is amortized: a second write within the sweep interval does not rescan', () => {
+    const target = path.join(dir, 'data.json');
+    atomicWriteJSON(target, { a: 1 }); // first write sweeps this directory
+    const orphan = plantTmp(target, 11 * 60 * 1000); // planted after the sweep
+    atomicWriteJSON(target, { a: 2 });
+    expect(fs.existsSync(orphan)).toBe(true); // not re-swept yet
+  });
+});

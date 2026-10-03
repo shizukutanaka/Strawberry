@@ -2,6 +2,16 @@
 // i18next / i18next-fs-backend は package.json に未宣言のため、未導入環境で
 // トップレベル require すると MODULE_NOT_FOUND で即死していた。
 
+// virtual モックはモジュールが解決できない環境でのみ必要。
+// インストール済みモジュールに付けるとワーカー共有の jest moduleID
+// キャッシュ経由で実行順序依存のモックミスが起きる（他ファイルの実 require
+// が優先される）。
+function doMockDep(name, factory) {
+  let resolvable = true;
+  try { require.resolve(name); } catch (_) { resolvable = false; }
+  jest.doMock(name, factory, { virtual: !resolvable });
+}
+
 describe('scripts/sample.js', () => {
   beforeEach(() => {
     jest.resetModules();
@@ -13,11 +23,11 @@ describe('scripts/sample.js', () => {
   });
 
   test('i18next 未導入では導入案内を表示して false を返す', async () => {
-    jest.doMock('i18next', () => {
+    doMockDep('i18next', () => {
       const e = new Error("Cannot find module 'i18next'");
       e.code = 'MODULE_NOT_FOUND';
       throw e;
-    }, { virtual: true });
+    });
     const { runI18nSample } = require('../../scripts/sample');
     const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
@@ -30,11 +40,11 @@ describe('scripts/sample.js', () => {
 
   test('i18next 利用可なら locales パスで init してメッセージを表示する', async () => {
     const init = jest.fn((opts, cb) => cb(null));
-    jest.doMock('i18next', () => ({
+    doMockDep('i18next', () => ({
       use: jest.fn().mockReturnValue({ init }),
       t: jest.fn().mockReturnValue('ようこそ！'),
-    }), { virtual: true });
-    jest.doMock('i18next-fs-backend', () => function FsBackend() {}, { virtual: true });
+    }));
+    doMockDep('i18next-fs-backend', () => function FsBackend() {});
     const { runI18nSample } = require('../../scripts/sample');
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
@@ -54,8 +64,8 @@ describe('scripts/sample.js', () => {
 
   test('init がエラーを返した場合も false で返す', async () => {
     const init = jest.fn((opts, cb) => cb(new Error('locale load failed')));
-    jest.doMock('i18next', () => ({ use: jest.fn().mockReturnValue({ init }), t: jest.fn() }), { virtual: true });
-    jest.doMock('i18next-fs-backend', () => function FsBackend() {}, { virtual: true });
+    doMockDep('i18next', () => ({ use: jest.fn().mockReturnValue({ init }), t: jest.fn() }));
+    doMockDep('i18next-fs-backend', () => function FsBackend() {});
     const { runI18nSample } = require('../../scripts/sample');
     const err = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {

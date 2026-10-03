@@ -41,7 +41,8 @@ function formatEntry(fb) {
   const message = typeof fb.message === 'string' ? fb.message : String(fb.message ?? '');
   const ts = typeof fb.timestamp === 'string' ? fb.timestamp : '';
   const head = [d, ts].filter(Boolean).join(' ');
-  return `- ${head} ${user}: ${message}`.replace(/\s+/g, ' ').trim();
+  const who = user ? `${user}: ` : '';
+  return `- ${head} ${who}${message}`.replace(/\s+/g, ' ').trim();
 }
 
 // Slack は長文を分割して送る。通知失敗は呼び出し側でキャッチする。

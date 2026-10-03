@@ -295,6 +295,10 @@ app.use('/master-auth', masterAuthRouter.router);
 // 運営利益受取アドレス管理（admin 認証必須。ルータ側で jwtAuth + rbac('admin') を適用）
 app.use('/api/profit-addresses', profitAddressesRouter);
 
+// サンドボックス API キー発行・検証（admin のみ・本番では 404。ルータは実装済み
+// だったがどこにも mount されていなかった）
+app.use('/api', require('./sandbox-apikey').router);
+
 // リクエストロギング
 app.use(responseTime);
 app.use(requestLogger);

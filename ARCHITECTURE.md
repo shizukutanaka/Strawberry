@@ -7,9 +7,11 @@
 ## 実体は何か
 
 - **本体は Node.js / Express の Web API サーバ**（`src/api/server.js`、`npm start`）。
-- Electron 用の `preload.js` / `react-app.tsx`（`ipcMain` ハンドラ無く未配線・デスクトップ
-  アプリとして未成立）は削除済み（2026-07）。デスクトップアプリを実装する場合は
-  `ipcMain`/`ipcRenderer` の配線から新規に設計すること。
+- Electron デスクトップシェルは `public/electron.js`（メインプロセス）+
+  `public/preload.js`（sandboxed preload）として実装済み（`npm run desktop` または
+  `npx electron public/electron.js`）。`ipcMain` は監査ログチャネルのみ配線し、
+  `STRAWBERRY_URL` 経由のリモート読み込みは https（ローカルのみ http 許可）に限定。
+  配布パッケージング（electron-builder 等）は未配線。
 - **`public/` は実際に動くフロントエンド**（2026-07 追加）。ビルド不要の静的SPA
   （素の HTML + CSS + ネイティブ ES modules、依存追加ゼロ）。`http://localhost:3000`
   で登録/ログイン・GPUマーケット閲覧・注文（Lightning/銀行振込決済含む）・稼働中セッション

@@ -8,23 +8,26 @@ const PaymentRepository = require('../db/json/PaymentRepository');
 
 async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
   // 1. オーダー自動停止
-  let order = OrderRepository.getById(orderId);
   // ORDER_STATES（state-checker）に 'failed' は無い — 書くと遷移表未定義で注文が永久に
   // 遷移不能になる。有効な終端値 'cancelled' へ落とし、障害由来であることは
   // failureReason/failedAt フィールドと監査ログで区別する。
-  if (order && order.status !== 'completed' && order.status !== 'cancelled') {
-    order.status = 'cancelled';
-    order.failedAt = new Date().toISOString();
-    order.failureReason = reason;
-    OrderRepository.update(orderId, order);
+  // updateIf の CAS で遷移させる（読取スナップショットの全行書戻しだと、並行して
+  // completed/cancelled へ進んだ注文の終端回帰や他フィールドの巻き戻しが起き得た）。
+  const cancelResult = OrderRepository.updateIf(orderId,
+    (o) => o.status !== 'completed' && o.status !== 'cancelled',
+    { status: 'cancelled', failedAt: new Date().toISOString(), failureReason: reason });
+  if (cancelResult.ok) {
     logger.info(`[AUTO-RECOVERY] Order ${orderId} cancelled due to GPU error: ${reason}`);
   }
   // 2. 返金処理（支払い済みの場合）
   // getByOrderId は many:true で配列を返すため、単体オブジェクトとして扱うバグを修正。
   const payments = PaymentRepository.getByOrderId(orderId) || [];
   for (const payment of payments) {
-    if (payment.status === 'paid') {
-      PaymentRepository.update(payment.id, { status: 'refunded', refundedAt: new Date().toISOString() });
+    // CAS: 読取と書込の間に settled/failed 等へ進んだ支払いを refunded へ回帰させない。
+    const res = PaymentRepository.updateIf(payment.id,
+      (p) => p.status === 'paid',
+      { status: 'refunded', refundedAt: new Date().toISOString() });
+    if (res.ok) {
       logger.info(`[AUTO-RECOVERY] Payment ${payment.id} marked as refunded for order ${orderId}`);
       // TODO: 実際の返金処理（Lightning/銀行API等）は今後拡張
     }

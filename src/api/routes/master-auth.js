@@ -7,6 +7,7 @@ const speakeasy = require('speakeasy');
 const { verifyTOTP } = require('../utils/totp');
 const { sendMail } = require('../utils/mailer');
 const { masterSession } = require('../middleware/master-session');
+const { asyncHandler } = require('../../utils/error-handler');
 
 const router = express.Router();
 
@@ -110,7 +111,7 @@ router.get('/totp', (req, res) => {
   if (!req.session.googleAuth) return res.status(401).send('Google認証未完了');
   res.send('<form method="POST"><input name="token" maxlength="6"><button>認証</button></form>');
 });
-router.post('/totp', async (req, res) => {
+router.post('/totp', asyncHandler(async (req, res) => {
   if (!req.session.googleAuth) return res.status(401).send('Google認証未完了');
   const { token } = req.body;
   if (!token || typeof token !== 'string' || !/^\d{6}$/.test(token)) {
@@ -160,7 +161,7 @@ router.post('/totp', async (req, res) => {
     return res.status(502).send('認証コードの送信に失敗しました。再試行してください。');
   }
   res.redirect('/master-auth/mail');
-});
+}));
 
 // --- メール認証 ---
 router.get('/mail', (req, res) => {

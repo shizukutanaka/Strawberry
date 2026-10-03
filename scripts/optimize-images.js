@@ -1,7 +1,11 @@
 // 画像圧縮自動化スクリプト（npm run optimize-images で実行）
-const imagemin = require('imagemin');
-const imageminMozjpeg = require('imagemin-mozjpeg');
-const imageminPngquant = require('imagemin-pngquant');
+// imagemin 系は ESM-only のため CJS require では { default: fn } が返る（両形を吸収）
+const _imagemin = require('imagemin');
+const imagemin = _imagemin.default || _imagemin;
+const _mozjpeg = require('imagemin-mozjpeg');
+const imageminMozjpeg = _mozjpeg.default || _mozjpeg;
+const _pngquant = require('imagemin-pngquant');
+const imageminPngquant = _pngquant.default || _pngquant;
 const path = require('path');
 
 (async () => {

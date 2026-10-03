@@ -30,11 +30,12 @@ describe('renter-profile: invalid ratings excluded from average (source assertio
     expect(src).not.toMatch(/Math\.min\(5, Math\.max\(1, Number\(o\.renterReview\.rating\) \|\| 1\)\)/);
   });
 
-  it('uses Number.isFinite to validate renter-profile ratings before averaging', () => {
+  it('uses integer 1-5 validation to exclude invalid renter-profile ratings before averaging', () => {
     const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/Number\.isFinite\(r\)/);
+    // #233: isFinite+クランプより厳格な書込み経路と同じ検証（整数 1-5 で除外）
+    expect(block).toMatch(/Number\.isInteger\(r\)\s*&&\s*r >= 1 && r <= 5/);
   });
 
   it('reviewCount is derived from the valid-ratings array, not raw renterOrders.length', () => {

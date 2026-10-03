@@ -47,8 +47,24 @@ async function autoOptimize() {
   }
 }
 
+let _optimizeTimer = null;
+
 function startAutoOptimize() {
-  setInterval(autoOptimize, CHECK_INTERVAL);
+  // 再呼出しでインターバルが積み上がらないよう既存を解除
+  stopAutoOptimize();
+  _optimizeTimer = setInterval(autoOptimize, CHECK_INTERVAL);
+  // デーモンタイマーがプロセス終了を妨げないようにする（auto-performance-optimizer
+  // 等の常駐ループと同方針。呼出元のサーバー自体がプロセスを延命する）
+  if (_optimizeTimer.unref) _optimizeTimer.unref();
 }
 
-module.exports = { startAutoOptimize, autoOptimize, getCpuUsage, getMemUsage };
+function stopAutoOptimize() {
+  if (_optimizeTimer) {
+    clearInterval(_optimizeTimer);
+    _optimizeTimer = null;
+  }
+}
+
+module.exports = { startAutoOptimize, stopAutoOptimize, autoOptimize, getCpuUsage, getMemUsage };
+// テスト用フック: 管理下タイマーの直接検証（Map 参照ではなく再代入される変数のため getter で公開）
+module.exports._getOptimizeTimer = () => _optimizeTimer;

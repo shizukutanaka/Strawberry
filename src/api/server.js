@@ -295,6 +295,11 @@ app.use('/master-auth', masterAuthRouter.router);
 // 運営利益受取アドレス管理（admin 認証必須。ルータ側で jwtAuth + rbac('admin') を適用）
 app.use('/api/profit-addresses', profitAddressesRouter);
 
+// SLA 稼働率・障害履歴 API（GET /api/sla = JWT、GET /api/anomalies = admin。
+// sla-tracker が data/sla.json へ集計する稼働率の配信経路 — ルータは実装済み
+// だったがどこにも mount されていなかった）
+app.use('/api', require('./sla').router);
+
 // リクエストロギング
 app.use(responseTime);
 app.use(requestLogger);

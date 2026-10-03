@@ -466,6 +466,7 @@ $/token 競争力が低い。§13 のサーバーレス推論ティアを作る�
 - `README.md` の実在しない運用コマンドを実在手段へ修正: `npm run start:prometheus`/`monitor:nodes`/`benchmark`/`report:monthly` は未実装のため `/metrics`（Bearer 保護）・`gpu-failure-monitor`・`progress-report` へ置き換え、「自動本番デプロイ」は ci-cd.yml の Deploy が echo スタブである旨を明記。
 - `CONTRIBUTING.md` を実態へ同期: 「main または develop からブランチ作成」→ develop は不在（main のみ）、「CI で lint/test/openapi をチェック」の記述を実ワークフローへ具体化（build-test の lint は non-blocking、coverage 閾値70、openapi-autogen の対象パス、optimize-images、ci-cd は main push のみで Deploy はスタブ）。日英両セクション。
 - `.gitignore` に実行時生成物を追加: `data-test/`（Jest ワーカー別データ分離の出力）と `src/health.json`（`src/p2p-health.js`/`src/p2p-notify.js` が実行時に生成）。いずれもローカル実行後に untracked としてツリーを汚していた。
+- `order-lifecycle.spec.js` の admin 昇格を共通 helper `promoteToAdmin` へ置き換え: 2箇所で users.json を `fs.writeFileSync` で非アトミックに直書きしており、起動中の webServer が読込中に重なると半書込み JSON の parse エラーで以降の UserRepository 呼出しが全滅し得た（user 不在時も `users[-1].role` で TypeError）。helper は atomicWriteJSON + 明確エラー + STRAWBERRY_DATA_DIR 解決（#198 の dataUsersPath 化で指定データ dir の dev サーバにも追従）。
 
 ### .env.example 再同期（2026-09-27・#55 後の差分）
 - **対応**: #55 マージ後に残っていた未記載の環境変数 12 件を追記 — ops スクリプト系（PROGRESS_SHEET_ID/FEEDBACK_SHEET_ID/NOTION_TOKEN/NOTION_DB_ID/GITHUB_TOKEN/GITHUB_REPO/SLACK_BOT_TOKEN/SLACK_CHANNEL/LND_PROTO_PATH/API_ENDPOINT）と e2e 系（E2E_BASE_URL/PLAYWRIGHT_CHROMIUM_PATH）。CI/DOCKER_HOST/HOME 等のシステム由来変数は対象外。

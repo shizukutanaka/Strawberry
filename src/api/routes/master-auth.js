@@ -20,11 +20,18 @@ const MAIL_CODE_TTL_MS = 10 * 60 * 1000;
 const _totpIpMap = new Map(); // IP -> { count, windowStart }
 const TOTP_IP_WINDOW_MS = 15 * 60 * 1000;
 const TOTP_IP_MAX = 10;
+// キーは未認証リクエストの任意 IP（IPv6 では事実上無限に回転可能）のため、
+// エントリが無制限に蓄積し得る。anomaly-detector と同じ挿入順 amortized
+// プルーニングで上限化する。
+const TOTP_IP_MAX_KEYS = 10_000;
 
 function _checkTotpIpLimit(ip) {
   const now = Date.now();
   const rec = _totpIpMap.get(ip);
   if (!rec || now - rec.windowStart > TOTP_IP_WINDOW_MS) {
+    if (!_totpIpMap.has(ip) && _totpIpMap.size >= TOTP_IP_MAX_KEYS) {
+      _totpIpMap.delete(_totpIpMap.keys().next().value);
+    }
     _totpIpMap.set(ip, { count: 1, windowStart: now });
     return false; // not rate-limited
   }
@@ -202,3 +209,6 @@ function requireMasterAuth(req, res, next) {
 module.exports = { router, requireMasterAuth };
 // テスト用フック: タイミングセーフ比較ヘルパーを直接検証する。
 module.exports._timingSafeStrEqual = timingSafeStrEqual;
+// テスト用フック: TOTP IP カウンタの上限プルーニングを直接検証する。
+module.exports._totpIpMap = _totpIpMap;
+module.exports._checkTotpIpLimit = _checkTotpIpLimit;

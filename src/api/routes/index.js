@@ -16,6 +16,7 @@ const authRoutes = require('./auth');
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
 const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
+const { deprecated } = require('../middleware/deprecated');
 const { cacheMiddleware, purgeCache } = require('../middleware/cache');
 
 // 初期化処理（各ステップを個別にガード。一部のサービスが未導入でも継続し、
@@ -265,7 +266,7 @@ router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
 // セキュリティ: これらは生のインフラ・パススルー（P2P ブロードキャスト・任意インボイス送金）
 // であり、特に /payment は運営ノードから任意の BOLT11 を送金できてしまう。注文所有権等の
 // 検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
-router.post('/order', rbac('admin'), asyncHandler(async (req, res) => {
+router.post('/order', rbac('admin'), deprecated('/api/v1/orders'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /order accessed, use /api/v1/orders instead');
   if (!requireService(p2pNetwork, res)) return;
   const order = req.body;
@@ -273,14 +274,14 @@ router.post('/order', rbac('admin'), asyncHandler(async (req, res) => {
   res.status(201).json({ message: 'Order created', order });
 }));
 
-router.post('/match', rbac('admin'), asyncHandler(async (req, res) => {
+router.post('/match', rbac('admin'), deprecated('/api/v1/orders/:id/match'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /match accessed, use /api/v1/orders/:id/match instead');
   if (!requireService(p2pNetwork, res)) return;
   const matchResult = await p2pNetwork.matchOrder(req.body);
   res.json({ matched: !!matchResult, detail: matchResult });
 }));
 
-router.post('/payment', rbac('admin'), asyncHandler(async (req, res) => {
+router.post('/payment', rbac('admin'), deprecated('/api/v1/payments/pay'), asyncHandler(async (req, res) => {
   logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
   if (!requireService(lightning, res)) return;
   const { paymentRequest, amount, orderId } = req.body;

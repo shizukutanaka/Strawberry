@@ -57,9 +57,19 @@ describe('scripts/ の外部依存が package.json に宣言されている', ()
   }
 
   test('宣言された外部依存が実際に解決できる', () => {
+    // optionalDependencies は engines 不適合の環境で npm が導入自体をスキップし得る
+    // （CI の Node 20 では google-auth-library@11 系が >=22 必須のため googleapis 不在）。
+    // optional の不在は正常とし、必須側（dependencies/devDependencies）の不在のみ失敗とする。
+    const OPTIONAL = new Set(Object.keys(pkg.optionalDependencies || {}));
+    const missingRequired = [];
     for (const dep of ['googleapis', '@notionhq/client', '@octokit/rest', '@slack/web-api', 'chartjs-node-canvas', 'i18next', 'i18next-fs-backend']) {
-      expect(() => require.resolve(dep, { paths: [ROOT] })).not.toThrow();
+      try {
+        require.resolve(dep, { paths: [ROOT] });
+      } catch {
+        if (!OPTIONAL.has(dep)) missingRequired.push(dep);
+      }
     }
+    expect(missingRequired).toEqual([]);
   });
 });
 

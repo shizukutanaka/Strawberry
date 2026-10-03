@@ -209,6 +209,7 @@ const { logger } = require('../../../utils/logger');
 const { appendAuditLog } = require('../../../utils/audit-log');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
+const { incrementDisputeCount } = require('../../utils/user-dispute-count');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
 const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
@@ -570,9 +571,14 @@ router.get('/:id',
       const rateInfo = await fetchRateInfo();
       // 借り手プロフィール（プロバイダが承認/拒否判断に使えるよう注文詳細に同梱）
       const renterOrders = OrderRepository.getAll().filter(o => o.userId === order.userId && o.renterReview);
-      const renterReviewCount = renterOrders.length;
+      // 集計は書込み経路と同じ検証（整数 1-5）を適用する。`|| 1` や isFinite+クランプでは
+      // null→0→1点・"99"→5点 のように破損レコードが借り手プロフィールを歪めてしまう。
+      const renterValidRatings = renterOrders
+        .map(o => o.renterReview.rating)
+        .filter(r => Number.isInteger(r) && r >= 1 && r <= 5);
+      const renterReviewCount = renterValidRatings.length;
       const renterRatingAverage = renterReviewCount > 0
-        ? Math.round((renterOrders.reduce((s, o) => s + Math.min(5, Math.max(1, Number(o.renterReview.rating) || 1)), 0) / renterReviewCount) * 10) / 10
+        ? Math.round((renterValidRatings.reduce((s, r) => s + r, 0) / renterReviewCount) * 10) / 10
         : null;
       // ステータス変遷タイムライン（既存タイムスタンプを時系列に整列）
       const timeline = [
@@ -715,8 +721,9 @@ router.put('/:id',
           }
         }
       } catch (e) {
+        logger.error(`Order cancel: escrow cancellation failed (order=${order.id}): ${e.message}`);
         throw new APIError(ErrorTypes.INTERNAL,
-          `Cannot cancel order: escrow cancellation failed (${e.message}). Retry or resolve escrow manually.`,
+          'Cannot cancel order: escrow cancellation failed. Retry or resolve escrow manually.',
           502);
       }
     }
@@ -812,8 +819,9 @@ router.delete('/:id',
     } catch (e) {
       if (e.name === 'APIError') throw e;
       // Escrow lookup failure or HELD cancel failure — block the order cancellation.
+      logger.error(`Order cancel: escrow operation failed (order=${order.id}): ${e.message}`);
       throw new APIError(ErrorTypes.INTERNAL,
-        `Cannot cancel order: escrow operation failed (${e.message}). Retry or contact support.`,
+        'Cannot cancel order: escrow operation failed. Retry or contact support.',
         502);
     }
     // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。
@@ -1436,11 +1444,7 @@ router.post('/:id/dispute/resolve',
       const vRaiser = order.dispute && order.dispute.raisedBy;
       if (vRaiser) {
         try {
-          const UserRepository = require('../../../db/json/UserRepository');
-          const u = UserRepository.getById(vRaiser);
-          if (u) {
-            UserRepository.update(vRaiser, { vindicatedDisputeCount: (u.vindicatedDisputeCount || 0) + 1 });
-          }
+          await incrementDisputeCount(vRaiser, 'vindicatedDisputeCount');
         } catch (e) {
           logger.warn(`vindicated-dispute accounting failed (raiser=${vRaiser}): ${e.message}`);
         }
@@ -1501,11 +1505,7 @@ router.post('/:id/dispute/resolve',
       const raiser = order.dispute && order.dispute.raisedBy;
       if (raiser) {
         try {
-          const UserRepository = require('../../../db/json/UserRepository');
-          const u = UserRepository.getById(raiser);
-          if (u) {
-            UserRepository.update(raiser, { deniedDisputeCount: (u.deniedDisputeCount || 0) + 1 });
-          }
+          await incrementDisputeCount(raiser, 'deniedDisputeCount');
         } catch (e) {
           logger.warn(`denied-dispute accounting failed (raiser=${raiser}): ${e.message}`);
         }

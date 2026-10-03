@@ -37,6 +37,7 @@ class P2PNetwork extends EventEmitter {
     constructor() {
         super();
         this.node = null;
+        this.initialized = false;
         this.peers = new Map();
         this.gpuRegistry = new Map();
         this.messageHandlers = new Map();
@@ -56,6 +57,7 @@ class P2PNetwork extends EventEmitter {
 
     async start() {
         try {
+            if (this.initialized) return; // 再呼出しでノード・タイマーを再生成しない
             logger.info('Starting P2P network...');
             
             // PeerID生成または読み込み
@@ -121,7 +123,9 @@ class P2PNetwork extends EventEmitter {
             
             // 定期タスク開始
             this.startPeriodicTasks();
-            
+
+            this.initialized = true;
+
             this.emit('started', { peerId: peerId.toB58String(), addresses });
             
         } catch (error) {
@@ -706,28 +710,33 @@ class P2PNetwork extends EventEmitter {
     }
 
     startPeriodicTasks() {
+        // 再 start() でインターバルが積み上がらないよう既存を解除
+        this._stopPeriodicTasks();
+        this._periodicTimers = [];
+        const track = (h) => { if (h && h.unref) h.unref(); this._periodicTimers.push(h); return h; };
+
         // GPU再アナウンス
-        setInterval(async () => {
+        track(setInterval(async () => {
             const localGPUs = Array.from(this.gpuRegistry.values())
                 .filter(gpu => gpu.peerId === this.node.peerId.toB58String());
             
             for (const gpu of localGPUs) {
                 await this.announceGPU(gpu);
             }
-        }, this.config.announceInterval);
-        
+        }, this.config.announceInterval));
+
         // ピア発見
-        setInterval(async () => {
+        track(setInterval(async () => {
             try {
                 const peers = await this.node.peerRouting.findPeers();
                 logger.debug(`Discovered ${peers.length} peers`);
             } catch (error) {
                 logger.error('Peer discovery error:', error);
             }
-        }, this.config.discoveryInterval);
-        
+        }, this.config.discoveryInterval));
+
         // ネットワーク統計ブロードキャスト
-        setInterval(async () => {
+        track(setInterval(async () => {
             const stats = {
                 peerId: this.node.peerId.toB58String(),
                 data: {
@@ -744,10 +753,10 @@ class P2PNetwork extends EventEmitter {
                 'strawberry:network:stats',
                 Buffer.from(JSON.stringify(stats))
             );
-        }, 60000); // 1分ごと
-        
+        }, 60000)); // 1分ごと
+
         // 古いエントリのクリーンアップ
-        setInterval(() => {
+        track(setInterval(() => {
             const now = Date.now();
             const timeout = 10 * 60 * 1000; // 10分
             
@@ -766,7 +775,14 @@ class P2PNetwork extends EventEmitter {
                     this.latencyCache.delete(peerId);
                 }
             }
-        }, 300000); // 5分ごと
+        }, 300000)); // 5分ごと
+    }
+
+    _stopPeriodicTasks() {
+        if (this._periodicTimers) {
+            for (const t of this._periodicTimers) clearInterval(t);
+            this._periodicTimers = [];
+        }
     }
 
     async signMessage(message) {
@@ -783,9 +799,11 @@ class P2PNetwork extends EventEmitter {
     }
 
     async validatePaymentProof(proof) {
-        // Lightning Network支払い証明の検証
-        // 実際の実装ではLightningサービスと連携
-        return true;
+        // Fail-closed: 支払い証明の検証契約（preimage/invoice 形式・照合先）が未確定の
+        // 間は一切受理しない。true を返すスタブのままでは任意のピアが access
+        // リクエストで無償の GPU アクセス資格情報を取得できてしまう。
+        // TODO: 証明フォーマット確定後、PaymentRepository の settled 決済と照合して実装。
+        return false;
     }
 
     async readStream(stream) {
@@ -826,6 +844,9 @@ class P2PNetwork extends EventEmitter {
                 await this.removeGPU(gpu.id);
             }
             
+            // 定期タスク解除（ノード停止後も announce/discover/publish が走り続けるのを防ぐ）
+            this._stopPeriodicTasks();
+
             // ノード停止
             await this.node.stop();
             
@@ -833,6 +854,7 @@ class P2PNetwork extends EventEmitter {
             this.peers.clear();
             this.gpuRegistry.clear();
             this.latencyCache.clear();
+            this.initialized = false;
             
             logger.info('P2P network stopped');
             

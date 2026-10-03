@@ -1,7 +1,8 @@
 // KPI推移グラフ画像をSlackに投稿するスクリプト（@slack/web-api利用）
 const fs = require('fs');
 const path = require('path');
-const { WebClient } = require('@slack/web-api');
+// @slack/web-api は optionalDependencies — 未導入環境での MODULE_NOT_FOUND を避けるため遅延 require。
+const { requireOptional } = require('./lib/optional-dep');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const SLACK_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -13,9 +14,9 @@ if (!SLACK_TOKEN || !SLACK_CHANNEL) {
   process.exit(1);
 }
 
-const web = new WebClient(SLACK_TOKEN);
-
 async function uploadGraph() {
+  const { WebClient } = requireOptional('@slack/web-api');
+  const web = new WebClient(SLACK_TOKEN);
   if (!fs.existsSync(FILE_PATH)) {
     console.log('KPI推移グラフがありません');
     return;

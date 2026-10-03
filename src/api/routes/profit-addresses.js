@@ -6,6 +6,7 @@ const jwtAuth = require('../middleware/jwt-auth');
 const rbac = require('../middleware/rbac');
 const { masterSession } = require('../middleware/master-session');
 const { requireMasterAuth } = require('./master-auth');
+const { asyncHandler } = require('../../utils/error-handler');
 const { logger } = require('../../utils/logger');
 
 // 運営利益受取アドレスは資金フローに直結するため、認証(JWT) + 管理者ロール(admin) に加え、
@@ -34,7 +35,7 @@ router.get('/', (req, res) => {
 });
 
 // 追加
-router.post('/', async (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ message: 'address required' });
   // 多層防御: ルート層でも構文検証し、無効入力は 400 で明確に拒否する
@@ -48,10 +49,10 @@ router.post('/', async (req, res) => {
   } catch (e) {
     res.status(500).json({ message: 'Failed to add address', error: maskError(e, 'Failed to add address') });
   }
-});
+}));
 
 // 削除
-router.delete('/', async (req, res) => {
+router.delete('/', asyncHandler(async (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ message: 'address required' });
   // POST と対称に DELETE でも構文検証: 攻撃者がパスを通る address="__proto__" 等の
@@ -65,6 +66,6 @@ router.delete('/', async (req, res) => {
   } catch (e) {
     res.status(500).json({ message: 'Failed to remove address', error: maskError(e, 'Failed to remove address') });
   }
-});
+}));
 
 module.exports = router;

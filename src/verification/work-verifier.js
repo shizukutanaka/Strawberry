@@ -99,7 +99,7 @@ function ternaryConsensus(outputs, opts = {}) {
 /**
  * ゼロ負荷課金の疑い検出（GPU profiling チェック, arXiv:2501.05374）。
  * ジョブ稼働中に取得した GPU 利用率サンプルが終始ほぼゼロなら「課金されたが実仕事なし」を疑う。
- * `src/gpu/gpu-metrics.js` 等で集めた利用率(%)系列を渡す想定。
+ * `src/gpu/metrics.js`（MetricsCollector）等で集めた利用率(%)系列を渡す想定。
  * @param {number[]} utilSamples 利用率(%)サンプル列
  * @param {{minUtilPct?: number, minActiveRatio?: number}} opts
  * @returns {{suspectedZeroLoad: boolean, activeRatio: number, samples: number}}

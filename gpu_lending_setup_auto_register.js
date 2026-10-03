@@ -11,6 +11,7 @@
 const os = require('os');
 const axios = require('axios');
 const { execSync } = require('child_process');
+const { AXIOS_SAFE_CONFIG } = require('./src/utils/http-safe-config');
 
 function detectPlatform() {
   const platform = os.platform();
@@ -108,7 +109,10 @@ async function autoRegisterGPU() {
     return;
   }
   try {
-    const res = await axios.post(`${API_URL}/api/v1/gpus`, gpuInfo, { headers: { Authorization: `Bearer ${TOKEN}` } });
+    const res = await axios.post(`${API_URL}/api/v1/gpus`, gpuInfo, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      ...AXIOS_SAFE_CONFIG,
+    });
     console.log('[SUCCESS] GPU登録:', res.data);
   } catch (e) {
     console.error('[ERROR] GPU登録失敗:', e.response?.data || e.message);

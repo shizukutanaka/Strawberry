@@ -6,13 +6,8 @@
 //    ディスクには _flushPending まで書かれない（I/O 削減の肝）
 //  - フラッシュは複数プロバイダーの差分を1回の updateMany で書き込む
 //  - フラッシュ時にレコードが消えていたプロバイダーは差分ごと再作成される
-const fs = require('fs');
-const path = require('path');
-
 const providerUptime = require('../../src/reputation/provider-uptime');
 const UptimeRepository = require('../../src/db/json/UptimeRepository');
-
-const UPTIME_PATH = path.resolve(__dirname, '../../data/uptime.json');
 
 function cleanupProviders(prefix) {
   for (const rec of UptimeRepository.getAll()) {

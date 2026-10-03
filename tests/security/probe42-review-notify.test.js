@@ -57,15 +57,13 @@ describe('renter-profile: ratingAverage clamped to [1, 5]', () => {
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
     );
-    // Probe74 fix: per-review clamping happens via validRatings.map(Math.min(5, Math.max(1, r))),
-    // applied only to Number.isFinite-validated ratings (invalid ratings excluded, not
-    // defaulted to 1). Averaging already-clamped [1,5] values can never leave [1,5], so an
-    // additional outer clamp on the final average is redundant and was removed.
+    // Probe74 fix → #233: 破損 rating はクランプで [1,5] へ畳むのではなく、書込み
+    // 経路と同じ検証（整数 1-5）で件数から除外する。整数1-5のみで平均する限り
+    // 平均が [1,5] を出ない点はクランプ時と同じ（外側クランプも不要）。
     const idx = src.indexOf("renterOrders = OrderRepository.getAll().filter(o => o.userId === userId && o.renterReview)");
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 700);
-    expect(block).toMatch(/Math\.min\(5,\s*Math\.max\(1,\s*r\)\)/);
-    expect(block).toMatch(/Number\.isFinite\(r\)/);
+    expect(block).toMatch(/Number\.isInteger\(r\)\s*&&\s*r >= 1 && r <= 5/);
   });
 
   it('user/index.js: raw renterReview.rating not used directly in sum without clamping', () => {

@@ -12,7 +12,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `npm run dev` | 開発起動（nodemon 再読み込み） |
 | `npm test` | 全テスト（jest --forceExit） |
 | `npm run coverage` | カバレッジ付きテスト（`coverage/coverage-summary.json` を生成） |
-| `npm run lint` | ESLint 全件走査 |
+| `npm run lint` | 全 .js ファイルの `node --check` 構文検査（eslint は依存に含まれないためゼロ依存実装） |
 | `npm run openapi` | `openapi.json` を実ルート走査から再生成 |
 | `npm run setup` | 新規環境の一括セットアップ（`npm ci` → openapi-gen → test） |
 
@@ -42,7 +42,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 
 - `GET /health` — 静的 `ok` + uptime。プロセス稼働確認用（LB / k8s probe 参照先）。
 - `GET /ready` — データ層の疎通を検証する readiness probe。
-- `GET /metrics` — Prometheus テキスト形式（Lightning チャネル容量・支払い失敗・キャッシュ等）。本番では `METRICS_AUTH_TOKEN` による Bearer 認証必須（未設定 → 503 fail-closed で非公開）。
+- `GET /metrics` — Prometheus テキスト形式（Lightning チャネル容量・支払い失敗・キャッシュ・vGPU 割当状況等）。本番では `METRICS_AUTH_TOKEN` による Bearer 認証必須（未設定 → 503 fail-closed で非公開）。vGPU 系: `vgpu_instances{status}`（available/allocating/allocated 等のインスタンス数）と `vgpu_allocations_active`（active アロケーション数）— 閾値超過アラートは Prometheus 側で `vgpu_allocations_active / sum(vgpu_instances)` 等のルールとして設定する。
 - 監査ログ — `src/utils/audit-log.js` がハッシュ連鎖の append-only ログを `logs/` 配下へ記録（改ざん検知用）。
 
 ## 運用スクリプト（`scripts/` → `npm run <name>`）

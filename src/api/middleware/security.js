@@ -13,6 +13,11 @@ const { safeTokenEqual } = require('../../utils/safe-compare');
 // 受理可否が食い違う（片方だけ旧鍵で検証する）ため必ず一元化すること。
 const { resolveSecret } = require('./jwt-auth');
 
+// 失効 jti の再提示でインシデント記録した jti（同一 jti の繰返しは stale client の
+// 通常リトライであることが多く、1 プロセスあたり一度だけ記録すれば攻撃シグナルを
+// 失わない。連続した別 jti の試行のみが証跡に並ぶ）。緩増殖は 10k で打ち切る。
+const _recordedRevokedJtis = new Set();
+
 // HSTSやXSS対策などのセキュリティヘッダー設定
 const securityHeaders = helmet({
   contentSecurityPolicy: {
@@ -133,6 +138,16 @@ const authenticateJWT = (req, res, next) => {
     // logout で失効済みのトークン(jti)を拒否（jwt-auth.js と同一ポリシー）
     const { isRevoked } = require('./token-denylist');
     if (decoded.jti && isRevoked(decoded.jti)) {
+      // 失効トークンの再提示は盗用・リプレイの兆候 — セキュリティインシデント証跡へ
+      if (!_recordedRevokedJtis.has(decoded.jti)) {
+        if (_recordedRevokedJtis.size >= 10000) _recordedRevokedJtis.clear();
+        _recordedRevokedJtis.add(decoded.jti);
+        try {
+          require('../../security/incident').recordIncident('revoked_token_reuse', {
+            userId: decoded.id, jti: decoded.jti, ip: req.ip,
+          });
+        } catch (_) { /* ログ失敗は認証拒否自体を妨げない */ }
+      }
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
     // パスワード変更・アカウント無効化後のトークンを拒否。

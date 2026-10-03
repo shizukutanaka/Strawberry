@@ -33,6 +33,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | service-monitor（Lightning/vGPU 等のヘルスチェック） | `SERVICE_MONITOR_INTERVAL_MS`（既定 10s） | `MONITOR_TARGETS`（監視 URL 一覧） |
 | invoice-poller（LN インボイス入金確認） | 15s | —（Lightning 未導入時は自動無効） |
 | 注文スイープ（heartbeat SLA・pending/matched/disputed/active の期限切れ処理） | 30s（order ルートモジュール内）+ 一覧/作成時の遅延スイープ | `ORDER_PENDING_TIMEOUT_MINUTES`, `ORDER_MATCHED_TIMEOUT_MINUTES`, `ORDER_DISPUTE_TIMEOUT_DAYS`, `ORDER_ACTIVE_TIMEOUT_HOURS` |
+| backup-scheduler（`data/*.json` の定期バックアップ） | `BACKUP_INTERVAL_HOURS`（時間単位） | `BACKUP_INTERVAL_HOURS`（0・未設定・不正値 = 無効） |
 
 期限切れ注文の手動スイープ（インシデント対応用）: `POST /api/v1/admin/expire-orders`（admin のみ）。
 
@@ -86,7 +87,7 @@ Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP 
 
 - `data/*.json` — JSON ファイルリポジトリの実データ（gitignore 済み）。破損時は fail-closed で起動/読み込みを中断するため、手動で `data/` を点検・復旧する。
 - `logs/*.log` — `access-audit.log`・`db-access.log`・`gpu-events.log`・ハッシュチェーン監査ログ（`AUDIT_LOG_PATH`）等、追記型（`logs/` 直下）。ローテーション機構はなく、ディスク使用量は外部で監視・退避する（`MAX_AUDIT_LOG_MB` は監査ログの上限）。
-- `backups/` — 手動バックアップ出力先。`src/utils/backup.js` が `backupAll`（`data/*.json` を `backups/` へ世代管理コピー + 任意でクラウド送信）と `restoreFromLatestBackup`（破損時に最新バックアップから復元。`p2p-sync.js` が使用）を提供する。`backupAll` の定期実行はコード上未配線のため、手動/cron で呼ぶ。任意クラウド送信は対応 SDK（`@aws-sdk/client-s3` 等）の導入が必要 — 現状 `cloud-storage.js` はこれらをトップレベル require するため、未導入環境では `require('./backup')` 自体が MODULE_NOT_FOUND で失敗する点に注意。
+- `backups/` — バックアップ出力先。`src/utils/backup.js` が `backupAll`（`data/*.json` を `backups/` へ世代管理コピー + 任意でクラウド送信）と `restoreFromLatestBackup`（破損時に最新バックアップから復元。`p2p-sync.js` が使用）を提供する。定期実行は `src/core/backup-scheduler.js` が `server.js` から起動し、`BACKUP_INTERVAL_HOURS` 設定時のみ有効（未設定なら無効 — 手動/cron で `backupAll` を呼ぶ運用も可能）。任意クラウド送信は対応 SDK（`@aws-sdk/client-s3` 等）の導入が必要だが、`cloud-storage.js` は遅延 require のため未導入環境でも `require('./backup')` 自体は成功し、クラウド送信の呼び出し時のみ手順付きエラーになる。
 
 ## 障害時の初動（推奨手順）
 

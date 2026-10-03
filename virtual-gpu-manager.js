@@ -1206,6 +1206,21 @@ nvidia-cuda-mps-control -d
         }
     }
 
+    // /metrics 用のスナップショット。Map を直接数えるだけで I/O を伴わないため、
+    // Prometheus のスクレイプごとに呼んでも安い。
+    getMetricsSnapshot() {
+        const byStatus = {};
+        for (const vgpu of this.virtualGPUs.values()) {
+            const status = (vgpu && vgpu.status) || 'unknown';
+            byStatus[status] = (byStatus[status] || 0) + 1;
+        }
+        let activeAllocations = 0;
+        for (const allocation of this.allocations.values()) {
+            if (allocation && allocation.status === 'active') activeAllocations++;
+        }
+        return { byStatus, activeAllocations };
+    }
+
     async shutdown() {
         logger.info('Shutting down Virtual GPU Manager...');
         

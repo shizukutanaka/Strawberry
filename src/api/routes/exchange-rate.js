@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const { getBTCtoJPYRate } = require('../../utils/exchange-rate');
+const { asyncHandler } = require('../../utils/error-handler');
 
 // 未認証エンドポイントなので独自レート制限を必ず掛ける。
 // 旧実装はグローバル apiLimiter より前にマウントされていたため
@@ -16,7 +17,7 @@ const _erLimiter = rateLimit({
 });
 
 // GET /api/exchange-rate
-router.get('/', _erLimiter, async (req, res) => {
+router.get('/', _erLimiter, asyncHandler(async (req, res) => {
   try {
     // ?fresh=true は管理者のみ。匿名ユーザーが繰り返しキャッシュを無視させると、
     // 1 リクエストあたり最大 4 つの外部 HTTPS 呼び出しを誘発でき上流プロバイダの
@@ -52,6 +53,6 @@ router.get('/', _erLimiter, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Failed to fetch exchange rate' : err.message });
   }
-});
+}));
 
 module.exports = router;

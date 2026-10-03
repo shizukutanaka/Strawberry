@@ -8,7 +8,10 @@
 // 手順が分かるエラーを投げる（呼び出し側は main().catch で表示する想定）。
 const fs = require('fs');
 const path = require('path');
-const { google } = require('googleapis');
+// googleapis は optionalDependencies — engines/プラットフォーム不一致で
+// npm が導入自体をスキップした環境でも、トップレベル require だと
+// MODULE_NOT_FOUND のスタックだけが出て対処手順が分からないため遅延 require。
+const { requireOptional } = require('./lib/optional-dep');
 
 const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
@@ -39,6 +42,7 @@ async function authorize(credentialsPath = CREDENTIALS_PATH, tokenPath = TOKEN_P
       'scripts/credentials.json の形式が不正です: installed/web 配下に client_id・client_secret が必要です'
     );
   }
+  const { google } = requireOptional('googleapis');
   const oAuth2Client = new google.auth.OAuth2(
     conf.client_id,
     conf.client_secret,

@@ -30,22 +30,38 @@ describe('computeRenterRating', () => {
     expect(r.average).toBe(2);
   });
 
-  it('clamps out-of-range ratings into [1,5]', () => {
+  it('skips out-of-range ratings instead of clamping into [1,5]', () => {
     const orders = [
-      { userId: 'renter', renterReview: { rating: 99 } },  // → 5
-      { userId: 'renter', renterReview: { rating: -3 } },  // → 1
+      { userId: 'renter', renterReview: { rating: 99 } },  // 破損 — 除外
+      { userId: 'renter', renterReview: { rating: -3 } },  // 破損 — 除外
+      { userId: 'renter', renterReview: { rating: 4 } },
     ];
     const r = computeRenterRating(orders, 'renter');
-    expect(r.average).toBe(3); // (5 + 1) / 2
+    // クランプ(5+1+4)/3=3.3 ではなく有効レコードのみ (4)/1
+    expect(r.count).toBe(1);
+    expect(r.average).toBe(4);
   });
 
-  it('treats a non-numeric rating as 1 (defensive)', () => {
+  it('skips non-numeric ratings instead of treating them as 1', () => {
     const orders = [
-      { userId: 'renter', renterReview: { rating: 'garbage' } }, // → 1
+      { userId: 'renter', renterReview: { rating: 'garbage' } }, // 破損 — 除外
+      { userId: 'renter', renterReview: { rating: null } },      // Number→0 — 除外
+      { userId: 'renter', renterReview: { rating: true } },      // Number→1 — 除外
       { userId: 'renter', renterReview: { rating: 5 } },
     ];
     const r = computeRenterRating(orders, 'renter');
-    expect(r.average).toBe(3);
+    // 破損値が 1 点として平均を押し下げない — 有効分のみ
+    expect(r.count).toBe(1);
+    expect(r.average).toBe(5);
+  });
+
+  it('reports no history when every stored rating is corrupt', () => {
+    const orders = [
+      { userId: 'renter', renterReview: { rating: 'x' } },
+      { userId: 'renter', renterReview: { rating: 0 } },
+    ];
+    const r = computeRenterRating(orders, 'renter');
+    expect(r).toEqual({ average: null, count: 0, hasHistory: false });
   });
 
   it('rounds the average to one decimal place', () => {

@@ -46,6 +46,28 @@ const channelCapacityGauge = new client.Gauge({ name: 'lightning_channel_total_c
 const paymentFailureCounter = new client.Counter({ name: 'lightning_payment_failure_total', help: 'Total number of payment failures' });
 const reconnectCounter = new client.Counter({ name: 'lightning_reconnect_total', help: 'Total number of Lightning gRPC reconnects' });
 
+// 仮想GPUプールの運用メトリクス（割当状況の可視化 — Prometheus/Grafana 向け）
+const vgpuStatusGauge = new client.Gauge({ name: 'vgpu_instances', help: 'Virtual GPU instances by status', labelNames: ['status'] });
+const vgpuActiveAllocationsGauge = new client.Gauge({ name: 'vgpu_allocations_active', help: 'Virtual GPU allocations currently active' });
+
+function updateVgpuMetrics() {
+  // vgpuManager は任意依存（docker/k8s 不在環境では null）
+  const { vgpuManager } = require('../core/services');
+  if (!vgpuManager || typeof vgpuManager.getMetricsSnapshot !== 'function') return;
+  const snapshot = vgpuManager.getMetricsSnapshot();
+  // 消えた status の時系列を残さないため一旦リセットしてから全件 set する
+  vgpuStatusGauge.reset();
+  for (const [status, count] of Object.entries(snapshot.byStatus)) {
+    vgpuStatusGauge.set({ status }, count);
+  }
+  vgpuActiveAllocationsGauge.set(snapshot.activeAllocations);
+}
+
+async function updateOperationalMetrics() {
+  await updateLightningMetrics();
+  updateVgpuMetrics();
+}
+
 // メトリクス更新関数
 async function updateLightningMetrics() {
   if (lightningService && lightningService.channels) {
@@ -65,11 +87,11 @@ async function updateLightningMetrics() {
 // 135 スイート分積み上がると 10 秒周期の Lightning メトリクス更新が延々と
 // 発火し、後続スイートの supertest リクエストが 30 秒のテストタイムアウトを
 // 超える（単体実行では PASS するのに全体実行だけ落ちる、の原因）。
-// /metrics ハンドラは毎回 updateLightningMetrics() を await するので、
+// /metrics ハンドラは毎回 updateOperationalMetrics() を await するので、
 // このタイマーが無くてもテストのメトリクス値は正しい。
 const metricsInterval = process.env.NODE_ENV === 'test'
   ? null
-  : setInterval(updateLightningMetrics, 10000);
+  : setInterval(updateOperationalMetrics, 10000);
 if (metricsInterval && metricsInterval.unref) metricsInterval.unref();
 
 // Expressアプリケーション初期化
@@ -80,9 +102,6 @@ const PORT = config.server.port || 3000;
 const { cacheHitCounter, cacheMissCounter, cachePurgeCounter } = require('./middleware/cache');
 // サービス死活監視モジュール（setServices/startMonitor を使用前に require する: TDZ回避）
 const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } = require('../core/service-monitor');
-
-// 新規為替レートAPIルート
-app.use('/api/exchange-rate', exchangeRateRouter);
 
 // コアサービス参照のセットと監視起動
 try {
@@ -136,6 +155,18 @@ try {
   logger.warn(`backup-scheduler: failed to start: ${e.message}`);
 }
 
+// vGPU コンテナの自動修復（GPU_AUTO_HEAL_INTERVAL_MS 設定時のみ有効。
+// 連続プローブ失敗で release→destroy→再作成→再割当を行う。テスト抑止は内部で実施）
+try {
+  const { vgpuManager } = require('../core/services');
+  if (vgpuManager) {
+    const GpuRepository = require('../db/json/GpuRepository');
+    require('../gpu/gpu-auto-heal').startGpuAutoHeal(vgpuManager, { gpuRepository: GpuRepository });
+  }
+} catch (e) {
+  logger.warn(`gpu-auto-heal: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
@@ -158,7 +189,7 @@ app.get('/metrics', apiLimiter, (req, res, next) => {
   }
   next();
 }, async (req, res) => {
-  await updateLightningMetrics();
+  await updateOperationalMetrics();
   // cacheHitCounter, cacheMissCounter, cachePurgeCounterはprom-clientに自動登録されている
   res.set('Content-Type', client.register.contentType);
   res.end(await client.register.metrics());
@@ -295,11 +326,15 @@ app.use('/master-auth', masterAuthRouter.router);
 // 運営利益受取アドレス管理（admin 認証必須。ルータ側で jwtAuth + rbac('admin') を適用）
 app.use('/api/profit-addresses', profitAddressesRouter);
 
+// 為替レート API。ミドルウェア群より前にマウントされていると、時限データである
+// レート応答が no-store/セキュリティヘッダーなしで配信され、ブラウザや中間
+// キャッシュが陳腐なレートを返し続けうる（その他のルートと同じ処遇を受ける位置へ）。
+app.use('/api/exchange-rate', exchangeRateRouter);
+
 // SLA 稼働率・障害履歴 API（GET /api/sla = JWT、GET /api/anomalies = admin。
 // sla-tracker が data/sla.json へ集計する稼働率の配信経路 — ルータは実装済み
 // だったがどこにも mount されていなかった）
 app.use('/api', require('./sla').router);
-
 // リクエストロギング
 app.use(responseTime);
 app.use(requestLogger);

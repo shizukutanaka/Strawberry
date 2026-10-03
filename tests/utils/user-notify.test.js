@@ -82,10 +82,13 @@ describe('loadAllSettings', () => {
     _resetSettingsCache();
   });
 
+  // stat 指紋は (mtimeMs:size)。連続 write が同一ミリ秒＋同サイズだと
+  // 指紋が不変でキャッシュミスが起きない（速度の速い環境でフレーク）ため、
+  // 呼出ごとに確実に増える mtime を使う。
+  let writeSeq = 0;
   const writeSettings = (obj) => {
     fs.writeFileSync(settingsPath, JSON.stringify(obj));
-    // stat 指紋 (mtimeMs:size) の確実な差分のため mtime を未来へずらす
-    const future = new Date(Date.now() + 10_000);
+    const future = new Date(Date.now() + 10_000 + writeSeq++ * 1_000);
     fs.utimesSync(settingsPath, future, future);
   };
 

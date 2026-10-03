@@ -1,16 +1,15 @@
 // 優先度付きフィードバックをNotion進捗ボードに転記（@notionhq/client利用）
 const fs = require('fs');
 const path = require('path');
-const { Client } = require('@notionhq/client');
+// @notionhq/client は optionalDependencies — 未導入環境での MODULE_NOT_FOUND を避けるため遅延 require。
+const { requireOptional } = require('./lib/optional-dep');
 const { readJsonArray } = require('./lib/read-json');
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_DB_ID = process.env.NOTION_DB_ID;
 const PRIORITY_FILE = path.join(__dirname, '../docs/feedback-priority.json');
 
-const notion = new Client({ auth: NOTION_TOKEN });
-
-async function addFeedbackToNotion(feedback) {
+async function addFeedbackToNotion(feedback, notion) {
   await notion.pages.create({
     parent: { database_id: NOTION_DB_ID },
     properties: {
@@ -29,8 +28,10 @@ async function main() {
   }
   if (!fs.existsSync(PRIORITY_FILE)) return;
   const feedbacks = readJsonArray(PRIORITY_FILE);
+  const { Client } = requireOptional('@notionhq/client');
+  const notion = new Client({ auth: NOTION_TOKEN });
   for (const fb of feedbacks) {
-    await addFeedbackToNotion(fb);
+    await addFeedbackToNotion(fb, notion);
   }
   console.log('Notion進捗ボードに転記しました。');
 }

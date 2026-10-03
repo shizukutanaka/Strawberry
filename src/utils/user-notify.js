@@ -102,4 +102,4 @@ function notifyUser(userId, eventType, message, extraOptions = {}) {
   return channels.length;
 }
 
-module.exports = { notifyUser, resolveChannels, _resetSettingsCache };
+module.exports = { notifyUser, resolveChannels, _resetSettingsCache, _loadAllSettings: loadAllSettings };

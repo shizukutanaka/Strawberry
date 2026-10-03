@@ -9,7 +9,7 @@ jest.mock('../../src/utils/anomaly-detector', () => ({ reportAnomaly: jest.fn() 
 const OrderRepository = require('../../src/db/json/OrderRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
 const PaymentRepository = require('../../src/db/json/PaymentRepository');
-const { monitorAndRecover, startGpuMonitor, stopGpuMonitor } = require('../../src/utils/gpu-monitor');
+const { monitorAndRecover, startGpuMonitor, stopGpuMonitor, resolveIntervalMs } = require('../../src/utils/gpu-monitor');
 
 describe('gpu-monitor monitorAndRecover', () => {
   it('死活応答の無い GPU の active 注文を cancelled へ落とし支払いを refunded にする', async () => {
@@ -49,14 +49,49 @@ describe('gpu-monitor monitorAndRecover', () => {
 
 describe('gpu-monitor タイマー', () => {
   it('startGpuMonitor は unref 済みタイマーを返し多重起動せず stopGpuMonitor で止まる', () => {
-    const t1 = startGpuMonitor();
+    const opts = { intervalMs: 60 * 1000, allowInTest: true };
+    const t1 = startGpuMonitor(opts);
     expect(t1.hasRef()).toBe(false);
-    const t2 = startGpuMonitor();
+    const t2 = startGpuMonitor(opts);
     expect(t2).toBe(t1);
     stopGpuMonitor();
     // 再始動できる（新しいタイマーが返る）
-    const t3 = startGpuMonitor();
+    const t3 = startGpuMonitor(opts);
     expect(t3).not.toBe(t1);
     stopGpuMonitor();
+  });
+});
+
+describe('gpu-monitor 起動条件（opt-in）', () => {
+  it('GPU_MONITOR_INTERVAL_MS 未設定/0/不正値/非正では disabled', () => {
+    expect(resolveIntervalMs({})).toBe(0);
+    expect(resolveIntervalMs({ GPU_MONITOR_INTERVAL_MS: '' })).toBe(0);
+    expect(resolveIntervalMs({ GPU_MONITOR_INTERVAL_MS: 'abc' })).toBe(0);
+    expect(resolveIntervalMs({ GPU_MONITOR_INTERVAL_MS: '0' })).toBe(0);
+    expect(resolveIntervalMs({ GPU_MONITOR_INTERVAL_MS: '-60000' })).toBe(0);
+  });
+
+  it('有効値はミリ秒として解釈される', () => {
+    expect(resolveIntervalMs({ GPU_MONITOR_INTERVAL_MS: '60000' })).toBe(60000);
+  });
+
+  it('環境変数未設定では startGpuMonitor は null を返す（opt-in）', () => {
+    const prev = process.env.GPU_MONITOR_INTERVAL_MS;
+    delete process.env.GPU_MONITOR_INTERVAL_MS;
+    try {
+      expect(startGpuMonitor()).toBeNull();
+    } finally {
+      if (prev !== undefined) process.env.GPU_MONITOR_INTERVAL_MS = prev;
+    }
+  });
+
+  it('NODE_ENV=test では allowInTest なしでは起動しない', () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'test';
+    try {
+      expect(startGpuMonitor({ intervalMs: 1000 })).toBeNull();
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
   });
 });

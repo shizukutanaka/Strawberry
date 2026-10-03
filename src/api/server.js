@@ -136,6 +136,15 @@ try {
   logger.warn(`backup-scheduler: failed to start: ${e.message}`);
 }
 
+// GPU 死活監視・自動リカバリの定期実行（GPU_MONITOR_INTERVAL_MS 設定時のみ有効。
+// 注文取消・返金マークを伴うため opt-in。gpu-monitor は実装済みだが起動されておらず
+// GPU 障害時の自動復旧経路が存在しなかった）
+try {
+  require('../utils/gpu-monitor').startGpuMonitor();
+} catch (e) {
+  logger.warn(`gpu-monitor: failed to start: ${e.message}`);
+}
+
 // /metricsエンドポイント（Prometheus スクレイプ用）。
 // Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。

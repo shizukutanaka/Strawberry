@@ -7,7 +7,18 @@ const { appendAuditLog } = require('./audit-log');
 const { reportAnomaly } = require('./anomaly-detector');
 const { logger } = require('./logger');
 
-const CHECK_INTERVAL = 60 * 1000; // 1分ごと
+// GPU_MONITOR_INTERVAL_MS の解釈。0/未設定/不正値は「無効」を返す。
+// 自動リカバリは注文取消・返金マークを伴うため既定では無効（opt-in 起動）。
+function resolveIntervalMs(env) {
+  const raw = env.GPU_MONITOR_INTERVAL_MS;
+  if (raw === undefined || raw === null || raw === '') return 0;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    logger.warn(`gpu-monitor: invalid GPU_MONITOR_INTERVAL_MS="${raw}" — disabled`);
+    return 0;
+  }
+  return Math.round(ms);
+}
 
 async function monitorAndRecover() {
   const orders = await getOrders();
@@ -45,7 +56,16 @@ async function monitorAndRecover() {
 let _monitorTimer = null;
 let _monitorInFlight = false;
 
-function startGpuMonitor() {
+// 定期監視を開始する。返り値はタイマー（無効時は null）。
+// options:
+//   intervalMs   — 直接指定（省略時は GPU_MONITOR_INTERVAL_MS から解決）
+//   allowInTest  — NODE_ENV=test でも起動を許可（テスト用）
+function startGpuMonitor(options = {}) {
+  const intervalMs = options.intervalMs !== undefined
+    ? options.intervalMs
+    : resolveIntervalMs(process.env);
+  if (intervalMs <= 0) return null;
+  if (process.env.NODE_ENV === 'test' && !options.allowInTest) return null;
   if (_monitorTimer) return _monitorTimer; // 多重起動防止
   // monitorAndRecover が 60 秒を超えて走り続けた場合の tick 重なりを防ぐ
   _monitorTimer = setInterval(() => {
@@ -54,9 +74,10 @@ function startGpuMonitor() {
     Promise.resolve(monitorAndRecover())
       .catch(err => logger.error('[gpu-monitor] monitor tick failed:', err))
       .finally(() => { _monitorInFlight = false; });
-  }, CHECK_INTERVAL);
+  }, intervalMs);
   // unref: 監視タイマーがプロセス終了を妨げない
   if (_monitorTimer.unref) _monitorTimer.unref();
+  logger.info(`gpu-monitor: started (every ${Math.round(intervalMs / 1000)}s)`);
   return _monitorTimer;
 }
 
@@ -67,4 +88,4 @@ function stopGpuMonitor() {
   }
 }
 
-module.exports = { startGpuMonitor, stopGpuMonitor, monitorAndRecover };
+module.exports = { startGpuMonitor, stopGpuMonitor, monitorAndRecover, resolveIntervalMs };

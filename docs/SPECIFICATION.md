@@ -29,7 +29,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 | **Escrow** | orderId, invoice, state, history, deadline | EscrowRepository | 🟡(on-chain BTC 支払い・marketplace/escrow/* へ配線済。LN hold-invoice 実機連携は未) |
 | **Verification record** | jobId, audited, outputs, consensus, verdict | VerificationRepository | 🟡(admin 閲覧 API `/admin/verifications` 配線済。実ジョブ収集フローは未) |
 
-> データ層は JSON のみ稼働。Prisma/pg/knex は未配線（三重化, `ARCHITECTURE.md`）。並行書込み保護なし=🟡。
+> データ層は JSON のみ稼働。Prisma/pg/knex は未配線（三重化, `ARCHITECTURE.md`）。書込みは `withLock` 直列化・`updateIf` CAS・`atomicWriteJSON` でプロセス内は保護済み。クロスプロセスのファイルロックのみ未=🟡。
 
 ## 3. API 仕様（実装ベース）
 
@@ -55,7 +55,7 @@ P2P GPU マーケットプレイス＋BTC Lightning 決済。本書は**ある�
 
 ### F1. 出品 → 検索 → 注文 → 決済
 1. 出品: Provider が GPU を登録 … 🟡 Mock アテステーション検証を登録フローへ配線済（`gpu-attestation-verifier`、nvtrust 実機連携は未・カテゴリ3）
-2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 `feature-pricer` は `marketplace-service.computePrice` 経由で配線済（marketplace/quote, rank）。需給連動 engine（`market-pricing-engine`）は未配線
+2. 価格: 現状 `pricePerHour/12` のフラット … 🟡 `feature-pricer` は `marketplace-service.computePrice` 経由で配線済（marketplace/quote, rank）。需給連動 engine（`market-pricing-engine`）は estimate エンドポイントへ advisory 配線済
 3. マッチング: 単純検索/ソート … ✅ **逆オークション実装済**（`src/marketplace/auction-engine.js`、Akash/Golem 型。価格・レピュテーション・SLA・アテステーションを統合した効用スコアで勝者選定。`selectProvider`／`POST /api/v1/marketplace/auction`、price-ratio 正規化）
 4. 決済: 直接二段送金 `btc-payment.sendBTC` … ✅→🟡 **エスクロー実装済**（`payment/btc-onchain.js` の注文支払いと `marketplace/escrow/*` で EscrowRepository を駆動。LN hold-invoice 実機連携のみ未）
 5. 稼働: `virtual-gpu-manager` でコンテナ割当 … 🟡（要 Docker/k8s 実機）

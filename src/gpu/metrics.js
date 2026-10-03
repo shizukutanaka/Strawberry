@@ -629,54 +629,52 @@ class MetricsCollector {
     }
 
     // ヘルパーメソッド
+    // prom-client v15 では各メトリクスの get() が {} を返し、実値は
+    // hashMap のラベル別エントリ（{ value, labels }）に保持される。
+    // 旧実装の metric.get().values 参照は全て空 → サマリーが常に 0 だった。
     calculateAverage(metricName) {
         const metric = this.register.getSingleMetric(metricName);
-        if (!metric) return 0;
+        if (!metric || !metric.hashMap) return 0;
 
-        const values = metric.get();
-        if (values.values) {
-            const sum = values.values.reduce((acc, v) => acc + v.value, 0);
-            return values.values.length > 0 ? sum / values.values.length : 0;
-        }
-        return 0;
+        const entries = Object.values(metric.hashMap);
+        const values = entries.map(e => e.value).filter(v => typeof v === 'number');
+        return values.length > 0 ? values.reduce((acc, v) => acc + v, 0) / values.length : 0;
     }
 
     getGaugeValue(metricName, labels = {}) {
         const metric = this.register.getSingleMetric(metricName);
-        if (!metric) return 0;
+        if (!metric || !metric.hashMap) return 0;
 
-        const values = metric.get();
-        if (values.values) {
-            const value = values.values.find(v => {
-                return Object.entries(labels).every(([key, val]) => v.labels[key] === val);
-            });
-            return value ? value.value : 0;
-        }
-        return 0;
+        const entry = Object.values(metric.hashMap).find(e =>
+            Object.entries(labels).every(([key, val]) => e.labels[key] === val)
+        );
+        return entry && typeof entry.value === 'number' ? entry.value : 0;
     }
 
     getCounterValue(metricName) {
         const metric = this.register.getSingleMetric(metricName);
-        if (!metric) return 0;
+        if (!metric || !metric.hashMap) return 0;
 
-        const values = metric.get();
-        if (values.values) {
-            return values.values.reduce((acc, v) => acc + v.value, 0);
-        }
-        return 0;
+        return Object.values(metric.hashMap)
+            .map(e => e.value)
+            .filter(v => typeof v === 'number')
+            .reduce((acc, v) => acc + v, 0);
     }
 
     calculateHistogramAverage(metricName) {
         const metric = this.register.getSingleMetric(metricName);
         if (!metric) return 0;
 
-        const values = metric.get();
-        if (values.values && values.values.length > 0) {
-            const sum = values.values[0].metricName.includes('sum') ? values.values[0].value : 0;
-            const count = values.values[0].metricName.includes('count') ? values.values[0].value : 0;
-            return count > 0 ? sum / count : 0;
+        // prom-client v15 では histogram の get() が {} を返し、観測値は
+        // hashMap のラベル別エントリ（sum/count）に保持される。全ラベルを合算し
+        // 加重平均を返す。旧実装の values.values[0] 参照は常に 0 を返していた。
+        if (!metric.hashMap) return 0;
+        let sum = 0, count = 0;
+        for (const entry of Object.values(metric.hashMap)) {
+            if (typeof entry.sum === 'number') sum += entry.sum;
+            if (typeof entry.count === 'number') count += entry.count;
         }
-        return 0;
+        return count > 0 ? sum / count : 0;
     }
 
     updateActiveRentals() {

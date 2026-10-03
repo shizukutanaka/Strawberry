@@ -209,6 +209,7 @@ const { logger } = require('../../../utils/logger');
 const { appendAuditLog } = require('../../../utils/audit-log');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 const { withLock } = require('../../../utils/async-lock');
+const { incrementDisputeCount } = require('../../utils/user-dispute-count');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
 const { p2pNetwork, vgpuManager, requireService } = require('../../../core/services');
@@ -1441,11 +1442,7 @@ router.post('/:id/dispute/resolve',
       const vRaiser = order.dispute && order.dispute.raisedBy;
       if (vRaiser) {
         try {
-          const UserRepository = require('../../../db/json/UserRepository');
-          const u = UserRepository.getById(vRaiser);
-          if (u) {
-            UserRepository.update(vRaiser, { vindicatedDisputeCount: (u.vindicatedDisputeCount || 0) + 1 });
-          }
+          await incrementDisputeCount(vRaiser, 'vindicatedDisputeCount');
         } catch (e) {
           logger.warn(`vindicated-dispute accounting failed (raiser=${vRaiser}): ${e.message}`);
         }
@@ -1506,11 +1503,7 @@ router.post('/:id/dispute/resolve',
       const raiser = order.dispute && order.dispute.raisedBy;
       if (raiser) {
         try {
-          const UserRepository = require('../../../db/json/UserRepository');
-          const u = UserRepository.getById(raiser);
-          if (u) {
-            UserRepository.update(raiser, { deniedDisputeCount: (u.deniedDisputeCount || 0) + 1 });
-          }
+          await incrementDisputeCount(raiser, 'deniedDisputeCount');
         } catch (e) {
           logger.warn(`denied-dispute accounting failed (raiser=${raiser}): ${e.message}`);
         }

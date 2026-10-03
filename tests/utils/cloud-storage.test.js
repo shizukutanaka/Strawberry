@@ -7,10 +7,22 @@ const path = require('path');
 
 const FIXTURE = path.join(__dirname, 'cloud-storage-fixture.txt');
 
+// { virtual: true } はモジュールが解決できない環境でのみ必要。
+// インストール済みモジュールに付けると、ワーカー内で共有される jest の
+// moduleID キャッシュ経由で別テストファイルの実 require が優先され、
+// 実行順序によってモックが効かず実 SDK が読み込まれる（再現: backup.test.js
+// の実 googleapis 呼出の後に本ファイルが走ると uploadToGoogleDrive が実
+// SDK に到達し、fixture の ReadStream が未処理 error でワーカーを落とす）。
+function doMockDep(name, factory) {
+  let resolvable = true;
+  try { require.resolve(name); } catch (_) { resolvable = false; }
+  jest.doMock(name, factory, { virtual: !resolvable });
+}
+
 function loadWithMocks(mocks) {
   jest.resetModules();
   for (const [name, factory] of Object.entries(mocks)) {
-    jest.doMock(name, factory, { virtual: true });
+    doMockDep(name, factory);
   }
   return require('../../src/utils/cloud-storage');
 }
@@ -47,7 +59,7 @@ describe('uploadToS3 (aws-sdk present)', () => {
     const FakeS3 = class {
       upload(params) { captured = params; return { promise: async () => ({ Location: 'https://s3.example/key' }) }; }
     };
-    jest.doMock('aws-sdk', () => ({ S3: FakeS3 }), { virtual: true });
+    doMockDep('aws-sdk', () => ({ S3: FakeS3 }));
     jest.resetModules();
     const cs = require('../../src/utils/cloud-storage');
 
@@ -64,7 +76,7 @@ describe('uploadToS3 (aws-sdk present)', () => {
 
   it('propagates fs read errors for a missing local file', async () => {
     const FakeS3 = class { upload() { return { promise: async () => ({}) }; } };
-    jest.doMock('aws-sdk', () => ({ S3: FakeS3 }), { virtual: true });
+    doMockDep('aws-sdk', () => ({ S3: FakeS3 }));
     jest.resetModules();
     const cs = require('../../src/utils/cloud-storage');
     await expect(cs.uploadToS3('/nonexistent/nope', 'k')).rejects.toThrow();

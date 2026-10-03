@@ -241,6 +241,25 @@ logger.performanceMetric = (metric, value, metadata = {}) => {
 };
 
 // エラーレポート機能
+// error-reports/ は障害調査用のスナップショット群。1 レポート = 1 ファイルで
+// 上限なく蓄積すると、エラー連発・長期稼働でディスクを埋めるため新規書込みごとに
+// 古い順に刈る（utils/log-rotate の世代管理と同じ設計思想）。
+const MAX_ERROR_REPORTS = 100;
+let _reportSeq = 0;
+
+function _pruneErrorReports(reportDir) {
+    try {
+        const files = fs.readdirSync(reportDir)
+            .filter(f => f.startsWith('error-') && f.endsWith('.json'))
+            .sort();
+        const excess = files.length - MAX_ERROR_REPORTS;
+        if (excess <= 0) return;
+        for (const f of files.slice(0, excess)) {
+            try { fs.unlinkSync(path.join(reportDir, f)); } catch (_) { /* 競合削除は無視 */ }
+        }
+    } catch (_) { /* 刈り取り失敗はレポート書込みを阻害しない */ }
+}
+
 logger.reportError = async (error, context = {}) => {
     const errorReport = {
         timestamp: new Date().toISOString(),
@@ -258,21 +277,26 @@ logger.reportError = async (error, context = {}) => {
             uptime: process.uptime()
         }
     };
-    
+
     // エラーレポートファイルに保存
-    const reportPath = path.join(logDir, 'error-reports', `error-${Date.now()}.json`);
-    const reportDir = path.dirname(reportPath);
-    
+    // uncaughtException パスでは直後に process.exit(1) が走るため、非同期 writeFile
+    // ではキュー滞留のままレポートが書かれずに終了する。同期書込みにして
+    // クラッシュ直前の最重要レポートが確実に残るようにする。
+    const reportDir = path.join(logDir, 'error-reports');
+    const reportPath = path.join(reportDir, `error-${Date.now()}-${(_reportSeq++) & 0xffff}.json`);
+
     try {
         if (!fs.existsSync(reportDir)) {
             fs.mkdirSync(reportDir, { recursive: true });
         }
-        
-        await fs.promises.writeFile(
+
+        fs.writeFileSync(
             reportPath,
             JSON.stringify(errorReport, null, 2)
         );
-        
+
+        _pruneErrorReports(reportDir);
+
         logger.error('Error reported:', errorReport);
         
         // 本番環境では外部エラー追跡サービスに送信
@@ -314,7 +338,13 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
     logger.error('Unhandled Rejection:', reason);
-    logger.reportError(new Error(reason), { 
+    // reason は Error とは限らない（throw 'str' / Promise.reject({})）。
+    // new Error(オブジェクト) だと message が '[object Object]' 等になり
+    // 原因が残らないため、元の値をそのまま記録する。
+    const err = reason instanceof Error ? reason : new Error(
+        typeof reason === 'string' ? reason : (() => { try { return JSON.stringify(reason); } catch (_) { return String(reason); } })()
+    );
+    logger.reportError(err, {
         type: 'unhandledRejection',
         promise: promise.toString()
     });

@@ -15,11 +15,38 @@ function makeTmp(filePath) {
   return `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
 }
 
+// A hard kill between openSync and renameSync orphans a
+// `<file>.<pid>.<rand>.tmp` sibling that the dead writer will never rename —
+// and the error path only unlinks on a CAUGHT error, so crash orphans
+// accumulate over time (observed in logs/). Reap `.tmp` siblings older than
+// STALE_TMP_MS. Amortized: at most one directory scan per SWEEP_MS per dir.
+const _lastSweep = new Map();
+const STALE_TMP_MS = 10 * 60 * 1000;
+const SWEEP_MS = 60 * 1000;
+
+function sweepStaleTmps(dir, filePath) {
+  const now = Date.now();
+  if ((_lastSweep.get(dir) || 0) > now - SWEEP_MS) return;
+  if (_lastSweep.size > 200) _lastSweep.clear();
+  _lastSweep.set(dir, now);
+  const prefix = `${path.basename(filePath)}.`;
+  let names;
+  try { names = fs.readdirSync(dir); } catch (_) { return; }
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith('.tmp')) continue;
+    const p = path.join(dir, name);
+    try {
+      if (now - fs.statSync(p).mtimeMs > STALE_TMP_MS) fs.unlinkSync(p);
+    } catch (_) {}
+  }
+}
+
 // Write `content` to a temp file, fsync it to disk, atomically rename onto
 // `filePath`, then fsync the directory so the rename itself is durable.
 function durableWrite(filePath, content) {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
+  sweepStaleTmps(dir, filePath);
   const tmp = makeTmp(filePath);
   let fd;
   try {

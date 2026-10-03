@@ -528,7 +528,10 @@ class MarketPricingEngine extends EventEmitter {
      * 定期更新
      */
     startPeriodicUpdates() {
-        setInterval(() => {
+        // 再初期化（initialize() 再呼出し）でインターバルが積み上がらないよう既存を解除
+        this.stopPeriodicUpdates();
+
+        this._periodicTimer = setInterval(() => {
             // キャッシュクリーンアップ
             const now = Date.now();
             for (const [key, cached] of this.priceCache) {
@@ -536,11 +539,21 @@ class MarketPricingEngine extends EventEmitter {
                     this.priceCache.delete(key);
                 }
             }
-            
+
             // 市場データ更新（実装は実際のデータソースに依存）
             this.updateMarketData();
-            
+
         }, this.config.updateInterval);
+
+        // デーモンタイマーがプロセス終了を妨げないようにする
+        if (this._periodicTimer.unref) this._periodicTimer.unref();
+    }
+
+    stopPeriodicUpdates() {
+        if (this._periodicTimer) {
+            clearInterval(this._periodicTimer);
+            this._periodicTimer = null;
+        }
     }
 
     /**

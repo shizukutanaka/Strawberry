@@ -72,8 +72,12 @@ describe('createIssues', () => {
         },
       },
     };
-    // @octokit/rest は optionalDependencies かつローカル未導入のため virtual モック
-    jest.doMock('@octokit/rest', () => ({ Octokit: function () { return fake; } }), { virtual: true });
+    // @octokit/rest が解決できる環境では virtual モックにしない。virtual は
+    // 解決不能モジュール専用で、実在モジュールに付けるとワーカー共有の
+    // moduleID キャッシュ経由で実行順序依存のモックミスが起きる。
+    let octokitResolvable = true;
+    try { require.resolve('@octokit/rest'); } catch (_) { octokitResolvable = false; }
+    jest.doMock('@octokit/rest', () => ({ Octokit: function () { return fake; } }), { virtual: !octokitResolvable });
     const file = path.join(dir, 'cl.md');
     fs.writeFileSync(file, '- [ ] 既存タスク\n- [ ] 新規A\n- [ ] 落ちる\n- [ ] 新規B\n');
     process.env.CHECKLIST_ISSUES_PATH = file;

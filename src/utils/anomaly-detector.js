@@ -4,6 +4,7 @@ const path = require('path');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const { withLock } = require('./async-lock');
 const { logger } = require('./logger');
+const { appendRotated } = require('./log-rotate');
 const { resilientNotify } = require('./resilient-notify');
 const { appendAuditLog } = require('./audit-log');
 
@@ -28,7 +29,7 @@ function reportAnomaly(type, detail = {}) {
   // ログ書き込み失敗（ディスクフル等）が報告呼び出しを殺さないようガードする。
   try {
     ensureLogDir();
-    fs.appendFileSync(ANOMALY_LOG_PATH, JSON.stringify(entry) + '\n');
+    appendRotated(ANOMALY_LOG_PATH, JSON.stringify(entry) + '\n');
   } catch (e) {
     logger.warn(`[Anomaly] failed to append anomaly.log: ${e.message}`);
   }

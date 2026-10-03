@@ -3,13 +3,14 @@ const { exec } = require('child_process');
 const { sendNotification, NotifyType } = require('./utils/notifier');
 const fs = require('fs');
 const path = require('path');
+const { appendRotated } = require('./utils/log-rotate');
 
 const LOG_PATH = path.join(__dirname, '../logs/security-audit.log');
 
 function logAudit(event) {
   try {
     fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-    fs.appendFileSync(LOG_PATH, JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n');
+    appendRotated(LOG_PATH, JSON.stringify({ ...event, time: new Date().toISOString() }) + '\n');
   } catch (e) {}
 }
 

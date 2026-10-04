@@ -92,6 +92,21 @@ transports.push(
     })
 );
 
+// ファイルトランスポートの書込みエラー（ログdir削除・ENOSPC・EACCES 等）を
+// 未ハンドルの 'error' イベントでプロセスを殺さず console 警告へ格下げする。
+// DailyRotateFile 内部の rotator ストリーム（t.logStream）にもリスナーが無いため両方に付ける。
+const onLogStreamError = (err) => {
+    try { console.warn(`[logger] file transport error: ${err && err.message}`); } catch (_) {}
+};
+for (const t of transports) {
+    if (t instanceof DailyRotateFile) {
+        t.on('error', onLogStreamError);
+        if (t.logStream && typeof t.logStream.on === 'function') {
+            t.logStream.on('error', onLogStreamError);
+        }
+    }
+}
+
 // Logger インスタンス作成
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',

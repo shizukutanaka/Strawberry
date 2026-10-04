@@ -18,6 +18,9 @@ describe('core/logger reportError', () => {
 
   afterEach(() => {
     delete process.env.LOG_DIR;
+    // DailyRotateFile のストリームを閉じてから dir を消す — 閉じずに消すと
+    // 次回書込みで ENOENT の unhandled 'error' が飛びワーカーが落ちる
+    try { logger.close(); } catch (_) {}
     fs.rmSync(tmpLogDir, { recursive: true, force: true });
   });
 

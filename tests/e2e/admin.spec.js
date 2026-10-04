@@ -16,7 +16,8 @@ test.describe('admin dashboard', () => {
     // 統計カード（ユーザー/GPU/注文/GMV）が描画される
     await expect(page.locator('text=累計GMV')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=検証監査')).toBeVisible();
-    await expect(page.locator('text=エスクロー')).toBeVisible();
+    // h2 セクション見出しを厳密指定 — 空状態の「エスクローはありません」も部分一致するため
+    await expect(page.getByRole('heading', { name: 'エスクロー', exact: true })).toBeVisible();
     // 検証/エスクローはデータなし → 空状態、またはデータテーブルのどちらか
     await expect(page.locator('.empty-state, table.data-table').first()).toBeVisible({ timeout: 5000 });
     expect(consoleErrors, `Unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([]);

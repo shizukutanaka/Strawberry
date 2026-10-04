@@ -6,6 +6,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const { logger } = require('./src/utils/logger');
+const { appendAuditLog } = require('./src/utils/audit-log');
+const { schemas } = require('./src/utils/validator');
 
 // unary RPC に既定 deadline を付けるチャネルオプションを構築する
 // （gRPC service config の methodConfig.timeout）。deadline 未設定だと、LND が
@@ -116,7 +118,6 @@ class LightningService extends EventEmitter {
 
     // gRPC自動再接続（指数バックオフ付）＋障害監査証跡・外部通知対応
     async connectToLND(maxRetries = process.env.NODE_ENV === 'test' ? 0 : 5, notifyOnError = true) {
-        const { appendAuditLog } = require('./src/utils/audit-log');
         let attempt = 0;
         let lastError = null;
         const backoff = (n) => Math.min(30000, 1000 * Math.pow(2, n)); // 最大30秒
@@ -426,9 +427,7 @@ class LightningService extends EventEmitter {
     async updateNodeInfo() {
         try {
             const info = await this.getInfo();
-            const { schemas } = require('./src/utils/validator');
-            const { appendAuditLog } = require('./src/utils/audit-log');
-            // Joiバリデーション
+                // Joiバリデーション
             const nodeInfo = {
                 pubkey: info.identity_pubkey,
                 alias: info.alias,
@@ -640,9 +639,7 @@ class LightningService extends EventEmitter {
                     else resolve(response);
                 });
             });
-            const { schemas } = require('./src/utils/validator');
-            const { appendAuditLog } = require('./src/utils/audit-log');
-            this.channels.clear();
+                this.channels.clear();
             let invalidCount = 0;
             channelList.channels.forEach(channel => {
                 const channelData = {
@@ -685,7 +682,6 @@ class LightningService extends EventEmitter {
     // データ到着=健全でリセット）により、LND 長期停止時でもログ・接続を
     // スパムせず、回復時は自動で疎通周期へ戻る。
     _setupResilientStream(name, subscribe, onData, { baseMs = 5000, maxMs = 5 * 60 * 1000 } = {}) {
-        const { appendAuditLog } = require('./src/utils/audit-log');
         const auditTag = `${name}_stream`;
         const notifyExternal = (msg, detail = {}) => {
             if (process.env.SENTRY_DSN) {
@@ -761,8 +757,7 @@ class LightningService extends EventEmitter {
                 invoiceData.settledAt = invoice.settle_date * 1000;
                 invoiceData.amountPaid = parseInt(invoice.amt_paid_sat);
                 logger.info(`Invoice paid: ${paymentHash.substring(0, 16)}...`);
-                const { appendAuditLog } = require('./src/utils/audit-log');
-                appendAuditLog('invoice_paid', { paymentHash, amount: invoiceData.amountPaid });
+                        appendAuditLog('invoice_paid', { paymentHash, amount: invoiceData.amountPaid });
                 this.emit('invoice:paid', invoiceData);
                 this.emit(`payment:${paymentHash}`, {
                     preimage: invoice.r_preimage.toString('hex')
@@ -774,13 +769,11 @@ class LightningService extends EventEmitter {
         this._setupResilientStream('channel', () => this.lnd.subscribeChannelEvents({}), (event) => {
             if (event.type === 'OPEN_CHANNEL') {
                 logger.info('Channel opened:', event.open_channel);
-                const { appendAuditLog } = require('./src/utils/audit-log');
-                appendAuditLog('channel_opened', { channel: event.open_channel });
+                        appendAuditLog('channel_opened', { channel: event.open_channel });
                 this.emit('channel:opened', event.open_channel);
             } else if (event.type === 'CLOSED_CHANNEL') {
                 logger.info('Channel closed:', event.closed_channel);
-                const { appendAuditLog } = require('./src/utils/audit-log');
-                appendAuditLog('channel_closed', { channel: event.closed_channel });
+                        appendAuditLog('channel_closed', { channel: event.closed_channel });
                 this.emit('channel:closed', event.closed_channel);
             }
             // チャネル情報更新

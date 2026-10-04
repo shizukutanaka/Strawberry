@@ -45,7 +45,8 @@ describe('sandbox-apikey', () => {
     const k = generateApiKey();
     atomicWriteJSON(KEY_PATH, [{ userId: 'u1', key: k, created: new Date().toISOString() }]);
     expect(isValidApiKey(k)).toBe(true);
-    expect(isValidApiKey(k.slice(0, -2) + '00')).toBe(false);
+    const tampered = k.slice(0, -1) + (k.endsWith('0') ? '1' : '0');
+    expect(isValidApiKey(tampered)).toBe(false);
   });
 
   it('破損/不在のキーファイルはクラッシュせず false', () => {

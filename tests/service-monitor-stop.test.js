@@ -15,11 +15,12 @@
 // accumulate in the same worker process (Jest isolates each test file's module
 // registry, but NOT real OS timers, which live in the actual Node event loop).
 //
-// This has zero impact on `npm test` (masked by --forceExit) and zero impact on
+// The accumulated intervals are unref'd so they don't block process exit (a full
+// `jest` run now exits cleanly without `--forceExit`) — but they keep firing for
+// the rest of the run, bloating audit/error logs and burning CPU. Zero impact on
 // production (the process always fully exits via process.exit() on graceful
 // shutdown, taking every timer with it) — but it is a real, observable leak for
-// anyone running `jest` directly (IDE test runners, `jest --watch`, misconfigured
-// CI that drops the flag).
+// anyone running `jest` directly (IDE test runners, `jest --watch`).
 //
 // Fix: export stopMonitor() so the interval can be explicitly cleared.
 

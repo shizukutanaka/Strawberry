@@ -227,3 +227,41 @@
 書き込み疎・不整合は検査＋手動修復で許容、の全てが真なら JSON で運用継続が正当。
 （短所 W36「二重パラダイム」は移行途中の過渡状態を長引かせないための理由でもある —
 移行するなら Prisma 経路を完成させるか JSON を完成させるか、両方を未完のままにしない。）
+
+## 付録: デーモンループ一元管理の設計案（i10）
+
+監査のソクラテス問答（「テスト中にタイマーが暴発するのはなぜか?」→「各ループが
+独自に抑止規約を持ち、stop の呼び方が統一されていない」）。実装は runtime 配線の
+ため不採用傾向だが、採用判断が変わった場合の設計を固定しておく。
+
+### 常駐ループ棚卸（server.js 起動順）
+
+| デーモン | 起動 | 停止関数 | 周期/env | テスト抑止 |
+|---|---|---|---|---|
+| metricsInterval | server.js:94 | clearInterval（ハンドルのみ） | 10s | NODE_ENV=test で未作成 |
+| service-monitor | server.js:123 `startMonitor()` | `stopMonitor()` | `SERVICE_MONITOR_INTERVAL_MS` | server.js 側で抑止 |
+| invoice-poller | server.js:137 `start(lightning)` | `stop()` | 15s | 内部抑止 |
+| sla-tracker | server.js:145 `startSLATracker()` | `stopSLATracker()` | 1min | 内部抑止 |
+| backup-scheduler | server.js:153 `startBackupScheduler()` | **なし**（timer ハンドルを返すのみ） | `BACKUP_INTERVAL_HOURS` opt-in | 内部抑止 |
+| gpu-auto-heal | server.js:164 `startGpuAutoHeal()` | クラス `stop()` | `GPU_AUTO_HEAL_INTERVAL_MS` opt-in | 内部抑止 |
+
+### 指摘された不一致
+
+1. **stop API の名前がバラバラ**（stopMonitor/stop/stopSLATracker/欠落）。一括停止が書けない。
+2. **backup-scheduler は stop を export しない** — ハンドル戻り値のみ。プロセス終了時の確定的後始末がない。
+3. **テスト抑止の責任場所が二層**（server.js 側で抑止するもの・内部で抑止するもの）が混在し、新規デーモン追加時にどちらに従うか不明瞭 — jest 環境で「片方だけ書き忘れ」が起きやすい。
+
+### 設計案（将来実装する場合）
+
+```js
+// src/core/daemon-registry.js（構想 — 実装しない）
+const daemons = new Map(); // name -> { start, stop, running }
+function registerDaemon(name, { start, stop }) { daemons.set(name, { start, stop, running: false }); }
+function startDaemons() { for (const d of daemons.values()) if (!d.running) { d.start(); d.running = true; } }
+function stopAllDaemons() { for (const d of daemons.values()) if (d.running) { try { d.stop(); } finally { d.running = false; } } }
+```
+
+- server.js は `registerDaemon` するだけで抑止規約を一箇所に集約（NODE_ENV==='test' なら startDaemons が no-op）。
+- 各デーモンは `stop` 必須として normalize（backup-scheduler に `stopBackupScheduler` を足す最小変更から始める）。
+- テストから `stopAllDaemons()` を呼べば「次の tick が残存」問題を確定的に排除。
+- ただし現行の個別抑止も機能しているため、現時点は設計固定に留め、実装の P 優先度は低い。

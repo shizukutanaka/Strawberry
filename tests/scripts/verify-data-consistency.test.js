@@ -538,6 +538,19 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'payer-order-mismatch' && i.detail.includes('p1'))).toBe(true);
   });
 
+  it('warns when order providerId differs from the gpu providerId', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u3', completedAt: '2025-01-01T00:00:00Z' }],
+      'gpus.json': [{ id: 'g1', providerId: 'u2', pricePerHour: 100, model: 'RTX 4090' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }, { id: 'u2', email: 'u2@example.com' }, { id: 'u3', email: 'u3@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'provider-mismatch' && i.detail.includes('o1'))).toBe(true);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

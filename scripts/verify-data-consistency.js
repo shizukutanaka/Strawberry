@@ -289,11 +289,17 @@ function run(dataDir) {
   {
     const gpuById = new Map(gpus.map((g) => [g && g.id, g]));
     for (const o of orders) {
-      if (o && BLOCKING.has(o.status) && o.gpuId) {
-        const g = gpuById.get(o.gpuId);
-        if (g && g.available === false) {
-          issues.push({ severity: 'warn', check: 'unavailable-gpu-order', detail: `orders.json: id "${o.id}" (${o.status}) は available=false の gpu "${o.gpuId}" を参照（予約中の利用不可出品）` });
-        }
+      if (!o || !o.gpuId) continue;
+      const g = gpuById.get(o.gpuId);
+      if (BLOCKING.has(o.status) && g && g.available === false) {
+        issues.push({ severity: 'warn', check: 'unavailable-gpu-order', detail: `orders.json: id "${o.id}" (${o.status}) は available=false の gpu "${o.gpuId}" を参照（予約中の利用不可出品）` });
+      }
+      // order.providerId は作成時に gpu.providerId をスナップショット
+      // （order/index.js:1037）。両者の食い違いは出品者変更・直接編集の兆候で、
+      // SLA 違反通知・評判更新・払い戻しの宛先が齟齬になる。
+      if (g && o.providerId !== undefined && g.providerId !== undefined
+          && o.providerId !== g.providerId) {
+        issues.push({ severity: 'warn', check: 'provider-mismatch', detail: `orders.json: id "${o.id}" の providerId "${o.providerId}" と gpu "${o.gpuId}" の providerId "${g.providerId}" が不一致（帰属ずれの兆候）` });
       }
     }
   }

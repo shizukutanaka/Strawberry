@@ -445,6 +445,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.detail.includes('jti-live'))).toBe(false);
   });
 
+  it('warns on orphan and malformed notification settings', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+      'notification-settings.json': {
+        u1: { enabled: { slack: true } },
+        ghost: { enabled: { line: true } },
+        broken: 'not-an-object',
+      },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'orphan-notification-settings' && i.detail.includes('ghost'))).toBe(true);
+    expect(issues.some((i) => i.check === 'orphan-notification-settings' && i.detail.includes('u1'))).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-notification-settings' && i.detail.includes('broken'))).toBe(true);
+  });
+
   it('warns on GPU records missing pricePerHour', () => {
     dir = makeDataDir({
       'orders.json': [],

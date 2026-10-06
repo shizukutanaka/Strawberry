@@ -341,6 +341,27 @@ function run(dataDir) {
     }
   }
 
+  // notification-settings.json — {userId: {enabled, lineToken, ...}} の
+  // オブジェクトマップ（user-notify.js:31）。users.json にないキーへの設定は
+  // 「消えたユーザーへの通知ルート」= 宛先不明のゴースト設定（warn）。
+  // 値がオブジェクトでない異形レコードも warn。
+  {
+    let notifParsed = null;
+    try {
+      notifParsed = JSON.parse(fs.readFileSync(path.join(dataDir, 'notification-settings.json'), 'utf8'));
+    } catch { /* 不在・破損は parse 系で報告済み */ }
+    if (notifParsed && typeof notifParsed === 'object' && !Array.isArray(notifParsed)) {
+      for (const [uid, prefs] of Object.entries(notifParsed)) {
+        if (userIds.size > 0 && !userIds.has(uid)) {
+          issues.push({ severity: 'warn', check: 'orphan-notification-settings', detail: `notification-settings.json: 存在しない user "${uid}" への通知設定（宛先不明のゴースト設定）` });
+        }
+        if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) {
+          issues.push({ severity: 'warn', check: 'invalid-notification-settings', detail: `notification-settings.json: user "${uid}" の設定値がオブジェクトでない（通知解決が壊れる）` });
+        }
+      }
+    }
+  }
+
   // 終端/進行ステータスの対応タイムスタンプ欠落 — completed は completedAt
   // （旧レコードは stoppedAt フォールバック order/index.js:1555）、cancelled は
   // cancelledAt、matched は matchedAt が書かれる。欠落はレビュー期間アンカー・

@@ -382,6 +382,22 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('renterReview'))).toBe(false);
   });
 
+  it('warns on escrow/payment records with no orderId at all', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'pending' },
+        { id: 'p2', status: 'pending' },
+      ],
+      'escrows.json': [{ id: 'e1', state: 'HELD' }],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-order-ref' && i.detail.includes('p2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-order-ref' && i.detail.includes('e1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-order-ref' && i.detail.includes('p1'))).toBe(false);
+  });
+
   it('warns on invalid/future timestamps but tolerates future scheduledStartAt', () => {
     dir = makeDataDir({
       'orders.json': [

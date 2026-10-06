@@ -122,6 +122,17 @@ function run(dataDir) {
     }
   }
 
+  // orderId 未設定の escrow/payment — orderId フィールド自体を欠くレコードは
+  // 上の dangling 検査をすり抜ける（!== undefined でしか判定しない）が、
+  // どの注文の資金か判別不能 = 「誰の資金か不明」。清算・返金で注文へ戻れない。
+  for (const [name, rows] of [['payments.json', payments], ['escrows.json', escrows]]) {
+    for (const row of rows) {
+      if (row && row.orderId === undefined) {
+        issues.push({ severity: 'warn', check: 'missing-order-ref', detail: `${name}: id "${row.id}" に orderId がない（どの注文の資金か判別不能）` });
+      }
+    }
+  }
+
   // エンティティ横断参照: gpuId→gpus、providerId/renterId/userId→users。
   // ユーザー削除等で dangling が正当な場合もあり得るため warn 止まり
   // （資金直結の orderId 参照だけ error）。

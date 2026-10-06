@@ -304,6 +304,24 @@ describe('verify-data-consistency', () => {
     expect(issues.filter((i) => i.check === 'invalid-amount' && i.severity === 'warn')).toHaveLength(2);
   });
 
+  it('checks settlement invariants: sum==amountSats, charged<=amountSats, non-negative', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 950 } },
+        { id: 'e2', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 900, renterRefundSats: 0, operatorFeeSats: 50, chargedSats: 950 } },
+        { id: 'e3', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 1200, renterRefundSats: -200, operatorFeeSats: 0, chargedSats: 1200 } },
+      ],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(summary.ok).toBe(false);
+    expect(issues.some((i) => i.check === 'settlement-mismatch' && i.detail.includes('e2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'settlement-invalid' && i.detail.includes('e3'))).toBe(true);
+    expect(issues.some((i) => i.check === 'settlement-mismatch' && i.detail.includes('e1'))).toBe(false);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

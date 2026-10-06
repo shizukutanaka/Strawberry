@@ -243,6 +243,27 @@ function run(dataDir) {
     byGpu.set(o.gpuId, list);
   }
 
+  // settlement の保存不変条件（settlement-calculator.js が保証するもの）:
+  //   providerPayoutSats + renterRefundSats + operatorFeeSats === total(=amountSats)
+  //   chargedSats <= amountSats、全フィールド非負。乖離 = 直接編集か旧計算の漂流。
+  for (const e of escrows) {
+    if (!e || !e.settlement) continue;
+    const s = e.settlement;
+    const fields = ['providerPayoutSats', 'renterRefundSats', 'operatorFeeSats', 'chargedSats'];
+    const nums = fields.map((f) => s[f]);
+    if (nums.some((n) => typeof n !== 'number' || !Number.isFinite(n) || n < 0)) {
+      issues.push({ severity: 'warn', check: 'settlement-invalid', detail: `escrows.json: id "${e.id}" の settlement に非有限/負のフィールド` });
+      continue;
+    }
+    const [payout, refund, fee, charged] = nums;
+    if (payout + refund + fee !== e.amountSats) {
+      issues.push({ severity: 'error', check: 'settlement-mismatch', detail: `escrows.json: id "${e.id}" の settlement 合計 ${payout + refund + fee} ≠ amountSats ${e.amountSats}` });
+    }
+    if (charged > e.amountSats) {
+      issues.push({ severity: 'error', check: 'settlement-overflow', detail: `escrows.json: id "${e.id}" の chargedSats ${charged} が amountSats ${e.amountSats} を超過（預かり超の課金）` });
+    }
+  }
+
   // 金額の健全性: escrow-service は create 時に amountSats の正有限数を強制するが、
   // 手動編集・旧レコードで非数/0/負が混入し得る。payment.amount も同様。
   for (const e of escrows) {

@@ -68,6 +68,8 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `kpi-trend-graph` / `checklist-kpi-report` / `assignee-progress-report` | KPI グラフ生成・担当者レポート | — |
 | `sentry-notify` | Sentry エラー通知 | `SENTRY_DSN` |
 | `line-notify` | LINE Notify 送信（service-monitor が利用） | `LINE_TOKEN` |
+| `verify-data` | `data/*.json` の整合性検査（dangling 参照・資金不変条件・形式異常を ~70種検査。error 検出時 exit 1。`--json` で機械可読出力、引数/`STRAWBERRY_DATA_DIR` でデータ dir 指定） | — |
+| `report-test-counts`（`node scripts/report-test-counts.js`） | jest 実測のスイート/テスト数と docs 記載の差分を検出（情報のみ、終了コードは常に 0） | — |
 
 Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP Console の OAuth クライアント JSON）と `scripts/token.json`（初回認可の発行トークン）を配置。詳細は `npm run <script>` 実行時のエラーメッセージに手順が出力される。
 
@@ -97,6 +99,7 @@ Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP 
 3. `GET /metrics`（`METRICS_AUTH_TOKEN` で Bearer 認証）で失敗カウンタを確認
 4. 外部サービス起因なら各サービスの status を確認（LND / 為替 API / SMTP 等）
 5. `data/*.json` 破損時は `backups/` から `restoreFromLatestBackup` で復旧（`p2p-sync.js` が起動時に自動試行する経路と同一）
+6. データの疑似的な不整合（孤立 escrow・二重課金・参照切れ等）を疑う場合は `npm run verify-data` — error は資金/取引直結、warn は漂流・デッドフィールドの兆候。`node scripts/verify-data-consistency.js --json` を cron/systemd 化すれば外形監視として不整合の新規発生をアラート化できる（i9 監視標準化）
 
 ## FAQ・トラブルシュート
 

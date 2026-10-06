@@ -783,3 +783,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 重複/形式異常 username 検査 (2026-10)**: 完全一致 getByUsername の重複（片方が照会不能なアカウント化）と 3-30文字 [a-zA-Z0-9_-] 形式外値（バリデーションを通れない化石レコード）を warn。55テスト緑。
 - **verify-data-consistency: watches/reputations 一意性検査 (2026-10)**: (userId,gpuId) 重複ウォッチ（通知二重化）と非正値 targetPrice（永遠に発火しない死レコード）、providerId 重複レピュテーション（評判分裂）を warn。57テスト緑。
 - **verify-data-consistency: --json 出力モード (2026-10)**: 機械可読な {dataDir, collections, errors, warnings, issues} を出力 — Slack 通知・外形監視からの差分消費が可能に（i9 監視標準化の布石）。57テスト緑。
+- **OPERATIONS.md: verify-data / report-test-counts の運用導線 (2026-10)**: スクリプト一覧に2件追記 + 障害時初動に「npm run verify-data で不整合診断、cron 化で外形監視」を追加 — 運用者が存在を知る導線を整備。

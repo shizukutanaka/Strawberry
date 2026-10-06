@@ -133,8 +133,11 @@ describe('backup-scheduler: startBackupScheduler', () => {
     const second = jest.fn(async () => {});
     startBackupScheduler({ intervalMs: 1000, backupAll: first, allowInTest: true });
     startBackupScheduler({ intervalMs: 1000, backupAll: second, allowInTest: true });
-    jest.advanceTimersByTime(2000);
-    await Promise.resolve(); await Promise.resolve();
+    // single-flight clears inFlight on the microtask queue — advance per-tick
+    for (let i = 0; i < 2; i++) {
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve(); await Promise.resolve();
+    }
     // only the newest scheduler fires — the old timer was cleared, not orphaned
     expect(first).toHaveBeenCalledTimes(0);
     expect(second).toHaveBeenCalledTimes(2);

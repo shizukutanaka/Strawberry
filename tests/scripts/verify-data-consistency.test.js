@@ -23,7 +23,7 @@ describe('verify-data-consistency', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1' }],
       'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
-      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'SETTLED' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1' }],
       'users.json': [{ id: 'u1' }],
@@ -37,7 +37,7 @@ describe('verify-data-consistency', () => {
     dir = makeDataDir({
       'orders.json': [],
       'payments.json': [],
-      'escrows.json': [{ id: 'e1', orderId: 'ghost', status: 'HELD' }],
+      'escrows.json': [{ id: 'e1', orderId: 'ghost', state: 'HELD' }],
       'verifications.json': [],
     });
     const { issues, summary } = run(dir);
@@ -49,7 +49,7 @@ describe('verify-data-consistency', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'cancelled' }],
       'payments.json': [],
-      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'HELD' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'HELD' }],
       'verifications.json': [],
     });
     const { issues, summary } = run(dir);
@@ -57,11 +57,35 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'stuck-escrow')).toBe(true);
   });
 
+  it('flags DISPUTED escrow on a terminal order too (DISPUTED also holds funds)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed' }],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'DISPUTED' }],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(summary.ok).toBe(false);
+    expect(issues.some((i) => i.check === 'stuck-escrow')).toBe(true);
+  });
+
+  it('warns when escrow is closed (CANCELED/SETTLED) but order is still active', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active' }],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'CANCELED' }],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'closed-escrow-active-order' && i.severity === 'warn')).toBe(true);
+    expect(summary.ok).toBe(true);
+  });
+
   it('flags SETTLED escrow on a non-completed order (premature settlement)', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],
       'payments.json': [],
-      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'SETTLED' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
     });
     const { issues } = run(dir);
@@ -73,8 +97,8 @@ describe('verify-data-consistency', () => {
       'orders.json': [{ id: 'o1', status: 'active' }],
       'payments.json': [],
       'escrows.json': [
-        { id: 'e1', orderId: 'o1', status: 'HELD' },
-        { id: 'e2', orderId: 'o1', status: 'PENDING' },
+        { id: 'e1', orderId: 'o1', state: 'HELD' },
+        { id: 'e2', orderId: 'o1', state: 'PENDING' },
       ],
       'verifications.json': [],
     });
@@ -117,7 +141,7 @@ describe('verify-data-consistency', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],
       'payments.json': [],
-      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'DISPUTED' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'DISPUTED' }],
       'verifications.json': [],
     });
     const { issues, summary } = run(dir);

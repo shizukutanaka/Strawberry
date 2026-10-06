@@ -191,6 +191,10 @@
 
 ## 今回の実施
 
-本監査の P0/i2 相当として、**JSON リポジトリの整合性を読み取り専用で検査するスクリプト**を実装する
-（order↔payment↔escrow の参照切れ・孤立エスクロー・状態不整合を報告。副作用なし）。
+本監査の P0/i2 相当として、**JSON リポジトリの整合性を読み取り専用で検査するスクリプト**
+（`scripts/verify-data-consistency.js`、`npm run verify-data`）を実装した: order↔payment↔escrow
+の参照切れ・終端 order の未清算 escrow（PENDING/HELD/DISPUTED = 資金保持中）・SETTLED↔非completed・
+同一 order の二重 open escrow・閉じた escrow×進行中 order・gpu/user 横断参照（warn）・重複 id・
+パース破損を報告（副作用なし、不整合で exit 1）。escrows.json は `state` フィールド
+（PENDING/HELD/SETTLED/CANCELED/DISPUTED、escrow-state-machine.js 準拠）で検査。
 併せて本監査を `docs/` に恒久的に配置し、今後の改善選定の参照点とする。

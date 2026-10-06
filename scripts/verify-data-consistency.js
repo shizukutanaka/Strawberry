@@ -13,7 +13,15 @@ const fs = require('fs');
 const path = require('path');
 
 const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed'];
-const ESCROW_STATES = ['PENDING', 'HELD', 'SETTLED', 'DISPUTED'];
+// escrow-state-machine.js の実状態（escrows.json は `state` フィールドで保持）
+const ESCROW_STATES = ['PENDING', 'HELD', 'SETTLED', 'CANCELED', 'DISPUTED'];
+// 資金を保持し続ける open 状態（DISPUTED は非終端で資金ロック中のため含む）
+const OPEN_ESCROW_STATES = new Set(['PENDING', 'HELD', 'DISPUTED']);
+
+function escrowState(e) {
+  // escrow-service は `state` を書く。`status` も許容（他経路のレコード向け）。
+  return e.state !== undefined ? e.state : e.status;
+}
 
 function loadCollection(dataDir, name, issues) {
   const file = path.join(dataDir, name);
@@ -120,37 +128,46 @@ function run(dataDir) {
 
   for (const e of escrows) {
     if (!e) continue;
-    if (e.status && !ESCROW_STATES.includes(e.status)) {
-      issues.push({ severity: 'warn', check: 'unknown-escrow-status', detail: `escrows.json: id "${e.id}" の status "${e.status}" は未定義` });
+    const st = escrowState(e);
+    if (st && !ESCROW_STATES.includes(st)) {
+      issues.push({ severity: 'warn', check: 'unknown-escrow-status', detail: `escrows.json: id "${e.id}" の state "${st}" は未定義` });
     }
     const oStatus = orderStatus.get(e.orderId);
     if (oStatus === undefined) continue; // dangling-ref は上で報告済み
-    if ((oStatus === 'completed' || oStatus === 'cancelled') && (e.status === 'PENDING' || e.status === 'HELD')) {
+    if ((oStatus === 'completed' || oStatus === 'cancelled') && OPEN_ESCROW_STATES.has(st)) {
       issues.push({
         severity: 'error',
         check: 'stuck-escrow',
-        detail: `escrow "${e.id}" (${e.status}) が終端 order "${e.orderId}" (${oStatus}) に残存 — 資金ロックの可能性`,
+        detail: `escrow "${e.id}" (${st}) が終端 order "${e.orderId}" (${oStatus}) に残存 — 資金ロックの可能性`,
       });
     }
-    if (e.status === 'SETTLED' && oStatus !== 'completed') {
+    if (st === 'SETTLED' && oStatus !== 'completed') {
       issues.push({
         severity: 'error',
         check: 'premature-settlement',
         detail: `escrow "${e.id}" が SETTLED だが order "${e.orderId}" は ${oStatus}`,
       });
     }
-    if (e.status === 'DISPUTED' && oStatus !== 'disputed') {
+    if (st === 'DISPUTED' && oStatus !== 'disputed') {
       issues.push({
         severity: 'warn',
         check: 'dispute-mismatch',
         detail: `escrow "${e.id}" が DISPUTED だが order "${e.orderId}" は ${oStatus}`,
       });
     }
+    // 資金返済/清算済みなのに order が進行中（返金後もレンタル継続 = 無償提供状態）
+    if ((st === 'CANCELED' || st === 'SETTLED') && (oStatus === 'active' || oStatus === 'matched')) {
+      issues.push({
+        severity: 'warn',
+        check: 'closed-escrow-active-order',
+        detail: `escrow "${e.id}" は ${st} だが order "${e.orderId}" は ${oStatus}（資金フロー終了済みで注文が進行中）`,
+      });
+    }
   }
 
-  // 同一 order に複数の未清算 escrow
+  // 同一 order に複数の未清算 escrow（DISPUTED も資金保持中のため含む）
   for (const [orderId, list] of escrowsByOrder) {
-    const open = list.filter((e) => e.status === 'PENDING' || e.status === 'HELD');
+    const open = list.filter((e) => OPEN_ESCROW_STATES.has(escrowState(e)));
     if (open.length > 1) {
       issues.push({
         severity: 'error',

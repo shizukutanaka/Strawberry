@@ -746,3 +746,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: settlement 不変条件検査 (2026-10)**: settlement-calculator が保証する「payout+refund+fee === amountSats」「chargedSats <= amountSats」「全非負」を事後検査へ — 乖離は直接編集または旧計算の漂流で、預かり超課金を error 検出。22テスト緑。
 - **verify-data-consistency: 無払い進行の拡張 (2026-10)**: unpaid-completed-order を matched/active にも拡張 — Lightning poller・btc-onchain 共に paid→matched のため進行系全ステータスが支払い証跡を前提とする。22テスト緑。
 - **verify-data-consistency: 予約/価格フィールド健全性 (2026-10)**: 作成ルートと同一規約で order.durationMinutes（正の5の倍数整数）と gpu.pricePerHour（正の数）を warn 検査 — 非正値は二重予約判定・価格見積もりを破損させ、書込み側検証を迂回した混入の検出。23テスト緑。
+- **verify-data-consistency: 未定義ロール検査 (2026-10)**: 権限判定集合（admin/lender/provider/renter/user/system）外の role を warn — どの権限チェックにも合致しない「幽霊権限」（借りたいのに借りられない等）を検出。24テスト緑。

@@ -330,6 +330,16 @@ function run(dataDir) {
     }
   }
 
+  // 未定義ロール — 権限チェックは admin/lender/provider/renter/user/system の
+  // 集合で判定するため、それ以外の role は「どの権限にも合致しない幽霊権限」
+  // （レンターのはずが借りられない等）になり得る。
+  const KNOWN_ROLES = new Set(['admin', 'lender', 'provider', 'renter', 'user', 'system']);
+  for (const u of users) {
+    if (u && u.role !== undefined && !KNOWN_ROLES.has(u.role)) {
+      issues.push({ severity: 'warn', check: 'unknown-role', detail: `users.json: id "${u.id}" の role "${u.role}" は未定義（権限マトリクス外）` });
+    }
+  }
+
   // 同一メールの複数ユーザ（登録経路で大小文字正規化が揃っていないため衝突し得る:
   // OAuth は lowered、パスワード登録は非正規化。getByEmail が曖昧化する）
   const seenEmails = new Map();

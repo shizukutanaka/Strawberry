@@ -344,6 +344,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-price' && i.detail.includes('g2'))).toBe(false);
   });
 
+  it('warns on unknown user roles', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [
+        { id: 'u1', role: 'admin' },
+        { id: 'u2', role: 'superuser' },
+      ],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'unknown-role' && i.severity === 'warn' && i.detail.includes('u2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'unknown-role' && i.detail.includes('u1'))).toBe(false);
+    expect(summary.ok).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

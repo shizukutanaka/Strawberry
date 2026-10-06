@@ -322,6 +322,28 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'settlement-mismatch' && i.detail.includes('e1'))).toBe(false);
   });
 
+  it('warns on invalid durationMinutes and pricePerHour', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'pending', durationMinutes: 7 },
+        { id: 'o2', status: 'pending', durationMinutes: 60 },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', providerId: 'u1', pricePerHour: 0 },
+        { id: 'g2', providerId: 'u1', pricePerHour: 500 },
+      ],
+      'users.json': [{ id: 'u1' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-duration' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-duration' && i.detail.includes('o2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-price' && i.detail.includes('g1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-price' && i.detail.includes('g2'))).toBe(false);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

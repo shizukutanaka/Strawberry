@@ -264,6 +264,20 @@ function run(dataDir) {
     }
   }
 
+  // 予約/価格フィールドの健全性（作成ルートの検証と同一規約）:
+  //   order.durationMinutes … 正の整数かつ5の倍数（order/index.js:881）
+  //   gpu.pricePerHour      … 正の数（order/index.js:952）
+  for (const o of orders) {
+    if (o && 'durationMinutes' in o && !(Number.isInteger(o.durationMinutes) && o.durationMinutes > 0 && o.durationMinutes % 5 === 0)) {
+      issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
+    }
+  }
+  for (const g of gpus) {
+    if (g && 'pricePerHour' in g && !(typeof g.pricePerHour === 'number' && Number.isFinite(g.pricePerHour) && g.pricePerHour > 0)) {
+      issues.push({ severity: 'warn', check: 'invalid-price', detail: `gpus.json: id "${g.id}" の pricePerHour "${g.pricePerHour}" は正の数ではない（予約不可・価格計算破損）` });
+    }
+  }
+
   // 金額の健全性: escrow-service は create 時に amountSats の正有限数を強制するが、
   // 手動編集・旧レコードで非数/0/負が混入し得る。payment.amount も同様。
   for (const e of escrows) {

@@ -293,6 +293,17 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'duplicate-payment-hash' && i.severity === 'error')).toBe(true);
   });
 
+  it('warns on non-positive/non-finite amounts', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'pending', amount: -100 }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'PENDING', amountSats: 'lots' }],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.filter((i) => i.check === 'invalid-amount' && i.severity === 'warn')).toHaveLength(2);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

@@ -243,6 +243,19 @@ function run(dataDir) {
     byGpu.set(o.gpuId, list);
   }
 
+  // 金額の健全性: escrow-service は create 時に amountSats の正有限数を強制するが、
+  // 手動編集・旧レコードで非数/0/負が混入し得る。payment.amount も同様。
+  for (const e of escrows) {
+    if (e && 'amountSats' in e && !(typeof e.amountSats === 'number' && Number.isFinite(e.amountSats) && e.amountSats > 0)) {
+      issues.push({ severity: 'warn', check: 'invalid-amount', detail: `escrows.json: id "${e.id}" の amountSats "${e.amountSats}" は正の有限数ではない` });
+    }
+  }
+  for (const p of payments) {
+    if (p && 'amount' in p && !(typeof p.amount === 'number' && Number.isFinite(p.amount) && p.amount > 0)) {
+      issues.push({ severity: 'warn', check: 'invalid-amount', detail: `payments.json: id "${p.id}" の amount "${p.amount}" は正の有限数ではない` });
+    }
+  }
+
   // 同一 paymentHash の payment 複数存在 — LN invoice は hash で一意のはず。
   // 二重レコード = 同一請求書の重複課金経路 or レコード破損。
   const seenHashes = new Map();

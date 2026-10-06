@@ -742,3 +742,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: GPU 二重予約検査 (2026-10)**: ソクラテス問答「1台のGPUを2人が同時占有できるか」→ 物理的に否。作成ルートは BLOCKING(pending/matched/active)×時間帯重複を拒否するが、手動操作・競合で迂回し得る。本番と同じ range=[scheduledStartAt||createdAt, +durationMinutes] 重複判定で `double-booked-gpu` error を検出（隣接する別時間帯は許容、durationMinutes=0 の零幅は誤検知しない）。18テスト緑。
 - **verify-data-consistency: 参照整合の全配列ストア一般化 (2026-10)**: orderId/providerId/userId/gpuId の dangling 検査が固定5ファイルに限られ reputations/uptime 等が対象外だった。動的列挙した全配列ストアへ同一規約で拡張（orderId=error、user/gpu 参照=warn）。実データの reputations.json で誤検知なし。19テスト緑。
 - **verify-data-consistency: paymentHash 重複検査 (2026-10)**: LN invoice は hash で一意のはず — 同一 hash の複数レコードは同一請求書の二重課金経路（btc-onchain の「資金移動済み escrow 取消」経路でも新 hash が発行される前提）またはレコード破損として `duplicate-payment-hash` error を検出。20テスト緑。
+- **verify-data-consistency: 金額健全性検査 (2026-10)**: escrow.amountSats / payment.amount の非数・0・負値を warn 検出 — 書込み側は正有限数を強制するため検出 = 手動編集や旧レコードの漂流。21テスト緑。

@@ -193,6 +193,32 @@ function run(dataDir) {
     }
   }
 
+  // verification → escrow 参照（verifyAndSettle は常に escrowId 付きで open する）と
+  // verdict↔escrow 状態の整合:
+  //   dangling-escrow-ref   : escrowId が存在しない → 資金経路を失った検証 (error)
+  //   stuck-verdict         : verdict=pending のまま escrow が終端 → 結論のないまま資金移動 (warn)
+  //   verdict-escrow-mismatch: verdict=failed で SETTLED / verdict=verified で CANCELED (warn)
+  const escrowIds = new Set(escrows.map((e) => e && e.id));
+  const escrowStateById = new Map(escrows.map((e) => [e.id, escrowState(e)]));
+  for (const v of verifications) {
+    if (!v) continue;
+    if (v.escrowId !== undefined && v.escrowId !== null && !escrowIds.has(v.escrowId)) {
+      issues.push({ severity: 'error', check: 'dangling-escrow-ref', detail: `verifications.json: id "${v.id}" が存在しない escrow "${v.escrowId}" を参照` });
+      continue;
+    }
+    if (v.escrowId === undefined || v.escrowId === null) continue;
+    const es = escrowStateById.get(v.escrowId);
+    if (v.verdict === 'pending' && (es === 'SETTLED' || es === 'CANCELED')) {
+      issues.push({ severity: 'warn', check: 'stuck-verdict', detail: `verifications.json: id "${v.id}" は verdict=pending のまま escrow "${v.escrowId}" が ${es}` });
+    }
+    if (v.verdict === 'failed' && es === 'SETTLED') {
+      issues.push({ severity: 'warn', check: 'verdict-escrow-mismatch', detail: `verifications.json: id "${v.id}" は failed 判定なのに escrow "${v.escrowId}" が SETTLED（失敗作業への支払い?）` });
+    }
+    if (v.verdict === 'verified' && es === 'CANCELED') {
+      issues.push({ severity: 'warn', check: 'verdict-escrow-mismatch', detail: `verifications.json: id "${v.id}" は verified 判定なのに escrow "${v.escrowId}" が CANCELED（成功作業の未払い?）` });
+    }
+  }
+
   // open escrow が deadlineAt を超過 — escrow-service は deadlineAt を書くが
   // 参照するコードが存在しないため、期限切れ hold は放置される。要手動対応の warn。
   const now = Date.now();

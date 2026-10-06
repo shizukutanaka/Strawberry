@@ -216,6 +216,28 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unpaid-completed-order' && i.severity === 'warn')).toBe(true);
   });
 
+  it('checks verification↔escrow consistency: dangling ref error, verdict mismatches warn', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'SETTLED' },
+        { id: 'e2', orderId: 'o1', state: 'CANCELED' },
+      ],
+      'verifications.json': [
+        { id: 'v1', jobId: 'j1', escrowId: 'ghost', verdict: 'verified' },
+        { id: 'v2', jobId: 'j2', escrowId: 'e1', verdict: 'pending' },
+        { id: 'v3', jobId: 'j3', escrowId: 'e1', verdict: 'failed' },
+        { id: 'v4', jobId: 'j4', escrowId: 'e2', verdict: 'verified' },
+      ],
+    });
+    const { issues, summary } = run(dir);
+    expect(summary.ok).toBe(false);
+    expect(issues.some((i) => i.check === 'dangling-escrow-ref' && i.severity === 'error')).toBe(true);
+    expect(issues.some((i) => i.check === 'stuck-verdict')).toBe(true);
+    expect(issues.filter((i) => i.check === 'verdict-escrow-mismatch')).toHaveLength(2);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

@@ -213,7 +213,9 @@ function run(dataDir) {
 }
 
 function main() {
-  const dataDir = process.argv[2] || path.join(__dirname, '../data');
+  // argv > STRAWBERRY_DATA_DIR > repo-root data/（resolveDataDir と同一の解決規約）
+  const { resolveDataDir } = require('../src/db/json/data-dir');
+  const dataDir = process.argv[2] || resolveDataDir();
   const { issues, summary } = run(dataDir);
   console.log(`[verify-data-consistency] ${dataDir}`);
   console.log(`  collections: orders=${summary.collections.orders} payments=${summary.collections.payments} escrows=${summary.collections.escrows} verifications=${summary.collections.verifications} gpus=${summary.collections.gpus} users=${summary.collections.users}`);

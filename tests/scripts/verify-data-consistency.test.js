@@ -520,13 +520,13 @@ describe('verify-data-consistency', () => {
       'orders.json': [
         { id: 'o1', status: 'pending', createdAt: 'not-a-date' },
         { id: 'o2', status: 'pending', createdAt: '2999-01-01T00:00:00Z' },
-        { id: 'o3', status: 'pending', scheduledStartAt: '2999-01-01T00:00:00Z' },
+        { id: 'o3', status: 'pending', gpuId: 'g1', scheduledStartAt: '2999-01-01T00:00:00Z' },
       ],
       'payments.json': [],
       'escrows.json': [],
       'verifications.json': [],
-      'gpus.json': [],
-      'users.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'invalid-timestamp' && i.detail.includes('o1'))).toBe(true);

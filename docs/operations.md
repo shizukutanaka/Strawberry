@@ -15,6 +15,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `npm run lint` | 全 .js ファイルの `node --check` 構文検査（eslint は依存に含まれないためゼロ依存実装） |
 | `npm run openapi` | `openapi.json` を実ルート走査から再生成 |
 | `npm run setup` | 新規環境の一括セットアップ（`npm ci` → openapi-gen → test） |
+| `npm run verify-data` | `data/*.json` の参照整合性を読み取り専用で検査（order↔payment↔escrow の不整合・資金ロック残存を検出。不整合時 exit 1） |
 
 ## 必須環境変数（最小構成）
 

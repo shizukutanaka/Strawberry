@@ -402,6 +402,31 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
+  it('errors on malformed payout address and warns on empty store', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'profit-addresses.json': ['bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4', 'not-an-address'],
+    });
+    let { issues } = run(dir);
+    expect(issues.some((i) => i.severity === 'error' && i.check === 'invalid-payout-address' && i.detail.includes('not-an-address'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-payout-address' && i.detail.includes('bc1q'))).toBe(false);
+    expect(issues.some((i) => i.check === 'no-payout-address')).toBe(false);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'profit-addresses.json': [],
+    });
+    ({ issues } = run(dir));
+    expect(issues.some((i) => i.severity === 'warn' && i.check === 'no-payout-address')).toBe(true);
+  });
+
   it('warns on GPU records missing pricePerHour', () => {
     dir = makeDataDir({
       'orders.json': [],

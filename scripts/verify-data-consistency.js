@@ -290,6 +290,34 @@ function run(dataDir) {
     }
   }
 
+  // profit-addresses.json — 運営利益の送金先。要素はアドレス文字列のみの
+  // プレーン配列で、書込み側は isValidBtcAddress
+  // （api/utils/profit-addresses.js:33-46 の mainnet/testnet/regtest 形式）
+  // で検証する。形式外の混入値は sendBTC の瞬間に不可逆な損失になるため error。
+  // 0 件登録は手数料の送金経路が全くない状態（backup.js の注記と同等）で warn。
+  const PAYOUT_ADDR_PATTERNS = [
+    /^[13][a-km-zA-HJ-NP-Z1-9]{25,39}$/,
+    /^[2mn][a-km-zA-HJ-NP-Z1-9]{25,39}$/,
+    /^bc1[a-z0-9]{11,87}$/,
+    /^tb1[a-z0-9]{11,87}$/,
+    /^bcrt1[a-z0-9]{11,87}$/,
+  ];
+  const payoutEntry = extraCollections.find(([file]) => file === 'profit-addresses.json');
+  const payoutAddrs = payoutEntry ? payoutEntry[1] : null;
+  if (Array.isArray(payoutAddrs)) {
+    for (const a of payoutAddrs) {
+      const s = typeof a === 'string' ? a.trim() : a;
+      const ok = typeof s === 'string' && s.length >= 14 && s.length <= 100
+        && PAYOUT_ADDR_PATTERNS.some((re) => re.test(s));
+      if (!ok) {
+        issues.push({ severity: 'error', check: 'invalid-payout-address', detail: `profit-addresses.json: "${String(a).slice(0, 40)}" は BTC アドレス形式外（この先の送金は不可逆な損失になる）` });
+      }
+    }
+    if (payoutAddrs.length === 0) {
+      issues.push({ severity: 'warn', check: 'no-payout-address', detail: 'profit-addresses.json が 0 件（手数料の送金先が未登録）' });
+    }
+  }
+
   // 終端/進行ステータスの対応タイムスタンプ欠落 — completed は completedAt
   // （旧レコードは stoppedAt フォールバック order/index.js:1555）、cancelled は
   // cancelledAt、matched は matchedAt が書かれる。欠落はレビュー期間アンカー・

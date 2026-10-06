@@ -748,3 +748,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 予約/価格フィールド健全性 (2026-10)**: 作成ルートと同一規約で order.durationMinutes（正の5の倍数整数）と gpu.pricePerHour（正の数）を warn 検査 — 非正値は二重予約判定・価格見積もりを破損させ、書込み側検証を迂回した混入の検出。23テスト緑。
 - **verify-data-consistency: 未定義ロール検査 (2026-10)**: 権限判定集合（admin/lender/provider/renter/user/system）外の role を warn — どの権限チェックにも合致しない「幽霊権限」（借りたいのに借りられない等）を検出。24テスト緑。
 - **verify-data-consistency: 出品支払い先・レビュー範囲検査 (2026-10)**: providerId 未設定 GPU（escrow 清算で払い先不明）と order.renterReview/providerReview.rating の範囲外値（整数1-5外は集計フィルタで静黙除外される幽霊レビュー）を warn。25テスト緑。
+- **verify-data-consistency: 返金済み進行 order 検査 (2026-10)**: refunded payment のみで paid がない matched/active/completed order を warn — 返金操作後に order 側を cancelled へ倒し忘れた（または誤返金による）無支払い進行の検出。26テスト緑。

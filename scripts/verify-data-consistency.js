@@ -385,6 +385,17 @@ function run(dataDir) {
     }
   }
 
+  // 返金済み payment を持つ進行/完了 order — 返金で資金が借り手へ戻ったのに
+  // order が matched/active/completed（= 支払いなしで仕事が進行）なら
+  // order 側を cancelled へ倒すべきか、返金自体が誤操作の可能性。
+  const refundedOrderIds = new Set(payments.filter((p) => p && p.status === 'refunded').map((p) => p.orderId));
+  const paidOrderIds = new Set(payments.filter((p) => p && p.status === 'paid').map((p) => p.orderId));
+  for (const o of orders) {
+    if (o && ['matched', 'active', 'completed'].includes(o.status) && refundedOrderIds.has(o.id) && !paidOrderIds.has(o.id)) {
+      issues.push({ severity: 'warn', check: 'refunded-active-order', detail: `orders.json: id "${o.id}" は ${o.status} だが返金済み payment があり paid がない（無支払い進行の疑い）` });
+    }
+  }
+
   // 進行/完了済み order に payment レコードが無い（課金経路を通らず稼働 = 無償提供の可能性）
   const ordersWithPayment = new Set(payments.map((p) => p && p.orderId).filter(Boolean));
   for (const o of orders) {

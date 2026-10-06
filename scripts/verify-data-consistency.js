@@ -243,6 +243,19 @@ function run(dataDir) {
     byGpu.set(o.gpuId, list);
   }
 
+  // 同一 paymentHash の payment 複数存在 — LN invoice は hash で一意のはず。
+  // 二重レコード = 同一請求書の重複課金経路 or レコード破損。
+  const seenHashes = new Map();
+  for (const p of payments) {
+    if (!p || !p.paymentHash) continue;
+    const prev = seenHashes.get(p.paymentHash);
+    if (prev) {
+      issues.push({ severity: 'error', check: 'duplicate-payment-hash', detail: `payments.json: paymentHash が複数 id (${prev}, ${p.id}) で重複（同一請求書の二重課金経路?）` });
+    } else {
+      seenHashes.set(p.paymentHash, p.id);
+    }
+  }
+
   // open escrow が deadlineAt を超過 — escrow-service は deadlineAt を書くが
   // 参照するコードが存在しないため、期限切れ hold は放置される。要手動対応の warn。
   const now = Date.now();

@@ -278,6 +278,21 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'dangling-user-ref' && i.detail.includes('reputations.json'))).toBe(true);
   });
 
+  it('flags duplicate paymentHash (same invoice billed twice)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', paymentHash: 'abc123' },
+        { id: 'p2', orderId: 'o1', status: 'pending', paymentHash: 'abc123' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(summary.ok).toBe(false);
+    expect(issues.some((i) => i.check === 'duplicate-payment-hash' && i.severity === 'error')).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

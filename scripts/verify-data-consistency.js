@@ -349,13 +349,15 @@ function run(dataDir) {
       issues.push({ severity: 'warn', check: 'missing-payment', detail: `orders.json: id "${o.id}" (${o.status}) に対応する payment レコードがない` });
     }
   }
-  // 完了 order に 'paid' な payment が無い — missing-payment の厳密版:
+  // matched 以降の order に 'paid' な payment が無い — missing-payment の厳密版:
+  // invoice-poller は paid→matched のため matched/active/completed は全て支払い証跡が前提。
   // レコードはあっても paid 到達していない（failed/pending のみ or 全額 refunded）なら
-  // 完了の根拠となる支払い証跡が無い。
+  // 進行の根拠となる支払いが無い。
   const ordersWithPaid = new Set(payments.filter((p) => p && p.status === 'paid').map((p) => p.orderId));
+  const PAID_REQUIRED_STATUSES = new Set(['matched', 'active', 'completed']);
   for (const o of orders) {
-    if (o && o.status === 'completed' && ordersWithPayment.has(o.id) && !ordersWithPaid.has(o.id)) {
-      issues.push({ severity: 'warn', check: 'unpaid-completed-order', detail: `orders.json: id "${o.id}" は completed だが paid な payment がない` });
+    if (o && PAID_REQUIRED_STATUSES.has(o.status) && ordersWithPayment.has(o.id) && !ordersWithPaid.has(o.id)) {
+      issues.push({ severity: 'warn', check: 'unpaid-completed-order', detail: `orders.json: id "${o.id}" は ${o.status} だが paid な payment がない` });
     }
   }
 

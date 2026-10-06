@@ -744,3 +744,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: paymentHash 重複検査 (2026-10)**: LN invoice は hash で一意のはず — 同一 hash の複数レコードは同一請求書の二重課金経路（btc-onchain の「資金移動済み escrow 取消」経路でも新 hash が発行される前提）またはレコード破損として `duplicate-payment-hash` error を検出。20テスト緑。
 - **verify-data-consistency: 金額健全性検査 (2026-10)**: escrow.amountSats / payment.amount の非数・0・負値を warn 検出 — 書込み側は正有限数を強制するため検出 = 手動編集や旧レコードの漂流。21テスト緑。
 - **verify-data-consistency: settlement 不変条件検査 (2026-10)**: settlement-calculator が保証する「payout+refund+fee === amountSats」「chargedSats <= amountSats」「全非負」を事後検査へ — 乖離は直接編集または旧計算の漂流で、預かり超課金を error 検出。22テスト緑。
+- **verify-data-consistency: 無払い進行の拡張 (2026-10)**: unpaid-completed-order を matched/active にも拡張 — Lightning poller・btc-onchain 共に paid→matched のため進行系全ステータスが支払い証跡を前提とする。22テスト緑。

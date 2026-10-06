@@ -290,6 +290,15 @@ function run(dataDir) {
     }
   }
 
+  // gpuId 未設定の order — 作成ルートは gpuId を必須とする
+  // （order/index.js:888 'gpuId is required'）。欠落は実行対象を失った予約で
+  // 二重予約判定・検証・SLA 集計の全てが対象を特定できない。
+  for (const o of orders) {
+    if (o && !o.gpuId) {
+      issues.push({ severity: 'warn', check: 'missing-gpu', detail: `orders.json: id "${o.id}" (${o.status}) に gpuId がない（実行対象を失った予約）` });
+    }
+  }
+
   // 予約/価格フィールドの健全性（作成ルートの検証と同一規約）:
   //   order.durationMinutes … 正の整数かつ5の倍数（order/index.js:881）
   //   gpu.pricePerHour      … 正の数（order/index.js:952）

@@ -759,3 +759,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 期限切れ未払い invoice 検査 (2026-10)**: pending のまま invoiceExpiresAt 超過した payment を warn — 二度と支払われない死に invoice で order が pending 停滞するのでキャンセル/再発行の運用判断が必要。33テスト緑。
 - **verify-data-consistency: email 未設定 user 検査 (2026-10)**: email のない user レコード（ログイン・リセット・通知経路を失った「開かない部屋」アカウント）を warn。34テスト緑。
 - **verify-data-consistency: jobId 未設定 verification 検査 (2026-10)**: open(jobId,...) が jobId 必須（getByJobId のキー）なのに jobId を欠く孤立検証証跡を warn。35テスト緑。
+- **verify-data-consistency: gpuId 未設定 order 検査 (2026-10)**: 作成ルートの必須フィールドを欠く order（二重予約判定・検証・SLA が対象を特定できない孤立予約）を warn。36テスト緑。

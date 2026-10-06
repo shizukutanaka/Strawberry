@@ -402,6 +402,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
+  it('warns on order records missing gpuId', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'pending', gpuId: 'g1' },
+        { id: 'o2', status: 'pending' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-gpu' && i.detail.includes('o2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-gpu' && i.detail.includes('o1'))).toBe(false);
+  });
+
   it('warns on verification records missing jobId', () => {
     dir = makeDataDir({
       'orders.json': [],

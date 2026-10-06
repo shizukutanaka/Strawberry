@@ -772,3 +772,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 借り手帰属不能 order 検査 (2026-10)**: userId/renterId 双方を欠く order（作成時 `orderData.userId = req.user.id` 必須）を warn — 課金・レビュー・返金・SLA 通知の帰属不能。46テスト緑。
 - **verify-data-consistency: escrow.history 異形検査 (2026-10)**: 遷移証跡 {event,from,to,at} が配列でない・event 名を欠く要素を warn — 紛争時の再現不能。47テスト緑。
 - **verify-data-consistency: 二重 paid payment 検査 (2026-10)**: 同一 order に paid が複数ある（二重請求・二重入金の証跡 — 返金しても残る paid が無払い検査をすり抜ける）を error。48テスト緑。
+- **verify-data-consistency: verified×cancelled order 検査 (2026-10)**: 検証 verified なのに order が cancelled（証明された作業が未支払い側に転がった証跡）を warn — verdict-escrow-mismatch の order 側版。49テスト緑。

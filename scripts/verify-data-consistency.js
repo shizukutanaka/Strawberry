@@ -230,7 +230,14 @@ function run(dataDir) {
       issues.push({ severity: 'warn', check: 'verdict-escrow-mismatch', detail: `verifications.json: id "${v.id}" は failed 判定なのに escrow "${v.escrowId}" が SETTLED（失敗作業への支払い?）` });
     }
     if (v.verdict === 'verified' && es === 'CANCELED') {
-      issues.push({ severity: 'warn', check: 'verdict-escrow-mismatch', detail: `verifications.json: id "${v.id}" は verified 判定なのに escrow "${v.escrowId}" が CANCELED（成功作業の未払い?）` });
+      issues.push({ severity: 'warn', check: 'verdict-escrow-mismatch', detail: `verifications.json: id "${v.id}" は verified 判定なのに escrow "${v.escrowId}" が CANCELED（成功作業が未支払い?）` });
+    }
+    // 検証が結論を出したのに order が cancelled — 証明された作業をしても
+    // 支払い側に転がらなかった証跡。
+    const vOrderId = v.escrowId != null ? (escrows.find((e) => e && e.id === v.escrowId) || {}).orderId : undefined;
+    const vOrderStatus = vOrderId != null ? orderStatus.get(vOrderId) : undefined;
+    if (v.verdict === 'verified' && vOrderStatus === 'cancelled') {
+      issues.push({ severity: 'warn', check: 'verified-cancelled-order', detail: `verifications.json: id "${v.id}" は verified 判定だが order "${vOrderId}" は cancelled（証明された作業が未支払いの可能性）` });
     }
   }
 

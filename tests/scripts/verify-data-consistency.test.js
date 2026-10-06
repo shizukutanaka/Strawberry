@@ -483,6 +483,17 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
   });
 
+  it('warns on verified verdict over a cancelled order', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'cancelled', cancelledAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'CANCELED' }],
+      'verifications.json': [{ id: 'v1', jobId: 'j1', escrowId: 'e1', verdict: 'verified' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'verified-cancelled-order' && i.detail.includes('v1'))).toBe(true);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

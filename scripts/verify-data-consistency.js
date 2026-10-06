@@ -219,6 +219,26 @@ function run(dataDir) {
     }
   }
 
+  // GPU 二重予約: order 作成ルートは同一 gpuId の BLOCKING(pending/matched/active)
+  // 注文と時間帯重複を拒否する（order/index.js:1019-1032）。そのガードを迂回して
+  // 共存する予約 = 物理的に不可能な同時占有。range = [scheduledStartAt||createdAt, +durationMinutes]。
+  const BLOCKING = new Set(['pending', 'matched', 'active']);
+  const byGpu = new Map();
+  for (const o of orders) {
+    if (!o || !o.gpuId || !BLOCKING.has(o.status)) continue;
+    const start = Date.parse(o.scheduledStartAt || o.createdAt);
+    if (Number.isNaN(start)) continue;
+    const end = start + (o.durationMinutes || 0) * 60 * 1000;
+    const list = byGpu.get(o.gpuId) || [];
+    for (const prev of list) {
+      if (start < prev.end && end > prev.start) {
+        issues.push({ severity: 'error', check: 'double-booked-gpu', detail: `orders.json: gpu "${o.gpuId}" に時間帯重複する BLOCKING 注文 ("${prev.id}" ${prev.status} と "${o.id}" ${o.status})` });
+      }
+    }
+    list.push({ id: o.id, status: o.status, start, end });
+    byGpu.set(o.gpuId, list);
+  }
+
   // open escrow が deadlineAt を超過 — escrow-service は deadlineAt を書くが
   // 参照するコードが存在しないため、期限切れ hold は放置される。要手動対応の warn。
   const now = Date.now();

@@ -238,6 +238,29 @@ describe('verify-data-consistency', () => {
     expect(issues.filter((i) => i.check === 'verdict-escrow-mismatch')).toHaveLength(2);
   });
 
+  it('flags double-booked GPU: overlapping BLOCKING orders on one gpu', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'active', gpuId: 'g1', createdAt: '2026-01-01T00:00:00Z', durationMinutes: 60 },
+        { id: 'o2', status: 'pending', gpuId: 'g1', scheduledStartAt: '2026-01-01T00:30:00Z', durationMinutes: 60 },
+        { id: 'o3', status: 'pending', gpuId: 'g1', scheduledStartAt: '2026-01-01T05:00:00Z', durationMinutes: 60 },
+      ],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid' },
+        { id: 'p2', orderId: 'o2', status: 'pending' },
+        { id: 'p3', orderId: 'o3', status: 'pending' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1' }],
+      'users.json': [{ id: 'u1' }],
+    });
+    const { issues, summary } = run(dir);
+    expect(summary.ok).toBe(false);
+    const db = issues.filter((i) => i.check === 'double-booked-gpu');
+    expect(db).toHaveLength(1); // o1×o2 のみ重複、o3 は別時間帯
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

@@ -753,3 +753,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: タイムスタンプ健全性 (2026-10)**: createdAt/updatedAt/paidAt/scheduledStartAt の解釈不能値と、過去時刻前提フィールドの未来日付を warn（scheduledStartAt は予約なので未来許容）。期限切れ判定・集計を誤判定させる不正時刻の検出。28テスト緑。
 - **verify-data-consistency: orderId 未設定の資金レコード検査 (2026-10)**: orderId フィールド自体を欠く payment/escrow を warn — dangling 参照検査をすり抜ける「どの注文の資金か判別不能」レコード（清算・返金で注文へ戻れない）。29テスト緑。
 - **監査 i9: MONITOR_TARGETS の用途と未設定時の罠を文書化 (2026-10)**: .env.example のコメントを実態へ修正 — p2p-notify.js（外形死活監視）の対象であり、空だと内蔵デフォルト localhost:3000 を監視し続ける（本番で自分を見ていない）。service-monitor.js（プロセス内監視）との混同も解消。
+- **verify-data-consistency: 支払いチャネル不明・未定義 verdict 検査 (2026-10)**: paid で method/paymentMethod を欠く payment（btc-onchain の既払い検出をすり抜けるチャネル不明レコード）と、verdict が pending/verified/failed/inconclusive 外の verification を warn。30テスト緑。

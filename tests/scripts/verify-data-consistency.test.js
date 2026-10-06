@@ -22,7 +22,7 @@ describe('verify-data-consistency', () => {
   it('reports OK on a consistent dataset', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1' }],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1' }],
@@ -219,7 +219,7 @@ describe('verify-data-consistency', () => {
   it('checks verification↔escrow consistency: dangling ref error, verdict mismatches warn', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed' }],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
       'escrows.json': [
         { id: 'e1', orderId: 'o1', state: 'SETTLED' },
         { id: 'e2', orderId: 'o1', state: 'CANCELED' },
@@ -246,7 +246,7 @@ describe('verify-data-consistency', () => {
         { id: 'o3', status: 'pending', gpuId: 'g1', scheduledStartAt: '2026-01-01T05:00:00Z', durationMinutes: 60 },
       ],
       'payments.json': [
-        { id: 'p1', orderId: 'o1', status: 'paid' },
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' },
         { id: 'p2', orderId: 'o2', status: 'pending' },
         { id: 'p3', orderId: 'o3', status: 'pending' },
       ],
@@ -282,7 +282,7 @@ describe('verify-data-consistency', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'pending' }],
       'payments.json': [
-        { id: 'p1', orderId: 'o1', status: 'paid', paymentHash: 'abc123' },
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paymentHash: 'abc123' },
         { id: 'p2', orderId: 'o1', status: 'pending', paymentHash: 'abc123' },
       ],
       'escrows.json': [],
@@ -307,7 +307,7 @@ describe('verify-data-consistency', () => {
   it('checks settlement invariants: sum==amountSats, charged<=amountSats, non-negative', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed' }],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
       'escrows.json': [
         { id: 'e1', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 950 } },
         { id: 'e2', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 900, renterRefundSats: 0, operatorFeeSats: 50, chargedSats: 950 } },
@@ -366,7 +366,7 @@ describe('verify-data-consistency', () => {
       'orders.json': [
         { id: 'o1', status: 'completed', userId: 'u1', providerId: 'u1', renterReview: { rating: 3 }, providerReview: { rating: 7 } },
       ],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [
@@ -380,6 +380,26 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'missing-provider' && i.detail.includes('g1'))).toBe(false);
     expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('providerReview'))).toBe(true);
     expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('renterReview'))).toBe(false);
+  });
+
+  it('warns on paid payment with no method and on unknown verdict', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid' },
+        { id: 'p2', orderId: 'o1', status: 'pending' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [
+        { id: 'v1', jobId: 'j1', verdict: 'verified' },
+        { id: 'v2', jobId: 'j2', verdict: 'maybe' },
+      ],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-method' && i.detail.includes('p1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-method' && i.detail.includes('p2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
   it('warns on escrow/payment records with no orderId at all', () => {
@@ -423,7 +443,7 @@ describe('verify-data-consistency', () => {
         { id: 'o1', status: 'active', gpuId: 'g1', userId: 'u1', providerId: 'u1' },
         { id: 'o2', status: 'completed', gpuId: 'g1', userId: 'u1', providerId: 'u1' },
       ],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }, { id: 'p2', orderId: 'o2', status: 'paid' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }, { id: 'p2', orderId: 'o2', status: 'paid', method: 'lightning' }],
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1', available: false }],

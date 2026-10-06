@@ -436,6 +436,27 @@ function run(dataDir) {
     }
   }
 
+  // 支払いチャネル不明 — paid な payment で method/paymentMethod が両方ないと
+  // 「Lightning? BTC on-chain? 手動承認?」が判別不能で、二重課金検査
+  // （btc-onchain.js:63 は paid && method !== 'btc_onchain' で既払いを検出）をすり抜ける。
+  // pending/failed/refunded はチャネルが資金安全性に効かないため対象外。
+  for (const p of payments) {
+    if (p && p.status === 'paid' && p.method === undefined && p.paymentMethod === undefined) {
+      issues.push({ severity: 'warn', check: 'missing-method', detail: `payments.json: id "${p.id}" (paid) に method/paymentMethod がない（支払いチャネル不明 — 二重課金検査をすり抜ける）` });
+    }
+  }
+
+  // 検証結論の未定義値 — verdict は pending/verified/failed/inconclusive
+  // （verification-service.js）。それ以外は 「検証したのに判定不明」 の漂流値。
+  {
+    const KNOWN_VERDICTS = new Set(['pending', 'verified', 'failed', 'inconclusive']);
+    for (const v of verifications) {
+      if (v && v.verdict !== undefined && !KNOWN_VERDICTS.has(v.verdict)) {
+        issues.push({ severity: 'warn', check: 'unknown-verdict', detail: `verifications.json: id "${v.id}" の verdict "${v.verdict}" は未定義` });
+      }
+    }
+  }
+
   // 返金済み payment を持つ進行/完了 order — 返金で資金が借り手へ戻ったのに
   // order が matched/active/completed（= 支払いなしで仕事が進行）なら
   // order 側を cancelled へ倒すべきか、返金自体が誤操作の可能性。

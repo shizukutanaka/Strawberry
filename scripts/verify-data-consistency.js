@@ -345,6 +345,31 @@ function run(dataDir) {
     }
   }
 
+  // タイムスタンプ健全性 — createdAt/paidAt/updatedAt が ISO 解釈不能、または
+  // 未来日付のレコード。期限切れ検査（expired-open-escrow）や各種表示集計が
+  // 時刻に依存するため、不正値は検査・集計の両方を誤判定させる。
+  {
+    const nowMs = Date.now();
+    // scheduledStartAt は未来日付が正常（予約）なので future チェックは過去時刻前提の3フィールドのみ
+    const TS_FIELDS = ['createdAt', 'updatedAt', 'paidAt', 'scheduledStartAt'];
+    const PAST_TS_FIELDS = new Set(['createdAt', 'updatedAt', 'paidAt']);
+    for (const [name, rows] of collections) {
+      for (const row of rows) {
+        if (!row) continue;
+        for (const f of TS_FIELDS) {
+          if (row[f] !== undefined) {
+            const t = Date.parse(row[f]);
+            if (!Number.isFinite(t)) {
+              issues.push({ severity: 'warn', check: 'invalid-timestamp', detail: `${name}: id "${row.id}" の ${f} "${row[f]}" は解釈不能` });
+            } else if (PAST_TS_FIELDS.has(f) && t > nowMs) {
+              issues.push({ severity: 'warn', check: 'future-timestamp', detail: `${name}: id "${row.id}" の ${f} "${row[f]}" は未来日付（時刻ずれか改竄の疑い）` });
+            }
+          }
+        }
+      }
+    }
+  }
+
   // providerId 未設定の GPU — 支払い先を欠いた出品（escrow 清算で providerId に
   // 払えない・出品者特定不能）。同時にレビュー評価の範囲検査（書込み側は整数1-5
   // を強制: order/index.js:1573。読み集計は同フィルタで静黙除外するため範囲外値は

@@ -750,3 +750,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 出品支払い先・レビュー範囲検査 (2026-10)**: providerId 未設定 GPU（escrow 清算で払い先不明）と order.renterReview/providerReview.rating の範囲外値（整数1-5外は集計フィルタで静黙除外される幽霊レビュー）を warn。25テスト緑。
 - **verify-data-consistency: 返金済み進行 order 検査 (2026-10)**: refunded payment のみで paid がない matched/active/completed order を warn — 返金操作後に order 側を cancelled へ倒し忘れた（または誤返金による）無支払い進行の検出。26テスト緑。
 - **verify-data-consistency: 利用不可 GPU 上の open order 検査 (2026-10)**: available=false の GPU を指す pending/matched/active order を warn — 予約後の可用性低下は正常だが ops が復帰判断すべき「占有中の不可出品」として可視化。27テスト緑。
+- **verify-data-consistency: タイムスタンプ健全性 (2026-10)**: createdAt/updatedAt/paidAt/scheduledStartAt の解釈不能値と、過去時刻前提フィールドの未来日付を warn（scheduledStartAt は予約なので未来許容）。期限切れ判定・集計を誤判定させる不正時刻の検出。28テスト緑。

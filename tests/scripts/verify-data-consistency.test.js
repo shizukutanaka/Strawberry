@@ -382,6 +382,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('renterReview'))).toBe(false);
   });
 
+  it('warns on invalid/future timestamps but tolerates future scheduledStartAt', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'pending', createdAt: 'not-a-date' },
+        { id: 'o2', status: 'pending', createdAt: '2999-01-01T00:00:00Z' },
+        { id: 'o3', status: 'pending', scheduledStartAt: '2999-01-01T00:00:00Z' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-timestamp' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'future-timestamp' && i.detail.includes('o2'))).toBe(true);
+    expect(issues.filter((i) => i.detail.includes('o3'))).toHaveLength(0);
+  });
+
   it('warns on open order referencing an unavailable GPU', () => {
     dir = makeDataDir({
       'orders.json': [

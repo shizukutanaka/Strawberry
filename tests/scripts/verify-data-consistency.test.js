@@ -402,6 +402,21 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
+  it('warns on verification records missing jobId', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [
+        { id: 'v1', jobId: 'j1', verdict: 'verified' },
+        { id: 'v2', verdict: 'pending' },
+      ],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-job-ref' && i.detail.includes('v2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-job-ref' && i.detail.includes('v1'))).toBe(false);
+  });
+
   it('warns on user records missing email', () => {
     dir = makeDataDir({
       'orders.json': [],

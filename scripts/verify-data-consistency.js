@@ -493,6 +493,15 @@ function run(dataDir) {
     }
   }
 
+  // jobId 未設定の verification — open(jobId,...) は jobId を必須とし
+  // （verification-service.js:36-37）、getByJobId のフィールドキーでもある。
+  // jobId のないレコードは finalize/参照の全経路から見えない孤立検証証跡。
+  for (const v of verifications) {
+    if (v && !v.jobId) {
+      issues.push({ severity: 'warn', check: 'missing-job-ref', detail: `verifications.json: id "${v.id}" に jobId がない（検証対象不明の孤立レコード）` });
+    }
+  }
+
   // 検証結論の未定義値 — verdict は pending/verified/failed/inconclusive
   // （verification-service.js）。それ以外は 「検証したのに判定不明」 の漂流値。
   {

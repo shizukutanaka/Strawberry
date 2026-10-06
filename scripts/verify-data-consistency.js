@@ -873,15 +873,22 @@ function run(dataDir) {
 
 function main() {
   // argv > STRAWBERRY_DATA_DIR > repo-root data/（resolveDataDir と同一の解決規約）
+  // --json で機械可読出力（監視系からの消費用 — Slack 通知や外形監視から
+  // issues 配列を直接差分処理できる）。フラグは可変位置で受け付ける。
   const { resolveDataDir } = require('../src/db/json/data-dir');
-  const dataDir = process.argv[2] || resolveDataDir();
+  const jsonMode = process.argv.includes('--json');
+  const dataDir = process.argv.slice(2).find((a) => !a.startsWith('-')) || resolveDataDir();
   const { issues, summary } = run(dataDir);
-  console.log(`[verify-data-consistency] ${dataDir}`);
-  console.log(`  collections: orders=${summary.collections.orders} payments=${summary.collections.payments} escrows=${summary.collections.escrows} verifications=${summary.collections.verifications} gpus=${summary.collections.gpus} users=${summary.collections.users}`);
-  for (const i of issues) {
-    console.log(`  [${i.severity}] ${i.check}: ${i.detail}`);
+  if (jsonMode) {
+    console.log(JSON.stringify({ dataDir, ...summary, issues }, null, 2));
+  } else {
+    console.log(`[verify-data-consistency] ${dataDir}`);
+    console.log(`  collections: orders=${summary.collections.orders} payments=${summary.collections.payments} escrows=${summary.collections.escrows} verifications=${summary.collections.verifications} gpus=${summary.collections.gpus} users=${summary.collections.users}`);
+    for (const i of issues) {
+      console.log(`  [${i.severity}] ${i.check}: ${i.detail}`);
+    }
+    console.log(`  result: ${summary.errors} error(s), ${summary.warnings} warning(s) — ${summary.ok ? 'OK' : 'INCONSISTENT'}`);
   }
-  console.log(`  result: ${summary.errors} error(s), ${summary.warnings} warning(s) — ${summary.ok ? 'OK' : 'INCONSISTENT'}`);
   process.exit(summary.ok ? 0 : 1);
 }
 

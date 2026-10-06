@@ -13,6 +13,8 @@ const fs = require('fs');
 const path = require('path');
 
 const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed'];
+// payment routes（index.js/btc-onchain.js/invoice-poller/auto-recovery）が書く実値
+const PAYMENT_STATES = ['pending', 'paid', 'failed', 'refunded'];
 // escrow-state-machine.js の実状態（escrows.json は `state` フィールドで保持）
 const ESCROW_STATES = ['PENDING', 'HELD', 'SETTLED', 'CANCELED', 'DISPUTED'];
 // 資金を保持し続ける open 状態（DISPUTED は非終端で資金ロック中のため含む）
@@ -177,10 +179,23 @@ function run(dataDir) {
     }
   }
 
-  // order の未知ステータス
+  // order/payment の未知ステータス
   for (const o of orders) {
     if (o && o.status && !ORDER_STATES.includes(o.status)) {
       issues.push({ severity: 'warn', check: 'unknown-order-status', detail: `orders.json: id "${o.id}" の status "${o.status}" は未定義` });
+    }
+  }
+  for (const p of payments) {
+    if (p && p.status && !PAYMENT_STATES.includes(p.status)) {
+      issues.push({ severity: 'warn', check: 'unknown-payment-status', detail: `payments.json: id "${p.id}" の status "${p.status}" は未定義` });
+    }
+  }
+
+  // 進行/完了済み order に payment レコードが無い（課金経路を通らず稼働 = 無償提供の可能性）
+  const ordersWithPayment = new Set(payments.map((p) => p && p.orderId).filter(Boolean));
+  for (const o of orders) {
+    if (o && (o.status === 'active' || o.status === 'completed') && !ordersWithPayment.has(o.id)) {
+      issues.push({ severity: 'warn', check: 'missing-payment', detail: `orders.json: id "${o.id}" (${o.status}) に対応する payment レコードがない` });
     }
   }
 

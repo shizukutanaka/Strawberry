@@ -137,6 +137,29 @@ describe('verify-data-consistency', () => {
     expect(summary.ok).toBe(true); // warn only, no error
   });
 
+  it('warns on an active/completed order with no payment record', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active' }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-payment' && i.severity === 'warn')).toBe(true);
+    expect(summary.ok).toBe(true);
+  });
+
+  it('warns on unknown payment status', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'bizarre' }],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unknown-payment-status' && i.severity === 'warn')).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

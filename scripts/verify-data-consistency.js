@@ -318,6 +318,29 @@ function run(dataDir) {
     }
   }
 
+  // revoked-tokens.json — {jti: expiryMs} のオブジェクトマップ。ローダーは
+  // 非数値エントリを静黙ドロップ（token-denylist.js:42）するため、数値以外の
+  // 値を持つ失効レコードは「記録されているが効いていない」= logout 済み JWT
+  // が復活するセキュリティホール → error。期限切れ残存は次回 revoke で
+  // GC される滞留（warn）。
+  {
+    // {jti: expiryMs} のオブジェクトマップ（配列系チェックとは形状が違うため直接読む）
+    let denyParsed = null;
+    try {
+      denyParsed = JSON.parse(fs.readFileSync(path.join(dataDir, 'revoked-tokens.json'), 'utf8'));
+    } catch { /* 不在・破損は loadCollection 系の parse エラー側で報告済み */ }
+    if (denyParsed && typeof denyParsed === 'object' && !Array.isArray(denyParsed)) {
+      const now = Date.now();
+      for (const [jti, expiryMs] of Object.entries(denyParsed)) {
+        if (typeof expiryMs !== 'number' || !Number.isFinite(expiryMs)) {
+          issues.push({ severity: 'error', check: 'invalid-denylist-entry', detail: `revoked-tokens.json: "${jti}" の expiry "${expiryMs}" は非数値 — ローダーが静黙ドロップし失効が効いていない` });
+        } else if (expiryMs <= now) {
+          issues.push({ severity: 'warn', check: 'stale-revoked-token', detail: `revoked-tokens.json: "${jti}" は期限切れ（次回 revoke まで滞留 — GC 対象）` });
+        }
+      }
+    }
+  }
+
   // 終端/進行ステータスの対応タイムスタンプ欠落 — completed は completedAt
   // （旧レコードは stoppedAt フォールバック order/index.js:1555）、cancelled は
   // cancelledAt、matched は matchedAt が書かれる。欠落はレビュー期間アンカー・

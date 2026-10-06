@@ -763,3 +763,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: ステータス対応タイムスタンプ欠落検査 (2026-10)**: completed/cancelled/matched で対応する *At フィールド（completedAt・stoppedAt フォールバック/cancelledAt/matchedAt）を欠く order を warn — レビュー期間アンカー・課金期間・タイムライン (:586) が破綻する。37テスト緑。
 - **verify-data-consistency: pricePerHour 未設定 GPU 検査 (2026-10)**: 価格フィールド自体を欠く出品（見積もり・order 作成を通せない注文不能品）を warn — invalid-price（非正値）と対。38テスト緑。
 - **verify-data-consistency: 送金先アドレス検査 (2026-10)**: profit-addresses.json の形式外エントリ（isValidBtcAddress 規約違反→送金時に不可逆損失）を error、0 件登録（手数料送金経路なし）を warn。39テスト緑。
+- **verify-data-consistency: revoked-tokens 健全性検査 (2026-10)**: {jti: expiryMs} マップの非数値エントリ（ローダーが静黙ドロップ → logout 済み JWT 復活の穴）を error、期限切れ滞留を warn。40テスト緑。

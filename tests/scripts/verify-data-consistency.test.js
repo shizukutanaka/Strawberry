@@ -427,6 +427,24 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.severity === 'warn' && i.check === 'no-payout-address')).toBe(true);
   });
 
+  it('errors on non-numeric denylist entries and warns on stale revocations', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'revoked-tokens.json': {
+        'jti-live': Date.now() + 60 * 60 * 1000,
+        'jti-bad': 'garbage',
+        'jti-old': Date.now() - 60 * 60 * 1000,
+      },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.severity === 'error' && i.check === 'invalid-denylist-entry' && i.detail.includes('jti-bad'))).toBe(true);
+    expect(issues.some((i) => i.check === 'stale-revoked-token' && i.detail.includes('jti-old'))).toBe(true);
+    expect(issues.some((i) => i.detail.includes('jti-live'))).toBe(false);
+  });
+
   it('warns on GPU records missing pricePerHour', () => {
     dir = makeDataDir({
       'orders.json': [],

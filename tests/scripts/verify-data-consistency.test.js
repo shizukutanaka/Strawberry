@@ -22,7 +22,7 @@ describe('verify-data-consistency', () => {
   it('reports OK on a consistent dataset', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' }],
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
@@ -219,7 +219,7 @@ describe('verify-data-consistency', () => {
   it('checks verification↔escrow consistency: dangling ref error, verdict mismatches warn', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed' }],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' }],
       'escrows.json': [
         { id: 'e1', orderId: 'o1', state: 'SETTLED' },
         { id: 'e2', orderId: 'o1', state: 'CANCELED' },
@@ -307,7 +307,7 @@ describe('verify-data-consistency', () => {
   it('checks settlement invariants: sum==amountSats, charged<=amountSats, non-negative', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed' }],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' }],
       'escrows.json': [
         { id: 'e1', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 950 } },
         { id: 'e2', orderId: 'o1', state: 'SETTLED', amountSats: 1000, settlement: { providerPayoutSats: 900, renterRefundSats: 0, operatorFeeSats: 50, chargedSats: 950 } },
@@ -366,7 +366,7 @@ describe('verify-data-consistency', () => {
       'orders.json': [
         { id: 'o1', status: 'completed', userId: 'u1', providerId: 'u1', renterReview: { rating: 3 }, providerReview: { rating: 7 } },
       ],
-      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' }],
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [
@@ -481,6 +481,21 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g2'))).toBe(true);
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g1'))).toBe(false);
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
+  });
+
+  it('warns on paid payments missing paidAt', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' },
+        { id: 'p2', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-paid-timestamp' && i.detail.includes('p1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-paid-timestamp' && i.detail.includes('p2'))).toBe(false);
   });
 
   it('warns on pending orders long past their scheduled start', () => {

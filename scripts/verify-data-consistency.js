@@ -378,6 +378,15 @@ function run(dataDir) {
     }
   }
 
+  // paid だが paidAt を欠く payment — status→paid 遷移は paidAt を書く
+  // （payment/index.js:97, btc-onchain.js:288）。欠落は支払い時刻の
+  // 欠損で、課金レポート・監査の時系列復元ができない。
+  for (const p of payments) {
+    if (p && p.status === 'paid' && !p.paidAt) {
+      issues.push({ severity: 'warn', check: 'missing-paid-timestamp', detail: `payments.json: id "${p.id}" は paid だが paidAt がない（支払い時刻が不明）` });
+    }
+  }
+
   // 開始予定を大幅に過ぎた pending order — scheduledStartAt は作成時
   // 「過去5分以内」必須（order/index.js:1007）で LN invoice 期限は ~1h。
   // 24h 以上前の予約が pending のまま = 支払いが永遠に来ない枠占有

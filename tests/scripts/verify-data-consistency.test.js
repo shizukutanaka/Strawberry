@@ -177,6 +177,18 @@ describe('verify-data-consistency', () => {
     expect(summary.ok).toBe(false);
   });
 
+  it('warns on an open escrow past its deadlineAt', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'matched' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'HELD', deadlineAt: '2020-01-01T00:00:00Z' }],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'expired-open-escrow' && i.severity === 'warn')).toBe(true);
+    expect(summary.ok).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

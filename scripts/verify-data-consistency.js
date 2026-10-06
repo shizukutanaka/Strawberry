@@ -193,6 +193,20 @@ function run(dataDir) {
     }
   }
 
+  // open escrow が deadlineAt を超過 — escrow-service は deadlineAt を書くが
+  // 参照するコードが存在しないため、期限切れ hold は放置される。要手動対応の warn。
+  const now = Date.now();
+  for (const e of escrows) {
+    if (!e) continue;
+    const st = escrowState(e);
+    if (st !== undefined && OPEN_ESCROW_STATES.has(st) && e.deadlineAt) {
+      const dl = Date.parse(e.deadlineAt);
+      if (!Number.isNaN(dl) && dl < now) {
+        issues.push({ severity: 'warn', check: 'expired-open-escrow', detail: `escrows.json: id "${e.id}" (${st}) は deadlineAt ${e.deadlineAt} を超過しているが open のまま` });
+      }
+    }
+  }
+
   // 同一 order に複数の未清算 escrow（DISPUTED も資金保持中のため含む）
   for (const [orderId, list] of escrowsByOrder) {
     const open = list.filter((e) => OPEN_ESCROW_STATES.has(escrowState(e)));

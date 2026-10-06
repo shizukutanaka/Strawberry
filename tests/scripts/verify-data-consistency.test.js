@@ -706,7 +706,7 @@ describe('verify-data-consistency', () => {
       'orders.json': [
         { id: 'o1', status: 'pending', createdAt: 'not-a-date' },
         { id: 'o2', status: 'pending', createdAt: '2999-01-01T00:00:00Z' },
-        { id: 'o3', status: 'pending', gpuId: 'g1', scheduledStartAt: '2999-01-01T00:00:00Z' },
+        { id: 'o3', status: 'pending', gpuId: 'g1', userId: 'u1', scheduledStartAt: '2999-01-01T00:00:00Z' },
       ],
       'payments.json': [],
       'escrows.json': [],

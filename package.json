@@ -24,6 +24,7 @@
     "openapi": "node src/api/openapi-generator.js",
     "openapi-gen": "node src/api/openapi-generator.js",
     "prepare-data": "node scripts/prepare-data.js",
+    "verify-data": "node scripts/verify-data-consistency.js",
     "optimize-images": "node scripts/optimize-images.js",
     "version-assets": "node scripts/version-assets.js",
     "update-references": "node scripts/update-references.js",

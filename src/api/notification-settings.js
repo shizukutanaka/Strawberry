@@ -91,15 +91,36 @@ const safeWebhookUrl = Joi.string().uri({ scheme: ['http', 'https'] }).max(2048)
 
 const SETTINGS_PATH = path.join(resolveDataDir(), 'notification-settings.json');
 
+// stat 指紋ゲートの読み取りキャッシュ — 全リクエストで settings 全量を
+// readFileSync+JSON.parse するのはホットパスの同期 I/O (i7)。
+// auth-user-lookup.js と同じ (mtimeMs, size) 指紋で変更時のみ再パースする。
+// 本プロセスの書き込み（POST/DELETE）は _invalidateSettingsCache で明示的に捨てる
+// （同一ミリ秒の書き換えでは stat 指紋が変わらない可能性があるため）。
+let _settingsCache = null;
+let _settingsCacheStat = null;
+function _invalidateSettingsCache() {
+  _settingsCache = null;
+  _settingsCacheStat = null;
+}
+
 function loadSettings() {
-  if (!require('fs').existsSync(SETTINGS_PATH)) return {};
-  const raw = require('fs').readFileSync(SETTINGS_PATH, 'utf-8');
+  const fs = require('fs');
+  if (!fs.existsSync(SETTINGS_PATH)) return {};
+  const stat = fs.statSync(SETTINGS_PATH);
+  if (_settingsCache && _settingsCacheStat
+      && _settingsCacheStat.mtimeMs === stat.mtimeMs
+      && _settingsCacheStat.size === stat.size) {
+    return _settingsCache;
+  }
+  const raw = fs.readFileSync(SETTINGS_PATH, 'utf-8');
   // JSON.parse を素通りさせる: parse 失敗は throw し呼び出し元で 500 にする。
   // 旧実装の catch→{} では POST が即座に上書きして全ユーザーの設定を消去していた。
   const parsed = JSON.parse(raw);
   if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
     throw new Error('[notification-settings] settings file is corrupt: expected a JSON object');
   }
+  _settingsCache = parsed;
+  _settingsCacheStat = { mtimeMs: stat.mtimeMs, size: stat.size };
   return parsed;
 }
 
@@ -206,9 +227,15 @@ router.post('/notification-settings/:userId', asyncHandler(async (req, res) => {
     }
   }
   await withLock(SETTINGS_LOCK, async () => {
-    const settings = loadSettings();
-    settings[userId] = value;
-    atomicWriteJSON(SETTINGS_PATH, settings);
+    try {
+      const settings = loadSettings();
+      settings[userId] = value;
+      atomicWriteJSON(SETTINGS_PATH, settings);
+    } finally {
+      // 書き込み後は必ずキャッシュ破棄 — 同一ms 書き換えで stat 指紋が
+      // 衝突し得るのと、失敗時に変更済みオブジェクトがキャッシュに残るのを防ぐ
+      _invalidateSettingsCache();
+    }
   });
   res.json({ success: true });
 }));
@@ -220,14 +247,18 @@ router.delete('/notification-settings/:userId', asyncHandler(async (req, res) =>
     throw new APIError(ErrorTypes.FORBIDDEN, 'Access denied', 403);
   }
   const result = await withLock(SETTINGS_LOCK, async () => {
-    const settings = loadSettings();
-    if (!settings[userId]) return { notFound: true };
-    delete settings[userId];
-    atomicWriteJSON(SETTINGS_PATH, settings);
-    return { notFound: false };
+    try {
+      const settings = loadSettings();
+      if (!settings[userId]) return { notFound: true };
+      delete settings[userId];
+      atomicWriteJSON(SETTINGS_PATH, settings);
+      return { notFound: false };
+    } finally {
+      _invalidateSettingsCache();
+    }
   });
   if (result.notFound) return res.status(404).json({ error: 'Notification settings not found' });
   res.json({ success: true });
 }));
 
-module.exports = { router };
+module.exports = { router, loadSettings, _invalidateSettingsCache };

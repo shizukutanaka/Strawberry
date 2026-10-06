@@ -14,6 +14,9 @@
 
 const { logger } = require('../utils/logger');
 
+// 起動中タイマーの共有ハンドル（stopBackupScheduler / 二重 start ガード用）
+let _timer = null;
+
 // BACKUP_INTERVAL_HOURS の解釈。0/未設定/不正値は「無効」を返す。
 function resolveIntervalMs(env) {
   const raw = env.BACKUP_INTERVAL_HOURS;
@@ -32,6 +35,8 @@ function resolveIntervalMs(env) {
 //   backupAll    — 実行関数の差し替え（テスト用）
 //   allowInTest  — NODE_ENV=test でも起動を許可（テスト用）
 function startBackupScheduler(options = {}) {
+  // 呼び直しは必ず再評価: 無効化された場合にも既存タイマーを残さない
+  if (_timer) { clearInterval(_timer); _timer = null; }
   const intervalMs = options.intervalMs !== undefined
     ? options.intervalMs
     : resolveIntervalMs(process.env);
@@ -69,10 +74,21 @@ function startBackupScheduler(options = {}) {
       .catch(e => logger.error(`scheduled backup failed: ${e.message}`))
       .finally(() => { inFlight = false; });
   };
-  const timer = setInterval(run, intervalMs);
-  if (typeof timer.unref === 'function') timer.unref();
+  // モジュール共有ハンドルに保持（stopBackupScheduler で確定的に停止できるよう
+  // にするため — service-monitor._timer と同型）。
+  _timer = setInterval(run, intervalMs);
+  if (typeof _timer.unref === 'function') _timer.unref();
   logger.info(`backup-scheduler: started (every ${Math.round((intervalMs / 3600e3) * 100) / 100}h)`);
-  return timer;
+  return _timer;
 }
 
-module.exports = { startBackupScheduler, resolveIntervalMs };
+// 定期実行を停止する。未起動時は no-op（他デーモンの stopMonitor/stopSLATracker と
+// 同一規約 — graceful shutdown やデーモン registry 化の際に一括停止できるようにする）。
+function stopBackupScheduler() {
+  if (_timer) {
+    clearInterval(_timer);
+    _timer = null;
+  }
+}
+
+module.exports = { startBackupScheduler, stopBackupScheduler, resolveIntervalMs };

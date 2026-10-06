@@ -65,16 +65,28 @@ function backupLocalWithGeneration(filePath) {
   }
 }
 
-// ファイル破損・消失時の自動リストア（BACKUP_DIR から復元）
+// ファイル破損・消失時の自動リストア（BACKUP_DIR から復元）。
+// バックアップ自体が破損している（コピー途中の切断・ディスク枯渇での打ち切り等）
+// 場合があり、検証なしで最新世代をコピーすると破損データで上書きしてしまうため、
+// 新しい順に各世代を JSON パース検証し、有効な最初の世代から復元する。
 function restoreFromLatestBackup(filePath) {
   const base = path.basename(filePath);
   if (!fs.existsSync(BACKUP_DIR)) return false;
   const backups = fs.readdirSync(BACKUP_DIR).filter(f => f.startsWith(base + '.bak-')).sort().reverse();
-  if (backups.length === 0) return false;
-  try {
-    fs.copyFileSync(path.join(BACKUP_DIR, backups[0]), filePath);
-    return true;
-  } catch (e) { return false; }
+  for (const name of backups) {
+    const src = path.join(BACKUP_DIR, name);
+    try {
+      JSON.parse(fs.readFileSync(src, 'utf8'));
+    } catch (e) {
+      logger.warn('バックアップ世代が破損のためスキップ', { file: name, error: e.message });
+      continue;
+    }
+    try {
+      fs.copyFileSync(src, filePath);
+      return true;
+    } catch (e) { return false; }
+  }
+  return false;
 }
 
 async function backupAll() {

@@ -7,7 +7,7 @@
 // require 自体が失敗する — スケジューラはこの失敗を起動クラッシュではなく
 // 警告+無効化として扱う必要がある。
 
-const { startBackupScheduler, resolveIntervalMs } = require('../../src/core/backup-scheduler');
+const { startBackupScheduler, stopBackupScheduler, resolveIntervalMs } = require('../../src/core/backup-scheduler');
 
 describe('backup-scheduler: resolveIntervalMs', () => {
   it('returns 0 (disabled) when BACKUP_INTERVAL_HOURS is unset or empty', () => {
@@ -112,5 +112,42 @@ describe('backup-scheduler: startBackupScheduler', () => {
     await Promise.resolve(); await Promise.resolve();
     expect(backupAll).toHaveBeenCalledTimes(2); // second tick still ran
     clearInterval(timer);
+  });
+
+  it('stopBackupScheduler() stops subsequent ticks (registry-stop contract)', async () => {
+    jest.useFakeTimers();
+    const backupAll = jest.fn(async () => {});
+    startBackupScheduler({ intervalMs: 1000, backupAll, allowInTest: true });
+    jest.advanceTimersByTime(1000);
+    await Promise.resolve();
+    expect(backupAll).toHaveBeenCalledTimes(1);
+    stopBackupScheduler();
+    jest.advanceTimersByTime(5000);
+    await Promise.resolve();
+    expect(backupAll).toHaveBeenCalledTimes(1); // no further ticks after stop
+  });
+
+  it('a second start replaces the timer instead of stacking (re-init safety)', async () => {
+    jest.useFakeTimers();
+    const first = jest.fn(async () => {});
+    const second = jest.fn(async () => {});
+    startBackupScheduler({ intervalMs: 1000, backupAll: first, allowInTest: true });
+    startBackupScheduler({ intervalMs: 1000, backupAll: second, allowInTest: true });
+    jest.advanceTimersByTime(2000);
+    await Promise.resolve(); await Promise.resolve();
+    // only the newest scheduler fires — the old timer was cleared, not orphaned
+    expect(first).toHaveBeenCalledTimes(0);
+    expect(second).toHaveBeenCalledTimes(2);
+    stopBackupScheduler();
+  });
+
+  it('re-calling start when disabled clears an existing timer', async () => {
+    jest.useFakeTimers();
+    const backupAll = jest.fn(async () => {});
+    startBackupScheduler({ intervalMs: 1000, backupAll, allowInTest: true });
+    startBackupScheduler({ intervalMs: 0, backupAll, allowInTest: true }); // disabled re-eval
+    jest.advanceTimersByTime(5000);
+    await Promise.resolve();
+    expect(backupAll).toHaveBeenCalledTimes(0);
   });
 });

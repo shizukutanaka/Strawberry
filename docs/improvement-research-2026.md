@@ -786,3 +786,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **OPERATIONS.md: verify-data / report-test-counts の運用導線 (2026-10)**: スクリプト一覧に2件追記 + 障害時初動に「npm run verify-data で不整合診断、cron 化で外形監視」を追加 — 運用者が存在を知る導線を整備。
 - **scripts/report-audit-backlog.js 新設 (i22, 2026-10)**: `npm audit --json` を severity × 修正可否（semver内 fix / メジャー更新含む fix / 経路のみ）に三分類して積存を可視化する読み取り専用レポート（常に exit 0、`--json` 対応）。実測 53件の内訳を正しく分離。
 - **監査 doc i10: デーモン一元管理の設計案を付録追加 (2026-10)**: 常駐ループ6件の棚卸（stop 名不一致・backup-scheduler の stop 欠落・テスト抑止の二層化）+ registerDaemon/stopAllDaemons の構想を設計固定（runtime 配線は不採用傾向のため doc のみ）。
+- **backup-scheduler: stopBackupScheduler 追加 + 再初期化ガード (i10 布石, 2026-10)**: 他デーモンと同一規約の stop を追加（唯一 stop が無かったデーモン）、二重 start で旧タイマーが孤児化しないよう共有ハンドル化。テスト3件追加・10件緑。

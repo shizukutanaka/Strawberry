@@ -395,6 +395,16 @@ function run(dataDir) {
       issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
     }
   }
+  // gpu.available の非真偽値 — ブッキングゲートは `available === false` の
+  // 厳密比較（order/index.js:909）。"no"/0/"false" のような異形値は
+  // ブロックされずに予約を受け付ける一方、集計・検索側では偽値として
+  // 扱われ得る「どちらとも取れない」出品状態 → warn。
+  for (const g of gpus) {
+    if (g && 'available' in g && typeof g.available !== 'boolean') {
+      issues.push({ severity: 'warn', check: 'invalid-availability', detail: `gpus.json: id "${g.id}" の available "${g.available}" は真偽値でない（出品フラグ破損）` });
+    }
+  }
+
   // pricePerHour 未設定の GPU — 価格不明の出品は見積もり・order 作成を
   // 通せない。'pricePerHour' in g ガードで非正値を見ている invalid-price と対。
   for (const g of gpus) {

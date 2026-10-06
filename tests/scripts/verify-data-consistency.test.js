@@ -464,6 +464,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-notification-settings' && i.detail.includes('broken'))).toBe(true);
   });
 
+  it('warns on non-boolean gpu availability flags', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', providerId: 'u1', pricePerHour: 100, available: true },
+        { id: 'g2', providerId: 'u1', pricePerHour: 100, available: 'no' },
+        { id: 'g3', providerId: 'u1', pricePerHour: 100 },
+      ],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g1'))).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
+  });
+
   it('warns on GPU records missing pricePerHour', () => {
     dir = makeDataDir({
       'orders.json': [],

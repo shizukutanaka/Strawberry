@@ -107,6 +107,7 @@ function run(dataDir) {
 
   const orderIds = new Set(orders.map((o) => o.id));
   const orderStatus = new Map(orders.map((o) => [o.id, o.status]));
+  const orderById = new Map(orders.map((o) => [o && o.id, o]));
 
   // orderId を持つ全レコードの参照先存在チェック（配列ストアなら全件 — reputations の
   // orderId も対象。資金・取引直結の参照なので error）
@@ -419,6 +420,18 @@ function run(dataDir) {
         paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + 1);
       }
     }
+    // 支払者≠借り手 — payment.userId は req.user.id（payment/index.js:52等）、
+    // order.userId も注文者自身（order/index.js:1035）。両者が異なる = 他人の注文を
+    // 支払った帰属矛盾（ルートは :197 で本人/admin のみ許可 — admin 代理払いは
+    // あり得るため warn）。返金・監査時に「誰が払ったか」が食い違う。
+    for (const p of payments) {
+      if (!p || !p.orderId || !p.userId) continue;
+      const o = orderById.get(p.orderId);
+      if (o && o.userId && o.userId !== p.userId) {
+        issues.push({ severity: 'warn', check: 'payer-order-mismatch', detail: `payments.json: id "${p.id}" の userId "${p.userId}" と order "${p.orderId}" の userId "${o.userId}" が不一致（支払者≠借り手）` });
+      }
+    }
+
     for (const [orderId, count] of paidByOrder) {
       if (count > 1) {
         issues.push({ severity: 'error', check: 'double-paid-order', detail: `payments.json: order "${orderId}" に paid が ${count} 件（二重課金の証跡）` });
@@ -688,7 +701,6 @@ function run(dataDir) {
   // userId/providerId がないと「誰が払ったか」に辿り着けない
   // （返金・照会・監査で当事者を特定できない）。
   {
-    const orderById = new Map(orders.map((o) => [o && o.id, o]));
     for (const p of payments) {
       if (!p || p.userId !== undefined || p.providerId !== undefined) continue;
       const o = p.orderId !== undefined ? orderById.get(p.orderId) : undefined;

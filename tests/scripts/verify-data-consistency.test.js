@@ -525,6 +525,19 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-email' && i.detail.includes('u2'))).toBe(false);
   });
 
+  it('warns when payment userId differs from order userId', () => {
+    dir = makeDataDir({
+      'users.json': [{ id: 'u1', email: 'a@b.com', role: 'user' }, { id: 'u2', email: 'c@d.com', role: 'user' }],
+      'orders.json': [{ id: 'o1', status: 'matched', userId: 'u1', matchedAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', userId: 'u2', paidAt: '2025-01-01T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'payer-order-mismatch' && i.detail.includes('p1'))).toBe(true);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

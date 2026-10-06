@@ -290,6 +290,22 @@ function run(dataDir) {
     }
   }
 
+  // 終端/進行ステータスの対応タイムスタンプ欠落 — completed は completedAt
+  // （旧レコードは stoppedAt フォールバック order/index.js:1555）、cancelled は
+  // cancelledAt、matched は matchedAt が書かれる。欠落はレビュー期間アンカー・
+  // 課金期間・タイムライン (:586-589) を破壊する。
+  const STATUS_TS = {
+    completed: ['completedAt', 'stoppedAt'],
+    cancelled: ['cancelledAt'],
+    matched: ['matchedAt'],
+  };
+  for (const o of orders) {
+    const fields = o && STATUS_TS[o.status];
+    if (fields && !fields.some((f) => o[f])) {
+      issues.push({ severity: 'warn', check: 'missing-status-timestamp', detail: `orders.json: id "${o.id}" は status "${o.status}" だが ${fields.join('/')} がない（レビュー期間・課金アンカーが不明）` });
+    }
+  }
+
   // gpuId 未設定の order — 作成ルートは gpuId を必須とする
   // （order/index.js:888 'gpuId is required'）。欠落は実行対象を失った予約で
   // 二重予約判定・検証・SLA 集計の全てが対象を特定できない。

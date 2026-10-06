@@ -21,7 +21,7 @@ describe('verify-data-consistency', () => {
 
   it('reports OK on a consistent dataset', () => {
     dir = makeDataDir({
-      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1' }],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
       'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
@@ -400,6 +400,27 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'missing-method' && i.detail.includes('p2'))).toBe(false);
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v2'))).toBe(true);
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
+  });
+
+  it('warns on orders missing their status timestamp', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'completed' },
+        { id: 'o2', status: 'cancelled' },
+        { id: 'o3', status: 'matched' },
+        { id: 'o4', status: 'completed', completedAt: '2025-01-01T00:00:00Z' },
+        { id: 'o5', status: 'pending' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    for (const id of ['o1', 'o2', 'o3']) {
+      expect(issues.some((i) => i.check === 'missing-status-timestamp' && i.detail.includes(id))).toBe(true);
+    }
+    expect(issues.some((i) => i.check === 'missing-status-timestamp' && i.detail.includes('o4'))).toBe(false);
+    expect(issues.some((i) => i.check === 'missing-status-timestamp' && i.detail.includes('o5'))).toBe(false);
   });
 
   it('warns on order records missing gpuId', () => {

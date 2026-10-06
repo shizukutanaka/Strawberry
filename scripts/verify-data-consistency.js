@@ -88,6 +88,7 @@ function run(dataDir) {
   } catch (e) {
     issues.push({ severity: 'warn', check: 'data-dir-unreadable', detail: `data dir の列挙に失敗: ${e.message}` });
   }
+  const extraCollections = [];
   for (const file of allJson) {
     // 実データにはオブジェクト形ストアも混在（notification-settings=userId→prefs、
     // revoked-tokens=jti→expiry）— パースのみ一律で、配列なら id 系チェックまで適用。
@@ -100,14 +101,16 @@ function run(dataDir) {
     }
     if (Array.isArray(parsed)) {
       checkDuplicateIds(file, parsed, issues);
+      extraCollections.push([file, parsed]);
     }
   }
 
   const orderIds = new Set(orders.map((o) => o.id));
   const orderStatus = new Map(orders.map((o) => [o.id, o.status]));
 
-  // orderId を持つ全レコードの参照先存在チェック
-  for (const [name, rows] of [['payments.json', payments], ['escrows.json', escrows], ['verifications.json', verifications]]) {
+  // orderId を持つ全レコードの参照先存在チェック（配列ストアなら全件 — reputations の
+  // orderId も対象。資金・取引直結の参照なので error）
+  for (const [name, rows] of [['payments.json', payments], ['escrows.json', escrows], ['verifications.json', verifications], ...extraCollections]) {
     for (const row of rows) {
       if (row && row.orderId !== undefined && !orderIds.has(row.orderId)) {
         issues.push({
@@ -131,6 +134,7 @@ function run(dataDir) {
     ['escrows.json', escrows],
     ['verifications.json', verifications],
     ['gpus.json', gpus],
+    ...extraCollections, // reputations/uptime 等の配列ストアも参照整合へ含める
   ];
   for (const [name, rows] of collections) {
     for (const row of rows) {

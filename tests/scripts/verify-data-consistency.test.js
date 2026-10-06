@@ -261,6 +261,23 @@ describe('verify-data-consistency', () => {
     expect(db).toHaveLength(1); // o1×o2 のみ重複、o3 は別時間帯
   });
 
+  it('extends ref checks to extra array stores (reputations orderId/providerId)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [{ id: 'u1' }],
+    });
+    fs.writeFileSync(path.join(dir, 'reputations.json'), JSON.stringify([
+      { id: 'r1', orderId: 'ghost-order', userId: 'u1' },
+      { id: 'r2', providerId: 'ghost-user' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'dangling-order-ref' && i.detail.includes('reputations.json'))).toBe(true);
+    expect(issues.some((i) => i.check === 'dangling-user-ref' && i.detail.includes('reputations.json'))).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

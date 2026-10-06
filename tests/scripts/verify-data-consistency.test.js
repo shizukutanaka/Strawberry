@@ -189,6 +189,22 @@ describe('verify-data-consistency', () => {
     expect(summary.ok).toBe(true);
   });
 
+  it('warns on duplicate emails across users (case-insensitive)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [
+        { id: 'u1', email: 'a@x.com' },
+        { id: 'u2', email: 'A@x.com' },
+      ],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'duplicate-email' && i.severity === 'warn')).toBe(true);
+    expect(summary.ok).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

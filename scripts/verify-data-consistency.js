@@ -219,6 +219,20 @@ function run(dataDir) {
     }
   }
 
+  // 同一メールの複数ユーザ（登録経路で大小文字正規化が揃っていないため衝突し得る:
+  // OAuth は lowered、パスワード登録は非正規化。getByEmail が曖昧化する）
+  const seenEmails = new Map();
+  for (const u of users) {
+    if (!u || !u.email) continue;
+    const key = String(u.email).toLowerCase();
+    const prev = seenEmails.get(key);
+    if (prev) {
+      issues.push({ severity: 'warn', check: 'duplicate-email', detail: `users.json: email "${u.email}" が複数 id (${prev}, ${u.id}) で重複（大小文字無視）` });
+    } else {
+      seenEmails.set(key, u.id);
+    }
+  }
+
   // order/payment の未知ステータス
   for (const o of orders) {
     if (o && o.status && !ORDER_STATES.includes(o.status)) {

@@ -160,6 +160,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-payment-status' && i.severity === 'warn')).toBe(true);
   });
 
+  it('covers unknown *.json stores: parse error flagged, object-shaped stores allowed', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    fs.writeFileSync(path.join(dir, 'watches.json'), '{bad json');
+    fs.writeFileSync(path.join(dir, 'revoked-tokens.json'), JSON.stringify({ jti1: 12345 }));
+    fs.writeFileSync(path.join(dir, 'reputations.json'), JSON.stringify([{ id: 'r1' }, { id: 'r1' }]));
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'parse' && i.detail.includes('watches.json'))).toBe(true);
+    expect(issues.some((i) => i.check === 'duplicate-id' && i.detail.includes('reputations.json'))).toBe(true);
+    expect(issues.some((i) => i.detail.includes('revoked-tokens.json'))).toBe(false);
+    expect(summary.ok).toBe(false);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

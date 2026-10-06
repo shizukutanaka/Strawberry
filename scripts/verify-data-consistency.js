@@ -61,6 +61,8 @@ function checkDuplicateIds(name, rows, issues) {
 }
 
 // dataDir の JSON 群を検査し { issues, summary } を返す。書き込みは一切しない。
+const KNOWN_COLLECTIONS = ['orders.json', 'payments.json', 'escrows.json', 'verifications.json', 'gpus.json', 'users.json'];
+
 function run(dataDir) {
   const issues = [];
   const orders = loadCollection(dataDir, 'orders.json', issues);
@@ -76,6 +78,30 @@ function run(dataDir) {
   checkDuplicateIds('verifications.json', verifications, issues);
   checkDuplicateIds('gpus.json', gpus, issues);
   checkDuplicateIds('users.json', users, issues);
+
+  // data/ 内の他の *.json も全件カバー — 固定リスト外のストア（watches/sla/token-denylist等）が
+  // 破損・非配列・id 欠落/重複でも静黙スキップされないよう、浅い検査だけ一律適用する。
+  // ドットファイル（.e2e-snapshot 等）は対象外。
+  let allJson = [];
+  try {
+    allJson = fs.readdirSync(dataDir).filter((f) => f.endsWith('.json') && !f.startsWith('.') && !KNOWN_COLLECTIONS.includes(f));
+  } catch (e) {
+    issues.push({ severity: 'warn', check: 'data-dir-unreadable', detail: `data dir の列挙に失敗: ${e.message}` });
+  }
+  for (const file of allJson) {
+    // 実データにはオブジェクト形ストアも混在（notification-settings=userId→prefs、
+    // revoked-tokens=jti→expiry）— パースのみ一律で、配列なら id 系チェックまで適用。
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(path.join(dataDir, file), 'utf8'));
+    } catch (e) {
+      issues.push({ severity: 'error', check: 'parse', detail: `${file}: JSON パース失敗 (${e.message})` });
+      continue;
+    }
+    if (Array.isArray(parsed)) {
+      checkDuplicateIds(file, parsed, issues);
+    }
+  }
 
   const orderIds = new Set(orders.map((o) => o.id));
   const orderStatus = new Map(orders.map((o) => [o.id, o.status]));

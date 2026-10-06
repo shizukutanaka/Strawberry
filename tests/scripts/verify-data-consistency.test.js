@@ -563,6 +563,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-total-price' && i.detail.includes('o1'))).toBe(true);
   });
 
+  it('warns on duplicate and malformed usernames', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'a@b.com', username: 'alice' },
+        { id: 'u2', email: 'c@d.com', username: 'alice' },
+        { id: 'u3', email: 'e@f.com', username: 'no spaces allowed' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'duplicate-username' && i.detail.includes('alice'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-username' && i.detail.includes('u3'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-username' && i.detail.includes('u1'))).toBe(false);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

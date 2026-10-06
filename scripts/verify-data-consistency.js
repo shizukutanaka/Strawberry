@@ -691,6 +691,25 @@ function run(dataDir) {
     }
   }
 
+  // 重複/形式異常 username — getByUsername は完全一致（UserRepository.js:20）のため
+  // 重複は片方が照会不能なアカウント化、形式外値（3-30文字の [a-zA-Z0-9_-] 以外:
+  // user/index.js:408）は更新・認証系バリデーションを通れない化石レコードの兆候。
+  {
+    const seenUsernames = new Map();
+    const USERNAME_RE = /^[a-zA-Z0-9_-]{3,30}$/;
+    for (const u of users) {
+      if (!u || u.username === undefined) continue;
+      if (seenUsernames.has(u.username)) {
+        issues.push({ severity: 'warn', check: 'duplicate-username', detail: `users.json: username "${u.username}" が複数 id (${seenUsernames.get(u.username)}, ${u.id}) で重複（片方が照会不能）` });
+      } else {
+        seenUsernames.set(u.username, u.id);
+      }
+      if (typeof u.username === 'string' && !USERNAME_RE.test(u.username)) {
+        issues.push({ severity: 'warn', check: 'invalid-username', detail: `users.json: id "${u.id}" の username "${u.username}" は形式外（バリデーションを通れない化石レコード）` });
+      }
+    }
+  }
+
   // order/payment の未知ステータス
   for (const o of orders) {
     if (o && o.status && !ORDER_STATES.includes(o.status)) {

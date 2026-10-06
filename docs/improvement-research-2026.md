@@ -780,3 +780,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **notification-settings: loadSettings の stat 指紋ゲートキャッシュ化 (2026-10)**: i7 監査で発見 — 認証済みリクエスト毎に settings 全文を readFileSync+JSON.parse していたホットパス同期 I/O を、(mtimeMs,size) 指紋ゲートへ変更（auth-user-lookup 規約）。書き込み経路は finally で明示破棄し、同一ms 書き換えの指紋衝突・未コミット変更の残留を遮断。テスト4件追加・lint 466 files 緑。
 - **verify-data-consistency: order↔gpu providerId 帰属ずれ検査 (2026-10)**: order.providerId（作成時スナップショット）と gpu.providerId の不一致（出品者変更・直接編集の兆候 — SLA 通知・評判更新・払い戻しの宛先齟齬）を warn。53テスト緑。
 - **verify-data-consistency: 非正値 totalPrice 検査 (2026-10)**: 作成時 ≥1 保証を迂回した 0/負/非数の totalPrice（売上集計で静黙に 0 扱いの計上漏れ）を warn。54テスト緑。
+- **verify-data-consistency: 重複/形式異常 username 検査 (2026-10)**: 完全一致 getByUsername の重複（片方が照会不能なアカウント化）と 3-30文字 [a-zA-Z0-9_-] 形式外値（バリデーションを通れない化石レコード）を warn。55テスト緑。

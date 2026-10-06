@@ -710,6 +710,44 @@ function run(dataDir) {
     }
   }
 
+  // watches.json — (userId, gpuId) 一意はルートの upsert で担保
+  // （gpu/index.js:1229）。upsert を迂回した重複は同じ GPU に複数しきい値が
+  // 残り通知が二重化する。targetPrice は作成時に正の数を検証（:1216） —
+  // 非正値はアラートが永遠に発火しない死レコード。
+  {
+    const watches = (extraCollections.find(([n]) => n === 'watches.json') || [null, []])[1];
+    const seenWatch = new Map();
+    for (const w of watches) {
+      if (!w) continue;
+      if (w.userId !== undefined && w.gpuId !== undefined) {
+        const key = `${w.userId}${w.gpuId}`;
+        if (seenWatch.has(key)) {
+          issues.push({ severity: 'warn', check: 'duplicate-watch', detail: `watches.json: (userId,gpuId)=("${w.userId}","${w.gpuId}") のウォッチが複数 (${seenWatch.get(key)}, ${w.id}) — upsert 迂回の重複で通知二重化` });
+        } else {
+          seenWatch.set(key, w.id);
+        }
+      }
+      if (w.targetPrice !== undefined && !(typeof w.targetPrice === 'number' && Number.isFinite(w.targetPrice) && w.targetPrice > 0)) {
+        issues.push({ severity: 'warn', check: 'invalid-watch-target', detail: `watches.json: id "${w.id}" の targetPrice "${w.targetPrice}" は非正値（永遠に発火しない死レコード）` });
+      }
+    }
+  }
+
+  // reputations.json — providerId で1レコード（ReputationRepository.js の
+  // getByProviderId 単発検索）。重複は片方が集計から見えない評判の分裂。
+  {
+    const reputations = (extraCollections.find(([n]) => n === 'reputations.json') || [null, []])[1];
+    const seenProvider = new Map();
+    for (const r of reputations) {
+      if (!r || r.providerId === undefined) continue;
+      if (seenProvider.has(r.providerId)) {
+        issues.push({ severity: 'warn', check: 'duplicate-provider-reputation', detail: `reputations.json: providerId "${r.providerId}" のレコードが複数 (${seenProvider.get(r.providerId)}, ${r.id}) — 評判の分裂` });
+      } else {
+        seenProvider.set(r.providerId, r.id);
+      }
+    }
+  }
+
   // order/payment の未知ステータス
   for (const o of orders) {
     if (o && o.status && !ORDER_STATES.includes(o.status)) {

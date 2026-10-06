@@ -582,6 +582,40 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-username' && i.detail.includes('u1'))).toBe(false);
   });
 
+  it('warns on duplicate watch and invalid watch targetPrice', () => {
+    dir = makeDataDir({
+      'watches.json': [
+        { id: 'w1', userId: 'u1', gpuId: 'g1', targetPrice: 100 },
+        { id: 'w2', userId: 'u1', gpuId: 'g1', targetPrice: -5 },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1' }],
+      'users.json': [{ id: 'u1', email: 'a@b.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'duplicate-watch' && i.detail.includes('w2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-watch-target' && i.detail.includes('w2'))).toBe(true);
+  });
+
+  it('warns on duplicate providerId in reputations', () => {
+    dir = makeDataDir({
+      'reputations.json': [
+        { id: 'r1', providerId: 'p1' },
+        { id: 'r2', providerId: 'p1' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'duplicate-provider-reputation' && i.detail.includes('p1'))).toBe(true);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

@@ -460,6 +460,22 @@ function run(dataDir) {
     }
   }
 
+  // 期限切れの未払い invoice — payment.invoiceExpiresAt は LN invoice の有効期限
+  // （payment/index.js:287-298、既定1時間）。pending のまま期限超過したレコードは
+  // 二度と paid にならない死に invoice — order も pending 停滞するのでキャンセル
+  // または invoice 再発行の運用判断が必要。
+  {
+    const nowMs = Date.now();
+    for (const p of payments) {
+      if (p && p.status === 'pending' && p.invoiceExpiresAt) {
+        const t = Date.parse(p.invoiceExpiresAt);
+        if (Number.isFinite(t) && t < nowMs) {
+          issues.push({ severity: 'warn', check: 'expired-invoice', detail: `payments.json: id "${p.id}" は pending のまま invoiceExpiresAt "${p.invoiceExpiresAt}" 超過（二度と支払われない死に invoice）` });
+        }
+      }
+    }
+  }
+
   // feeRate 範囲外 — create は [0,0.99] にクランプ（escrow-service.js:148）。
   // 範囲外の保存値は書き込み側検証を迂回した混入（fee>=1 は payout<=0 で
   // provider が無報酬になる、負値は運営損失）。

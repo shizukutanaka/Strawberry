@@ -756,3 +756,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 支払いチャネル不明・未定義 verdict 検査 (2026-10)**: paid で method/paymentMethod を欠く payment（btc-onchain の既払い検出をすり抜けるチャネル不明レコード）と、verdict が pending/verified/failed/inconclusive 外の verification を warn。30テスト緑。
 - **verify-data-consistency: feeRate 範囲外検査 (2026-10)**: escrow.feeRate が [0,0.99] 範囲外（create のクランプを迂回した混入）を warn — fee>=1 は provider 無報酬、負値は運営損失。31テスト緑。
 - **verify-data-consistency: 支払い当事者不明検査 (2026-10)**: payment 自身と参照先 order の双方に userId/providerId/renterId がなく支払者に辿り着けないレコードを warn。32テスト緑。
+- **verify-data-consistency: 期限切れ未払い invoice 検査 (2026-10)**: pending のまま invoiceExpiresAt 超過した payment を warn — 二度と支払われない死に invoice で order が pending 停滞するのでキャンセル/再発行の運用判断が必要。33テスト緑。

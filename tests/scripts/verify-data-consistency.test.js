@@ -402,6 +402,21 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
+  it('warns on expired unpaid invoice', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'pending', invoiceExpiresAt: '2020-01-01T00:00:00Z' },
+        { id: 'p2', orderId: 'o1', status: 'pending', invoiceExpiresAt: '2999-01-01T00:00:00Z' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'expired-invoice' && i.detail.includes('p1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'expired-invoice' && i.detail.includes('p2'))).toBe(false);
+  });
+
   it('warns when a payment is unattributable to any party', () => {
     dir = makeDataDir({
       'orders.json': [

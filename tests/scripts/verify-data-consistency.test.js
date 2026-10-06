@@ -361,6 +361,27 @@ describe('verify-data-consistency', () => {
     expect(summary.ok).toBe(true);
   });
 
+  it('warns on providerless GPU and out-of-range review rating', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'completed', userId: 'u1', providerId: 'u1', renterReview: { rating: 3 }, providerReview: { rating: 7 } },
+      ],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', providerId: 'u1' },
+        { id: 'g2' },
+      ],
+      'users.json': [{ id: 'u1' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-provider' && i.detail.includes('g2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-provider' && i.detail.includes('g1'))).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('providerReview'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('renterReview'))).toBe(false);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

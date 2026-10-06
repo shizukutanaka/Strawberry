@@ -330,6 +330,25 @@ function run(dataDir) {
     }
   }
 
+  // providerId 未設定の GPU — 支払い先を欠いた出品（escrow 清算で providerId に
+  // 払えない・出品者特定不能）。同時にレビュー評価の範囲検査（書込み側は整数1-5
+  // を強制: order/index.js:1573。読み集計は同フィルタで静黙除外するため範囲外値は
+  // 「あるのに集計に出ない」不整合になる — #233 のフィルタをここでも適用）
+  for (const g of gpus) {
+    if (g && !g.providerId) {
+      issues.push({ severity: 'warn', check: 'missing-provider', detail: `gpus.json: id "${g.id}" に providerId がない（支払い先不明の出品）` });
+    }
+  }
+  for (const o of orders) {
+    if (!o) continue;
+    for (const key of ['renterReview', 'providerReview']) {
+      const r = o[key];
+      if (r && !(Number.isInteger(r.rating) && r.rating >= 1 && r.rating <= 5)) {
+        issues.push({ severity: 'warn', check: 'invalid-rating', detail: `orders.json: id "${o.id}" の ${key}.rating "${r.rating}" は整数1-5ではない（集計対象外の幽霊レビュー）` });
+      }
+    }
+  }
+
   // 未定義ロール — 権限チェックは admin/lender/provider/renter/user/system の
   // 集合で判定するため、それ以外の role は「どの権限にも合致しない幽霊権限」
   // （レンターのはずが借りられない等）になり得る。

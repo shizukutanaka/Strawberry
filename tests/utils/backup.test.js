@@ -75,4 +75,36 @@ describe('backup.js: ローカル世代バックアップ', () => {
     expect(backup.restoreFromLatestBackup(nope)).toBe(false);
     fs.rmSync(path.dirname(nope), { recursive: true, force: true });
   });
+
+  test('最新世代が破損している場合は有効な旧世代から復元する', () => {
+    // 他テストが残した実バックアップと混ざらないよう専用ファイル名を使う
+    const target = path.join(path.dirname(tmpFile), 'vdc-test.json');
+    const base = path.basename(target);
+    const names = [
+      `${base}.bak-20200101000001`,
+      `${base}.bak-20200101000002`,
+    ];
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.writeFileSync(path.join(BACKUP_DIR, names[0]), JSON.stringify([{ id: 'old-good' }]));
+    fs.writeFileSync(path.join(BACKUP_DIR, names[1]), '{truncated'); // 最新 = 破損
+    createdBackups.push(...names);
+
+    fs.writeFileSync(target, 'corrupted{');
+    expect(backup.restoreFromLatestBackup(target)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(target))).toEqual([{ id: 'old-good' }]);
+  });
+
+  test('全世代が破損している場合は false を返し対象ファイルを変更しない', () => {
+    const target = path.join(path.dirname(tmpFile), 'vdc-test2.json');
+    const base = path.basename(target);
+    const names = [`${base}.bak-20200101000003`, `${base}.bak-20200101000004`];
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    for (const n of names) fs.writeFileSync(path.join(BACKUP_DIR, n), '{broken');
+    createdBackups.push(...names);
+
+    fs.writeFileSync(target, 'still-corrupt{');
+    expect(backup.restoreFromLatestBackup(target)).toBe(false);
+    // 破損データで上書きしていないことを確認（現在のファイル内容が維持されている）
+    expect(fs.readFileSync(target, 'utf8')).toBe('still-corrupt{');
+  });
 });

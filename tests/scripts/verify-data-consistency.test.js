@@ -483,6 +483,22 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
   });
 
+  it('errors on orders with multiple paid payments', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' },
+        { id: 'p2', orderId: 'o1', status: 'paid', method: 'btc_onchain', paidAt: '2025-01-02T00:00:00Z' },
+        { id: 'p3', orderId: 'o1', status: 'pending' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'double-paid-order' && i.detail.includes('o1'))).toBe(true);
+    expect(summary.ok).toBe(false);
+  });
+
   it('warns on malformed escrow history', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'completed', completedAt: '2025-01-01T00:00:00Z' }],

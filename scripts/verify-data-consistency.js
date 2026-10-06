@@ -401,6 +401,24 @@ function run(dataDir) {
     }
   }
 
+  // 同一 order の二重 paid — 1注文の入金は payment 1レコードが前提
+  // （invoice-poller は paid→matched を一度だけ進める）。paid が2件以上
+  // ある = 二重請求・二重入金の証跡で、返金しても残った paid が
+  // 無払い検査をすり抜ける → error。
+  {
+    const paidByOrder = new Map();
+    for (const p of payments) {
+      if (p && p.status === 'paid' && p.orderId) {
+        paidByOrder.set(p.orderId, (paidByOrder.get(p.orderId) || 0) + 1);
+      }
+    }
+    for (const [orderId, count] of paidByOrder) {
+      if (count > 1) {
+        issues.push({ severity: 'error', check: 'double-paid-order', detail: `payments.json: order "${orderId}" に paid が ${count} 件（二重課金の証跡）` });
+      }
+    }
+  }
+
   // escrow.history の異形 — FSM は遷移ごとに `{ event, from, to, at }` を
   // append し、紛争時の再現はこれに依存する。配列でない・イベント名の
   // ない要素は遷移証跡の破損 → warn（監査ログが一次証跡のため warn 止まり）。

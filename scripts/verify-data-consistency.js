@@ -446,6 +446,15 @@ function run(dataDir) {
     }
   }
 
+  // feeRate 範囲外 — create は [0,0.99] にクランプ（escrow-service.js:148）。
+  // 範囲外の保存値は書き込み側検証を迂回した混入（fee>=1 は payout<=0 で
+  // provider が無報酬になる、負値は運営損失）。
+  for (const e of escrows) {
+    if (e && e.feeRate !== undefined && !(typeof e.feeRate === 'number' && e.feeRate >= 0 && e.feeRate <= 0.99)) {
+      issues.push({ severity: 'warn', check: 'invalid-fee-rate', detail: `escrows.json: id "${e.id}" の feeRate "${e.feeRate}" は [0,0.99] 範囲外（清算時の支払い計算が破綻する）` });
+    }
+  }
+
   // 検証結論の未定義値 — verdict は pending/verified/failed/inconclusive
   // （verification-service.js）。それ以外は 「検証したのに判定不明」 の漂流値。
   {

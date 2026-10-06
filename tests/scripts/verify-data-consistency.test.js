@@ -402,6 +402,21 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
+  it('warns on out-of-range escrow feeRate', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending' }],
+      'payments.json': [],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'PENDING', feeRate: 0.05 },
+        { id: 'e2', orderId: 'o1', state: 'PENDING', feeRate: 1.5 },
+      ],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-fee-rate' && i.detail.includes('e2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-fee-rate' && i.detail.includes('e1'))).toBe(false);
+  });
+
   it('warns on escrow/payment records with no orderId at all', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'pending' }],

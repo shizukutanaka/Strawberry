@@ -382,6 +382,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('renterReview'))).toBe(false);
   });
 
+  it('warns on open order referencing an unavailable GPU', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'active', gpuId: 'g1', userId: 'u1', providerId: 'u1' },
+        { id: 'o2', status: 'completed', gpuId: 'g1', userId: 'u1', providerId: 'u1' },
+      ],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }, { id: 'p2', orderId: 'o2', status: 'paid' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', available: false }],
+      'users.json': [{ id: 'u1' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unavailable-gpu-order' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'unavailable-gpu-order' && i.detail.includes('o2'))).toBe(false);
+  });
+
   it('warns on refunded-but-progressing order', () => {
     dir = makeDataDir({
       'orders.json': [

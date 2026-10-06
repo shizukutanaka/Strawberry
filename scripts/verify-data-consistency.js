@@ -264,6 +264,21 @@ function run(dataDir) {
     }
   }
 
+  // 利用不可 GPU 上の open order — 作成ルートは available===false を 409 で拒否する
+  // （order/index.js:909）。open 状態の order が available=false の GPU を指すのは
+  // 予約後の可用性低下（正常）か出品側の誤更新（要復帰判断） — ops 判断材料として warn。
+  {
+    const gpuById = new Map(gpus.map((g) => [g && g.id, g]));
+    for (const o of orders) {
+      if (o && BLOCKING.has(o.status) && o.gpuId) {
+        const g = gpuById.get(o.gpuId);
+        if (g && g.available === false) {
+          issues.push({ severity: 'warn', check: 'unavailable-gpu-order', detail: `orders.json: id "${o.id}" (${o.status}) は available=false の gpu "${o.gpuId}" を参照（予約中の利用不可出品）` });
+        }
+      }
+    }
+  }
+
   // 予約/価格フィールドの健全性（作成ルートの検証と同一規約）:
   //   order.durationMinutes … 正の整数かつ5の倍数（order/index.js:881）
   //   gpu.pricePerHour      … 正の数（order/index.js:952）

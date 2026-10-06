@@ -494,6 +494,20 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'verified-cancelled-order' && i.detail.includes('v1'))).toBe(true);
   });
 
+  it('warns on out-of-order status chronology', () => {
+    dir = makeDataDir({
+      'orders.json': [{
+        id: 'o1', status: 'completed',
+        createdAt: '2025-01-05T00:00:00Z', matchedAt: '2025-01-01T00:00:00Z', completedAt: '2025-01-02T00:00:00Z',
+      }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-10T00:00:00Z', settledAt: '2025-01-09T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.filter((i) => i.check === 'status-chronology').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

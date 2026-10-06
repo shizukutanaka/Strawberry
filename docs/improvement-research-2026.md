@@ -774,3 +774,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: 二重 paid payment 検査 (2026-10)**: 同一 order に paid が複数ある（二重請求・二重入金の証跡 — 返金しても残る paid が無払い検査をすり抜ける）を error。48テスト緑。
 - **verify-data-consistency: verified×cancelled order 検査 (2026-10)**: 検証 verified なのに order が cancelled（証明された作業が未支払い側に転がった証跡）を warn — verdict-escrow-mismatch の order 側版。49テスト緑。
 - **scripts/report-test-counts.js 新設 (2026-10)**: jest --listTests で実測スイート数、it/test 呼出し回数で近似テスト数を測定し、docs 記載の「N スイート/N テスト」記述との drift を報告する（件数クレームは直前60字に「テスト」必須＋総数値域フィルタで歴史的/部分数値の誤爆を遮断）。初回実行で PRODUCT_ANALYSIS.md の 249 スイート陳腐化を検出・同期済み。
+- **verify-data-consistency: ステータス時系列逆転検査 (2026-10)**: createdAt→matchedAt→終了時刻、paidAt→settledAt の不可能な逆転（時計ずれ・直接編集・移行破損の兆候）を warn。50テスト緑。

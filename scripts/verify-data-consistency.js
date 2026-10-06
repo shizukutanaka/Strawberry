@@ -575,6 +575,36 @@ function run(dataDir) {
     }
   }
 
+  // ステータス時系列の逆転 — createdAt→matchedAt→(completedAt|stoppedAt|cancelledAt)
+  // の順は状態機械が保証するはずで、逆転は時計ずれ・直接編集・移行破損の兆候。
+  // payment 側は paidAt→settledAt（invoice-poller.js:157 で paid→settle の順）。
+  {
+    const ts = (v) => (v !== undefined && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null);
+    for (const o of orders) {
+      if (!o) continue;
+      const created = ts(o.createdAt);
+      const matched = ts(o.matchedAt);
+      const end = ts(o.completedAt || o.stoppedAt || o.cancelledAt);
+      if (created !== null && matched !== null && matched < created) {
+        issues.push({ severity: 'warn', check: 'status-chronology', detail: `orders.json: id "${o.id}" の matchedAt が createdAt より前（状態遷移の時系列逆転）` });
+      }
+      if (matched !== null && end !== null && end < matched) {
+        issues.push({ severity: 'warn', check: 'status-chronology', detail: `orders.json: id "${o.id}" の終了時刻が matchedAt より前（状態遷移の時系列逆転）` });
+      }
+      if (matched === null && created !== null && end !== null && end < created) {
+        issues.push({ severity: 'warn', check: 'status-chronology', detail: `orders.json: id "${o.id}" の終了時刻が createdAt より前（状態遷移の時系列逆転）` });
+      }
+    }
+    for (const p of payments) {
+      if (!p) continue;
+      const paid = ts(p.paidAt);
+      const settled = ts(p.settledAt);
+      if (paid !== null && settled !== null && settled < paid) {
+        issues.push({ severity: 'warn', check: 'status-chronology', detail: `payments.json: id "${p.id}" の settledAt が paidAt より前（決済時系列の逆転）` });
+      }
+    }
+  }
+
   // providerId 未設定の GPU — 支払い先を欠いた出品（escrow 清算で providerId に
   // 払えない・出品者特定不能）。同時にレビュー評価の範囲検査（書込み側は整数1-5
   // を強制: order/index.js:1573。読み集計は同フィルタで静黙除外するため範囲外値は

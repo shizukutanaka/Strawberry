@@ -168,7 +168,7 @@ describe('verify-data-consistency', () => {
       'verifications.json': [],
     });
     fs.writeFileSync(path.join(dir, 'watches.json'), '{bad json');
-    fs.writeFileSync(path.join(dir, 'revoked-tokens.json'), JSON.stringify({ jti1: 12345 }));
+    fs.writeFileSync(path.join(dir, 'revoked-tokens.json'), JSON.stringify({ jti1: Date.now() + 3_600_000 }));
     fs.writeFileSync(path.join(dir, 'reputations.json'), JSON.stringify([{ id: 'r1' }, { id: 'r1' }]));
     const { issues, summary } = run(dir);
     expect(issues.some((i) => i.check === 'parse' && i.detail.includes('watches.json'))).toBe(true);

@@ -323,6 +323,13 @@ function run(dataDir) {
       issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
     }
   }
+  // pricePerHour 未設定の GPU — 価格不明の出品は見積もり・order 作成を
+  // 通せない。'pricePerHour' in g ガードで非正値を見ている invalid-price と対。
+  for (const g of gpus) {
+    if (g && !('pricePerHour' in g)) {
+      issues.push({ severity: 'warn', check: 'missing-gpu-price', detail: `gpus.json: id "${g.id}" に pricePerHour がない（価格不明で注文不能な出品）` });
+    }
+  }
   for (const g of gpus) {
     if (g && 'pricePerHour' in g && !(typeof g.pricePerHour === 'number' && Number.isFinite(g.pricePerHour) && g.pricePerHour > 0)) {
       issues.push({ severity: 'warn', check: 'invalid-price', detail: `gpus.json: id "${g.id}" の pricePerHour "${g.pricePerHour}" は正の数ではない（予約不可・価格計算破損）` });

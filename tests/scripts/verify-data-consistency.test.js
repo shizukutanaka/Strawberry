@@ -25,7 +25,7 @@ describe('verify-data-consistency', () => {
       'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' }],
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
-      'gpus.json': [{ id: 'g1', providerId: 'u1' }],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100 }],
       'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues, summary } = run(dir);
@@ -400,6 +400,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'missing-method' && i.detail.includes('p2'))).toBe(false);
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v2'))).toBe(true);
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
+  });
+
+  it('warns on GPU records missing pricePerHour', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', providerId: 'u1', pricePerHour: 100 },
+        { id: 'g2', providerId: 'u1' },
+      ],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-gpu-price' && i.detail.includes('g2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-gpu-price' && i.detail.includes('g1'))).toBe(false);
   });
 
   it('warns on orders missing their status timestamp', () => {

@@ -57,11 +57,15 @@ function run(dataDir) {
   const payments = loadCollection(dataDir, 'payments.json', issues);
   const escrows = loadCollection(dataDir, 'escrows.json', issues);
   const verifications = loadCollection(dataDir, 'verifications.json', issues);
+  const gpus = loadCollection(dataDir, 'gpus.json', issues);
+  const users = loadCollection(dataDir, 'users.json', issues);
 
   checkDuplicateIds('orders.json', orders, issues);
   checkDuplicateIds('payments.json', payments, issues);
   checkDuplicateIds('escrows.json', escrows, issues);
   checkDuplicateIds('verifications.json', verifications, issues);
+  checkDuplicateIds('gpus.json', gpus, issues);
+  checkDuplicateIds('users.json', users, issues);
 
   const orderIds = new Set(orders.map((o) => o.id));
   const orderStatus = new Map(orders.map((o) => [o.id, o.status]));
@@ -75,6 +79,33 @@ function run(dataDir) {
           check: 'dangling-order-ref',
           detail: `${name}: id "${row.id}" が存在しない order "${row.orderId}" を参照`,
         });
+      }
+    }
+  }
+
+  // エンティティ横断参照: gpuId→gpus、providerId/renterId/userId→users。
+  // ユーザー削除等で dangling が正当な場合もあり得るため warn 止まり
+  // （資金直結の orderId 参照だけ error）。
+  const gpuIds = new Set(gpus.map((g) => g.id));
+  const userIds = new Set(users.map((u) => u.id));
+  const USER_REF_FIELDS = ['providerId', 'renterId', 'userId'];
+  const collections = [
+    ['orders.json', orders],
+    ['payments.json', payments],
+    ['escrows.json', escrows],
+    ['verifications.json', verifications],
+    ['gpus.json', gpus],
+  ];
+  for (const [name, rows] of collections) {
+    for (const row of rows) {
+      if (!row) continue;
+      if (row.gpuId !== undefined && !gpuIds.has(row.gpuId)) {
+        issues.push({ severity: 'warn', check: 'dangling-gpu-ref', detail: `${name}: id "${row.id}" が存在しない gpu "${row.gpuId}" を参照` });
+      }
+      for (const f of USER_REF_FIELDS) {
+        if (row[f] !== undefined && !userIds.has(row[f])) {
+          issues.push({ severity: 'warn', check: 'dangling-user-ref', detail: `${name}: id "${row.id}" の ${f} "${row[f]}" は存在しない user を参照` });
+        }
       }
     }
   }
@@ -141,7 +172,7 @@ function run(dataDir) {
   return {
     issues,
     summary: {
-      collections: { orders: orders.length, payments: payments.length, escrows: escrows.length, verifications: verifications.length },
+      collections: { orders: orders.length, payments: payments.length, escrows: escrows.length, verifications: verifications.length, gpus: gpus.length, users: users.length },
       errors,
       warnings,
       ok: errors === 0,
@@ -153,7 +184,7 @@ function main() {
   const dataDir = process.argv[2] || path.join(__dirname, '../data');
   const { issues, summary } = run(dataDir);
   console.log(`[verify-data-consistency] ${dataDir}`);
-  console.log(`  collections: orders=${summary.collections.orders} payments=${summary.collections.payments} escrows=${summary.collections.escrows} verifications=${summary.collections.verifications}`);
+  console.log(`  collections: orders=${summary.collections.orders} payments=${summary.collections.payments} escrows=${summary.collections.escrows} verifications=${summary.collections.verifications} gpus=${summary.collections.gpus} users=${summary.collections.users}`);
   for (const i of issues) {
     console.log(`  [${i.severity}] ${i.check}: ${i.detail}`);
   }

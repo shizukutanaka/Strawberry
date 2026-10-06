@@ -21,10 +21,12 @@ describe('verify-data-consistency', () => {
 
   it('reports OK on a consistent dataset', () => {
     dir = makeDataDir({
-      'orders.json': [{ id: 'o1', status: 'completed' }],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1' }],
       'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid' }],
       'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'SETTLED' }],
       'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1' }],
+      'users.json': [{ id: 'u1' }],
     });
     const { issues, summary } = run(dir);
     expect(summary.ok).toBe(true);
@@ -94,6 +96,21 @@ describe('verify-data-consistency', () => {
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'duplicate-id')).toBe(true);
     expect(issues.some((i) => i.check === 'parse')).toBe(true);
+  });
+
+  it('flags dangling gpu/user references as warnings (not errors)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'ghost-gpu', providerId: 'ghost-user' }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1' }],
+      'users.json': [{ id: 'u1' }],
+    });
+    const { issues, summary } = run(dir);
+    expect(issues.some((i) => i.check === 'dangling-gpu-ref' && i.severity === 'warn')).toBe(true);
+    expect(issues.some((i) => i.check === 'dangling-user-ref' && i.severity === 'warn')).toBe(true);
+    expect(summary.ok).toBe(true); // warn only, no error
   });
 
   it('dispute mismatch is a warning, not an error', () => {

@@ -419,6 +419,15 @@ function run(dataDir) {
     }
   }
 
+  // model 未設定の GPU — model は価格推定（market-pricing-engine）、検索
+  // （gpu/index.js:178）、重複排除キー (:522,:717) の識別子。欠落は
+  // 「何の GPU か判別不能な出品」。
+  for (const g of gpus) {
+    if (g && !g.model) {
+      issues.push({ severity: 'warn', check: 'missing-gpu-model', detail: `gpus.json: id "${g.id}" に model がない（価格推定・検索・重複排除が効かない出品）` });
+    }
+  }
+
   // pricePerHour 未設定の GPU — 価格不明の出品は見積もり・order 作成を
   // 通せない。'pricePerHour' in g ガードで非正値を見ている invalid-price と対。
   for (const g of gpus) {

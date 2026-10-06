@@ -252,6 +252,15 @@ function run(dataDir) {
       issues.push({ severity: 'warn', check: 'missing-payment', detail: `orders.json: id "${o.id}" (${o.status}) に対応する payment レコードがない` });
     }
   }
+  // 完了 order に 'paid' な payment が無い — missing-payment の厳密版:
+  // レコードはあっても paid 到達していない（failed/pending のみ or 全額 refunded）なら
+  // 完了の根拠となる支払い証跡が無い。
+  const ordersWithPaid = new Set(payments.filter((p) => p && p.status === 'paid').map((p) => p.orderId));
+  for (const o of orders) {
+    if (o && o.status === 'completed' && ordersWithPayment.has(o.id) && !ordersWithPaid.has(o.id)) {
+      issues.push({ severity: 'warn', check: 'unpaid-completed-order', detail: `orders.json: id "${o.id}" は completed だが paid な payment がない` });
+    }
+  }
 
   const errors = issues.filter((i) => i.severity === 'error').length;
   const warnings = issues.length - errors;

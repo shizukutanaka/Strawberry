@@ -205,6 +205,17 @@ describe('verify-data-consistency', () => {
     expect(summary.ok).toBe(true);
   });
 
+  it('warns on a completed order whose payments never reached paid', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'failed' }],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unpaid-completed-order' && i.severity === 'warn')).toBe(true);
+  });
+
   it('dispute mismatch is a warning, not an error', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'active' }],

@@ -483,6 +483,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
   });
 
+  it('warns on malformed escrow history', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed', completedAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'SETTLED', history: [{ event: 'PAY', from: 'PENDING', to: 'HELD' }] },
+        { id: 'e2', orderId: 'o1', state: 'CANCELED', history: 'oops' },
+        { id: 'e3', orderId: 'o1', state: 'CANCELED', history: [{ from: 'PENDING' }] },
+      ],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'malformed-escrow-history' && i.detail.includes('e2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'malformed-escrow-history' && i.detail.includes('e3'))).toBe(true);
+    expect(issues.some((i) => i.check === 'malformed-escrow-history' && i.detail.includes('e1'))).toBe(false);
+  });
+
   it('warns on orders missing renter attribution', () => {
     dir = makeDataDir({
       'orders.json': [

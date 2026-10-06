@@ -770,3 +770,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: model 未設定 GPU 検査 (2026-10)**: model は価格推定・検索・重複排除キーの識別子 — 欠落は「何の GPU か判別不能な出品」を warn。44テスト緑。
 - **verify-data-consistency: paidAt 欠落 payment 検査 (2026-10)**: status→paid 遷移が書く paidAt を欠く paid レコード（支払い時刻不明で課金・監査の時系列復元不可）を warn。45テスト緑。
 - **verify-data-consistency: 借り手帰属不能 order 検査 (2026-10)**: userId/renterId 双方を欠く order（作成時 `orderData.userId = req.user.id` 必須）を warn — 課金・レビュー・返金・SLA 通知の帰属不能。46テスト緑。
+- **verify-data-consistency: escrow.history 異形検査 (2026-10)**: 遷移証跡 {event,from,to,at} が配列でない・event 名を欠く要素を warn — 紛争時の再現不能。47テスト緑。

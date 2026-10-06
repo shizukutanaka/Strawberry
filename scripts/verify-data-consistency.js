@@ -401,6 +401,20 @@ function run(dataDir) {
     }
   }
 
+  // escrow.history の異形 — FSM は遷移ごとに `{ event, from, to, at }` を
+  // append し、紛争時の再現はこれに依存する。配列でない・イベント名の
+  // ない要素は遷移証跡の破損 → warn（監査ログが一次証跡のため warn 止まり）。
+  for (const e of escrows) {
+    if (!e || e.history === undefined) continue;
+    if (!Array.isArray(e.history)) {
+      issues.push({ severity: 'warn', check: 'malformed-escrow-history', detail: `escrows.json: id "${e.id}" の history が配列でない（遷移証跡破損）` });
+      continue;
+    }
+    if (e.history.some((h) => !h || typeof h !== 'object' || !h.event)) {
+      issues.push({ severity: 'warn', check: 'malformed-escrow-history', detail: `escrows.json: id "${e.id}" の history に event 名のない要素がある（遷移証跡破損）` });
+    }
+  }
+
   // userId 未設定の order — 作成は `orderData.userId = req.user.id` で
   // 借り手を必ず記録する（order/index.js:1035）。欠落は課金・レビュー・
   // 返金・SLA 通知の帰属ができない「誰の注文か分からない」状態。

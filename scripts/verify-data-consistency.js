@@ -630,6 +630,12 @@ function run(dataDir) {
     if (u && !u.email) {
       issues.push({ severity: 'warn', check: 'missing-email', detail: `users.json: id "${u.id}" に email がない（ログイン・通知経路を失ったアカウント）` });
     }
+    // 形式異常 email — 書込み側は Joi.string().email() で検証する
+    // (user/index.js:78 → validator.js:220) ので、混入は移行・直接編集の兆候。
+    // 通知・リセットは静黙失敗するため保守的パターンで warn。
+    if (u && typeof u.email === 'string' && u.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u.email)) {
+      issues.push({ severity: 'warn', check: 'invalid-email', detail: `users.json: id "${u.id}" の email "${u.email}" は形式外（通知・認証が静黙失敗）` });
+    }
   }
 
   // 未定義ロール — 権限チェックは admin/lender/provider/renter/user/system の

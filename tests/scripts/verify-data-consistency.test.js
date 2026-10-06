@@ -508,6 +508,23 @@ describe('verify-data-consistency', () => {
     expect(issues.filter((i) => i.check === 'status-chronology').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('warns on malformed user emails', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'not-an-email', role: 'user' },
+        { id: 'u2', email: 'good@example.com', role: 'user' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-email' && i.detail.includes('u1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-email' && i.detail.includes('u2'))).toBe(false);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

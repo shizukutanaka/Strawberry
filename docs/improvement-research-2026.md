@@ -777,3 +777,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: ステータス時系列逆転検査 (2026-10)**: createdAt→matchedAt→終了時刻、paidAt→settledAt の不可能な逆転（時計ずれ・直接編集・移行破損の兆候）を warn。50テスト緑。
 - **verify-data-consistency: 形式異常 email 検査 (2026-10)**: Joi.email() 検証を迂回した壊れた email（@ なし・ドメインにドットなし — 通知・認証の静黙失敗）を warn。51テスト緑。
 - **verify-data-consistency: 支払者≠借り手検査 (2026-10)**: payment.userId と order.userId の不一致（他人の注文を支払った帰属矛盾 — 返金・監査で当事者が食い違う）を warn。52テスト緑。
+- **notification-settings: loadSettings の stat 指紋ゲートキャッシュ化 (2026-10)**: i7 監査で発見 — 認証済みリクエスト毎に settings 全文を readFileSync+JSON.parse していたホットパス同期 I/O を、(mtimeMs,size) 指紋ゲートへ変更（auth-user-lookup 規約）。書き込み経路は finally で明示破棄し、同一ms 書き換えの指紋衝突・未コミット変更の残留を遮断。テスト4件追加・lint 466 files 緑。

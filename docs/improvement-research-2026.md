@@ -766,3 +766,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: revoked-tokens 健全性検査 (2026-10)**: {jti: expiryMs} マップの非数値エントリ（ローダーが静黙ドロップ → logout 済み JWT 復活の穴）を error、期限切れ滞留を warn。40テスト緑。
 - **verify-data-consistency: notification-settings 健全性検査 (2026-10)**: {userId: prefs} マップの孤立エントリ（消えたユーザーへのゴースト通知ルート）と異形値（オブジェクトでない設定）を warn。41テスト緑。
 - **verify-data-consistency: gpu.available 非真偽値検査 (2026-10)**: ブッキングゲート `available === false` 厳密比較をすり抜ける異形値（"no"/0/"false"）を warn — 検索側では偽値扱いされる両義状態。42テスト緑。
+- **verify-data-consistency: 滞留 pending 予約検査 (2026-10)**: 開始予定から24h超経過も pending の order（支払いの来ない枠占有 — 時間帯重複ガードが pending を BLOCKING 扱いするため他注文を締め出す）を warn。43テスト緑。

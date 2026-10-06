@@ -378,6 +378,20 @@ function run(dataDir) {
     }
   }
 
+  // 開始予定を大幅に過ぎた pending order — scheduledStartAt は作成時
+  // 「過去5分以内」必須（order/index.js:1007）で LN invoice 期限は ~1h。
+  // 24h 以上前の予約が pending のまま = 支払いが永遠に来ない枠占有
+  // （時間帯重複ガードが pending を BLOCKING に含むため他注文を締め出す）。
+  {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const o of orders) {
+      const t = o && o.status === 'pending' && o.scheduledStartAt && Date.parse(o.scheduledStartAt);
+      if (t && t < cutoff) {
+        issues.push({ severity: 'warn', check: 'stuck-pending-reservation', detail: `orders.json: id "${o.id}" は開始予定 ${o.scheduledStartAt} から24h超経過も pending（支払いの来ない枠占有）` });
+      }
+    }
+  }
+
   // gpuId 未設定の order — 作成ルートは gpuId を必須とする
   // （order/index.js:888 'gpuId is required'）。欠落は実行対象を失った予約で
   // 二重予約判定・検証・SLA 集計の全てが対象を特定できない。

@@ -483,6 +483,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
   });
 
+  it('warns on pending orders long past their scheduled start', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'pending', scheduledStartAt: '2020-01-01T00:00:00Z' },
+        { id: 'o2', status: 'pending', scheduledStartAt: new Date(Date.now() + 86_400_000).toISOString() },
+        { id: 'o3', status: 'completed', scheduledStartAt: '2020-01-01T00:00:00Z' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'stuck-pending-reservation' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'stuck-pending-reservation' && i.detail.includes('o2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'stuck-pending-reservation' && i.detail.includes('o3'))).toBe(false);
+  });
+
   it('warns on GPU records missing pricePerHour', () => {
     dir = makeDataDir({
       'orders.json': [],

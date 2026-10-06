@@ -401,6 +401,15 @@ function run(dataDir) {
     }
   }
 
+  // userId 未設定の order — 作成は `orderData.userId = req.user.id` で
+  // 借り手を必ず記録する（order/index.js:1035）。欠落は課金・レビュー・
+  // 返金・SLA 通知の帰属ができない「誰の注文か分からない」状態。
+  for (const o of orders) {
+    if (o && !o.userId && !o.renterId) {
+      issues.push({ severity: 'warn', check: 'missing-renter', detail: `orders.json: id "${o.id}" (${o.status}) に userId/renterId がない（借り手帰属不能）` });
+    }
+  }
+
   // gpuId 未設定の order — 作成ルートは gpuId を必須とする
   // （order/index.js:888 'gpuId is required'）。欠落は実行対象を失った予約で
   // 二重予約判定・検証・SLA 集計の全てが対象を特定できない。

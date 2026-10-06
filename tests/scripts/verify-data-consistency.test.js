@@ -21,7 +21,7 @@ describe('verify-data-consistency', () => {
 
   it('reports OK on a consistent dataset', () => {
     dir = makeDataDir({
-      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
       'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-01-01T00:00:00Z' }],
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
@@ -481,6 +481,24 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g2'))).toBe(true);
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g1'))).toBe(false);
     expect(issues.some((i) => i.check === 'invalid-availability' && i.detail.includes('g3'))).toBe(false);
+  });
+
+  it('warns on orders missing renter attribution', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'pending', userId: 'u1' },
+        { id: 'o2', status: 'pending', renterId: 'u1' },
+        { id: 'o3', status: 'pending' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-renter' && i.detail.includes('o3'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-renter' && i.detail.includes('o1'))).toBe(false);
+    expect(issues.some((i) => i.check === 'missing-renter' && i.detail.includes('o2'))).toBe(false);
   });
 
   it('warns on paid payments missing paidAt', () => {

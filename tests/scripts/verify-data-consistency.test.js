@@ -26,7 +26,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1' }],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues, summary } = run(dir);
     expect(summary.ok).toBe(true);
@@ -129,7 +129,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1' }],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues, summary } = run(dir);
     expect(issues.some((i) => i.check === 'dangling-gpu-ref' && i.severity === 'warn')).toBe(true);
@@ -253,7 +253,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1' }],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues, summary } = run(dir);
     expect(summary.ok).toBe(false);
@@ -267,7 +267,7 @@ describe('verify-data-consistency', () => {
       'payments.json': [],
       'escrows.json': [],
       'verifications.json': [],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     fs.writeFileSync(path.join(dir, 'reputations.json'), JSON.stringify([
       { id: 'r1', orderId: 'ghost-order', userId: 'u1' },
@@ -335,7 +335,7 @@ describe('verify-data-consistency', () => {
         { id: 'g1', providerId: 'u1', pricePerHour: 0 },
         { id: 'g2', providerId: 'u1', pricePerHour: 500 },
       ],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'invalid-duration' && i.detail.includes('o1'))).toBe(true);
@@ -373,7 +373,7 @@ describe('verify-data-consistency', () => {
         { id: 'g1', providerId: 'u1' },
         { id: 'g2' },
       ],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'missing-provider' && i.detail.includes('g2'))).toBe(true);
@@ -400,6 +400,22 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'missing-method' && i.detail.includes('p2'))).toBe(false);
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v2'))).toBe(true);
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
+  });
+
+  it('warns on user records missing email', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [
+        { id: 'u1', email: 'u1@example.com' },
+        { id: 'u2' },
+      ],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-email' && i.detail.includes('u2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-email' && i.detail.includes('u1'))).toBe(false);
   });
 
   it('warns on expired unpaid invoice', () => {
@@ -429,7 +445,7 @@ describe('verify-data-consistency', () => {
       ],
       'escrows.json': [],
       'verifications.json': [],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'missing-payer' && i.detail.includes('p2'))).toBe(true);
@@ -496,7 +512,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1', available: false }],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'unavailable-gpu-order' && i.detail.includes('o1'))).toBe(true);
@@ -516,7 +532,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [],
       'verifications.json': [],
       'gpus.json': [],
-      'users.json': [{ id: 'u1' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'refunded-active-order' && i.detail.includes('o1'))).toBe(true);

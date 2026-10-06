@@ -400,6 +400,14 @@ function run(dataDir) {
     }
   }
 
+  // email 未設定の user — ログイン・パスワードリセット・通知全てが email を
+  // キーにするため、email のないアカウントは認証経路を失った「開かない部屋」。
+  for (const u of users) {
+    if (u && !u.email) {
+      issues.push({ severity: 'warn', check: 'missing-email', detail: `users.json: id "${u.id}" に email がない（ログイン・通知経路を失ったアカウント）` });
+    }
+  }
+
   // 未定義ロール — 権限チェックは admin/lender/provider/renter/user/system の
   // 集合で判定するため、それ以外の role は「どの権限にも合致しない幽霊権限」
   // （レンターのはずが借りられない等）になり得る。

@@ -446,6 +446,20 @@ function run(dataDir) {
     }
   }
 
+  // 支払者不明 — payment 自身にも、その orderId が指す order にも
+  // userId/providerId がないと「誰が払ったか」に辿り着けない
+  // （返金・照会・監査で当事者を特定できない）。
+  {
+    const orderById = new Map(orders.map((o) => [o && o.id, o]));
+    for (const p of payments) {
+      if (!p || p.userId !== undefined || p.providerId !== undefined) continue;
+      const o = p.orderId !== undefined ? orderById.get(p.orderId) : undefined;
+      if (!o || (o.userId === undefined && o.providerId === undefined && o.renterId === undefined)) {
+        issues.push({ severity: 'warn', check: 'missing-payer', detail: `payments.json: id "${p.id}" は payment/order のどちらからも支払い当事者に辿り着けない` });
+      }
+    }
+  }
+
   // feeRate 範囲外 — create は [0,0.99] にクランプ（escrow-service.js:148）。
   // 範囲外の保存値は書き込み側検証を迂回した混入（fee>=1 は payout<=0 で
   // provider が無報酬になる、負値は運営損失）。

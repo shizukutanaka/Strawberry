@@ -402,6 +402,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'unknown-verdict' && i.detail.includes('v1'))).toBe(false);
   });
 
+  it('warns when a payment is unattributable to any party', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'completed', userId: 'u1' },
+        { id: 'o2', status: 'completed' },
+      ],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning' },
+        { id: 'p2', orderId: 'o2', status: 'pending' },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+      'users.json': [{ id: 'u1' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-payer' && i.detail.includes('p2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-payer' && i.detail.includes('p1'))).toBe(false);
+  });
+
   it('warns on out-of-range escrow feeRate', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'pending' }],

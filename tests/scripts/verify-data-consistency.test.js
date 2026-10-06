@@ -551,6 +551,18 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'provider-mismatch' && i.detail.includes('o1'))).toBe(true);
   });
 
+  it('warns on non-positive order totalPrice', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'cancelled', cancelledAt: '2025-01-01T00:00:00Z', totalPrice: 0 }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-total-price' && i.detail.includes('o1'))).toBe(true);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

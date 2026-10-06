@@ -304,6 +304,16 @@ function run(dataDir) {
     }
   }
 
+  // totalPrice の非正値 — 作成時は Math.max(1, round(price×h)) で ≥1 を保証
+  // （order/index.js:1051）。0・負・非数の totalPrice は集計系（stats の
+  // completedSats/JPY 加算）で静黙に 0 扱いされる売上計上漏れの兆候。
+  // レガシー注文の totalPrice 未設定は order-pricing 側が再計算するので対象外。
+  for (const o of orders) {
+    if (o && o.totalPrice !== undefined && !(typeof o.totalPrice === 'number' && Number.isFinite(o.totalPrice) && o.totalPrice > 0)) {
+      issues.push({ severity: 'warn', check: 'invalid-total-price', detail: `orders.json: id "${o.id}" の totalPrice "${o.totalPrice}" は非正値（集計・請求で 0 扱いの売上計上漏れ）` });
+    }
+  }
+
   // profit-addresses.json — 運営利益の送金先。要素はアドレス文字列のみの
   // プレーン配列で、書込み側は isValidBtcAddress
   // （api/utils/profit-addresses.js:33-46 の mainnet/testnet/regtest 形式）

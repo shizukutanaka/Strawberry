@@ -77,22 +77,27 @@ function report() {
 
 function main() {
   const jsonMode = process.argv.includes('--json');
+  const strict = process.argv.includes('--strict');
   const r = report();
   if (jsonMode) {
     console.log(JSON.stringify(r, null, 2));
-    return;
-  }
-  const s = r.summary;
-  console.log(`[report-console-usage] src/ の console.* 使用: ${s.filesWithConsole} ファイル（正当 ${s.legitFiles} / drift ${s.driftFiles}・${s.driftCalls} 呼出）`);
-  for (const f of r.files) {
-    if (f.error) {
-      console.log(`    ! ${f.file}: 読込不可 ${f.error}`);
-      continue;
+  } else {
+    const s = r.summary;
+    console.log(`[report-console-usage] src/ の console.* 使用: ${s.filesWithConsole} ファイル（正当 ${s.legitFiles} / drift ${s.driftFiles}・${s.driftCalls} 呼出）`);
+    for (const f of r.files) {
+      if (f.error) {
+        console.log(`    ! ${f.file}: 読込不可 ${f.error}`);
+        continue;
+      }
+      const kinds = Object.entries(f.byKind).map(([k, n]) => `${k}×${n}`).join(' ');
+      console.log(`    ${f.legit ? '=' : '-'} ${f.file}: ${f.count}（${kinds}）${f.legit ? ' [正当: CLI/ロガー実装]' : ''}`);
     }
-    const kinds = Object.entries(f.byKind).map(([k, n]) => `${k}×${n}`).join(' ');
-    console.log(`    ${f.legit ? '=' : '-'} ${f.file}: ${f.count}（${kinds}）${f.legit ? ' [正当: CLI/ロガー実装]' : ''}`);
+    if (!s.driftFiles) console.log('  ロガー迂回 drift なし');
   }
-  if (!s.driftFiles) console.log('  ロガー迂回 drift なし');
+  if (strict && r.summary.driftFiles > 0) {
+    console.error(`report-console-usage: ${r.summary.driftFiles} ファイルのロガー迂回 drift を検出`);
+    process.exit(1);
+  }
 }
 
 if (require.main === module) {

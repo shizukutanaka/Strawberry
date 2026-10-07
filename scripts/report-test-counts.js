@@ -119,18 +119,23 @@ function compute() {
 function main() {
   const update = process.argv.includes('--update');
   const jsonMode = process.argv.includes('--json');
+  const strict = process.argv.includes('--strict');
   const r = compute();
   if (jsonMode) {
     console.log(JSON.stringify(r, null, 2));
-    return;
+  } else {
+    console.log(`measured: suites=${r.suites} (jest --listTests), tests≈${r.testsApprox} (it/test call sites — 近似値)`);
+    for (const c of r.drifts) {
+      console.log(`  [drift] ${c.file}: "${c.value} ${c.unit}" (measured ${c.measured}) — ${c.context}`);
+    }
+    console.log(r.drifts.length === 0 ? 'doc claims: no drift' : `doc claims: ${r.drifts.length} potential drift point(s)`);
+    if (update && r.drifts.length > 0) {
+      console.log('(--update は数値の意味を区別できないため自動置換しません — 上記箇所を手動で同期してください)');
+    }
   }
-  console.log(`measured: suites=${r.suites} (jest --listTests), tests≈${r.testsApprox} (it/test call sites — 近似値)`);
-  for (const c of r.drifts) {
-    console.log(`  [drift] ${c.file}: "${c.value} ${c.unit}" (measured ${c.measured}) — ${c.context}`);
-  }
-  console.log(r.drifts.length === 0 ? 'doc claims: no drift' : `doc claims: ${r.drifts.length} potential drift point(s)`);
-  if (update && r.drifts.length > 0) {
-    console.log('(--update は数値の意味を区別できないため自動置換しません — 上記箇所を手動で同期してください)');
+  if (strict && r.drifts.length > 0) {
+    console.error(`report-test-counts: ${r.drifts.length} 件のテスト数記述 drift を検出`);
+    process.exit(1);
   }
 }
 

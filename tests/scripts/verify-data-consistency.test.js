@@ -1073,4 +1073,24 @@ describe('verify-data-consistency', () => {
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('o1'))).toBe(true);
   });
+
+  it('warns on GPU enum/schema violations (vendor, apiType, memoryGB)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', vendor: 'CustomSilicon', apiType: 'CUDA', memoryGB: 24, model: 'X' },
+        { id: 'g2', vendor: 'NVIDIA', apiType: 'WebGPU', memoryGB: 24, model: 'X' },
+        { id: 'g3', vendor: 'AMD', apiType: 'ROCm', memoryGB: 0, model: 'X' },
+        { id: 'g4', vendor: 'Intel', apiType: 'oneAPI', memoryGB: 16, model: 'X' },
+      ],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.filter((i) => i.check === 'invalid-gpu-enum')).toHaveLength(2);
+    expect(issues.some((i) => i.check === 'invalid-gpu-memory' && i.detail.includes('g3'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-gpu-enum' && i.detail.includes('g4'))).toBe(false);
+  });
 });

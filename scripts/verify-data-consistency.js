@@ -524,6 +524,26 @@ function run(dataDir) {
     }
   }
 
+  // GPU 登録スキーマ（validator.js:36-49）を迂回した出品 — vendor/apiType の
+  // enum 外値はフィルタ検索（gpu/index.js:177-178）にヒットしない「見えない出品」、
+  // memoryGB の範囲外値は能力誤表示。
+  {
+    const VENDORS = ['NVIDIA', 'AMD', 'Intel'];
+    const API_TYPES = ['CUDA', 'ROCm', 'oneAPI', 'OpenCL'];
+    for (const g of gpus) {
+      if (!g) continue;
+      if (g.vendor !== undefined && !VENDORS.includes(g.vendor)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-enum', detail: `gpus.json: id "${g.id}" の vendor "${g.vendor}" は enum 外（検索フィルタに載らない出品）` });
+      }
+      if (g.apiType !== undefined && !API_TYPES.includes(g.apiType)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-enum', detail: `gpus.json: id "${g.id}" の apiType "${g.apiType}" は enum 外（検索フィルタに載らない出品）` });
+      }
+      if (g.memoryGB !== undefined && !(typeof g.memoryGB === 'number' && g.memoryGB >= 1 && g.memoryGB <= 8192)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-memory', detail: `gpus.json: id "${g.id}" の memoryGB "${g.memoryGB}" は範囲外 [1,8192]（能力誤表示）` });
+      }
+    }
+  }
+
   // model 未設定の GPU — model は価格推定（market-pricing-engine）、検索
   // （gpu/index.js:178）、重複排除キー (:522,:717) の識別子。欠落は
   // 「何の GPU か判別不能な出品」。

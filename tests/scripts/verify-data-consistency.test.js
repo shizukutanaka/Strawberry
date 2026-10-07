@@ -1013,4 +1013,34 @@ describe('verify-data-consistency', () => {
     const bad = issues.filter((i) => i.check === 'invalid-uptime-counter');
     expect(bad).toHaveLength(2); // beats と gapEvents の2件
   });
+
+  it('warns on durationMinutes above the 30-day Joi ceiling', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending', durationMinutes: 50000 }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-duration' && i.detail.includes('43200'))).toBe(true);
+  });
+
+  it('warns on schedule-window mismatch (end != start + duration)', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'matched', gpuId: 'g1', durationMinutes: 60, scheduledStartAt: '2026-01-01T00:00:00Z', scheduledEndAt: '2026-01-01T02:00:00Z' },
+        { id: 'o2', status: 'matched', gpuId: 'g1', durationMinutes: 60, scheduledStartAt: '2026-02-01T00:00:00Z', scheduledEndAt: '2026-02-01T01:00:00Z' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o2'))).toBe(false);
+  });
 });

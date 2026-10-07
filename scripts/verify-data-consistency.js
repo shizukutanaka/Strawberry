@@ -491,11 +491,27 @@ function run(dataDir) {
   }
 
   // 予約/価格フィールドの健全性（作成ルートの検証と同一規約）:
-  //   order.durationMinutes … 正の整数かつ5の倍数（order/index.js:881）
+  //   order.durationMinutes … 正の整数かつ5の倍数かつ ≤43200（order/index.js:881、
+  //     上限は Joi schemas.order.create が担保 — 30日超の注文はスキーマ迂回）
   //   gpu.pricePerHour      … 正の数（order/index.js:952）
   for (const o of orders) {
-    if (o && 'durationMinutes' in o && !(Number.isInteger(o.durationMinutes) && o.durationMinutes > 0 && o.durationMinutes % 5 === 0)) {
-      issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
+    if (o && 'durationMinutes' in o) {
+      if (!(Number.isInteger(o.durationMinutes) && o.durationMinutes > 0 && o.durationMinutes % 5 === 0)) {
+        issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
+      } else if (o.durationMinutes > 43200) {
+        issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は上限 43200（30日）超過 — スキーマ検証の迂回` });
+      }
+    }
+    // 予約窓の不変条件: scheduledEndAt = scheduledStartAt + durationMinutes
+    // （order/index.js:1042）。ずれは手動編集・他経路書き込みの兆候 — 二重予約
+    // 判定や SLA 計算が壊れる。±1秒の許容誤差（端数・手動補正の丸め）。
+    if (o && o.scheduledStartAt && o.scheduledEndAt && Number.isFinite(o.durationMinutes)) {
+      const start = Date.parse(o.scheduledStartAt);
+      const end = Date.parse(o.scheduledEndAt);
+      if (Number.isFinite(start) && Number.isFinite(end)
+          && Math.abs(end - (start + o.durationMinutes * 60 * 1000)) > 1000) {
+        issues.push({ severity: 'warn', check: 'schedule-window-mismatch', detail: `orders.json: id "${o.id}" の scheduledEndAt が start+duration と不一致（予約窓の破損 — 重複判定/SLA が狂う）` });
+      }
     }
   }
   // gpu.available の非真偽値 — ブッキングゲートは `available === false` の

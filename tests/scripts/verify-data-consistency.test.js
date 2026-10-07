@@ -1133,4 +1133,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e3'))).toBe(false);
     expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e4'))).toBe(false);
   });
+
+  it('warns on out-of-range GPU spec fields (clockMHz, powerWatt, availability)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', clockMHz: 50, model: 'X' },
+        { id: 'g2', powerWatt: 0, model: 'X' },
+        { id: 'g3', availability: { hoursPerDay: 25, daysAvailable: [0, 7] }, model: 'X' },
+        { id: 'g4', clockMHz: 1500, powerWatt: 300, availability: { hoursPerDay: 8, daysAvailable: [0, 6] }, model: 'X' },
+      ],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.filter((i) => i.check === 'invalid-gpu-spec')).toHaveLength(2);
+    expect(issues.filter((i) => i.check === 'invalid-gpu-availability')).toHaveLength(2);
+    expect(issues.some((i) => i.check === 'invalid-gpu-spec' && i.detail.includes('g4'))).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-gpu-availability' && i.detail.includes('g4'))).toBe(false);
+  });
 });

@@ -796,3 +796,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: GPU スキーマ検査 (2026-10)**: 登録 Joi スキーマ（validator.js:36-49）を迂回した vendor/apiType enum 外値（検索フィルタに載らない「見えない出品」）と memoryGB 範囲外値を warn。67テスト緑。
 - **verify-data-consistency: GPU スキーマ＋価格ロック検査 (2026-10)**: vendor/apiType enum 外値・memoryGB 範囲外（検索フィルタ不可視出品）に加え、totalPrice = round(pricePerHour×durationMinutes/60) sat の約定不変条件（order/index.js:1049-1051）ずれを warn。68テスト緑。
 - **verify-data-consistency: HELD escrow 解放情報検査 (2026-10)**: HELD なのに preimageHash（LN reveal 経路）・txBorrowerToOperator（btc-onchain 経路）双方を欠く「鍵を失った資金ロック」を warn。69テスト緑。
+- **verify-data-consistency: GPU スペック/可稼働範囲検査 (2026-10)**: clockMHz [100,20000]・powerWatt [1,20000]・hoursPerDay [1,24]・daysAvailable [0,6] の範囲外値を warn（登録 Joi スキーマの事後検証）。70テスト緑。

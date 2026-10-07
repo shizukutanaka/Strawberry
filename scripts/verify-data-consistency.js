@@ -553,6 +553,21 @@ function run(dataDir) {
       if (g.memoryGB !== undefined && !(typeof g.memoryGB === 'number' && g.memoryGB >= 1 && g.memoryGB <= 8192)) {
         issues.push({ severity: 'warn', check: 'invalid-gpu-memory', detail: `gpus.json: id "${g.id}" の memoryGB "${g.memoryGB}" は範囲外 [1,8192]（能力誤表示）` });
       }
+      if (g.clockMHz !== undefined && !(typeof g.clockMHz === 'number' && g.clockMHz >= 100 && g.clockMHz <= 20000)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-spec', detail: `gpus.json: id "${g.id}" の clockMHz "${g.clockMHz}" は範囲外 [100,20000]` });
+      }
+      if (g.powerWatt !== undefined && !(typeof g.powerWatt === 'number' && g.powerWatt >= 1 && g.powerWatt <= 20000)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-spec', detail: `gpus.json: id "${g.id}" の powerWatt "${g.powerWatt}" は範囲外 [1,20000]` });
+      }
+      if (g.availability !== undefined && g.availability !== null && typeof g.availability === 'object') {
+        const av = g.availability;
+        if (av.hoursPerDay !== undefined && !(typeof av.hoursPerDay === 'number' && av.hoursPerDay >= 1 && av.hoursPerDay <= 24)) {
+          issues.push({ severity: 'warn', check: 'invalid-gpu-availability', detail: `gpus.json: id "${g.id}" の availability.hoursPerDay "${av.hoursPerDay}" は範囲外 [1,24]` });
+        }
+        if (Array.isArray(av.daysAvailable) && av.daysAvailable.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
+          issues.push({ severity: 'warn', check: 'invalid-gpu-availability', detail: `gpus.json: id "${g.id}" の availability.daysAvailable に曜日範囲外 [0,6] の値` });
+        }
+      }
     }
   }
 

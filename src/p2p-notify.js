@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const { appendRotated } = require('./utils/log-rotate');
+const { logger } = require('./utils/logger');
 
 const HEALTH_FILE = path.join(__dirname, 'health.json');
 // 死活監視アラートの記録先。改ざん検知ハッシュチェーンが管理する logs/audit.log とは
@@ -102,7 +103,7 @@ if (require.main === module) {
   // （MONITOR_TARGETS）は単独で動作させる（README 記載の運用コマンド）。
   Promise.resolve()
     .then(() => healthMain())
-    .catch(e => console.warn(`P2P ヘルス監視をスキップします: ${e.message}`));
+    .catch(e => logger.warn(`P2P ヘルス監視をスキップします: ${e.message}`));
   startNotifyLoop();
 }
 

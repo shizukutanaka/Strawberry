@@ -3,6 +3,7 @@ const { createNode, signMessage, verifyMessage } = require('./p2p-node');
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('./db/json/atomicWrite');
+const { logger } = require('./utils/logger');
 
 const ORDERS_FILE = path.join(__dirname, 'orders.json');
 const PAYMENTS_FILE = path.join(__dirname, 'payments.json');
@@ -31,7 +32,7 @@ async function handleOrderEvent(msg) {
   if (!orders.find(o => o.id === payload.id)) {
     orders.push(payload);
     saveOrders(orders);
-    console.log('新規注文を追加:', payload);
+    logger.info('新規注文を追加:', payload);
   }
 }
 async function handlePaymentEvent(msg) {
@@ -41,7 +42,7 @@ async function handlePaymentEvent(msg) {
   if (!payments.find(p => p.id === payload.id)) {
     payments.push(payload);
     savePayments(payments);
-    console.log('新規支払いを追加:', payload);
+    logger.info('新規支払いを追加:', payload);
   }
 }
 

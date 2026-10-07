@@ -3,6 +3,7 @@ const { createNode, signMessage, verifyMessage } = require('./p2p-node');
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('./db/json/atomicWrite');
+const { logger } = require('./utils/logger');
 
 const GPUS_FILE = path.join(__dirname, 'gpus.json');
 
@@ -21,7 +22,7 @@ async function handleGpuEvent(msg) {
   if (!gpus.find(g => g.id === payload.id)) {
     gpus.push(payload);
     saveGpus(gpus);
-    console.log('新規GPU情報を追加:', payload);
+    logger.info('新規GPU情報を追加:', payload);
   }
 }
 

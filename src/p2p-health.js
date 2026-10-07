@@ -3,6 +3,7 @@ const { createNode } = require('./p2p-node');
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('./db/json/atomicWrite');
+const { logger } = require('./utils/logger');
 
 const HEALTH_FILE = path.join(__dirname, 'health.json');
 
@@ -25,10 +26,10 @@ async function main() {
       peers,
     };
     saveHealth(health);
-    console.log('ノード死活監視:', health);
+    logger.info('ノード死活監視:', health);
     // 異常検知例: ピア数が0なら警告
     if (peers.length === 0) {
-      console.warn('警告: ピア接続なし（ネットワーク分断の可能性）');
+      logger.warn('警告: ピア接続なし（ネットワーク分断の可能性）');
     }
   }, 10000); // 10秒ごとに死活監視
 }

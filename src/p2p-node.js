@@ -4,6 +4,7 @@
 // MODULE_NOT_FOUND で道連れにするため、実際にノードを起動する createNode() 内で
 // 遅延 require し、未導入時は手順付きエラーにする。
 const crypto = require('crypto');
+const { logger } = require('./utils/logger');
 
 const P2P_DEP_HINT = 'P2P 機能には libp2p 系パッケージが必要です: npm i libp2p @chainsafe/libp2p-noise @libp2p/tcp @libp2p/mplex @libp2p/peer-id-factory peer-id';
 
@@ -57,7 +58,7 @@ async function createNode() {
     connectionEncryption: [new Noise()]
   });
   await node.start();
-  console.log(`P2Pノード起動: ${peerId.toString()}`);
+  logger.info(`P2Pノード起動: ${peerId.toString()}`);
   return node;
 }
 

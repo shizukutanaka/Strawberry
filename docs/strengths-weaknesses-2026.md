@@ -128,7 +128,7 @@
 42. **管理パススルー二重経路**: 非推奨 admin ルートが残り API 面が冗長。
 43. **同期 fs 呼び出しの残存**: `readFileSync`/`writeFileSync`/`appendFileSync` がホットパス近辺に残る。 → **部分対応**（#268/#269 — notification-settings・/sla・/anomalies・sandbox-apikey・profit-addresses の毎回全文読込を stat 指紋キャッシュ化。JSON ストア自体は atomic write 設計のまま）。
 44. **エラーハンドリングの非一貫**: APIError 規約と生 throw が混在する箇所が残る。
-45. **構造化ログの不統一**: winston ロガーと console 出力が混在。 → **部分対応**（#269 — `npm run report-console-usage` が drift を棚卸し token-denylist/openapi-generator をロガー化。残 drift は休眠 p2p 系のみ）。
+45. **構造化ログの不統一**: winston ロガーと console 出力が混在。 → **対応済み**（#269 — `npm run report-console-usage` で棚卸、token-denylist/openapi-generator/休眠 p2p 系5ファイルを全てロガー規約へ統一。drift 0）。
 46. **docker-compose/k8s は参考実装寄り**: 実装済みだが本番検証の形跡なし。
 47. **依存の遅延 require パターンが散在**: optional dep 対策として合理的だが不統一。
 48. **マルチリージョン/HA 設計なし**: 単一インスタンス前提で障害時の切替えなし。

@@ -1112,4 +1112,25 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o2'))).toBe(false);
     expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o3'))).toBe(false);
   });
+
+  it('warns on HELD escrow missing release info (stuck funds)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active' }],
+      'payments.json': [],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'HELD' },
+        { id: 'e2', orderId: 'o1', state: 'HELD', preimageHash: 'abc' },
+        { id: 'e3', orderId: 'o1', state: 'HELD', txBorrowerToOperator: 'txid1' },
+        { id: 'e4', orderId: 'o1', state: 'SETTLED' },
+      ],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e4'))).toBe(false);
+  });
 });

@@ -618,6 +618,16 @@ function run(dataDir) {
     }
   }
 
+  // HELD escrow の解放情報欠落 — LN escrow の清算は preimageHash の開示
+  // （escrow-service.js:38, state-machine DELIVER_OK→reveal_preimage）、
+  // btc-onchain escrow は txBorrowerToOperator を前提（btc-onchain.js:252）。
+  // 両方を欠く HELD は「鍵を失った資金ロック」— 解除にも清算にも進めない → warn。
+  for (const e of escrows) {
+    if (e && escrowState(e) === 'HELD' && !e.preimageHash && !e.txBorrowerToOperator) {
+      issues.push({ severity: 'warn', check: 'held-escrow-unreleasable', detail: `escrows.json: id "${e.id}" が HELD だが解放情報（preimageHash / txBorrowerToOperator）を欠く — 資金ロック解除不能` });
+    }
+  }
+
   // 同一 order に複数の未清算 escrow（DISPUTED も資金保持中のため含む）
   for (const [orderId, list] of escrowsByOrder) {
     const open = list.filter((e) => OPEN_ESCROW_STATES.has(escrowState(e)));

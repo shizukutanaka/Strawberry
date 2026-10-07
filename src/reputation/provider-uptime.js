@@ -92,10 +92,19 @@ function _maybeFlush(nowMs) {
 
 // ハートビートが途絶した期間に溜まった差分も取りこぼさないよう、無音期間を
 // カバーする unref タイマーを張る（unref のため単体ではプロセスを延命しない）。
-const _flushTimer = setInterval(() => {
-  try { _flushPending(Date.now()); } catch (_) { /* best-effort */ }
-}, FLUSH_INTERVAL_MS);
-if (typeof _flushTimer.unref === 'function') _flushTimer.unref();
+// NODE_ENV==='test' では張らない — このモジュールを require する各スイートが
+// 独自のタイマーを積み上げ、発火が jest 実行中のログを肥大化させるため
+// （server.js の metricsInterval と同じ問題）。flush は _flushPending を
+// テストから直接呼んで検証する。
+const _flushTimer = process.env.NODE_ENV === 'test'
+  ? null
+  : setInterval(() => {
+    try { _flushPending(Date.now()); } catch (_) { /* best-effort */ }
+  }, FLUSH_INTERVAL_MS);
+if (_flushTimer && typeof _flushTimer.unref === 'function') _flushTimer.unref();
+if (_flushTimer) {
+  require('../utils/daemon-registry').registerDaemon('provider-uptime-flush', () => clearInterval(_flushTimer));
+}
 
 // 前回ビートからこの時間を超えて次のビートが来たら「切断イベント」1回とみなす。
 // heartbeat の最小間隔は既定 10s。その 6 倍（60s）を超える空白は、

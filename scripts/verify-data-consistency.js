@@ -795,6 +795,42 @@ function run(dataDir) {
         issues.push({ severity: 'warn', check: 'status-chronology', detail: `payments.json: id "${p.id}" の settledAt が paidAt より前（決済時系列の逆転）` });
       }
     }
+    // 予約ウィンドウの不変条件 — order 作成時に scheduledEndAt =
+    // scheduledStartAt + durationMinutes×60s で直書きされる（order/index.js:1045）。
+    // ずれは予約重複判定（同ウィンドウ重なり検査）と auto-start の基準を狂わせる。
+    for (const o of orders) {
+      if (!o) continue;
+      const startMs = ts(o.scheduledStartAt);
+      const endMs = ts(o.scheduledEndAt);
+      if (startMs !== null && endMs !== null) {
+        if (endMs <= startMs) {
+          issues.push({ severity: 'warn', check: 'reversed-schedule', detail: `orders.json: id "${o.id}" の scheduledEndAt が scheduledStartAt 以下（予約ウィンドウ破損 = 重複判定不能）` });
+        } else {
+          const dur = Number(o.durationMinutes);
+          if (Number.isFinite(dur) && dur > 0) {
+            const expected = startMs + dur * 60 * 1000;
+            if (Math.abs(endMs - expected) > 60 * 1000) {
+              issues.push({ severity: 'warn', check: 'schedule-window-mismatch', detail: `orders.json: id "${o.id}" の scheduledEndAt が durationMinutes=${dur} から算出した終了と1分以上ずれる（予約重複判定の基準破損）` });
+            }
+          }
+        }
+      }
+    }
+    // SLA breach レコードの完結性 — sweep が付ける slaBreach=true には
+    // deliveredRatio∈[0,1] と slaBreachReason が必須（order/index.js:128-135）。
+    // 欠落・範囲外は係争時の精算根拠を失う。
+    for (const o of orders) {
+      if (!o || o.slaBreach !== true) continue;
+      const ratio = Number(o.deliveredRatio);
+      if (!(Number.isFinite(ratio) && ratio >= 0 && ratio <= 1)) {
+        issues.push({ severity: 'warn', check: 'incomplete-breach-record', detail: `orders.json: id "${o.id}" は slaBreach=true だが deliveredRatio "${o.deliveredRatio}" が [0,1] 範囲外（精算根拠の欠落）` });
+      }
+      if (o.slaBreachReason !== undefined && o.slaBreachReason !== 'provider_heartbeat_lost') {
+        issues.push({ severity: 'warn', check: 'incomplete-breach-record', detail: `orders.json: id "${o.id}" の slaBreachReason "${o.slaBreachReason}" は未定義値（発生元の追跡不能）` });
+      } else if (o.slaBreachReason === undefined) {
+        issues.push({ severity: 'warn', check: 'incomplete-breach-record', detail: `orders.json: id "${o.id}" は slaBreach=true だが slaBreachReason がない（発生元の追跡不能）` });
+      }
+    }
     // 資金レコードが資金対象の order より古い — 注文が存在する前の支払い/ロックは
     // 不可能な時系列（インポート時の時計ずれ or 後付け改竄の兆候）。
     for (const [label, records] of [['payments.json', payments], ['escrows.json', escrows]]) {

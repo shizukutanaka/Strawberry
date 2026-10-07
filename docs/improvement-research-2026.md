@@ -814,3 +814,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **duplicate-api-key 検査追加 (2026-10・verify-data-consistency)**: users.json の apiKey 重複を warn — getByApiKey は先勝ち完全一致のため重複は片方が誤認証される資格情報衝突。detail は資格情報保護で桁数と id のみ。テスト追加・73件緑。
 - **fund-before-order 検査追加 (2026-10・verify-data-consistency)**: payment/escrow の createdAt が資金対象 order の作成より古い不可能な時系列を warn — インポート時の時計ずれ or 後付け改竄の兆候。テスト2件追加・75件緑。
 - **escrow history FSM 合法性検査追加 (2026-10・verify-data-consistency)**: escrow-state-machine の TRANSITIONS を export して検査側と共有 — history を初期 PENDING から辿り、(a) 現状態で無効な FSM イベント、(b) 記録 state と表の行き先不一致、(c) チェーン末端と現在 state の drift を warn。観測イベント（LN_ACTIONS_*/SETTLEMENT_COMPUTED）は読み飛ばし。テスト3件追加・78件緑。
+- **/sla・/anomalies の stat 指紋キャッシュ化 (2026-10・弱所#43/i7)**: sla.json と anomaly-history.json の per-request readFileSync+JSON.parse を stat 指紋ゲート化（notification-settings/auth-user-lookup と同規約）。/sla は認証ユーザ全員が打てるため負荷面で優先。破損ファイルはキャッシュせず修復後即回復。テスト3件追加。

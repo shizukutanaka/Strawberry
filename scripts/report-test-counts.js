@@ -21,7 +21,9 @@ const { execFileSync } = require('child_process');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const TESTS_DIR = path.join(REPO_ROOT, 'tests');
-const DOC_FILES = ['README.md', 'docs/PRODUCT_ANALYSIS.md'];
+// スイート/テスト数の記述を含むドキュメント（docs/SPECIFICATION.md:84 の
+// 「247/249スイート」のような陳腐化記述も対象 — #266 の同期漏れ箇所）。
+const DOC_FILES = ['README.md', 'docs/PRODUCT_ANALYSIS.md', 'docs/SPECIFICATION.md'];
 
 function listTestFiles() {
   const out = [];

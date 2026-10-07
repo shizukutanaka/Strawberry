@@ -67,13 +67,31 @@ if (!fs.existsSync(ADDR_FILE)) {
   atomicWriteJSON(ADDR_FILE, migrated);
 }
 
+// selectProfitAddress は決済/清算の度に呼ばれるため、readFileSync を
+// stat 指紋ゲートのキャッシュへ（i7・同規約: notification-settings/sla/
+// sandbox-apikey）。書き込み経路は atomicWriteJSON で mtime が必ず変わる。
+let _addrStamp = undefined;
+let _addrCache = null;
+function _addrFileStamp() {
+  try {
+    const s = fs.statSync(ADDR_FILE);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch (_) {
+    return null;
+  }
+}
 function getProfitAddresses() {
+  const stamp = _addrFileStamp();
+  if (stamp !== null && _addrStamp === stamp) return _addrCache;
+  if (stamp === null) return []; // 不在は「0件」— 毎回 stat 1回のみ
   try {
     const arr = JSON.parse(fs.readFileSync(ADDR_FILE));
-    return Array.isArray(arr) ? arr : [];
+    _addrCache = Array.isArray(arr) ? arr : [];
+    _addrStamp = stamp;
   } catch (_) {
-    return [];
+    return _addrCache || []; // 破損時は既キャッシュ維持（初回のみ空）
   }
+  return _addrCache;
 }
 
 async function addProfitAddress(address) {

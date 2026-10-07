@@ -212,6 +212,33 @@ function deepMergeConfig(base, override) {
   return out;
 }
 
+// config.json のスキーマ検証（弱所#9）: 深いマージは型・キー名を見ないため、
+// {"sever": {...}} のような綴りミスは静黙に無視され、{"server": {"port":
+// "abc"}} のような型違反は起動後に不可解なエラーで顕在化する。既定値ツリーと
+// 形を比較し、(a) 既定に存在しないキー（綴りミス or 無効化済みキー）と
+// (b) 型不一致のリーフを warn する。未知キーは将来互換のためエラーにしない。
+function validateConfigShape(merged, defaults = defaultConfig, prefix = '') {
+  const problems = [];
+  for (const [key, value] of Object.entries(merged)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!(key in defaults)) {
+      problems.push(`unknown config key "${path}" (typo or stale key — silently ignored)`);
+      continue;
+    }
+    const def = defaults[key];
+    if (_isPlainObject(def) && _isPlainObject(value)) {
+      problems.push(...validateConfigShape(value, def, path));
+    } else if (_isPlainObject(def) !== _isPlainObject(value)) {
+      problems.push(`config "${path}" should be ${typeof def === 'object' ? 'an object' : typeof def}, got ${Array.isArray(value) ? 'array' : typeof value}`);
+    } else if (typeof value !== typeof def) {
+      // 値自体は出さない — jwtSecret 等の秘密値が config.json に書かれた
+      // 場合にログへ漏らさないため、型情報のみを報告する
+      problems.push(`config "${path}" should be ${typeof def}, got ${typeof value}`);
+    }
+  }
+  return problems;
+}
+
 // 最終的な設定を取得
 function getConfig() {
   // 環境変数から設定をロード
@@ -224,7 +251,15 @@ function getConfig() {
   // 設定をマージ (ファイル設定 > 環境変数設定 > デフォルト設定)
   // 従来 `fileConfig || envConfig` はファイルが存在すると環境変数オーバーライド
   // （PORT 等）を丸ごと捨てていた。深いマージでキー単位の優先順位にする。
-  return fileConfig ? deepMergeConfig(envConfig, fileConfig) : envConfig;
+  const merged = fileConfig ? deepMergeConfig(envConfig, fileConfig) : envConfig;
+
+  // config.json 由来の差分だけを検査する（env 経路は個別に safeInt/検証済み）
+  if (fileConfig) {
+    for (const p of validateConfigShape(fileConfig)) {
+      logger.warn(`[config] ${p} — check config.json`);
+    }
+  }
+  return merged;
 }
 
 const config = getConfig();
@@ -233,3 +268,4 @@ logger.info('Configuration loaded');
 module.exports = { config, requireSecret };
 // テスト用に内部マージ関数を公開
 module.exports._deepMergeConfig = deepMergeConfig;
+module.exports._validateConfigShape = validateConfigShape;

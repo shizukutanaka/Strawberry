@@ -801,6 +801,21 @@ function run(dataDir) {
     }
   }
 
+  // 重複 apiKey — getByApiKey は完全一致で先勝ち（UserRepository.js:44）のため
+  // 重複は片方のアカウントがキー認証で誤解決される資格情報衝突。
+  // キー自体は資格情報なので detail へ値は出さない（id と桁数のみ）。
+  {
+    const seenKeys = new Map();
+    for (const u of users) {
+      if (!u || typeof u.apiKey !== 'string' || !u.apiKey) continue;
+      if (seenKeys.has(u.apiKey)) {
+        issues.push({ severity: 'warn', check: 'duplicate-api-key', detail: `users.json: apiKey(${u.apiKey.length}桁) が複数 id (${seenKeys.get(u.apiKey)}, ${u.id}) で重複（片方が誤認証される資格情報衝突）` });
+      } else {
+        seenKeys.set(u.apiKey, u.id);
+      }
+    }
+  }
+
   // watches.json — (userId, gpuId) 一意はルートの upsert で担保
   // （gpu/index.js:1229）。upsert を迂回した重複は同じ GPU に複数しきい値が
   // 残り通知が二重化する。targetPrice は作成時に正の数を検証（:1216） —

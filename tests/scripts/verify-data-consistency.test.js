@@ -582,6 +582,28 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-username' && i.detail.includes('u1'))).toBe(false);
   });
 
+  it('warns on duplicate apiKey without leaking the key value', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'a@b.com', apiKey: 'super-secret-key-1' },
+        { id: 'u2', email: 'c@d.com', apiKey: 'super-secret-key-1' },
+        { id: 'u3', email: 'e@f.com', apiKey: 'different-key' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    const dup = issues.find((i) => i.check === 'duplicate-api-key');
+    expect(dup).toBeTruthy();
+    // キー値は資格情報のため detail に出さない（id と桁数のみ）
+    expect(dup.detail).not.toContain('super-secret-key-1');
+    expect(dup.detail).toContain('u2');
+    expect(dup.detail).toContain('u1');
+  });
+
   it('warns on duplicate watch and invalid watch targetPrice', () => {
     dir = makeDataDir({
       'watches.json': [

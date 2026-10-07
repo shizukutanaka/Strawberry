@@ -811,3 +811,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **UserRepository: db-access.log の機密値マスク (2026-10・弱所#17)**: report-log-pii で検出した実 PII 面の供給源を修繕 — finder の参照値（email/apiKey/googleId 等）と update ペイロード内の機密キーを `[redacted]` 化。username は監査目的のため保持（テストで両方を固定）。3テスト緑。
 - **access-audit/login ログの PII 修繕 (2026-10・弱所#17)**: sanitizeSensitiveFields を「正規化 suffix 一致」へ拡張（confirmEmail/notify_email/x-api_key/sessionToken が従来すり抜け — access-audit.log の body 記録で実 PII を確認済み）。maskEmail 新設（ローカル部伏字・ドメイン保持）で login ログ4箇所の平文メールをマスク。テスト5件追加・関連205テスト緑。
 - **report-log-pii を多パターン化 (2026-10・弱所#17)**: email に加え JWT（eyJ3部）/Bearer/api_key 値を種別集計で検出 — 資格情報は PII より重大（そのまま認証を通る）。実データで db-access.log 系に修正前の apiKey 値残留（`api-key-should-never-leak` センチネル等）を検出 — 新規行は `_redact` で遮断済み、過去分はローテーションで処理。テスト5件緑。
+- **duplicate-api-key 検査追加 (2026-10・verify-data-consistency)**: users.json の apiKey 重複を warn — getByApiKey は先勝ち完全一致のため重複は片方が誤認証される資格情報衝突。detail は資格情報保護で桁数と id のみ。テスト追加・73件緑。

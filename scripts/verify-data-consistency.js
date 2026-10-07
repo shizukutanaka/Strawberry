@@ -653,6 +653,25 @@ function run(dataDir) {
     }
   }
 
+  // 支払い額 ↔ 価格ロックの資金不変条件:
+  //   paid payment は order.totalPrice（ロック済み価格）を下回ってはならない
+  //   — 不足額で「支払い済み」扱いの注文は start/dispute ゲートを素通りする資金穴。
+  //   btc_onchain は amount = totalPrice×(1+feeRate) で手数料込みが正当（下限のみ検査）。
+  //   lightning/manual は create 時に amount=totalPrice を直書きするため厳密一致が約定
+  //   — ±1 sat 超のずれは事後編集・レコード破損の兆候。
+  for (const p of payments) {
+    if (!p || p.status !== 'paid' || !p.orderId) continue;
+    const o = orderById.get(p.orderId);
+    if (!o || !Number.isFinite(o.totalPrice) || o.totalPrice <= 0) continue;
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount)) continue;
+    if (amount < o.totalPrice) {
+      issues.push({ severity: 'warn', check: 'payment-undercharge', detail: `payments.json: id "${p.id}" の amount ${amount}sat が order "${p.orderId}" の価格ロック ${o.totalPrice}sat を下回る（paid だが未全額 = start/dispute ゲートを素通りする資金穴）` });
+    } else if (p.method !== 'btc_onchain' && Math.abs(amount - o.totalPrice) > 1) {
+      issues.push({ severity: 'warn', check: 'payment-amount-mismatch', detail: `payments.json: id "${p.id}" (${p.method}) の amount ${amount}sat が order "${p.orderId}" の価格ロック ${o.totalPrice}sat と不一致（create 時約定からのずれ = 事後編集か破損）` });
+    }
+  }
+
   // 同一 paymentHash の payment 複数存在 — LN invoice は hash で一意のはず。
   // 二重レコード = 同一請求書の重複課金経路 or レコード破損。
   const seenHashes = new Map();

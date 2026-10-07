@@ -1278,4 +1278,38 @@ describe('escrow history FSM legality', () => {
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'escrow-history-state-drift' && i.detail.includes('e1'))).toBe(true);
   });
+
+  it('warns on paid payment below the order price lock', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 400, paidAt: '2025-01-02T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'payment-undercharge' && i.detail.includes('p1'))).toBe(true);
+  });
+
+  it('warns on non-onchain amount drift but tolerates btc_onchain fee-included totals', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 1200, paidAt: '2025-01-02T00:00:00Z' },
+        { id: 'p2', orderId: 'o1', status: 'paid', method: 'btc_onchain', amount: 1005, paidAt: '2025-01-03T00:00:00Z' },
+        { id: 'p3', orderId: 'o1', status: 'paid', method: 'manual', amount: 1000, paidAt: '2025-01-04T00:00:00Z' },
+        { id: 'p4', orderId: 'o1', status: 'pending', method: 'lightning', amount: 5 },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'payment-undercharge' && i.detail.includes('p4'))).toBe(false);
+  });
 });

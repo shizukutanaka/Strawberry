@@ -99,4 +99,20 @@ describe('report-env-drift', () => {
     const r = report(repo.dir, repo.envPath);
     expect(r.unreferenced).toHaveLength(0);
   });
+
+  it('ルート直下 *.js の参照もスキャン対象（undocumented/haystack 両方）', () => {
+    const repo = makeRepo({
+      files: {
+        'tool.js': 'process.env.ROOT_VAR; process.env.ONLY_DOC;',
+        'src/a.js': 'process.env.MY_FLAG;',
+      },
+      envExample: 'MY_FLAG=\nONLY_DOC=\n',
+    });
+    dir = repo.dir;
+    const r = report(repo.dir, repo.envPath);
+    // ルート *.js の参照は undocumented 検出対象
+    expect(r.undocumented.map((u) => u.name)).toContain('ROOT_VAR');
+    // ルート *.js に出る変数は unreferenced に出さない（haystack 側も効く）
+    expect(r.unreferenced).not.toContain('ONLY_DOC');
+  });
 });

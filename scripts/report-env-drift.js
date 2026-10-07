@@ -18,6 +18,10 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const SCAN_DIRS = ['src', 'scripts'];
+// ルート直下の *.js（lightning-service.js / virtual-gpu-manager.js /
+// gpu_lending_setup_auto_register.js 等の起動・ツール系エントリ）も
+// スキャン対象 — src/ 外にあるため drift 検出をすり抜けていた。
+const ROOT_JS = true;
 // unreferenced 判定の haystack は tests/ も含める — テスト専用変数
 // （E2E_BASE_URL 等）を「どこにも使われていない」と誤検しないため。
 const HAYSTACK_DIRS = ['src', 'scripts', 'tests'];
@@ -26,6 +30,8 @@ const ENV_EXAMPLE = path.join(ROOT, '.env.example');
 const BUILTIN_IGNORE = new Set([
   'NODE_ENV', 'PATH', 'HOME', 'PWD', 'PORT', 'HOSTNAME', 'CI', 'JEST_WORKER_ID',
   'npm_lifecycle_event', 'npm_config_user_agent', 'LANG', 'TZ',
+  // Docker / Kubernetes がコンテナ内へ自動注入する環境変数
+  'DOCKER_HOST', 'KUBERNETES_SERVICE_HOST',
 ]);
 
 const ENV_RE = /process\.env\.([A-Z_][A-Z0-9_]*)/g;
@@ -60,23 +66,32 @@ function referencedVars(root = ROOT) {
     if (!refs.has(name)) refs.set(name, []);
     refs.get(name).push(loc);
   };
+  const files = [];
   for (const base of HAYSTACK_DIRS) {
-    for (const file of walkJs(path.join(root, base))) {
-      const rel = path.relative(root, file);
-      const src = fs.readFileSync(file, 'utf8');
-      contents.push(src);
-      if (!SCAN_DIRS.includes(base)) continue; // tests/ は haystack のみ
-      src.split('\n').forEach((line, i) => {
-        const trimmed = line.trimStart();
-        if (trimmed.startsWith('//') || trimmed.startsWith('*')) return; // コメント行は参照でない
-        const loc = `${rel}:${i + 1}`;
-        for (const re of [ENV_RE, ENV_DOT_RE, ENV_BRACKET_RE]) {
-          re.lastIndex = 0;
-          let m;
-          while ((m = re.exec(line)) !== null) record(m[1], loc);
-        }
-      });
+    for (const file of walkJs(path.join(root, base))) files.push(file);
+  }
+  if (ROOT_JS) {
+    // ルート直下 *.js（walkJs はディレクトリ前提なので個別列挙）も対象
+    for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith('.js')) files.push(path.join(root, e.name));
     }
+  }
+  for (const file of files) {
+    const rel = path.relative(root, file);
+    const src = fs.readFileSync(file, 'utf8');
+    contents.push(src);
+    // tests/ は haystack のみ — 参照としては記録しない
+    if (rel.startsWith('tests' + path.sep)) continue;
+    src.split('\n').forEach((line, i) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('//') || trimmed.startsWith('*')) return; // コメント行は参照でない
+      const loc = `${rel}:${i + 1}`;
+      for (const re of [ENV_RE, ENV_DOT_RE, ENV_BRACKET_RE]) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(line)) !== null) record(m[1], loc);
+      }
+    });
   }
   return { refs, contents };
 }

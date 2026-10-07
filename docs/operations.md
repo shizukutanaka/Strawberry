@@ -68,10 +68,11 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `kpi-trend-graph` / `checklist-kpi-report` / `assignee-progress-report` | KPI グラフ生成・担当者レポート | — |
 | `sentry-notify` | Sentry エラー通知 | `SENTRY_DSN` |
 | `line-notify` | LINE Notify 送信（service-monitor が利用） | `LINE_TOKEN` |
-| `verify-data` | `data/*.json` の整合性検査（dangling 参照・資金不変条件・形式異常を ~70種検査。error 検出時 exit 1。`--json` で機械可読出力、引数/`STRAWBERRY_DATA_DIR` でデータ dir 指定） | — |
+| `verify-data` | `data/*.json` の整合性検査（dangling 参照・資金不変条件・形式異常を 80+種検査。error 検出時 exit 1。`--json` で機械可読出力、引数/`STRAWBERRY_DATA_DIR` でデータ dir 指定） | — |
 | `report-test-counts`（`node scripts/report-test-counts.js`） | jest 実測のスイート/テスト数と docs 記載の差分を検出（情報のみ、終了コードは常に 0） | — |
 | `node scripts/verify-audit-chain.js` | `logs/audit.log` のハッシュ連鎖を改竄検証（不一致・ファイル欠落・形式外行を報告、失敗時 exit 1。`--json` 対応、`AUDIT_LOG_PATH`/`AUDIT_HASH_PATH` で差し替え可） | `AUDIT_LOG_PATH`, `AUDIT_HASH_PATH`（任意） |
-| `node scripts/report-env-drift.js` | コード内 env 参照と `.env.example` 記載の差分を検出（記載漏れ=運用者が知れない変数・陳腐候補。情報のみ、終了コードは常に 0、`--json` 対応） | — |
+| `node scripts/report-env-drift.js` | コード内 env 参照と `.env.example` 記載の差分を検出（記載漏れ=運用者が知れない変数・陳腐候補・重複記載。情報のみ、終了コードは常に 0、`--json` 対応） | — |
+| `node scripts/report-audit-backlog.js` | `npm audit` の積存を severity×修正可否（semver内 fix / メジャー更新要 / 経路のみ）で可視化（情報のみ） | — |
 
 Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP Console の OAuth クライアント JSON）と `scripts/token.json`（初回認可の発行トークン）を配置。詳細は `npm run <script>` 実行時のエラーメッセージに手順が出力される。
 

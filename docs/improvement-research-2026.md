@@ -800,3 +800,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **report-env-drift: ルート *.js スキャン化 (2026-10)**: SCAN_DIRS が src/ と scripts/ のみでルート直下の起動・ツール系エントリ（lightning-service / virtual-gpu-manager / gpu_lending_setup_auto_register）が未検出だった。拡張後に実 drift 6件（GPU_*・STRAWBERRY_API_URL/STRAWBERRY_TOKEN）を検出し .env.example へ記載。同時に LND_PROTO_PATH/PLAYWRIGHT_CHROMIUM_PATH の unreferenced 誤検（ルート haystack 欠落）も解消。DOCKER_HOST/KUBERNETES_SERVICE_HOST を組み込み除外へ。8テスト緑。
 - **report-env-drift: duplicates 検出 (2026-10)**: .env.example 内の同名変数の重複記載（マージ残骸・二重定義の兆候）を `duplicates` として報告。9テスト緑。
 - **report-test-counts: docs/SPECIFICATION.md をスキャン対象へ追加 (2026-10)**: 監視対象が README/PRODUCT_ANALYSIS のみで SPECIFICATION.md:84 の「247/249スイート・1982/1985テスト」陳腐化記述をすり抜けていた。追加後に実 drift を検出し「253スイート・約2000テスト」へ同期（現在 drift 0）。scripts/ 246テスト緑。
+- **operations.md: verify/レポート系スクリプト表を実態へ同期 (2026-10)**: 検査数を 80+種に更新、report-env-drift の duplicates 検出と report-audit-backlog の行を追記。

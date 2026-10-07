@@ -788,3 +788,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **監査 doc i10: デーモン一元管理の設計案を付録追加 (2026-10)**: 常駐ループ6件の棚卸（stop 名不一致・backup-scheduler の stop 欠落・テスト抑止の二層化）+ registerDaemon/stopAllDaemons の構想を設計固定（runtime 配線は不採用傾向のため doc のみ）。
 - **backup-scheduler: stopBackupScheduler 追加 + 再初期化ガード (i10 布石, 2026-10)**: 他デーモンと同一規約の stop を追加（唯一 stop が無かったデーモン）、二重 start で旧タイマーが孤児化しないよう共有ハンドル化。テスト3件追加・10件緑。
 - **scripts/report-env-drift.js 新設 (2026-10)**: コード内の env 参照（process.env.X / env.X / bracket）と .env.example 記載の差分を検出する読み取り専用レポート。これまで #55/#138/#240 で手動同期を繰り返してきた env drift を機械化 — 記載漏れ変数は運用者が存在を知れず実質未定義。実測で drift 0・陳腐候補2件（LND_PROTO_PATH/PLAYWRIGHT_CHROMIUM_PATH）を正しく分離。7テスト緑。
+- **scripts/verify-audit-chain.js 新設 (2026-10)**: appendAuditLog の sha256 連鎖を運用者が直接検証できる CLI（verifyAuditLogIntegrity は内部関数で実行導線なし）。不一致・ファイル欠落・形式外行を行番号付きで報告、exit 0/1・--json 対応。実データ logs/audit.log 4,389 エントリで連鎖一致を実証。8テスト緑。

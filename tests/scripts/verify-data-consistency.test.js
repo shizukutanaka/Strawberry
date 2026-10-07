@@ -979,4 +979,38 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'sla-counter-invalid')).toBe(true);
     expect(issues.some((i) => i.check === 'sla-history-invalid')).toBe(true);
   });
+
+  it('warns on duplicate providerId in uptime.json', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+      'uptime.json': [
+        { id: 't1', providerId: 'u1', beats: 10, gapEvents: 0, sessions: 1 },
+        { id: 't2', providerId: 'u1', beats: 5, gapEvents: 0, sessions: 1 },
+        { id: 't3', providerId: 'u2', beats: 3, gapEvents: 0, sessions: 1 },
+      ],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'duplicate-provider-uptime' && i.detail.includes('u1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'duplicate-provider-uptime' && i.detail.includes('u2'))).toBe(false);
+  });
+
+  it('warns on invalid uptime counters', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'uptime.json': [{ id: 't1', providerId: 'u1', beats: -3, gapEvents: 'x' }],
+    });
+    const { issues } = run(dir);
+    const bad = issues.filter((i) => i.check === 'invalid-uptime-counter');
+    expect(bad).toHaveLength(2); // beats と gapEvents の2件
+  });
 });

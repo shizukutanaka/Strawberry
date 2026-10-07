@@ -779,6 +779,29 @@ function run(dataDir) {
     }
   }
 
+  // uptime.json — providerId で1レコード（UptimeRepository.js の getByProviderId
+  // 単発検索、upsert で一意担保）。重複は片方が集計から見えない稼働実績の分裂。
+  // beats/gapEvents/sessions の非数・負値は稼働率算出を破損する。
+  {
+    const uptimes = (extraCollections.find(([n]) => n === 'uptime.json') || [null, []])[1];
+    const seenProvider = new Map();
+    for (const u of uptimes) {
+      if (!u) continue;
+      if (u.providerId !== undefined) {
+        if (seenProvider.has(u.providerId)) {
+          issues.push({ severity: 'warn', check: 'duplicate-provider-uptime', detail: `uptime.json: providerId "${u.providerId}" のレコードが複数 (${seenProvider.get(u.providerId)}, ${u.id}) — 稼働実績の分裂` });
+        } else {
+          seenProvider.set(u.providerId, u.id);
+        }
+      }
+      for (const k of ['beats', 'gapEvents', 'sessions']) {
+        if (u[k] !== undefined && !(typeof u[k] === 'number' && Number.isFinite(u[k]) && u[k] >= 0)) {
+          issues.push({ severity: 'warn', check: 'invalid-uptime-counter', detail: `uptime.json: id "${u.id}" の ${k} "${u[k]}" は非数・負値（稼働率算出を破損）` });
+        }
+      }
+    }
+  }
+
   // order/payment の未知ステータス
   for (const o of orders) {
     if (o && o.status && !ORDER_STATES.includes(o.status)) {

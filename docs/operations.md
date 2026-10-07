@@ -74,6 +74,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `node scripts/report-env-drift.js` | コード内 env 参照と `.env.example` 記載の差分を検出（記載漏れ=運用者が知れない変数・陳腐候補・重複記載。情報のみ、終了コードは常に 0、`--json` 対応） | — |
 | `node scripts/report-audit-backlog.js` | `npm audit` の積存を severity×修正可否（semver内 fix / メジャー更新要 / 経路のみ）で可視化（情報のみ） | — |
 | `node scripts/report-log-pii.js` | `logs/*.log` のメールアドレス混入を件数・行番号で可視化（値自体は出力しない。情報のみ、終了コードは常に 0、`--json` 対応、引数/`STRAWBERRY_LOG_DIR` で対象 dir 指定） | `STRAWBERRY_LOG_DIR`（任意） |
+| `node scripts/report-console-usage.js` | `src/` 内の console.* 直書き残存を種別内訳で棚卸（cli/ロガー実装/audit フォールバックは正当分離。情報のみ、終了コードは常に 0、`--json` 対応） | — |
 
 Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP Console の OAuth クライアント JSON）と `scripts/token.json`（初回認可の発行トークン）を配置。詳細は `npm run <script>` 実行時のエラーメッセージに手順が出力される。
 

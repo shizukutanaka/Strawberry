@@ -805,3 +805,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **order-pricing: プロパティ不変条件テスト (2026-10・弱所#37)**: satoshi 整数演算を値例テストから全域性質テストへ — 単価9点×duration 9点の格子で「非負整数」「正の生額は 1sat フロア」「duration 単調非減少」「価格ロック不変」「JPY は整数 or null」を固定。16テスト緑。
 - **report-log-pii.js 新設 (2026-10・弱所#17)**: `logs/*.log`（ローテーション含む）の email 候補を件数・行番号で可視化 — PII 値自体は出力しない設計。実データ初回実行で **db-access.log 系に ~61k 件の email 記録**を検出（DB アクセスログが user レコードを記録している実 PII 面）。operations.md・.env.example（STRAWBERRY_LOG_DIR）同期。4テスト緑。
 - **verify-data-consistency: dispute-escrow-mismatch (2026-10)**: order=disputed だが escrow が PENDING/HELD のまま（注文側だけ係争表示で資金側は未係争）を warn。escrow を持たない LN 経路 order は除外。逆方向の既存 dispute-mismatch と対になるデシンク検査。72テスト緑。
+- **report-console-usage.js 新設 (2026-10・弱所#45)**: src/ 内の console.* 直書きを種別内訳で棚卸 — cli/logger 実装・audit-log フォールバックを「正当」分離し、drift は休眠 p2p 系 + token-denylist + openapi-generator の 7ファイル9呼出と特定（ロガー規約への集約判断材料）。4テスト緑。

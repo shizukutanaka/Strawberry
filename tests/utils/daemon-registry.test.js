@@ -67,6 +67,7 @@ test('各デーモンが start 時にレジストリへ自己登録する', () =
     ['src/core/backup-scheduler.js', "registerDaemon('backup-scheduler'"],
     ['src/gpu/gpu-auto-heal.js', "registerDaemon('gpu-auto-heal'"],
     ['src/api/server.js', "registerDaemon('metrics-refresh'"],
+    ['src/api/routes/order/index.js', "registerDaemon('order-sweep'"],
   ];
   for (const [file, needle] of sites) {
     const src = fs.readFileSync(path.join(__dirname, '../../', file), 'utf8');

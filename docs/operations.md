@@ -35,6 +35,10 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | invoice-poller（LN インボイス入金確認） | 15s | —（Lightning 未導入時は自動無効） |
 | 注文スイープ（heartbeat SLA・pending/matched/disputed/active の期限切れ処理） | 30s（order ルートモジュール内）+ 一覧/作成時の遅延スイープ | `ORDER_PENDING_TIMEOUT_MINUTES`, `ORDER_MATCHED_TIMEOUT_MINUTES`, `ORDER_DISPUTE_TIMEOUT_DAYS`, `ORDER_ACTIVE_TIMEOUT_HOURS` |
 | backup-scheduler（`data/*.json` の定期バックアップ） | `BACKUP_INTERVAL_HOURS`（時間単位） | `BACKUP_INTERVAL_HOURS`（0・未設定・不正値 = 無効） |
+| sla-tracker（/health の稼働率集計、`GET /api/sla` の供給源） | 60s | — |
+| gpu-auto-heal（vGPU コンテナの自動修復・再スケジュール） | `GPU_AUTO_HEAL_INTERVAL_MS`（ミリ秒） | `GPU_AUTO_HEAL_INTERVAL_MS`, `GPU_AUTO_HEAL_FAILURE_THRESHOLD`（0・未設定 = 無効） |
+
+全デーモンは `src/utils/daemon-registry.js` に start 時に自己登録し、SIGTERM/SIGINT の graceful shutdown で `stopAllDaemons()` が逆順に停止する（ドレイン窓での残留書込み防止）。`registeredDaemons()` で起動中デーモン名を診断可能。
 
 期限切れ注文の手動スイープ（インシデント対応用）: `POST /api/v1/admin/expire-orders`（admin のみ）。
 

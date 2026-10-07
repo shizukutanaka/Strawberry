@@ -120,4 +120,4 @@ function applyDecision(state, ctx = {}) {
   return { ...next, event };
 }
 
-module.exports = { STATES, isTerminal, initial, transition, tryTransition, decideSettlement, applyDecision };
+module.exports = { STATES, TRANSITIONS, isTerminal, initial, transition, tryTransition, decideSettlement, applyDecision };

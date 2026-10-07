@@ -11,6 +11,12 @@
 
 const fs = require('fs');
 const path = require('path');
+// FSM 遷移表は実装側と同一ソースを共有（複写すると表の更新時に検査が陳腐化する）
+const { TRANSITIONS: ESCROW_TRANSITIONS, initial: escrowInitial } = require('../src/payments/escrow-state-machine');
+const ESCROW_INITIAL = escrowInitial();
+// 遷移表に登場する全イベント名 — history 内の「FSM イベントだが無効な状態で出現」と
+// 「表に一切ない観測イベント（読み飛ばし対象）」を区別するために使う。
+const FSM_EVENTS = new Set(Object.values(ESCROW_TRANSITIONS).flatMap((row) => Object.keys(row)));
 
 const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed'];
 // payment routes（index.js/btc-onchain.js/invoice-poller/auto-recovery）が書く実値
@@ -479,6 +485,37 @@ function run(dataDir) {
     }
     if (e.history.some((h) => !h || typeof h !== 'object' || !h.event)) {
       issues.push({ severity: 'warn', check: 'malformed-escrow-history', detail: `escrows.json: id "${e.id}" の history に event 名のない要素がある（遷移証跡破損）` });
+    }
+    // 遷移の合法性 — 実 history は `{ event, actions, state, at }` 形（state=遷移後状態）。
+    // 初期 PENDING から FSM 遷移表を辿り、遷移イベントと記録 state の整合を検証する。
+    // LN_ACTIONS_EXECUTED/FAILED・SETTLEMENT_COMPUTED 等の観測イベント（遷移表に
+    // 存在しないイベント名）は状態を変えない注記として読み飛ばす。
+    // 表にない遷移・state 不一致は FSM を迂回した書き込み（desync/手編集）の兆候。
+    {
+      let cur = ESCROW_INITIAL;
+      for (const h of e.history) {
+        if (!h || typeof h !== 'object' || !h.event) continue;
+        const row = ESCROW_TRANSITIONS[cur];
+        const t = row && row[h.event];
+        if (!t) {
+          // FSM 遷移イベント名なのに現在状態では無効 — 順序破壊の違法遷移
+          // （観測イベント名は表に一切出ないのでここには来ない）。
+          if (FSM_EVENTS.has(h.event)) {
+            issues.push({ severity: 'warn', check: 'illegal-escrow-transition', detail: `escrows.json: id "${e.id}" の history に ${cur} 状態での違法イベント "${h.event}"（遷移表にない順序 — FSM 迂回の証跡）` });
+          }
+          continue; // 観測イベント（状態を変えない注記）
+        }
+        if (h.state !== undefined && h.state !== t.to) {
+          issues.push({ severity: 'warn', check: 'illegal-escrow-transition', detail: `escrows.json: id "${e.id}" の history ${cur}->${h.event} は FSM では ${t.to} だが記録 state は "${h.state}"（FSM 迂回の証跡）` });
+        }
+        cur = t.to;
+      }
+      // 遷移チェーンの末端と現在 state の整合 — チェーンが終端/中間で現在 state と
+      // 食い違う場合、history 外で state が書き換えられた兆候。
+      const curState = escrowState(e);
+      if (curState && cur !== curState) {
+        issues.push({ severity: 'warn', check: 'escrow-history-state-drift', detail: `escrows.json: id "${e.id}" の history 末端状態 ${cur} と現在 state "${curState}" が不一致（history 外の state 書き換え?）` });
+      }
     }
   }
 

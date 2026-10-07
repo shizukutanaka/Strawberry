@@ -1233,3 +1233,49 @@ describe('verify-data-consistency', () => {
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'dispute-escrow-mismatch')).toBe(false);
   });
+
+describe('escrow history FSM legality', () => {
+  const base = { 'orders.json': [], 'payments.json': [], 'verifications.json': [], 'gpus.json': [], 'users.json': [] };
+
+  it('passes a valid transition chain', () => {
+    dir = makeDataDir({
+      ...base,
+      'escrows.json': [{
+        id: 'e1', orderId: 'o1', status: 'SETTLED',
+        history: [
+          { event: 'PAY', state: 'HELD', at: 't1' },
+          { event: 'LN_ACTIONS_EXECUTED', at: 't2' },
+          { event: 'DELIVER_OK', state: 'SETTLED', at: 't3' },
+        ],
+      }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'illegal-escrow-transition')).toBe(false);
+    expect(issues.some((i) => i.check === 'escrow-history-state-drift')).toBe(false);
+  });
+
+  it('flags an out-of-order FSM event and a state mismatch', () => {
+    dir = makeDataDir({
+      ...base,
+      'escrows.json': [
+        // DELIVER_OK は PENDING では無効（HELD でのみ有効）
+        { id: 'e1', orderId: 'o1', status: 'HELD', history: [{ event: 'DELIVER_OK', state: 'SETTLED', at: 't1' }] },
+        // PAY は HELD へ遷移するが記録 state が SETTLED = 記録改竄
+        { id: 'e2', orderId: 'o2', status: 'SETTLED', history: [{ event: 'PAY', state: 'SETTLED', at: 't1' }] },
+      ],
+    });
+    const { issues } = run(dir);
+    const ill = issues.filter((i) => i.check === 'illegal-escrow-transition');
+    expect(ill.some((i) => i.detail.includes('e1'))).toBe(true);
+    expect(ill.some((i) => i.detail.includes('e2'))).toBe(true);
+  });
+
+  it('flags history-end vs current-state drift', () => {
+    dir = makeDataDir({
+      ...base,
+      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'DISPUTED', history: [{ event: 'PAY', state: 'HELD', at: 't1' }] }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'escrow-history-state-drift' && i.detail.includes('e1'))).toBe(true);
+  });
+});

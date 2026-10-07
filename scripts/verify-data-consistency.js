@@ -89,6 +89,7 @@ function run(dataDir) {
     issues.push({ severity: 'warn', check: 'data-dir-unreadable', detail: `data dir の列挙に失敗: ${e.message}` });
   }
   const extraCollections = [];
+  const extraObjects = new Map(); // オブジェクト形ストア（sla.json 等）も後続検査へ
   for (const file of allJson) {
     // 実データにはオブジェクト形ストアも混在（notification-settings=userId→prefs、
     // revoked-tokens=jti→expiry）— パースのみ一律で、配列なら id 系チェックまで適用。
@@ -102,6 +103,8 @@ function run(dataDir) {
     if (Array.isArray(parsed)) {
       checkDuplicateIds(file, parsed, issues);
       extraCollections.push([file, parsed]);
+    } else if (parsed && typeof parsed === 'object') {
+      extraObjects.set(file, parsed);
     }
   }
 
@@ -744,6 +747,34 @@ function run(dataDir) {
         issues.push({ severity: 'warn', check: 'duplicate-provider-reputation', detail: `reputations.json: providerId "${r.providerId}" のレコードが複数 (${seenProvider.get(r.providerId)}, ${r.id}) — 評判の分裂` });
       } else {
         seenProvider.set(r.providerId, r.id);
+      }
+    }
+  }
+
+  // sla.json — updateSLA は total++ と up++/down++ を必ずペアで進める
+  // （sla-tracker.js:50-53）ため、up+down≠total は手動編集・途中クラッシュの兆候。
+  // カウンタの非数・負値も uptimeRate 計算（:73）を破損する。
+  {
+    const sla = extraObjects.get('sla.json');
+    if (sla) {
+      for (const k of ['total', 'up', 'down']) {
+        if (sla[k] !== undefined && !(typeof sla[k] === 'number' && Number.isFinite(sla[k]) && sla[k] >= 0)) {
+          issues.push({ severity: 'warn', check: 'sla-counter-invalid', detail: `sla.json: ${k} "${sla[k]}" は非数・負値（uptimeRate 計算を破損）` });
+        }
+      }
+      if (typeof sla.up === 'number' && typeof sla.down === 'number' && typeof sla.total === 'number'
+          && sla.up + sla.down !== sla.total) {
+        issues.push({ severity: 'warn', check: 'sla-counter-mismatch', detail: `sla.json: up(${sla.up})+down(${sla.down}) != total(${sla.total}) — カウンタの不整合（手動編集・途中クラッシュの兆候）` });
+      }
+      if (sla.history !== undefined) {
+        if (!Array.isArray(sla.history)) {
+          issues.push({ severity: 'warn', check: 'sla-history-invalid', detail: 'sla.json: history が配列でない（死活履歴の破損）' });
+        } else {
+          const bad = sla.history.filter((h) => !h || typeof h.time !== 'string' || typeof h.alive !== 'boolean').length;
+          if (bad > 0) {
+            issues.push({ severity: 'warn', check: 'sla-history-invalid', detail: `sla.json: history に形式外の要素が ${bad} 件（{time, alive} 形でない）` });
+          }
+        }
       }
     }
   }

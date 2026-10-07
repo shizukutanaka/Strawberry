@@ -936,4 +936,47 @@ describe('verify-data-consistency', () => {
     expect(dispute.severity).toBe('warn');
     expect(summary.ok).toBe(true); // warnings do not fail
   });
+
+  it('warns on sla counter mismatch (up+down != total)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'sla.json': { total: 10, up: 5, down: 2, history: [] },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'sla-counter-mismatch')).toBe(true);
+  });
+
+  it('accepts consistent sla counters without warning', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'sla.json': { total: 7, up: 5, down: 2, history: [{ time: '2026-01-01T00:00:00Z', alive: true }] },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check && i.check.startsWith('sla-'))).toBe(false);
+  });
+
+  it('warns on invalid sla counter and malformed history', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'sla.json': { total: -1, up: 0, down: -1, history: [{ bogus: true }] },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'sla-counter-invalid')).toBe(true);
+    expect(issues.some((i) => i.check === 'sla-history-invalid')).toBe(true);
+  });
 });

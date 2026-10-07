@@ -508,6 +508,34 @@ describe('verify-data-consistency', () => {
     expect(issues.filter((i) => i.check === 'status-chronology').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('warns on fund records predating their order (fund-before-order)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', createdAt: '2025-02-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', createdAt: '2025-01-01T00:00:00Z' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'SETTLED', createdAt: '2025-01-15T00:00:00Z' }],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    const fbo = issues.filter((i) => i.check === 'fund-before-order');
+    expect(fbo.some((i) => i.detail.includes('p1'))).toBe(true);
+    expect(fbo.some((i) => i.detail.includes('e1'))).toBe(true);
+  });
+
+  it('does not flag fund records created after their order', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', createdAt: '2025-02-01T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'fund-before-order')).toBe(false);
+  });
+
   it('warns on malformed user emails', () => {
     dir = makeDataDir({
       'users.json': [

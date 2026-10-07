@@ -812,3 +812,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **access-audit/login ログの PII 修繕 (2026-10・弱所#17)**: sanitizeSensitiveFields を「正規化 suffix 一致」へ拡張（confirmEmail/notify_email/x-api_key/sessionToken が従来すり抜け — access-audit.log の body 記録で実 PII を確認済み）。maskEmail 新設（ローカル部伏字・ドメイン保持）で login ログ4箇所の平文メールをマスク。テスト5件追加・関連205テスト緑。
 - **report-log-pii を多パターン化 (2026-10・弱所#17)**: email に加え JWT（eyJ3部）/Bearer/api_key 値を種別集計で検出 — 資格情報は PII より重大（そのまま認証を通る）。実データで db-access.log 系に修正前の apiKey 値残留（`api-key-should-never-leak` センチネル等）を検出 — 新規行は `_redact` で遮断済み、過去分はローテーションで処理。テスト5件緑。
 - **duplicate-api-key 検査追加 (2026-10・verify-data-consistency)**: users.json の apiKey 重複を warn — getByApiKey は先勝ち完全一致のため重複は片方が誤認証される資格情報衝突。detail は資格情報保護で桁数と id のみ。テスト追加・73件緑。
+- **fund-before-order 検査追加 (2026-10・verify-data-consistency)**: payment/escrow の createdAt が資金対象 order の作成より古い不可能な時系列を warn — インポート時の時計ずれ or 後付け改竄の兆候。テスト2件追加・75件緑。

@@ -718,6 +718,20 @@ function run(dataDir) {
         issues.push({ severity: 'warn', check: 'status-chronology', detail: `payments.json: id "${p.id}" の settledAt が paidAt より前（決済時系列の逆転）` });
       }
     }
+    // 資金レコードが資金対象の order より古い — 注文が存在する前の支払い/ロックは
+    // 不可能な時系列（インポート時の時計ずれ or 後付け改竄の兆候）。
+    for (const [label, records] of [['payments.json', payments], ['escrows.json', escrows]]) {
+      for (const r of records) {
+        if (!r || !r.orderId) continue;
+        const o = orderById.get(r.orderId);
+        if (!o) continue;
+        const rec = ts(r.createdAt);
+        const oc = ts(o.createdAt);
+        if (rec !== null && oc !== null && rec < oc) {
+          issues.push({ severity: 'warn', check: 'fund-before-order', detail: `${label}: id "${r.id}" (${r.createdAt}) が order "${r.orderId}" の作成 (${o.createdAt}) より古い（資金証跡が注文を先行）` });
+        }
+      }
+    }
   }
 
   // providerId 未設定の GPU — 支払い先を欠いた出品（escrow 清算で providerId に

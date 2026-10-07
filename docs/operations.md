@@ -38,7 +38,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | sla-tracker（/health の稼働率集計、`GET /api/sla` の供給源） | 60s | — |
 | gpu-auto-heal（vGPU コンテナの自動修復・再スケジュール） | `GPU_AUTO_HEAL_INTERVAL_MS`（ミリ秒） | `GPU_AUTO_HEAL_INTERVAL_MS`, `GPU_AUTO_HEAL_FAILURE_THRESHOLD`（0・未設定 = 無効） |
 
-全デーモンは `src/utils/daemon-registry.js` に start 時に自己登録し、SIGTERM/SIGINT の graceful shutdown で `stopAllDaemons()` が逆順に停止する（ドレイン窓での残留書込み防止）。`registeredDaemons()` で起動中デーモン名を診断可能。
+全デーモンは `src/utils/daemon-registry.js` に start 時に自己登録し、SIGTERM/SIGINT の graceful shutdown で `stopAllDaemons()` が逆順に停止する（ドレイン窓での残留書込み防止）。`registeredDaemons()` で起動中デーモン名を診断可能。opt-in 起動の常駐タイマー（gpu-monitor・market-pricing-updates・perf-auto-optimize・auto-performance-optimizer）も start 呼出時に自己登録し、起動した場合のみ shutdown 対象になる。
 
 期限切れ注文の手動スイープ（インシデント対応用）: `POST /api/v1/admin/expire-orders`（admin のみ）。
 

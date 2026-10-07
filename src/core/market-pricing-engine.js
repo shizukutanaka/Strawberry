@@ -547,6 +547,7 @@ class MarketPricingEngine extends EventEmitter {
 
         // デーモンタイマーがプロセス終了を妨げないようにする
         if (this._periodicTimer.unref) this._periodicTimer.unref();
+        require('../utils/daemon-registry').registerDaemon('market-pricing-updates', () => this.stopPeriodicUpdates());
     }
 
     stopPeriodicUpdates() {

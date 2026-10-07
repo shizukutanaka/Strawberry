@@ -69,6 +69,12 @@ test('各デーモンが start 時にレジストリへ自己登録する', () =
     ['src/api/server.js', "registerDaemon('metrics-refresh'"],
     ['src/api/routes/order/index.js', "registerDaemon('order-sweep'"],
     ['src/reputation/provider-uptime.js', "registerDaemon('provider-uptime-flush'"],
+    // opt-in 起動される常駐タイマー（休眠デーモン。start 呼出時に自己登録し、
+    // 起動した場合だけ graceful shutdown の対象になる）
+    ['src/core/market-pricing-engine.js', "registerDaemon('market-pricing-updates'"],
+    ['src/utils/perf-auto-optimize.js', "registerDaemon('perf-auto-optimize'"],
+    ['src/utils/gpu-monitor.js', "registerDaemon('gpu-monitor'"],
+    ['src/core/auto-performance-optimizer.js', "registerDaemon('auto-performance-optimizer'"],
   ];
   for (const [file, needle] of sites) {
     const src = fs.readFileSync(path.join(__dirname, '../../', file), 'utf8');

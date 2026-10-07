@@ -56,6 +56,7 @@ function startAutoOptimize() {
   // デーモンタイマーがプロセス終了を妨げないようにする（auto-performance-optimizer
   // 等の常駐ループと同方針。呼出元のサーバー自体がプロセスを延命する）
   if (_optimizeTimer.unref) _optimizeTimer.unref();
+  require('./daemon-registry').registerDaemon('perf-auto-optimize', stopAutoOptimize);
 }
 
 function stopAutoOptimize() {

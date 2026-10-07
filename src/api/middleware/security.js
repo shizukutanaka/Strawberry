@@ -2,7 +2,6 @@
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const jwt = require('jsonwebtoken');
 // レート制限キー生成（XFF 偽装耐性 + IPv6 /64 畳み込み）は ip-key.js に集約。
 const { rateLimitKeyGenerator: _rlKeyGeneratorShared } = require('./ip-key');
 const { config } = require('../../utils/config');

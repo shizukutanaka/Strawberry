@@ -4,7 +4,6 @@ const { getBTCtoJPYRate } = require('../utils/exchange-rate');
 const OrderRepository = require('../db/json/OrderRepository');
 const UserRepository = require('../db/json/UserRepository');
 const GPURepository = require('../db/json/GpuRepository');
-const jwt = require('jsonwebtoken');
 const { verifyWithRotation } = require('./middleware/jwt-auth');
 const { isRevoked } = require('./middleware/token-denylist');
 const { sanitizeUser } = require('./utils/sanitize-user');

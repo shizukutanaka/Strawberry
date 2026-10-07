@@ -70,7 +70,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `line-notify` | LINE Notify 送信（service-monitor が利用） | `LINE_TOKEN` |
 | `verify-data` | `data/*.json` の整合性検査（dangling 参照・資金不変条件・形式異常を 80+種検査。error 検出時 exit 1。`--json` で機械可読出力、引数/`STRAWBERRY_DATA_DIR` でデータ dir 指定） | — |
 | `npm run report-test-counts`（`node scripts/report-test-counts.js`） | jest 実測のスイート/テスト数と docs 記載の差分を検出（情報のみ、終了コードは常に 0） | — |
-| `node scripts/verify-audit-chain.js` | `logs/audit.log` のハッシュ連鎖を改竄検証（不一致・ファイル欠落・形式外行を報告、失敗時 exit 1。`--json` 対応、`AUDIT_LOG_PATH`/`AUDIT_HASH_PATH` で差し替え可） | `AUDIT_LOG_PATH`, `AUDIT_HASH_PATH`（任意） |
+| `npm run verify-audit-chain`（`node scripts/verify-audit-chain.js`） | `logs/audit.log` のハッシュ連鎖を改竄検証（不一致・ファイル欠落・形式外行を報告、失敗時 exit 1。`--json` 対応、`AUDIT_LOG_PATH`/`AUDIT_HASH_PATH` で差し替え可） | `AUDIT_LOG_PATH`, `AUDIT_HASH_PATH`（任意） |
 | `npm run report-env-drift`（`node scripts/report-env-drift.js`） | コード内 env 参照と `.env.example` 記載の差分を検出（記載漏れ=運用者が知れない変数・陳腐候補・重複記載。情報のみ、終了コードは常に 0、`--json` 対応） | — |
 | `npm run report-audit-backlog`（`node scripts/report-audit-backlog.js`） | `npm audit` の積存を severity×修正可否（semver内 fix / メジャー更新要 / 経路のみ）で可視化（情報のみ） | — |
 | `npm run report-log-pii`（`node scripts/report-log-pii.js`） | `logs/*.log` のメールアドレス混入を件数・行番号で可視化（値自体は出力しない。情報のみ、終了コードは常に 0、`--json` 対応、引数/`STRAWBERRY_LOG_DIR` で対象 dir 指定） | `STRAWBERRY_LOG_DIR`（任意） |

@@ -27,7 +27,6 @@ router.get('/', _erLimiter, asyncHandler(async (req, res) => {
       const authHeader = req.headers.authorization || '';
       if (authHeader.startsWith('Bearer ')) {
         try {
-          const jwt = require('jsonwebtoken');
           const { verifyWithRotation } = require('../middleware/jwt-auth');
           const decoded = verifyWithRotation(authHeader.slice(7));
           // 失効済み・セッション無効化済みトークンは fresh=true を拒否。

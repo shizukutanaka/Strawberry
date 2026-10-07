@@ -672,6 +672,27 @@ function run(dataDir) {
     }
   }
 
+  // エスクロー額 ↔ 価格ロック: marketplace/LN 経路は amountSats = order.totalPrice
+  // で開く（marketplace.js:112 の amountSatOverride / payment/index.js:304）。
+  // btc_onchain は amountSats = total×1e8（手数料込み）が正当 — lenderWallet/
+  // operatorWallet/txBorrowerToOperator/total/payout を持つ行で判別する。
+  // 下限を割るエスクロー = 約定額未満の資金ロック（係争精算が不足分で行われる）。
+  for (const e of escrows) {
+    if (!e || !e.orderId) continue;
+    const o = orderById.get(e.orderId);
+    if (!o || !Number.isFinite(o.totalPrice) || o.totalPrice <= 0) continue;
+    const amountSats = Number(e.amountSats);
+    if (!Number.isFinite(amountSats)) continue;
+    if (amountSats < o.totalPrice) {
+      issues.push({ severity: 'warn', check: 'escrow-undercharge', detail: `escrows.json: id "${e.id}" の amountSats ${amountSats}sat が order "${e.orderId}" の価格ロック ${o.totalPrice}sat を下回る（約定額未満の資金ロック）` });
+      continue;
+    }
+    const looksOnchain = Boolean(e.lenderWallet || e.operatorWallet || e.txBorrowerToOperator || e.total !== undefined || e.payout !== undefined);
+    if (!looksOnchain && Math.abs(amountSats - o.totalPrice) > 1) {
+      issues.push({ severity: 'warn', check: 'escrow-amount-mismatch', detail: `escrows.json: id "${e.id}" の amountSats ${amountSats}sat が order "${e.orderId}" の価格ロック ${o.totalPrice}sat と不一致（amountSatOverride 約定からのずれ = 係争精算額の狂い）` });
+    }
+  }
+
   // 同一 paymentHash の payment 複数存在 — LN invoice は hash で一意のはず。
   // 二重レコード = 同一請求書の重複課金経路 or レコード破損。
   const seenHashes = new Map();

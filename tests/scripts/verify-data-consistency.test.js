@@ -1312,4 +1312,36 @@ describe('escrow history FSM legality', () => {
     expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p3'))).toBe(false);
     expect(issues.some((i) => i.check === 'payment-undercharge' && i.detail.includes('p4'))).toBe(false);
   });
+
+  it('warns on escrow locked below the order price', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 1000, paidAt: '2025-01-02T00:00:00Z' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'HELD', amountSats: 300 }],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'escrow-undercharge' && i.detail.includes('e1'))).toBe(true);
+  });
+
+  it('warns on non-onchain escrow amount drift, tolerates btc_onchain fee-included rows', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 1000, paidAt: '2025-01-02T00:00:00Z' }],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'HELD', amountSats: 1500 },
+        { id: 'e2', orderId: 'o1', state: 'HELD', amountSats: 1005, lenderWallet: 'bc1xyz', operatorWallet: 'bc1op', total: 0.001, payout: 0.0009 },
+        { id: 'e3', orderId: 'o1', state: 'PENDING', amountSats: 1000 },
+      ],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'escrow-amount-mismatch' && i.detail.includes('e1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'escrow-amount-mismatch' && i.detail.includes('e2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'escrow-amount-mismatch' && i.detail.includes('e3'))).toBe(false);
+  });
 });

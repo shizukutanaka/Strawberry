@@ -112,13 +112,13 @@
 ### テスト・CI（31-38）
 
 31. **`--forceExit` が残置**: ハンドルリークを静黙化するフラグが残る（削除 PR #267 closed=不採用）。今後のリークが可視化されない。
-32. **蓄積タイマーのログ肥大化**: unref 済みで終了は阻害しないが、全量 jest 実行中は発火し続け audit/error ログが肥大化する設計が残る。
+32. **蓄積タイマーのログ肥大化**: unref 済みで終了は阻害しないが、全量 jest 実行中は発火し続け audit/error ログが肥大化する設計が残る。 → **対応済み**（#269 — サーバープロセスの module-level タイマーを全棚卸: provider-uptime-flush を `NODE_ENV==='test'` 抑止へ修正。残りは全て start 関数ガート済みで、テストが明示起動しない限り発火しない）。
 33. **e2e（playwright）が CI 非接続**: testMatch から除外され常時赤が1件残る（#265 closed）。
 34. **CI のパスフィルタで coverage ジョブが抜ける**: docs-only 変更は test ジョブ自体がスキップ（仕様だがゲートとしては弱い）。
 35. **CI ランナー待ちの長時間滞留**: build-test がキュー待ちで数日 pending になる（環境側の制約）。
 36. **実 LND 経路のテストなし**: MockLnAdapter のみで本番 Lightning 経路は未検証。
 37. **金額計算のプロパティテストなし**: satoshi 整数演算の境界は値例テストのみ。 → **対応済み**（#269 — order-pricing を単価9×時間9 格子で性質テスト化: 非負整数・1sat フロア・単調性・価格ロック）。
-38. **テスト数と実態の乖離が繰り返し発生**: ドキュメントの陳腐化が再発しうる構造（集計を自動化していない）。 → **対応済み**（#269 — `npm run report-test-counts` が jest 実測と docs 記述の drift を検出・すでに陳腐化2件を捕捉）。
+38. **テスト数と実態の乖離が繰り返し発生**: ドキュメントの陳腐化が再発しうる構造（集計を自動化していない）。 → **対応済み**（#269 — `npm run report-test-counts` が jest 実測と docs 記述の drift を検出・`--strict` で CI ゲート化（検出済み 259 スイート drift を同期））。
 
 ### アーキテクチャ・運用（39-50）
 
@@ -128,7 +128,7 @@
 42. **管理パススルー二重経路**: 非推奨 admin ルートが残り API 面が冗長。
 43. **同期 fs 呼び出しの残存**: `readFileSync`/`writeFileSync`/`appendFileSync` がホットパス近辺に残る。 → **対応済み**（#268/#269 — notification-settings・/sla・/anomalies・sandbox-apikey・profit-addresses の毎回全文読込を stat 指紋キャッシュ化。最終棚卸: 残存は起動時 config・バックアップ・audit-anchor・withLock 内の anomaly-history（1000件上限）などコールド/有界パスのみ）。
 44. **エラーハンドリングの非一貫**: APIError 規約と生 throw が混在する箇所が残る。 → **対応済み**（#237 裸 async ハンドラ統一 + 棚卸確認: ルートハンドラは `throw new APIError` または `res.status(...)` 早期 return に統一。生 `throw new Error` は routes 層には残らず utils/notification-settings/webhook の内部バリデーションのみで、呼び出し側が APIError へ包む規約）。
-45. **構造化ログの不統一**: winston ロガーと console 出力が混在。 → **対応済み**（#269 — `npm run report-console-usage` で棚卸、token-denylist/openapi-generator/休眠 p2p 系5ファイルを全てロガー規約へ統一。drift 0）。
+45. **構造化ログの不統一**: winston ロガーと console 出力が混在。 → **対応済み**（#269 — `npm run report-console-usage` で棚卸、token-denylist/openapi-generator/休眠 p2p 系5ファイルを全てロガー規約へ統一。drift 0、`--strict` で CI ゲート化）。
 46. **docker-compose/k8s は参考実装寄り**: 実装済みだが本番検証の形跡なし。
 47. **依存の遅延 require パターンが散在**: optional dep 対策として合理的だが不統一。
 48. **マルチリージョン/HA 設計なし**: 単一インスタンス前提で障害時の切替えなし。

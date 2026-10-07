@@ -513,6 +513,18 @@ function run(dataDir) {
         issues.push({ severity: 'warn', check: 'schedule-window-mismatch', detail: `orders.json: id "${o.id}" の scheduledEndAt が start+duration と不一致（予約窓の破損 — 重複判定/SLA が狂う）` });
       }
     }
+    // 課金額の不変条件: totalPrice = max(1, round(pricePerHour × durationMinutes / 60))
+    // sats（order/index.js:1049-1051 — pricePerHour は注文時にロック :1058）。
+    // ずれは「請求書が約定額と違う」直接編集/他経路書込みの兆候。1 sat の
+    // 端数許容（手動補正）。非正値は invalid-total-price が担当するので対象外。
+    if (o && Number.isFinite(o.totalPrice) && o.totalPrice > 0
+        && Number.isFinite(o.pricePerHour) && o.pricePerHour > 0
+        && Number.isFinite(o.durationMinutes) && o.durationMinutes > 0) {
+      const expected = Math.max(1, Math.round(o.pricePerHour * o.durationMinutes / 60));
+      if (Math.abs(o.totalPrice - expected) > 1) {
+        issues.push({ severity: 'warn', check: 'total-price-mismatch', detail: `orders.json: id "${o.id}" の totalPrice ${o.totalPrice} sat が約定計算値 ${expected} sat と不一致（価格ロックの破損）` });
+      }
+    }
   }
   // gpu.available の非真偽値 — ブッキングゲートは `available === false` の
   // 厳密比較（order/index.js:909）。"no"/0/"false" のような異形値は

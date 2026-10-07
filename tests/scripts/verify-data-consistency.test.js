@@ -1093,4 +1093,23 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-gpu-memory' && i.detail.includes('g3'))).toBe(true);
     expect(issues.some((i) => i.check === 'invalid-gpu-enum' && i.detail.includes('g4'))).toBe(false);
   });
+
+  it('warns on totalPrice deviating from pricePerHour × durationMinutes / 60', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'completed', pricePerHour: 100, durationMinutes: 60, totalPrice: 500 },
+        { id: 'o2', status: 'pending', pricePerHour: 100, durationMinutes: 60, totalPrice: 100 },
+        { id: 'o3', status: 'pending', pricePerHour: 0, durationMinutes: 60, totalPrice: 500 },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o3'))).toBe(false);
+  });
 });

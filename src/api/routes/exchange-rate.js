@@ -28,8 +28,8 @@ router.get('/', _erLimiter, asyncHandler(async (req, res) => {
       if (authHeader.startsWith('Bearer ')) {
         try {
           const jwt = require('jsonwebtoken');
-          const { resolveSecret } = require('../middleware/jwt-auth');
-          const decoded = jwt.verify(authHeader.slice(7), resolveSecret(), { algorithms: ['HS256'] });
+          const { verifyWithRotation } = require('../middleware/jwt-auth');
+          const decoded = verifyWithRotation(authHeader.slice(7));
           // 失効済み・セッション無効化済みトークンは fresh=true を拒否。
           // ログアウト・ロール降格後のトークンで上流レート制限を消費できてしまうのを防ぐ。
           if (decoded && decoded.role === 'admin') {

@@ -22,6 +22,42 @@ function resolveRefreshSecret() {
   return process.env.JWT_REFRESH_SECRET || resolveSecret();
 }
 
+// 鍵ローテーション猶予（弱所#15）: 新シークレットへ更新する際、旧シークレットを
+// JWT_SECRET_PREVIOUS（アクセス用）/ JWT_REFRESH_SECRET_PREVIOUS（リフレッシュ用）に
+// カンマ区切りで置けば、猶予期間中は旧鍵署名のトークンも検証を通る。
+// アクセストークン TTL(1h)+リフレッシュ TTL(7d) だけ残し、全トークンが新鍵へ
+// 移行したら除去する。アクセス/リフレッシュで別リストにするのは、古いアクセス鍵を
+// 知る攻撃者がリフレッシュトークンを偽造できないようにするため。
+function _previousSecrets(envName) {
+  const raw = process.env[envName];
+  if (!raw) return [];
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+// 現行鍵を先に試し、失敗したら旧鍵リストを順に試す。payload を返すか、
+// 全鍵で失敗したら最後のエラーを投げる（呼出側の従来挙動と同じ）。
+// 署名アルゴリズムは HS256 固定 — 旧鍵でも alg=none / RS256 すり替えは通らない。
+// refresh で JWT_REFRESH_SECRET 未設定（アクセス鍵と共用）の場合は、旧鍵
+// リストも JWT_SECRET_PREVIOUS を踏襲する — 共用鍵ローテーション時に
+// リフレッシュトークンだけが切り捨てられないようにするため。
+function verifyWithRotation(token, { refresh = false } = {}) {
+  const hasDedicatedRefresh = !!process.env.JWT_REFRESH_SECRET;
+  const primary = refresh ? resolveRefreshSecret() : resolveSecret();
+  const previousEnv = refresh && hasDedicatedRefresh
+    ? 'JWT_REFRESH_SECRET_PREVIOUS'
+    : 'JWT_SECRET_PREVIOUS';
+  const previous = _previousSecrets(previousEnv);
+  let lastErr;
+  for (const secret of [primary, ...previous]) {
+    try {
+      return jwt.verify(token, secret, { algorithms: ['HS256'] });
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 module.exports = function(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) {
@@ -30,7 +66,7 @@ module.exports = function(req, res, next) {
   const token = auth.slice(7);
   try {
     // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ（署名は HS256）。
-    const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+    const payload = verifyWithRotation(token);
     // リフレッシュトークンをアクセストークンとして使わせない（type 厳密分離）。
     // type 無しトークンは旧アクセストークンとして許可（後方互換）。
     if (payload.type === 'refresh') {
@@ -61,3 +97,4 @@ module.exports = function(req, res, next) {
 
 module.exports.resolveSecret = resolveSecret;
 module.exports.resolveRefreshSecret = resolveRefreshSecret;
+module.exports.verifyWithRotation = verifyWithRotation;

@@ -13,7 +13,7 @@ const { config } = require('../../../utils/config');
 // 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
 // リフレッシュトークンは resolveRefreshSecret を使い、JWT_REFRESH_SECRET が設定されている
 // 場合はアクセストークンとは別の鍵で署名・検証する（クロスタイプ代替攻撃を防ぐ）。
-const { resolveSecret, resolveRefreshSecret } = require('../../middleware/jwt-auth');
+const { verifyWithRotation } = require('../../middleware/jwt-auth');
 const { withLock } = require('../../../utils/async-lock');
 
 const { sanitizeObject, maskEmail } = require('../../../utils/sanitize');
@@ -182,7 +182,7 @@ router.post('/refresh',
     }
     let payload;
     try {
-      payload = jwt.verify(refreshToken, resolveRefreshSecret(), { algorithms: ['HS256'] });
+      payload = verifyWithRotation(refreshToken, { refresh: true });
     } catch (_) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
@@ -258,7 +258,7 @@ router.post('/logout',
     if (refreshToken && typeof refreshToken === 'string') {
       // リフレッシュトークンが提供されていれば jti を即時失効させる。
       try {
-        const rp = jwt.verify(refreshToken, resolveRefreshSecret(), { algorithms: ['HS256'] });
+        const rp = verifyWithRotation(refreshToken, { refresh: true });
         if (rp.type === 'refresh' && rp.jti) {
           revoke(rp.jti, rp.exp ? rp.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
         }

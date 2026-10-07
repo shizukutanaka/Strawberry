@@ -164,21 +164,21 @@
 ### P0（正確性・資金安全性）
 
 - **i1**: order+payment+escrow の複数ファイル更新に補償トランザクション or WAL 風ジャーナルを検討（現状の最大リスク。ただし大掛かり — まず整合性チェックスクリプトで不整合を検知する方が現実的）。
-- **i2**: 整合性自己検査スクリプトの追加（`scripts/verify-data-consistency.js` 風。order↔payment↔escrow の参照整合を読み取り専用で検査。実行時副作用なしでマージ可能）。
+- **i2**: 整合性自己検査スクリプトの追加（`scripts/verify-data-consistency.js` 風。order↔payment↔escrow の参照整合を読み取り専用で検査。実行時副作用なしでマージ可能）。→ **対応済み**（#268 — 80+種の検査へ拡張中）。
 - **i3**: POST /orders への冪等性キー (#26 open の内容。PR 済みのため再提出不可 — ユーザー判断待ち)。
 
 ### P1（信頼性）
 
 - **i4**: `--forceExit` の扱いを文書化のまま据置（#267 で不採用と判断されたため、再提案はしない）。
 - **i5**: jest 実行中の蓄積タイマーによる audit/error ログ肥大化の抑制（stopMonitor 徹底 or テスト環境での monitorServices 早期 return — 既に unref 済みで優先度は低下）。
-- **i6**: バックアップ復元時の整合性検証（JSON パース + 必須キー存在チェック）。
-- **i7**: 同期 fs 呼出のホットパス残存箇所の棚卸（perf 影響の低い順に async 化）。
+- **i6**: バックアップ復元時の整合性検証（JSON パース + 必須キー存在チェック）。→ **対応済み**（#268 — 復元前検証）。
+- **i7**: 同期 fs 呼出のホットパス残存箇所の棚卸（perf 影響の低い順に async 化）。→ **一部対応**（#268 — notification-settings を stat 指紋キャッシュ化。残存は低頻度のため棚卸のみ）。
 
 ### P2（観測性・運用）
 
-- **i8**: テスト数の自動集計（jest `--listTests | wc -l` を CI artifact 化し、docs の手動記述を廃止）。
-- **i9**: 外形監視の標準化（UPTIME_* env が任意のまま — .env.example への推奨設定コメント追加）。
-- **i10**: デーモンループの一元管理（registry パターンで stopAll を提供 — ただし runtime 配線は不採用傾向のため設計検討のみ）。
+- **i8**: テスト数の自動集計（jest `--listTests | wc -l` を CI artifact 化し、docs の手動記述を廃止）。→ **対応済み**（#268/#269 — `scripts/report-test-counts.js` で実測と docs 記載の drift 検出）。
+- **i9**: 外形監視の標準化（UPTIME_* env が任意のまま — .env.example への推奨設定コメント追加）。→ **対応済み**（#268 — MONITOR_TARGETS コメントを実態へ修正）。
+- **i10**: デーモンループの一元管理（registry パターンで stopAll を提供 — ただし runtime 配線は不採用傾向のため設計検討のみ）。→ **設計案+部分実装**（#268 — 付録の設計案 + backup-scheduler の stop 追加）。
 
 ### P3（機能面・open PR 依存）
 
@@ -186,8 +186,8 @@
 
 ### P4（長期）
 
-- **i21**: Postgres 移行の判断基準文書化（JSON の限界条件を明示 — 「何时移行するか」の定量化）。
-- **i22**: npm audit の週次レポート整備（既に audit-notifier はあるが breaking-only が積存する現状の可視化）。
+- **i21**: Postgres 移行の判断基準文書化（JSON の限界条件を明示 — 「何时移行するか」の定量化）。→ **対応済み**（#268 — 付録へ5条件+留保条件で定量化）。
+- **i22**: npm audit の週次レポート整備（既に audit-notifier はあるが breaking-only が積存する現状の可視化）。→ **対応済み**（#268 — `scripts/report-audit-backlog.js` で3分類の積存可視化）。
 
 ## 今回の実施
 

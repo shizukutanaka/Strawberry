@@ -1043,4 +1043,34 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o1'))).toBe(true);
     expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o2'))).toBe(false);
   });
+
+  it('warns on review attached to a non-completed order', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'active', review: { rating: 5, comment: 'x', reviewedAt: '2026-01-01T00:00:00Z' } },
+        { id: 'o2', status: 'completed', review: { rating: 5, comment: 'x', reviewedAt: '2026-01-01T00:00:00Z' } },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'review-on-unfinished-order' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'review-on-unfinished-order' && i.detail.includes('o2'))).toBe(false);
+  });
+
+  it('warns on out-of-range rating in canonical o.review', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed', review: { rating: 7 } }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('o1'))).toBe(true);
+  });
 });

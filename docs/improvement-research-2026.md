@@ -792,3 +792,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: sla カウンタ検査 (2026-10)**: updateSLA のペアインクリメント不変条件（up+down=total）・非負値・history {time,alive} 形式を warn 検査 — 稼働率ダッシュボードを破損する手動編集/途中クラッシュの兆候。60テスト緑。
 - **verify-data-consistency: uptime 一意性・カウンタ検査 (2026-10)**: providerId upsert 迂回の重複（稼働実績分裂）と beats/gapEvents/sessions の非数・負値（稼働率算出破損）を warn。62テスト緑。
 - **verify-data-consistency: 予約窓検査 (2026-10)**: durationMinutes の 30日上限（Joi スキーマ迂回検出）と scheduledEndAt = start+duration の窓不変条件（二重予約判定・SLA を狂わせる破損）を warn。64テスト緑。
+- **verify-data-consistency: レビュー健全性検査 (2026-10)**: o.review を invalid-rating の対象へ拡張 + 非 completed 注文へのレビュー付着（completed 前提ゲートの迂回）を warn。66テスト緑。

@@ -664,11 +664,16 @@ function run(dataDir) {
   }
   for (const o of orders) {
     if (!o) continue;
-    for (const key of ['renterReview', 'providerReview']) {
+    for (const key of ['renterReview', 'providerReview', 'review']) {
       const r = o[key];
       if (r && !(Number.isInteger(r.rating) && r.rating >= 1 && r.rating <= 5)) {
         issues.push({ severity: 'warn', check: 'invalid-rating', detail: `orders.json: id "${o.id}" の ${key}.rating "${r.rating}" は整数1-5ではない（集計対象外の幽霊レビュー）` });
       }
+    }
+    // o.review は completed 注文へ1回限り（order/index.js:1582 の updateIf ガード）。
+    // 完了前レビュー・完了後に status が戻った注文はゲート迂回の兆候。
+    if (o.review && o.status !== 'completed') {
+      issues.push({ severity: 'warn', check: 'review-on-unfinished-order', detail: `orders.json: id "${o.id}" (${o.status}) にレビューがある（completed 前提ゲートの迂回）` });
     }
   }
 

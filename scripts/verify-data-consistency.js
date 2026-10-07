@@ -202,6 +202,16 @@ function run(dataDir) {
         detail: `escrow "${e.id}" が DISPUTED だが order "${e.orderId}" は ${oStatus}`,
       });
     }
+    // 逆方向: order が disputed だが資金側が DISPUTED へ進んでいない
+    // （PENDING/HELD のまま）= 注文側だけ係争表示で資金は未係争のデシンク。
+    // escrow を持たない LN 経路の order は対象外（escrow がある場合のみ検査）。
+    if (oStatus === 'disputed' && (st === 'PENDING' || st === 'HELD')) {
+      issues.push({
+        severity: 'warn',
+        check: 'dispute-escrow-mismatch',
+        detail: `order "${e.orderId}" は disputed だが escrow "${e.id}" は ${st}（資金側が未係争）`,
+      });
+    }
     // 資金返済/清算済みなのに order が進行中（返金後もレンタル継続 = 無償提供状態）
     if ((st === 'CANCELED' || st === 'SETTLED') && (oStatus === 'active' || oStatus === 'matched')) {
       issues.push({

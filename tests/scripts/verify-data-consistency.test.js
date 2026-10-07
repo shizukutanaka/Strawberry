@@ -1155,3 +1155,31 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-gpu-availability' && i.detail.includes('g4'))).toBe(false);
   });
 });
+
+  it('warns when a disputed order has a non-DISPUTED escrow (dispute-escrow-mismatch)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'disputed' }],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'HELD', preimageHash: 'ph' }],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    const m = issues.find((i) => i.check === 'dispute-escrow-mismatch');
+    expect(m).toBeDefined();
+    expect(m.severity).toBe('warn');
+    expect(m.detail).toContain('e1');
+  });
+
+  it('does not flag disputed order when escrow is DISPUTED or absent', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'disputed' },
+        { id: 'o2', status: 'disputed' },
+      ],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'DISPUTED' }],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'dispute-escrow-mismatch')).toBe(false);
+  });

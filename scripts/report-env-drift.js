@@ -17,14 +17,14 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const SCAN_DIRS = ['src', 'scripts'];
 // ルート直下の *.js（lightning-service.js / virtual-gpu-manager.js /
 // gpu_lending_setup_auto_register.js 等の起動・ツール系エントリ）も
 // スキャン対象 — src/ 外にあるため drift 検出をすり抜けていた。
 const ROOT_JS = true;
-// unreferenced 判定の haystack は tests/ も含める — テスト専用変数
-// （E2E_BASE_URL 等）を「どこにも使われていない」と誤検しないため。
-const HAYSTACK_DIRS = ['src', 'scripts', 'tests'];
+// unreferenced 判定の haystack は tests/（テスト専用変数 E2E_BASE_URL 等を
+// 「どこにも使われていない」と誤検しないため）と public/（Electron シェルの
+// electron.js / preload.js — src 外の実行コードで STRAWBERRY_URL 等を読む）も含める。
+const HAYSTACK_DIRS = ['src', 'scripts', 'tests', 'public'];
 const ENV_EXAMPLE = path.join(ROOT, '.env.example');
 // コードにしか存在しないことを前提とする変数（実行環境が供給する組み込み系）。
 const BUILTIN_IGNORE = new Set([

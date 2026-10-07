@@ -125,4 +125,17 @@ describe('report-env-drift', () => {
     const r = report(repo.dir, repo.envPath);
     expect(r.duplicates).toEqual(['MY_FLAG']);
   });
+
+  it('public/ 内の参照もスキャン対象（Electron シェル等）', () => {
+    const repo = makeRepo({
+      files: {
+        'public/electron.js': 'process.env.PUBLIC_VAR;',
+        'src/a.js': 'process.env.MY_FLAG;',
+      },
+      envExample: 'MY_FLAG=\n',
+    });
+    dir = repo.dir;
+    const r = report(repo.dir, repo.envPath);
+    expect(r.undocumented.map((u) => u.name)).toContain('PUBLIC_VAR');
+  });
 });

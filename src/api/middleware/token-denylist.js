@@ -70,6 +70,14 @@ function persist(map) {
   atomicWriteJSON(DENYLIST_PATH, Object.fromEntries(map));
 }
 
+// 期限切れエントリの GC。in-memory では isRevoked が都度除外するが
+// prune+persist は revoke() 時にしか走らず、失効追加が無ければ期限切れ
+// エントリがファイルに永遠に滞留して肥大化する。isRevoked で期限切れを
+// 見つけた際に amortized persist する（毎回書くと hot path の同期 I/O に
+// なるため間隔を置く — i7 の stat 指紋規約と同じ発想）。
+let _lastGcPersist = 0;
+const GC_PERSIST_MS = 60_000;
+
 /**
  * トークンを失効させる。
  * @param {string} jti - トークンの一意ID
@@ -96,6 +104,15 @@ function isRevoked(jti) {
   if (expiryMs === undefined) return false;
   if (expiryMs <= Date.now()) {
     map.delete(jti);
+    if (Date.now() - _lastGcPersist >= GC_PERSIST_MS) {
+      _lastGcPersist = Date.now();
+      prune(map);
+      try {
+        persist(map);
+      } catch (_) {
+        /* GC の永続化失敗は次回チェックへ持ち越し（メモリ側は既に除去済み） */
+      }
+    }
     return false;
   }
   return true;

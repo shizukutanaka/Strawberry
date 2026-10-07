@@ -802,3 +802,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **report-test-counts: docs/SPECIFICATION.md をスキャン対象へ追加 (2026-10)**: 監視対象が README/PRODUCT_ANALYSIS のみで SPECIFICATION.md:84 の「247/249スイート・1982/1985テスト」陳腐化記述をすり抜けていた。追加後に実 drift を検出し「253スイート・約2000テスト」へ同期（現在 drift 0）。scripts/ 246テスト緑。
 - **operations.md: verify/レポート系スクリプト表を実態へ同期 (2026-10)**: 検査数を 80+種に更新、report-env-drift の duplicates 検出と report-audit-backlog の行を追記。
 - **strengths-weaknesses-2026.md: i 項目の対応状況を追記 (2026-10)**: i2/i6/i7/i8/i9/i10/i21/i22 に「対応済み/一部対応/設計案+部分実装」と実施 PR を明記。残る未着手は i1（runtime txn — 不採用傾向）、i3/i11-20（open PR 依存・ユーザー判断）、i4/i5（据置判断済み）のみ。
+- **order-pricing: プロパティ不変条件テスト (2026-10・弱所#37)**: satoshi 整数演算を値例テストから全域性質テストへ — 単価9点×duration 9点の格子で「非負整数」「正の生額は 1sat フロア」「duration 単調非減少」「価格ロック不変」「JPY は整数 or null」を固定。16テスト緑。

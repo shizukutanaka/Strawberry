@@ -16,6 +16,16 @@ function sanitizeSensitiveFields(obj, fields = [
   'password','secret','token','apiKey','privateKey','email','refreshToken','accessToken','jwt','macaroon','mnemonic','seed'
 ]) {
   const fieldsLower = fields.map(f => f.toLowerCase());
+  // camelCase/snake_case の複合キー（confirmEmail, notify_email, x-api_key 等）
+  // は完全一致をすり抜けるため「正規化後の suffix 一致」も機密とみなす。
+  // confirmemail→email, api_key→apikey がマスク対象になる（弱所#17）。
+  const isSensitiveKey = (key) => {
+    const norm = key.toLowerCase().replace(/[_\-.]/g, '');
+    return fieldsLower.some((f) => {
+      const fn = f.replace(/[_\-.]/g, '');
+      return norm === fn || norm.endsWith(fn);
+    });
+  };
   const seen = new WeakSet(); // 循環参照ガード（JSON 由来では起きないが、logger 経由の内部オブジェクトでは起き得る）
   function walk(node, depth) {
     if (!node || typeof node !== 'object') return node;
@@ -26,7 +36,7 @@ function sanitizeSensitiveFields(obj, fields = [
     const out = Array.isArray(node) ? [] : { ...node };
     for (const k of Object.keys(node)) {
       const v = node[k];
-      if (fieldsLower.includes(k.toLowerCase())) {
+      if (isSensitiveKey(k)) {
         out[k] = '[MASKED]';
       } else if (v !== null && typeof v === 'object') {
         out[k] = walk(v, depth + 1);
@@ -40,8 +50,21 @@ function sanitizeSensitiveFields(obj, fields = [
   return walk(obj, 0);
 }
 
+/**
+ * ログメッセージ内の email 値をマスクする（ローカル部を伏字化しドメインのみ残す）。
+ * 「Login attempt: a***@example.com」のように相関分析（辞書攻撃のクラスタ判定）に
+ * 必要なドメインは残しつつ、個人を特定するローカル部を隠す（弱所#17）。
+ * @param {string} value
+ * @returns {string}
+ */
+function maskEmail(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/([a-zA-Z0-9._%+-])[a-zA-Z0-9._%+-]*(@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g, '$1***$2');
+}
+
 module.exports = {
   sanitizeSensitiveFields,
+  maskEmail,
   sanitizeString(str) {
     if (typeof str !== 'string') return '';
     // 制御文字・HTMLタグ除去。タグ除去後に残る `<`/`>` (例: `<<script>` の外側の `<`) を

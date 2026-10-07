@@ -4,8 +4,7 @@ const { getBTCtoJPYRate } = require('../utils/exchange-rate');
 const OrderRepository = require('../db/json/OrderRepository');
 const UserRepository = require('../db/json/UserRepository');
 const GPURepository = require('../db/json/GpuRepository');
-const jwt = require('jsonwebtoken');
-const { resolveSecret } = require('./middleware/jwt-auth');
+const { verifyWithRotation } = require('./middleware/jwt-auth');
 const { isRevoked } = require('./middleware/token-denylist');
 const { sanitizeUser } = require('./utils/sanitize-user');
 // 価格計算は REST と同一の共通ユーティリティを使う（整数 sats へ丸め・単位統一）。
@@ -174,7 +173,7 @@ async function setupGraphQL(app) {
       const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
       if (!token) return { user: null };
       try {
-        const payload = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+        const payload = verifyWithRotation(token);
         // REST(jwt-auth.js) と同一ポリシー: リフレッシュトークンをアクセスとして使わせない、
         // かつ logout で失効済み(jti)のトークンは拒否する。これを欠くと GraphQL 経由で
         // ログアウト済み/リフレッシュ用トークンが認証を通ってしまう。

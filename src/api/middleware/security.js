@@ -2,7 +2,6 @@
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const jwt = require('jsonwebtoken');
 // レート制限キー生成（XFF 偽装耐性 + IPv6 /64 畳み込み）は ip-key.js に集約。
 const { rateLimitKeyGenerator: _rlKeyGeneratorShared } = require('./ip-key');
 const { config } = require('../../utils/config');
@@ -11,7 +10,7 @@ const { safeTokenEqual } = require('../../utils/safe-compare');
 // シークレット解決は jwt-auth.js と共有する（process.env.JWT_SECRET 優先）。
 // 別々に解決すると鍵ローテーション時にグローバルゲートと本ミドルウェアで
 // 受理可否が食い違う（片方だけ旧鍵で検証する）ため必ず一元化すること。
-const { resolveSecret } = require('./jwt-auth');
+const { verifyWithRotation } = require('./jwt-auth');
 
 // HSTSやXSS対策などのセキュリティヘッダー設定
 const securityHeaders = helmet({
@@ -125,7 +124,7 @@ const authenticateJWT = (req, res, next) => {
   try {
     // algorithms を固定し、アルゴリズム混同攻撃（alg=none / RS256 すり替え）を防ぐ。
     // 署名は HS256（文字列シークレットの jwt.sign 既定）で行っている。
-    const decoded = jwt.verify(token, resolveSecret(), { algorithms: ['HS256'] });
+    const decoded = verifyWithRotation(token);
     // リフレッシュトークンをアクセストークンとして使わせない（jwt-auth.js と同一ポリシー）
     if (decoded.type === 'refresh') {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));

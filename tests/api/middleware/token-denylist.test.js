@@ -55,4 +55,26 @@ describe('token-denylist', () => {
     expect(denylistReads).toBe(0);
     spy.mockRestore();
   });
+
+  it('prunes expired entries from the file (amortized GC)', () => {
+    // ファイルに期限切れエントリを直接書く（revoke は過去 exp を 24h 矯正するため）。
+    // GC の persist は 60s 間隔で amortize されるため、直前テストで時計が進め済みでも
+    // 間隔を超過したことにする（Date.now を +61s 進める）。
+    const realNow = Date.now;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => realNow() + 61_000);
+    fs.writeFileSync(DENYLIST, JSON.stringify({
+      'expired-a': realNow() - 1000,
+      'expired-b': realNow() - 2000,
+      'live-jti': realNow() + 300_000, // +61s 進めても未期限切れ
+    }));
+    try {
+      expect(isRevoked('expired-a')).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+    }
+    const persisted = JSON.parse(fs.readFileSync(DENYLIST, 'utf-8'));
+    expect(persisted['expired-a']).toBeUndefined();
+    expect(persisted['expired-b']).toBeUndefined();
+    expect(persisted['live-jti']).toBeDefined(); // 有効エントリは保持
+  });
 });

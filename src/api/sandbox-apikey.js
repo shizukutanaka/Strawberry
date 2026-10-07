@@ -18,14 +18,34 @@ function generateApiKey() {
 }
 
 // サンドボックスAPIキー保存・検証
-function loadApiKeys() {
+// /sandbox/apikey/verify は呼ぶたびキー一覧を readFileSync するため、
+// stat 指紋ゲートで「変わった時だけ再パース」にする（i7・同規約:
+// notification-settings/sla）。書き込みは atomicWriteJSON なので
+// mtime で確実に検知できる。破損時は空配列（旧来の挙動）を返す。
+const fs = require('fs');
+let _keysStamp = undefined; // undefined=未ロード, null=ファイル不在, string=指紋
+let _keysCache = null;
+function _fileStamp() {
   try {
-    return require('fs').existsSync(SANDBOX_KEY_PATH)
-      ? JSON.parse(require('fs').readFileSync(SANDBOX_KEY_PATH, 'utf-8'))
-      : [];
+    const s = fs.statSync(SANDBOX_KEY_PATH);
+    return `${s.mtimeMs}:${s.size}`;
   } catch (_) {
-    return [];
+    return null;
   }
+}
+function loadApiKeys() {
+  const stamp = _fileStamp();
+  if (stamp !== null && _keysStamp === stamp) return _keysCache;
+  // ファイル不在は「キー0件」として扱いキャッシュもする（指紋は null で
+  // 記録できないので毎回 stat になる — 不在時のコストは stat 1回のみで可）
+  if (stamp === null) return [];
+  try {
+    _keysCache = JSON.parse(fs.readFileSync(SANDBOX_KEY_PATH, 'utf-8'));
+    _keysStamp = stamp;
+  } catch (_) {
+    return _keysCache || []; // 破損時は既キャッシュ維持（初回のみ空）
+  }
+  return _keysCache;
 }
 function addApiKey(userId) {
   const keys = loadApiKeys();

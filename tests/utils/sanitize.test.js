@@ -4,7 +4,7 @@
 // 100KB body 上限内に収まる）を audit ミドルウェアの req.body マスクが
 // 受けると Maximum call stack size exceeded → プロセス終了だった。
 // また循環オブジェクトでも無限再帰していた。
-const { sanitizeSensitiveFields, sanitizeString } = require('../../src/utils/sanitize');
+const { sanitizeSensitiveFields, sanitizeString, maskEmail } = require('../../src/utils/sanitize');
 
 function makeDeepJson(depth) {
   return JSON.parse('{"a":'.repeat(depth) + '1' + '}'.repeat(depth));
@@ -63,5 +63,54 @@ describe('sanitizeString', () => {
   it('strips tags and residual angle brackets', () => {
     expect(sanitizeString('<<script>alert(1)</script>')).not.toContain('<');
     expect(sanitizeString('<b>hi</b>')).toBe('hi');
+  });
+});
+
+describe('sanitizeSensitiveFields: 複合キーの suffix マスキング（弱所#17）', () => {
+  it('confirmEmail / notify_email / x-api_key のような複合キーもマスクする', () => {
+    const out = sanitizeSensitiveFields({
+      confirmEmail: 'someone@example.com',
+      notify_email: 'a@b.co',
+      'x-api_key': 'sk-123',
+      refresh_token: 'rt',
+      sessionToken: 'st',
+    });
+    expect(out.confirmEmail).toBe('[MASKED]');
+    expect(out.notify_email).toBe('[MASKED]');
+    expect(out['x-api_key']).toBe('[MASKED]');
+    expect(out.refresh_token).toBe('[MASKED]');
+    expect(out.sessionToken).toBe('[MASKED]');
+  });
+
+  it('非機密キー（emailVerified, tokenCount, userId 等）はマスクしない', () => {
+    const out = sanitizeSensitiveFields({
+      emailVerified: true,
+      tokenCount: 3,
+      userId: 'u1',
+      emailAddressLabel: 'primary',
+    });
+    expect(out.emailVerified).toBe(true);
+    expect(out.tokenCount).toBe(3);
+    expect(out.userId).toBe('u1');
+    expect(out.emailAddressLabel).toBe('primary');
+  });
+});
+
+describe('maskEmail（弱所#17 — ログ内の平文メール伏字化）', () => {
+  it('ローカル部を伏字化しドメインを残す', () => {
+    expect(maskEmail('alice@example.com')).toBe('a***@example.com');
+    expect(maskEmail('x@b.co')).toBe('x***@b.co');
+  });
+
+  it('メッセージ中の複数アドレスも全て伏字化する', () => {
+    expect(maskEmail('Login attempt: alice@x.com vs bob@y.org')).toBe(
+      'Login attempt: a***@x.com vs b***@y.org'
+    );
+  });
+
+  it('非文字列・非メール文字列はそのまま返す', () => {
+    expect(maskEmail('no email here')).toBe('no email here');
+    expect(maskEmail(42)).toBe(42);
+    expect(maskEmail(null)).toBe(null);
   });
 });

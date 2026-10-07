@@ -54,13 +54,16 @@ describe('Crypto: resolveRefreshSecret is exported from jwt-auth', () => {
     expect(src).toMatch(/resolveRefreshSecret\(\)/);
   });
 
-  it('user/index.js: refresh endpoint uses resolveRefreshSecret', () => {
+  it('user/index.js: refresh endpoint uses the refresh-secret verification path', () => {
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
     );
-    expect(src).toMatch(/resolveRefreshSecret/);
+    // Refresh-token verification goes through verifyWithRotation(..., { refresh:
+    // true }), which internally resolves JWT_REFRESH_SECRET (falling back to the
+    // access secret) plus JWT_REFRESH_SECRET_PREVIOUS during rotation.
+    expect(src).toMatch(/verifyWithRotation/);
     // Both the /refresh and /logout refresh-token verification paths must use it
-    const matches = (src.match(/resolveRefreshSecret\(\)/g) || []).length;
+    const matches = (src.match(/verifyWithRotation\([^)]*\{\s*refresh:\s*true/g) || []).length;
     expect(matches).toBeGreaterThanOrEqual(2);
   });
 });

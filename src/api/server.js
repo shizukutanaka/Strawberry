@@ -89,10 +89,12 @@ async function updateLightningMetrics() {
 // 超える（単体実行では PASS するのに全体実行だけ落ちる、の原因）。
 // /metrics ハンドラは毎回 updateOperationalMetrics() を await するので、
 // このタイマーが無くてもテストのメトリクス値は正しい。
+const { registerDaemon } = require('../utils/daemon-registry');
 const metricsInterval = process.env.NODE_ENV === 'test'
   ? null
   : setInterval(updateOperationalMetrics, 10000);
 if (metricsInterval && metricsInterval.unref) metricsInterval.unref();
+if (metricsInterval) registerDaemon('metrics-refresh', () => clearInterval(metricsInterval));
 
 // Expressアプリケーション初期化
 const app = express();
@@ -401,7 +403,14 @@ if (require.main === module) {
   const gracefulShutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    logger.info(`${signal} signal received: closing HTTP server`);
+    logger.info(`${signal} signal received: stopping daemons and closing HTTP server`);
+    // ドレイン窓の間もデーモン tick が動き続けてファイル書込み等を行うのを防ぐ。
+    // 各デーモンは起動時に daemon-registry へ stop を登録している（監査 i10）。
+    try {
+      require('../utils/daemon-registry').stopAllDaemons();
+    } catch (e) {
+      logger.warn(`daemon stop failed during shutdown: ${e.message}`);
+    }
     const forceExit = setTimeout(() => {
       logger.error('Graceful shutdown timed out after 30s; forcing exit');
       process.exit(1);

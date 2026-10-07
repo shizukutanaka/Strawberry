@@ -5,6 +5,7 @@ const { atomicWriteJSON } = require('../db/json/atomicWrite');
 const j2s = require('joi-to-swagger');
 const Joi = require('joi');
 const { schemas } = require('../utils/validator');
+const { logger } = require('../utils/logger');
 
 // schemas のトップレベル要素は2形態ある:
 //  (A) グループ ＝ { name: JoiSchema, ... }（例: gpu, order, user）
@@ -119,7 +120,7 @@ function generateOpenAPISpec({ persist = false } = {}) {
 
   if (persist) {
     atomicWriteJSON(OPENAPI_PATH, openapi);
-    console.log('OpenAPI仕様書を自動生成しました:', OPENAPI_PATH);
+    logger.info('OpenAPI仕様書を自動生成しました:', OPENAPI_PATH);
   }
   return openapi;
 }

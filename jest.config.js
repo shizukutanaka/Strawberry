@@ -18,6 +18,19 @@ module.exports = {
   // 読むが、既定 reporters (json/lcov/text/clover) は json-summary を出力せず
   // ジョブが MODULE_NOT_FOUND で落ちていた。json-summary を追加して修正。
   coverageReporters: ['json', 'json-summary', 'lcov', 'text', 'clover'],
+  // カバレッジの ratchet（後退防止の床）。workflow 側のチェックは lines のみ
+  // ≥70 だったため、測定系4指標すべてに床を設定する。値は CI 実測
+  // (2026-10: lines 79.2 / stmts 77.4 / funcs 74.4 / branches 70.5) より
+  // 3-4pt 下に置き、env 依存 skip による小さな揺れを許容しつつ大きな後退
+  // を早期に検出する。カバレッジを上げたらこの床も引き上げること。
+  coverageThreshold: {
+    global: {
+      lines: 75,
+      statements: 73,
+      functions: 70,
+      branches: 66,
+    },
+  },
   // CI で実行不能な経路しか持たないファイルを計測対象から除外する。
   // collectCoverageFrom ではなく coveragePathIgnorePatterns を使う理由:
   // 前者を書くと既定の「テストが実際にロードしたファイル」計測から

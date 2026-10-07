@@ -3,6 +3,7 @@
 // ドキュメントに書かれたテスト数記述とのズレ（陳腐化）を検出するレポーター。
 //
 // 使い方: node scripts/report-test-counts.js
+//   --json       : 機械可読 JSON 出力（他の report-* 系と同規約 — 監視消費用）
 //   --update     : 検出したズレをドキュメント上で置き換えて書き戻す（既定は報告のみ）
 //
 // 背景: PRODUCT_ANALYSIS.md 等の「N スイート・N テスト」記述は手動同期のため
@@ -21,7 +22,9 @@ const { execFileSync } = require('child_process');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const TESTS_DIR = path.join(REPO_ROOT, 'tests');
-const DOC_FILES = ['README.md', 'docs/PRODUCT_ANALYSIS.md'];
+// スイート/テスト数の記述を含むドキュメント（docs/SPECIFICATION.md:84 の
+// 「247/249スイート」のような陳腐化記述も対象 — #266 の同期漏れ箇所）。
+const DOC_FILES = ['README.md', 'docs/PRODUCT_ANALYSIS.md', 'docs/SPECIFICATION.md'];
 
 function listTestFiles() {
   const out = [];
@@ -86,22 +89,18 @@ function docClaims(file) {
   return claims;
 }
 
-function main() {
-  const update = process.argv.includes('--update');
+function compute() {
   const files = listTestFiles();
   const suites = measuredSuites();
   const testsApprox = countTestCalls(files);
-  console.log(`measured: suites=${suites} (jest --listTests), tests≈${testsApprox} (it/test call sites — 近似値)`);
-
   const isSuite = (unit) => /suites?|スイート/i.test(unit);
   const claims = DOC_FILES.flatMap((f) => (fs.existsSync(path.join(REPO_ROOT, f)) ? docClaims(f) : []));
-  let drift = 0;
+  const drifts = [];
   for (const c of claims) {
     if (isSuite(c.unit)) {
       // スイート数は正確値比較 — ±1 のずれも検出する
       if (c.value !== suites) {
-        drift++;
-        console.log(`  [drift] ${c.file}: "${c.value} ${c.unit}" (measured ${suites}) — ${c.context}`);
+        drifts.push({ ...c, measured: suites });
       }
       continue;
     }
@@ -111,13 +110,32 @@ function main() {
     if (c.value < testsApprox * 0.3 || c.value > testsApprox * 3) continue;
     const nearHit = Math.abs(c.value - testsApprox) <= Math.max(3, testsApprox * 0.1);
     if (!nearHit) {
-      drift++;
-      console.log(`  [drift] ${c.file}: "${c.value} ${c.unit}" — ...${c.context}`);
+      drifts.push({ ...c, measured: testsApprox, approx: true });
     }
   }
-  console.log(drift === 0 ? 'doc claims: no drift' : `doc claims: ${drift} potential drift point(s)`);
-  if (update && drift > 0) {
-    console.log('(--update は数値の意味を区別できないため自動置換しません — 上記箇所を手動で同期してください)');
+  return { suites, testsApprox, claims: claims.length, drifts };
+}
+
+function main() {
+  const update = process.argv.includes('--update');
+  const jsonMode = process.argv.includes('--json');
+  const strict = process.argv.includes('--strict');
+  const r = compute();
+  if (jsonMode) {
+    console.log(JSON.stringify(r, null, 2));
+  } else {
+    console.log(`measured: suites=${r.suites} (jest --listTests), tests≈${r.testsApprox} (it/test call sites — 近似値)`);
+    for (const c of r.drifts) {
+      console.log(`  [drift] ${c.file}: "${c.value} ${c.unit}" (measured ${c.measured}) — ${c.context}`);
+    }
+    console.log(r.drifts.length === 0 ? 'doc claims: no drift' : `doc claims: ${r.drifts.length} potential drift point(s)`);
+    if (update && r.drifts.length > 0) {
+      console.log('(--update は数値の意味を区別できないため自動置換しません — 上記箇所を手動で同期してください)');
+    }
+  }
+  if (strict && r.drifts.length > 0) {
+    console.error(`report-test-counts: ${r.drifts.length} 件のテスト数記述 drift を検出`);
+    process.exit(1);
   }
 }
 
@@ -130,4 +148,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { listTestFiles, countTestCalls, docClaims };
+module.exports = { listTestFiles, countTestCalls, docClaims, compute };

@@ -508,6 +508,34 @@ describe('verify-data-consistency', () => {
     expect(issues.filter((i) => i.check === 'status-chronology').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('warns on fund records predating their order (fund-before-order)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', createdAt: '2025-02-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', createdAt: '2025-01-01T00:00:00Z' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'SETTLED', createdAt: '2025-01-15T00:00:00Z' }],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    const fbo = issues.filter((i) => i.check === 'fund-before-order');
+    expect(fbo.some((i) => i.detail.includes('p1'))).toBe(true);
+    expect(fbo.some((i) => i.detail.includes('e1'))).toBe(true);
+  });
+
+  it('does not flag fund records created after their order', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', createdAt: '2025-02-01T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'fund-before-order')).toBe(false);
+  });
+
   it('warns on malformed user emails', () => {
     dir = makeDataDir({
       'users.json': [
@@ -580,6 +608,28 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'duplicate-username' && i.detail.includes('alice'))).toBe(true);
     expect(issues.some((i) => i.check === 'invalid-username' && i.detail.includes('u3'))).toBe(true);
     expect(issues.some((i) => i.check === 'invalid-username' && i.detail.includes('u1'))).toBe(false);
+  });
+
+  it('warns on duplicate apiKey without leaking the key value', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'a@b.com', apiKey: 'super-secret-key-1' },
+        { id: 'u2', email: 'c@d.com', apiKey: 'super-secret-key-1' },
+        { id: 'u3', email: 'e@f.com', apiKey: 'different-key' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    const dup = issues.find((i) => i.check === 'duplicate-api-key');
+    expect(dup).toBeTruthy();
+    // キー値は資格情報のため detail に出さない（id と桁数のみ）
+    expect(dup.detail).not.toContain('super-secret-key-1');
+    expect(dup.detail).toContain('u2');
+    expect(dup.detail).toContain('u1');
   });
 
   it('warns on duplicate watch and invalid watch targetPrice', () => {
@@ -935,5 +985,297 @@ describe('verify-data-consistency', () => {
     expect(dispute).toBeDefined();
     expect(dispute.severity).toBe('warn');
     expect(summary.ok).toBe(true); // warnings do not fail
+  });
+
+  it('warns on sla counter mismatch (up+down != total)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'sla.json': { total: 10, up: 5, down: 2, history: [] },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'sla-counter-mismatch')).toBe(true);
+  });
+
+  it('accepts consistent sla counters without warning', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'sla.json': { total: 7, up: 5, down: 2, history: [{ time: '2026-01-01T00:00:00Z', alive: true }] },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check && i.check.startsWith('sla-'))).toBe(false);
+  });
+
+  it('warns on invalid sla counter and malformed history', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'sla.json': { total: -1, up: 0, down: -1, history: [{ bogus: true }] },
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'sla-counter-invalid')).toBe(true);
+    expect(issues.some((i) => i.check === 'sla-history-invalid')).toBe(true);
+  });
+
+  it('warns on duplicate providerId in uptime.json', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+      'uptime.json': [
+        { id: 't1', providerId: 'u1', beats: 10, gapEvents: 0, sessions: 1 },
+        { id: 't2', providerId: 'u1', beats: 5, gapEvents: 0, sessions: 1 },
+        { id: 't3', providerId: 'u2', beats: 3, gapEvents: 0, sessions: 1 },
+      ],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'duplicate-provider-uptime' && i.detail.includes('u1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'duplicate-provider-uptime' && i.detail.includes('u2'))).toBe(false);
+  });
+
+  it('warns on invalid uptime counters', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+      'uptime.json': [{ id: 't1', providerId: 'u1', beats: -3, gapEvents: 'x' }],
+    });
+    const { issues } = run(dir);
+    const bad = issues.filter((i) => i.check === 'invalid-uptime-counter');
+    expect(bad).toHaveLength(2); // beats と gapEvents の2件
+  });
+
+  it('warns on durationMinutes above the 30-day Joi ceiling', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'pending', durationMinutes: 50000 }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-duration' && i.detail.includes('43200'))).toBe(true);
+  });
+
+  it('warns on schedule-window mismatch (end != start + duration)', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'matched', gpuId: 'g1', durationMinutes: 60, scheduledStartAt: '2026-01-01T00:00:00Z', scheduledEndAt: '2026-01-01T02:00:00Z' },
+        { id: 'o2', status: 'matched', gpuId: 'g1', durationMinutes: 60, scheduledStartAt: '2026-02-01T00:00:00Z', scheduledEndAt: '2026-02-01T01:00:00Z' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o2'))).toBe(false);
+  });
+
+  it('warns on review attached to a non-completed order', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'active', review: { rating: 5, comment: 'x', reviewedAt: '2026-01-01T00:00:00Z' } },
+        { id: 'o2', status: 'completed', review: { rating: 5, comment: 'x', reviewedAt: '2026-01-01T00:00:00Z' } },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'review-on-unfinished-order' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'review-on-unfinished-order' && i.detail.includes('o2'))).toBe(false);
+  });
+
+  it('warns on out-of-range rating in canonical o.review', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'completed', review: { rating: 7 } }],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-rating' && i.detail.includes('o1'))).toBe(true);
+  });
+
+  it('warns on GPU enum/schema violations (vendor, apiType, memoryGB)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', vendor: 'CustomSilicon', apiType: 'CUDA', memoryGB: 24, model: 'X' },
+        { id: 'g2', vendor: 'NVIDIA', apiType: 'WebGPU', memoryGB: 24, model: 'X' },
+        { id: 'g3', vendor: 'AMD', apiType: 'ROCm', memoryGB: 0, model: 'X' },
+        { id: 'g4', vendor: 'Intel', apiType: 'oneAPI', memoryGB: 16, model: 'X' },
+      ],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.filter((i) => i.check === 'invalid-gpu-enum')).toHaveLength(2);
+    expect(issues.some((i) => i.check === 'invalid-gpu-memory' && i.detail.includes('g3'))).toBe(true);
+    expect(issues.some((i) => i.check === 'invalid-gpu-enum' && i.detail.includes('g4'))).toBe(false);
+  });
+
+  it('warns on totalPrice deviating from pricePerHour × durationMinutes / 60', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'completed', pricePerHour: 100, durationMinutes: 60, totalPrice: 500 },
+        { id: 'o2', status: 'pending', pricePerHour: 100, durationMinutes: 60, totalPrice: 100 },
+        { id: 'o3', status: 'pending', pricePerHour: 0, durationMinutes: 60, totalPrice: 500 },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'total-price-mismatch' && i.detail.includes('o3'))).toBe(false);
+  });
+
+  it('warns on HELD escrow missing release info (stuck funds)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active' }],
+      'payments.json': [],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'HELD' },
+        { id: 'e2', orderId: 'o1', state: 'HELD', preimageHash: 'abc' },
+        { id: 'e3', orderId: 'o1', state: 'HELD', txBorrowerToOperator: 'txid1' },
+        { id: 'e4', orderId: 'o1', state: 'SETTLED' },
+      ],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'held-escrow-unreleasable' && i.detail.includes('e4'))).toBe(false);
+  });
+
+  it('warns on out-of-range GPU spec fields (clockMHz, powerWatt, availability)', () => {
+    dir = makeDataDir({
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [
+        { id: 'g1', clockMHz: 50, model: 'X' },
+        { id: 'g2', powerWatt: 0, model: 'X' },
+        { id: 'g3', availability: { hoursPerDay: 25, daysAvailable: [0, 7] }, model: 'X' },
+        { id: 'g4', clockMHz: 1500, powerWatt: 300, availability: { hoursPerDay: 8, daysAvailable: [0, 6] }, model: 'X' },
+      ],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.filter((i) => i.check === 'invalid-gpu-spec')).toHaveLength(2);
+    expect(issues.filter((i) => i.check === 'invalid-gpu-availability')).toHaveLength(2);
+    expect(issues.some((i) => i.check === 'invalid-gpu-spec' && i.detail.includes('g4'))).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-gpu-availability' && i.detail.includes('g4'))).toBe(false);
+  });
+});
+
+  it('warns when a disputed order has a non-DISPUTED escrow (dispute-escrow-mismatch)', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'disputed' }],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'HELD', preimageHash: 'ph' }],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    const m = issues.find((i) => i.check === 'dispute-escrow-mismatch');
+    expect(m).toBeDefined();
+    expect(m.severity).toBe('warn');
+    expect(m.detail).toContain('e1');
+  });
+
+  it('does not flag disputed order when escrow is DISPUTED or absent', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'disputed' },
+        { id: 'o2', status: 'disputed' },
+      ],
+      'payments.json': [],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'DISPUTED' }],
+      'verifications.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'dispute-escrow-mismatch')).toBe(false);
+  });
+
+describe('escrow history FSM legality', () => {
+  const base = { 'orders.json': [], 'payments.json': [], 'verifications.json': [], 'gpus.json': [], 'users.json': [] };
+
+  it('passes a valid transition chain', () => {
+    dir = makeDataDir({
+      ...base,
+      'escrows.json': [{
+        id: 'e1', orderId: 'o1', status: 'SETTLED',
+        history: [
+          { event: 'PAY', state: 'HELD', at: 't1' },
+          { event: 'LN_ACTIONS_EXECUTED', at: 't2' },
+          { event: 'DELIVER_OK', state: 'SETTLED', at: 't3' },
+        ],
+      }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'illegal-escrow-transition')).toBe(false);
+    expect(issues.some((i) => i.check === 'escrow-history-state-drift')).toBe(false);
+  });
+
+  it('flags an out-of-order FSM event and a state mismatch', () => {
+    dir = makeDataDir({
+      ...base,
+      'escrows.json': [
+        // DELIVER_OK は PENDING では無効（HELD でのみ有効）
+        { id: 'e1', orderId: 'o1', status: 'HELD', history: [{ event: 'DELIVER_OK', state: 'SETTLED', at: 't1' }] },
+        // PAY は HELD へ遷移するが記録 state が SETTLED = 記録改竄
+        { id: 'e2', orderId: 'o2', status: 'SETTLED', history: [{ event: 'PAY', state: 'SETTLED', at: 't1' }] },
+      ],
+    });
+    const { issues } = run(dir);
+    const ill = issues.filter((i) => i.check === 'illegal-escrow-transition');
+    expect(ill.some((i) => i.detail.includes('e1'))).toBe(true);
+    expect(ill.some((i) => i.detail.includes('e2'))).toBe(true);
+  });
+
+  it('flags history-end vs current-state drift', () => {
+    dir = makeDataDir({
+      ...base,
+      'escrows.json': [{ id: 'e1', orderId: 'o1', status: 'DISPUTED', history: [{ event: 'PAY', state: 'HELD', at: 't1' }] }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'escrow-history-state-drift' && i.detail.includes('e1'))).toBe(true);
   });
 });

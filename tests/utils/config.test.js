@@ -50,3 +50,34 @@ describe('deepMergeConfig', () => {
     expect(_deepMergeConfig(base, {})).toEqual(base);
   });
 });
+
+// validateConfigShape（弱所#9）: config.json の綴りミスキーと型違反の検出。
+// require は上部で済んでいるので内部関数を直接検証する。
+const { _validateConfigShape } = require('../../src/utils/config');
+
+describe('validateConfigShape', () => {
+  it('flags unknown keys (typos like "sever") as silently-ignored problems', () => {
+    const problems = _validateConfigShape({ sever: { port: 1 } });
+    expect(problems.some((p) => p.includes('sever'))).toBe(true);
+  });
+
+  it('flags type mismatches on known leaf keys', () => {
+    const problems = _validateConfigShape({ server: { port: 'abc' } });
+    expect(problems.some((p) => p.includes('server.port') && p.includes('number'))).toBe(true);
+  });
+
+  it('flags object-vs-scalar shape mismatches', () => {
+    const problems = _validateConfigShape({ server: 'oops' });
+    expect(problems.some((p) => p.includes('server'))).toBe(true);
+  });
+
+  it('does not print the offending value (secrets in config.json must not reach logs)', () => {
+    const problems = _validateConfigShape({ security: { jwtSecret: 12345 } });
+    expect(problems.some((p) => p.includes('12345'))).toBe(false);
+  });
+
+  it('returns no problems for a well-formed partial config', () => {
+    const problems = _validateConfigShape({ server: { port: 4000 }, gpu: { minMemoryGB: 8 } });
+    expect(problems).toEqual([]);
+  });
+});

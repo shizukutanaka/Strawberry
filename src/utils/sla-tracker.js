@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../db/json/atomicWrite');
+const { registerDaemon, unregisterDaemon } = require('./daemon-registry');
 const { resolveDataDir } = require('../db/json/data-dir');
 const { logger } = require('./logger');
 const { resilientNotify } = require('./resilient-notify');
@@ -84,9 +85,11 @@ function startSLATracker() {
     updateSLA().catch((e) => logger.warn(`[SLA] updateSLA failed: ${e.message}`));
   }, CHECK_INTERVAL);
   if (_timer.unref) _timer.unref(); // タイマーがプロセス終了を妨げないように
+  registerDaemon('sla-tracker', stopSLATracker);
 }
 
 function stopSLATracker() {
+  unregisterDaemon('sla-tracker');
   if (_timer) {
     clearInterval(_timer);
     _timer = null;

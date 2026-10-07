@@ -80,7 +80,7 @@
 6. **バックアップはファイルコピーのみ**: 復元時の整合性検証・ポイントインタイム復旧なし。
 7. **セッション/揮発 Map はメモリ内**: プロセス再起動で揮発する状態が複数箇所。
 8. **冪等性キー不在**: `POST /orders` のリトライで二重注文が起き得る（#26 open）。
-9. **設定ファイルのスキーマ検証なし**: config.json は深いマージ済みだが型・必須チェックなし。
+9. **設定ファイルのスキーマ検証なし**: config.json は深いマージ済みだが型・必須チェックなし。 → **対応済み**（#269 — `validateConfigShape` が未知キー・型違反を起動時 warn で検出。値は出力しない設計）。
 10. **data/*.json の世代管理なし**: 破損時の世代バックアップ自動復元は未実装（#42 open）。
 
 ### セキュリティ・認証（11-18)
@@ -89,9 +89,9 @@
 12. **apollo-server-express v3（EOL）**: GraphQL 経路が保守切れ依存に乗っている（#46 closed=不採用）。
 13. **パスワードリセット導線なし**: forgot/reset フローが main に存在しない（#49 open）。
 14. **Webhook に HMAC 署名・リトライなし**: 受信側が送信者を検証できず配送も best-effort（#32/#33 open）。
-15. **JWT シークレットのローテーション手段なし**: 鍵更新で全セッション即失効しかない。
+15. **JWT シークレットのローテーション手段なし**: 鍵更新で全セッション即失効しかない。 → **対応済み**（#269 — `JWT_SECRET_PREVIOUS`/`JWT_REFRESH_SECRET_PREVIOUS` の猶予受理 + 検証を `verifyWithRotation` へ集約）。
 16. **.env 平文管理**: 秘密情報がファイルのみ。KMS/secret store 連携なし。
-17. **ログへの PII 混入リスク**: email 等の個人情報がログに残り得る経路が残る。
+17. **ログへの PII 混入リスク**: email 等の個人情報がログに残り得る経路が残る。 → **部分対応**（#269 — db-access の detail を `[redacted]` 化・ログインログの maskEmail・sanitizeSensitiveFields の suffix 一致拡張。新規行は遮断済み、過去分はローテーションで処理）。
 18. **2FA 強制なし**: TOTP は master-auth 昇格のみで通常ユーザーには任意/不在。
 
 ### 製品機能（19-30)
@@ -112,28 +112,28 @@
 ### テスト・CI（31-38）
 
 31. **`--forceExit` が残置**: ハンドルリークを静黙化するフラグが残る（削除 PR #267 closed=不採用）。今後のリークが可視化されない。
-32. **蓄積タイマーのログ肥大化**: unref 済みで終了は阻害しないが、全量 jest 実行中は発火し続け audit/error ログが肥大化する設計が残る。
+32. **蓄積タイマーのログ肥大化**: unref 済みで終了は阻害しないが、全量 jest 実行中は発火し続け audit/error ログが肥大化する設計が残る。 → **対応済み**（#269 — サーバープロセスの module-level タイマーを全棚卸: provider-uptime-flush を `NODE_ENV==='test'` 抑止へ修正。残りは全て start 関数ガート済みで、テストが明示起動しない限り発火しない）。
 33. **e2e（playwright）が CI 非接続**: testMatch から除外され常時赤が1件残る（#265 closed）。
 34. **CI のパスフィルタで coverage ジョブが抜ける**: docs-only 変更は test ジョブ自体がスキップ（仕様だがゲートとしては弱い）。
 35. **CI ランナー待ちの長時間滞留**: build-test がキュー待ちで数日 pending になる（環境側の制約）。
 36. **実 LND 経路のテストなし**: MockLnAdapter のみで本番 Lightning 経路は未検証。
-37. **金額計算のプロパティテストなし**: satoshi 整数演算の境界は値例テストのみ。
-38. **テスト数と実態の乖離が繰り返し発生**: ドキュメントの陳腐化が再発しうる構造（集計を自動化していない）。
+37. **金額計算のプロパティテストなし**: satoshi 整数演算の境界は値例テストのみ。 → **対応済み**（#269 — order-pricing を単価9×時間9 格子で性質テスト化: 非負整数・1sat フロア・単調性・価格ロック）。
+38. **テスト数と実態の乖離が繰り返し発生**: ドキュメントの陳腐化が再発しうる構造（集計を自動化していない）。 → **対応済み**（#269 — `npm run report-test-counts` が jest 実測と docs 記述の drift を検出・`--strict` で CI ゲート化（検出済み 259 スイート drift を同期））。
 
 ### アーキテクチャ・運用（39-50）
 
 39. **単一プロセス前提**: レート制限・キャッシュ・タイマーがすべてプロセス内。水平スケール不可。
-40. **複数デーモンループの乱立**: invoice-poller/service-monitor/gpu-monitor/sla-tracker 等が個別 setInterval で散在。
+40. **複数デーモンループの乱立**: invoice-poller/service-monitor/gpu-monitor/sla-tracker 等が個別 setInterval で散在。 → **対応済み**（#269 — `src/utils/daemon-registry.js` 新設、全7デーモン（+order-sweep +provider-uptime-flush）が start 時に自己登録し graceful shutdown で `stopAllDaemons()` が逆順停止。構造テストで登録漏れを固定）。
 41. **休眠モジュールの保有コスト**: 未配線コード（p2p、各種 §機能 PR）がレビュー・保守負荷を生む。
 42. **管理パススルー二重経路**: 非推奨 admin ルートが残り API 面が冗長。
-43. **同期 fs 呼び出しの残存**: `readFileSync`/`writeFileSync`/`appendFileSync` がホットパス近辺に残る。
-44. **エラーハンドリングの非一貫**: APIError 規約と生 throw が混在する箇所が残る。
-45. **構造化ログの不統一**: winston ロガーと console 出力が混在。
+43. **同期 fs 呼び出しの残存**: `readFileSync`/`writeFileSync`/`appendFileSync` がホットパス近辺に残る。 → **対応済み**（#268/#269 — notification-settings・/sla・/anomalies・sandbox-apikey・profit-addresses の毎回全文読込を stat 指紋キャッシュ化。最終棚卸: 残存は起動時 config・バックアップ・audit-anchor・withLock 内の anomaly-history（1000件上限）などコールド/有界パスのみ）。
+44. **エラーハンドリングの非一貫**: APIError 規約と生 throw が混在する箇所が残る。 → **対応済み**（#237 裸 async ハンドラ統一 + 棚卸確認: ルートハンドラは `throw new APIError` または `res.status(...)` 早期 return に統一。生 `throw new Error` は routes 層には残らず utils/notification-settings/webhook の内部バリデーションのみで、呼び出し側が APIError へ包む規約）。
+45. **構造化ログの不統一**: winston ロガーと console 出力が混在。 → **対応済み**（#269 — `npm run report-console-usage` で棚卸、token-denylist/openapi-generator/休眠 p2p 系5ファイルを全てロガー規約へ統一。drift 0、`--strict` で CI ゲート化）。
 46. **docker-compose/k8s は参考実装寄り**: 実装済みだが本番検証の形跡なし。
 47. **依存の遅延 require パターンが散在**: optional dep 対策として合理的だが不統一。
 48. **マルチリージョン/HA 設計なし**: 単一インスタンス前提で障害時の切替えなし。
 49. **PR バックログ巨大**: #10-#52 の §機能バッチが数十件滞留しマージ判断がボトルネック化。
-50. **監視の外側が弱い**: 自前メトリクス+通知はあるが、外形監視・合成監視は環境変数任意で標準では未接続。
+50. **監視の外側が弱い**: 自前メトリクス+通知はあるが、外形監視・合成監視は環境変数任意で標準では未接続。 → **部分対応**（#268/#269 — verify-data `--json`・report-* 系の機械可読出力で外部監視からの消費が可能に。MONITOR_TARGETS 記述も実態へ修正）。
 
 ## 第一原理監査（イーロン・マスク思考法）
 
@@ -164,21 +164,21 @@
 ### P0（正確性・資金安全性）
 
 - **i1**: order+payment+escrow の複数ファイル更新に補償トランザクション or WAL 風ジャーナルを検討（現状の最大リスク。ただし大掛かり — まず整合性チェックスクリプトで不整合を検知する方が現実的）。
-- **i2**: 整合性自己検査スクリプトの追加（`scripts/verify-data-consistency.js` 風。order↔payment↔escrow の参照整合を読み取り専用で検査。実行時副作用なしでマージ可能）。
+- **i2**: 整合性自己検査スクリプトの追加（`scripts/verify-data-consistency.js` 風。order↔payment↔escrow の参照整合を読み取り専用で検査。実行時副作用なしでマージ可能）。→ **対応済み**（#268 — 80+種の検査へ拡張中）。
 - **i3**: POST /orders への冪等性キー (#26 open の内容。PR 済みのため再提出不可 — ユーザー判断待ち)。
 
 ### P1（信頼性）
 
 - **i4**: `--forceExit` の扱いを文書化のまま据置（#267 で不採用と判断されたため、再提案はしない）。
 - **i5**: jest 実行中の蓄積タイマーによる audit/error ログ肥大化の抑制（stopMonitor 徹底 or テスト環境での monitorServices 早期 return — 既に unref 済みで優先度は低下）。
-- **i6**: バックアップ復元時の整合性検証（JSON パース + 必須キー存在チェック）。
-- **i7**: 同期 fs 呼出のホットパス残存箇所の棚卸（perf 影響の低い順に async 化）。
+- **i6**: バックアップ復元時の整合性検証（JSON パース + 必須キー存在チェック）。→ **対応済み**（#268 — 復元前検証）。
+- **i7**: 同期 fs 呼出のホットパス残存箇所の棚卸（perf 影響の低い順に async 化）。→ **一部対応**（#268 — notification-settings を stat 指紋キャッシュ化。残存は低頻度のため棚卸のみ）。
 
 ### P2（観測性・運用）
 
-- **i8**: テスト数の自動集計（jest `--listTests | wc -l` を CI artifact 化し、docs の手動記述を廃止）。
-- **i9**: 外形監視の標準化（UPTIME_* env が任意のまま — .env.example への推奨設定コメント追加）。
-- **i10**: デーモンループの一元管理（registry パターンで stopAll を提供 — ただし runtime 配線は不採用傾向のため設計検討のみ）。
+- **i8**: テスト数の自動集計（jest `--listTests | wc -l` を CI artifact 化し、docs の手動記述を廃止）。→ **対応済み**（#268/#269 — `scripts/report-test-counts.js` で実測と docs 記載の drift 検出）。
+- **i9**: 外形監視の標準化（UPTIME_* env が任意のまま — .env.example への推奨設定コメント追加）。→ **対応済み**（#268 — MONITOR_TARGETS コメントを実態へ修正）。
+- **i10**: デーモンループの一元管理（registry パターンで stopAll を提供 — ただし runtime 配線は不採用傾向のため設計検討のみ）。→ **対応済み**（#269 — `src/utils/daemon-registry.js` 新設: 全デーモン6系統（invoice-poller/service-monitor/sla-tracker/backup-scheduler/gpu-auto-heal/metrics-refresh）が start 時に自己登録、graceful shutdown が `stopAllDaemons()` で逆順停止）。
 
 ### P3（機能面・open PR 依存）
 
@@ -186,8 +186,8 @@
 
 ### P4（長期）
 
-- **i21**: Postgres 移行の判断基準文書化（JSON の限界条件を明示 — 「何时移行するか」の定量化）。
-- **i22**: npm audit の週次レポート整備（既に audit-notifier はあるが breaking-only が積存する現状の可視化）。
+- **i21**: Postgres 移行の判断基準文書化（JSON の限界条件を明示 — 「何时移行するか」の定量化）。→ **対応済み**（#268 — 付録へ5条件+留保条件で定量化）。
+- **i22**: npm audit の週次レポート整備（既に audit-notifier はあるが breaking-only が積存する現状の可視化）。→ **対応済み**（#268 — `scripts/report-audit-backlog.js` で3分類の積存可視化）。
 
 ## 今回の実施
 

@@ -2,7 +2,6 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { asyncHandler } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
@@ -13,10 +12,10 @@ const { config } = require('../../../utils/config');
 // 別経路で解決すると JWT_SECRET 設定時に署名と検証で鍵が食い違いログイン不能になる。
 // リフレッシュトークンは resolveRefreshSecret を使い、JWT_REFRESH_SECRET が設定されている
 // 場合はアクセストークンとは別の鍵で署名・検証する（クロスタイプ代替攻撃を防ぐ）。
-const { resolveSecret, resolveRefreshSecret } = require('../../middleware/jwt-auth');
+const { verifyWithRotation } = require('../../middleware/jwt-auth');
 const { withLock } = require('../../../utils/async-lock');
 
-const { sanitizeObject } = require('../../../utils/sanitize');
+const { sanitizeObject, maskEmail } = require('../../../utils/sanitize');
 // レスポンスから機密フィールド(password/apiKey 等)を除去する共通ヘルパー。
 const { sanitizeUser } = require('../../utils/sanitize-user');
 
@@ -129,7 +128,7 @@ router.post('/login',
   asyncHandler(async (req, res) => {
     const { password } = req.validatedBody;
     const email = typeof req.validatedBody.email === 'string' ? req.validatedBody.email.toLowerCase() : req.validatedBody.email;
-    logger.info(`Login attempt: ${email}`);
+    logger.info(`Login attempt: ${maskEmail(email)}`);
     // アカウント単位ロックアウト（IPを迂回した辞書攻撃対策）
     if (_isLoginLocked(email)) {
       return res.status(429).json({ error: 'Too many failed login attempts. Please try again later.' });
@@ -144,13 +143,13 @@ router.post('/login',
     if (!user || !validPassword) {
       // ログメッセージを統一して「ユーザー不在」と「誤パスワード」を区別しない。
       // ログ閲覧権限を持つオペレータによるメールアドレス列挙を防ぐ。
-      logger.warn(`Login failed (${email})`);
+      logger.warn(`Login failed (${maskEmail(email)})`);
       _recordLoginFailure(email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // 無効化済みアカウントはログイン不可（メール匿名化に加えた多層防御）
     if (user.status === 'deactivated') {
-      logger.warn(`Login failed: account deactivated (${email})`);
+      logger.warn(`Login failed: account deactivated (${maskEmail(email)})`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // ログイン成功 → 失敗カウントをリセット
@@ -162,7 +161,7 @@ router.post('/login',
     const token = signAccessToken(user, accessJti);
     const refreshToken = signRefreshToken(user, accessJti);
     UserRepository.update(user.id, { lastLogin: new Date().toISOString() });
-    logger.info(`Login success: ${email}`);
+    logger.info(`Login success: ${maskEmail(email)}`);
     // パスワードやAPIキーは絶対にレスポンス・ログに含めない
     res.json({
       message: 'Login successful',
@@ -182,7 +181,7 @@ router.post('/refresh',
     }
     let payload;
     try {
-      payload = jwt.verify(refreshToken, resolveRefreshSecret(), { algorithms: ['HS256'] });
+      payload = verifyWithRotation(refreshToken, { refresh: true });
     } catch (_) {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
@@ -258,7 +257,7 @@ router.post('/logout',
     if (refreshToken && typeof refreshToken === 'string') {
       // リフレッシュトークンが提供されていれば jti を即時失効させる。
       try {
-        const rp = jwt.verify(refreshToken, resolveRefreshSecret(), { algorithms: ['HS256'] });
+        const rp = verifyWithRotation(refreshToken, { refresh: true });
         if (rp.type === 'refresh' && rp.jti) {
           revoke(rp.jti, rp.exp ? rp.exp * 1000 : Date.now() + 24 * 60 * 60 * 1000);
         }

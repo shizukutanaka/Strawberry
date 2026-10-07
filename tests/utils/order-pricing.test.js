@@ -85,3 +85,61 @@ describe('computeOrderPricing', () => {
     expect('exchangeRateTimestamp' in p).toBe(false);
   });
 });
+
+// 弱所#37 — satoshi 整数演算のプロパティテスト（値例ではなく全域の不変条件）
+describe('プロパティ不変条件（satoshi 整数演算の全域検査）', () => {
+  // 代表的単価域 × 全 durationMinutes 格子（5 の倍数・Joi 上限 43200 含む端点）
+  const PRICES = [0.00001, 0.1, 1, 12, 100, 999.99, 1000, 100000, 999999.5];
+  const DURATIONS = [5, 10, 15, 30, 55, 60, 120, 1440, 43200];
+
+  test('totalPrice は常に非負の整数 sat（NaN・小数・負値を生成しない）', () => {
+    for (const pricePerHour of PRICES) {
+      for (const durationMinutes of DURATIONS) {
+        const { totalPrice } = computeOrderPricing({ pricePerHour, durationMinutes });
+        expect(Number.isInteger(totalPrice)).toBe(true);
+        expect(totalPrice).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  test('正の生額は最小 1 sat に切り上げ（1sat フロア — 0 sat 支払い不能を防ぐ）', () => {
+    for (const pricePerHour of PRICES.filter((p) => p > 0)) {
+      for (const durationMinutes of DURATIONS) {
+        const { totalPrice } = computeOrderPricing({ pricePerHour, durationMinutes });
+        expect(totalPrice).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  test('durationMinutes に対し単調非減少（長い予約が安くなることはない）', () => {
+    const sorted = [...DURATIONS].sort((a, b) => a - b);
+    for (const pricePerHour of PRICES) {
+      let prev = -1;
+      for (const durationMinutes of sorted) {
+        const { totalPrice } = computeOrderPricing({ pricePerHour, durationMinutes });
+        expect(totalPrice).toBeGreaterThanOrEqual(prev);
+        prev = totalPrice;
+      }
+    }
+  });
+
+  test('価格ロック: totalPrice 保存済み注文は単価・時間の変更を受けない', () => {
+    for (const totalPrice of [1, 100, 123456789]) {
+      const p = computeOrderPricing({ totalPrice, pricePerHour: 0.001, durationMinutes: 5 });
+      expect(p.totalPrice).toBe(totalPrice);
+    }
+  });
+
+  test('totalPriceJPY は整数 or null（NaN を絶対に書かない）全域', () => {
+    const rates = [1, 1000, 5_000_000, 10_000_000, 999_999_999, NaN, Infinity, -Infinity, 0];
+    for (const rate of rates) {
+      const p = computeOrderPricing(
+        { totalPrice: 123_456_789 },
+        { rate, timestamp: '2026-01-01T00:00:00Z' }
+      );
+      if (p.totalPriceJPY === null) continue;
+      expect(Number.isInteger(p.totalPriceJPY)).toBe(true);
+      expect(p.totalPriceJPY).toBeGreaterThanOrEqual(0);
+    }
+  });
+});

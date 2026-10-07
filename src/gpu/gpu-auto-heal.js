@@ -18,6 +18,7 @@
 // - tick の重なり防止・障害カウンタ Map の消失エントリ掃除も備える（常駐ループの定型健全性）。
 
 const { logger } = require('../core/logger');
+const { registerDaemon, unregisterDaemon } = require('../utils/daemon-registry');
 
 const DEFAULT_FAILURE_THRESHOLD = 3;
 
@@ -50,10 +51,12 @@ class GpuAutoHealer {
       this.tick().catch((e) => logger.warn(`gpu-auto-heal tick error: ${e.message}`));
     }, this.intervalMs);
     if (typeof this._timer.unref === 'function') this._timer.unref();
+    registerDaemon('gpu-auto-heal', () => this.stop());
     logger.info(`gpu-auto-heal: started (every ${Math.round(this.intervalMs / 1000)}s, threshold ${this.failureThreshold})`);
   }
 
   stop() {
+    unregisterDaemon('gpu-auto-heal');
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;

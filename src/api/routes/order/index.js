@@ -202,6 +202,9 @@ const sessionTimeoutInterval = process.env.NODE_ENV === 'test' ? null : setInter
   } catch (_) { /* jest teardown 後の発火等: 無視 */ }
 }, 30000);
 if (sessionTimeoutInterval && sessionTimeoutInterval.unref) sessionTimeoutInterval.unref();
+if (sessionTimeoutInterval) {
+  require('../../../utils/daemon-registry').registerDaemon('order-sweep', () => clearInterval(sessionTimeoutInterval));
+}
 
 const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');

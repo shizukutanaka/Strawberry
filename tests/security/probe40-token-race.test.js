@@ -133,11 +133,11 @@ describe('Token rotation: refresh revokes prior access token via ati claim', () 
 
 // ─── 40b-5: Denylist load failure is logged ──────────────────────────────────
 describe('token-denylist.js: corruption is logged not silently swallowed', () => {
-  it('token-denylist.js: catch block calls console.error on parse failure', () => {
+  it('token-denylist.js: catch block logs the parse failure (logger or console)', () => {
     const src = require('fs').readFileSync(
       require.resolve('../../src/api/middleware/token-denylist.js'), 'utf-8'
     );
-    expect(src).toMatch(/console\.error/);
+    expect(src).toMatch(/(logger|console)\.error/);
     expect(src).toMatch(/denylist_load_failure|revoked-tokens/);
   });
 

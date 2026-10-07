@@ -11,6 +11,12 @@
 
 const fs = require('fs');
 const path = require('path');
+// FSM 遷移表は実装側と同一ソースを共有（複写すると表の更新時に検査が陳腐化する）
+const { TRANSITIONS: ESCROW_TRANSITIONS, initial: escrowInitial } = require('../src/payments/escrow-state-machine');
+const ESCROW_INITIAL = escrowInitial();
+// 遷移表に登場する全イベント名 — history 内の「FSM イベントだが無効な状態で出現」と
+// 「表に一切ない観測イベント（読み飛ばし対象）」を区別するために使う。
+const FSM_EVENTS = new Set(Object.values(ESCROW_TRANSITIONS).flatMap((row) => Object.keys(row)));
 
 const ORDER_STATES = ['pending', 'matched', 'active', 'completed', 'cancelled', 'disputed'];
 // payment routes（index.js/btc-onchain.js/invoice-poller/auto-recovery）が書く実値
@@ -89,6 +95,7 @@ function run(dataDir) {
     issues.push({ severity: 'warn', check: 'data-dir-unreadable', detail: `data dir の列挙に失敗: ${e.message}` });
   }
   const extraCollections = [];
+  const extraObjects = new Map(); // オブジェクト形ストア（sla.json 等）も後続検査へ
   for (const file of allJson) {
     // 実データにはオブジェクト形ストアも混在（notification-settings=userId→prefs、
     // revoked-tokens=jti→expiry）— パースのみ一律で、配列なら id 系チェックまで適用。
@@ -102,6 +109,8 @@ function run(dataDir) {
     if (Array.isArray(parsed)) {
       checkDuplicateIds(file, parsed, issues);
       extraCollections.push([file, parsed]);
+    } else if (parsed && typeof parsed === 'object') {
+      extraObjects.set(file, parsed);
     }
   }
 
@@ -197,6 +206,16 @@ function run(dataDir) {
         severity: 'warn',
         check: 'dispute-mismatch',
         detail: `escrow "${e.id}" が DISPUTED だが order "${e.orderId}" は ${oStatus}`,
+      });
+    }
+    // 逆方向: order が disputed だが資金側が DISPUTED へ進んでいない
+    // （PENDING/HELD のまま）= 注文側だけ係争表示で資金は未係争のデシンク。
+    // escrow を持たない LN 経路の order は対象外（escrow がある場合のみ検査）。
+    if (oStatus === 'disputed' && (st === 'PENDING' || st === 'HELD')) {
+      issues.push({
+        severity: 'warn',
+        check: 'dispute-escrow-mismatch',
+        detail: `order "${e.orderId}" は disputed だが escrow "${e.id}" は ${st}（資金側が未係争）`,
       });
     }
     // 資金返済/清算済みなのに order が進行中（返金後もレンタル継続 = 無償提供状態）
@@ -467,6 +486,37 @@ function run(dataDir) {
     if (e.history.some((h) => !h || typeof h !== 'object' || !h.event)) {
       issues.push({ severity: 'warn', check: 'malformed-escrow-history', detail: `escrows.json: id "${e.id}" の history に event 名のない要素がある（遷移証跡破損）` });
     }
+    // 遷移の合法性 — 実 history は `{ event, actions, state, at }` 形（state=遷移後状態）。
+    // 初期 PENDING から FSM 遷移表を辿り、遷移イベントと記録 state の整合を検証する。
+    // LN_ACTIONS_EXECUTED/FAILED・SETTLEMENT_COMPUTED 等の観測イベント（遷移表に
+    // 存在しないイベント名）は状態を変えない注記として読み飛ばす。
+    // 表にない遷移・state 不一致は FSM を迂回した書き込み（desync/手編集）の兆候。
+    {
+      let cur = ESCROW_INITIAL;
+      for (const h of e.history) {
+        if (!h || typeof h !== 'object' || !h.event) continue;
+        const row = ESCROW_TRANSITIONS[cur];
+        const t = row && row[h.event];
+        if (!t) {
+          // FSM 遷移イベント名なのに現在状態では無効 — 順序破壊の違法遷移
+          // （観測イベント名は表に一切出ないのでここには来ない）。
+          if (FSM_EVENTS.has(h.event)) {
+            issues.push({ severity: 'warn', check: 'illegal-escrow-transition', detail: `escrows.json: id "${e.id}" の history に ${cur} 状態での違法イベント "${h.event}"（遷移表にない順序 — FSM 迂回の証跡）` });
+          }
+          continue; // 観測イベント（状態を変えない注記）
+        }
+        if (h.state !== undefined && h.state !== t.to) {
+          issues.push({ severity: 'warn', check: 'illegal-escrow-transition', detail: `escrows.json: id "${e.id}" の history ${cur}->${h.event} は FSM では ${t.to} だが記録 state は "${h.state}"（FSM 迂回の証跡）` });
+        }
+        cur = t.to;
+      }
+      // 遷移チェーンの末端と現在 state の整合 — チェーンが終端/中間で現在 state と
+      // 食い違う場合、history 外で state が書き換えられた兆候。
+      const curState = escrowState(e);
+      if (curState && cur !== curState) {
+        issues.push({ severity: 'warn', check: 'escrow-history-state-drift', detail: `escrows.json: id "${e.id}" の history 末端状態 ${cur} と現在 state "${curState}" が不一致（history 外の state 書き換え?）` });
+      }
+    }
   }
 
   // userId 未設定の order — 作成は `orderData.userId = req.user.id` で
@@ -488,11 +538,39 @@ function run(dataDir) {
   }
 
   // 予約/価格フィールドの健全性（作成ルートの検証と同一規約）:
-  //   order.durationMinutes … 正の整数かつ5の倍数（order/index.js:881）
+  //   order.durationMinutes … 正の整数かつ5の倍数かつ ≤43200（order/index.js:881、
+  //     上限は Joi schemas.order.create が担保 — 30日超の注文はスキーマ迂回）
   //   gpu.pricePerHour      … 正の数（order/index.js:952）
   for (const o of orders) {
-    if (o && 'durationMinutes' in o && !(Number.isInteger(o.durationMinutes) && o.durationMinutes > 0 && o.durationMinutes % 5 === 0)) {
-      issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
+    if (o && 'durationMinutes' in o) {
+      if (!(Number.isInteger(o.durationMinutes) && o.durationMinutes > 0 && o.durationMinutes % 5 === 0)) {
+        issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は正の5の倍数整数ではない` });
+      } else if (o.durationMinutes > 43200) {
+        issues.push({ severity: 'warn', check: 'invalid-duration', detail: `orders.json: id "${o.id}" の durationMinutes "${o.durationMinutes}" は上限 43200（30日）超過 — スキーマ検証の迂回` });
+      }
+    }
+    // 予約窓の不変条件: scheduledEndAt = scheduledStartAt + durationMinutes
+    // （order/index.js:1042）。ずれは手動編集・他経路書き込みの兆候 — 二重予約
+    // 判定や SLA 計算が壊れる。±1秒の許容誤差（端数・手動補正の丸め）。
+    if (o && o.scheduledStartAt && o.scheduledEndAt && Number.isFinite(o.durationMinutes)) {
+      const start = Date.parse(o.scheduledStartAt);
+      const end = Date.parse(o.scheduledEndAt);
+      if (Number.isFinite(start) && Number.isFinite(end)
+          && Math.abs(end - (start + o.durationMinutes * 60 * 1000)) > 1000) {
+        issues.push({ severity: 'warn', check: 'schedule-window-mismatch', detail: `orders.json: id "${o.id}" の scheduledEndAt が start+duration と不一致（予約窓の破損 — 重複判定/SLA が狂う）` });
+      }
+    }
+    // 課金額の不変条件: totalPrice = max(1, round(pricePerHour × durationMinutes / 60))
+    // sats（order/index.js:1049-1051 — pricePerHour は注文時にロック :1058）。
+    // ずれは「請求書が約定額と違う」直接編集/他経路書込みの兆候。1 sat の
+    // 端数許容（手動補正）。非正値は invalid-total-price が担当するので対象外。
+    if (o && Number.isFinite(o.totalPrice) && o.totalPrice > 0
+        && Number.isFinite(o.pricePerHour) && o.pricePerHour > 0
+        && Number.isFinite(o.durationMinutes) && o.durationMinutes > 0) {
+      const expected = Math.max(1, Math.round(o.pricePerHour * o.durationMinutes / 60));
+      if (Math.abs(o.totalPrice - expected) > 1) {
+        issues.push({ severity: 'warn', check: 'total-price-mismatch', detail: `orders.json: id "${o.id}" の totalPrice ${o.totalPrice} sat が約定計算値 ${expected} sat と不一致（価格ロックの破損）` });
+      }
     }
   }
   // gpu.available の非真偽値 — ブッキングゲートは `available === false` の
@@ -502,6 +580,41 @@ function run(dataDir) {
   for (const g of gpus) {
     if (g && 'available' in g && typeof g.available !== 'boolean') {
       issues.push({ severity: 'warn', check: 'invalid-availability', detail: `gpus.json: id "${g.id}" の available "${g.available}" は真偽値でない（出品フラグ破損）` });
+    }
+  }
+
+  // GPU 登録スキーマ（validator.js:36-49）を迂回した出品 — vendor/apiType の
+  // enum 外値はフィルタ検索（gpu/index.js:177-178）にヒットしない「見えない出品」、
+  // memoryGB の範囲外値は能力誤表示。
+  {
+    const VENDORS = ['NVIDIA', 'AMD', 'Intel'];
+    const API_TYPES = ['CUDA', 'ROCm', 'oneAPI', 'OpenCL'];
+    for (const g of gpus) {
+      if (!g) continue;
+      if (g.vendor !== undefined && !VENDORS.includes(g.vendor)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-enum', detail: `gpus.json: id "${g.id}" の vendor "${g.vendor}" は enum 外（検索フィルタに載らない出品）` });
+      }
+      if (g.apiType !== undefined && !API_TYPES.includes(g.apiType)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-enum', detail: `gpus.json: id "${g.id}" の apiType "${g.apiType}" は enum 外（検索フィルタに載らない出品）` });
+      }
+      if (g.memoryGB !== undefined && !(typeof g.memoryGB === 'number' && g.memoryGB >= 1 && g.memoryGB <= 8192)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-memory', detail: `gpus.json: id "${g.id}" の memoryGB "${g.memoryGB}" は範囲外 [1,8192]（能力誤表示）` });
+      }
+      if (g.clockMHz !== undefined && !(typeof g.clockMHz === 'number' && g.clockMHz >= 100 && g.clockMHz <= 20000)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-spec', detail: `gpus.json: id "${g.id}" の clockMHz "${g.clockMHz}" は範囲外 [100,20000]` });
+      }
+      if (g.powerWatt !== undefined && !(typeof g.powerWatt === 'number' && g.powerWatt >= 1 && g.powerWatt <= 20000)) {
+        issues.push({ severity: 'warn', check: 'invalid-gpu-spec', detail: `gpus.json: id "${g.id}" の powerWatt "${g.powerWatt}" は範囲外 [1,20000]` });
+      }
+      if (g.availability !== undefined && g.availability !== null && typeof g.availability === 'object') {
+        const av = g.availability;
+        if (av.hoursPerDay !== undefined && !(typeof av.hoursPerDay === 'number' && av.hoursPerDay >= 1 && av.hoursPerDay <= 24)) {
+          issues.push({ severity: 'warn', check: 'invalid-gpu-availability', detail: `gpus.json: id "${g.id}" の availability.hoursPerDay "${av.hoursPerDay}" は範囲外 [1,24]` });
+        }
+        if (Array.isArray(av.daysAvailable) && av.daysAvailable.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
+          issues.push({ severity: 'warn', check: 'invalid-gpu-availability', detail: `gpus.json: id "${g.id}" の availability.daysAvailable に曜日範囲外 [0,6] の値` });
+        }
+      }
     }
   }
 
@@ -564,6 +677,16 @@ function run(dataDir) {
       if (!Number.isNaN(dl) && dl < now) {
         issues.push({ severity: 'warn', check: 'expired-open-escrow', detail: `escrows.json: id "${e.id}" (${st}) は deadlineAt ${e.deadlineAt} を超過しているが open のまま` });
       }
+    }
+  }
+
+  // HELD escrow の解放情報欠落 — LN escrow の清算は preimageHash の開示
+  // （escrow-service.js:38, state-machine DELIVER_OK→reveal_preimage）、
+  // btc-onchain escrow は txBorrowerToOperator を前提（btc-onchain.js:252）。
+  // 両方を欠く HELD は「鍵を失った資金ロック」— 解除にも清算にも進めない → warn。
+  for (const e of escrows) {
+    if (e && escrowState(e) === 'HELD' && !e.preimageHash && !e.txBorrowerToOperator) {
+      issues.push({ severity: 'warn', check: 'held-escrow-unreleasable', detail: `escrows.json: id "${e.id}" が HELD だが解放情報（preimageHash / txBorrowerToOperator）を欠く — 資金ロック解除不能` });
     }
   }
 
@@ -632,6 +755,20 @@ function run(dataDir) {
         issues.push({ severity: 'warn', check: 'status-chronology', detail: `payments.json: id "${p.id}" の settledAt が paidAt より前（決済時系列の逆転）` });
       }
     }
+    // 資金レコードが資金対象の order より古い — 注文が存在する前の支払い/ロックは
+    // 不可能な時系列（インポート時の時計ずれ or 後付け改竄の兆候）。
+    for (const [label, records] of [['payments.json', payments], ['escrows.json', escrows]]) {
+      for (const r of records) {
+        if (!r || !r.orderId) continue;
+        const o = orderById.get(r.orderId);
+        if (!o) continue;
+        const rec = ts(r.createdAt);
+        const oc = ts(o.createdAt);
+        if (rec !== null && oc !== null && rec < oc) {
+          issues.push({ severity: 'warn', check: 'fund-before-order', detail: `${label}: id "${r.id}" (${r.createdAt}) が order "${r.orderId}" の作成 (${o.createdAt}) より古い（資金証跡が注文を先行）` });
+        }
+      }
+    }
   }
 
   // providerId 未設定の GPU — 支払い先を欠いた出品（escrow 清算で providerId に
@@ -645,11 +782,16 @@ function run(dataDir) {
   }
   for (const o of orders) {
     if (!o) continue;
-    for (const key of ['renterReview', 'providerReview']) {
+    for (const key of ['renterReview', 'providerReview', 'review']) {
       const r = o[key];
       if (r && !(Number.isInteger(r.rating) && r.rating >= 1 && r.rating <= 5)) {
         issues.push({ severity: 'warn', check: 'invalid-rating', detail: `orders.json: id "${o.id}" の ${key}.rating "${r.rating}" は整数1-5ではない（集計対象外の幽霊レビュー）` });
       }
+    }
+    // o.review は completed 注文へ1回限り（order/index.js:1582 の updateIf ガード）。
+    // 完了前レビュー・完了後に status が戻った注文はゲート迂回の兆候。
+    if (o.review && o.status !== 'completed') {
+      issues.push({ severity: 'warn', check: 'review-on-unfinished-order', detail: `orders.json: id "${o.id}" (${o.status}) にレビューがある（completed 前提ゲートの迂回）` });
     }
   }
 
@@ -710,6 +852,21 @@ function run(dataDir) {
     }
   }
 
+  // 重複 apiKey — getByApiKey は完全一致で先勝ち（UserRepository.js:44）のため
+  // 重複は片方のアカウントがキー認証で誤解決される資格情報衝突。
+  // キー自体は資格情報なので detail へ値は出さない（id と桁数のみ）。
+  {
+    const seenKeys = new Map();
+    for (const u of users) {
+      if (!u || typeof u.apiKey !== 'string' || !u.apiKey) continue;
+      if (seenKeys.has(u.apiKey)) {
+        issues.push({ severity: 'warn', check: 'duplicate-api-key', detail: `users.json: apiKey(${u.apiKey.length}桁) が複数 id (${seenKeys.get(u.apiKey)}, ${u.id}) で重複（片方が誤認証される資格情報衝突）` });
+      } else {
+        seenKeys.set(u.apiKey, u.id);
+      }
+    }
+  }
+
   // watches.json — (userId, gpuId) 一意はルートの upsert で担保
   // （gpu/index.js:1229）。upsert を迂回した重複は同じ GPU に複数しきい値が
   // 残り通知が二重化する。targetPrice は作成時に正の数を検証（:1216） —
@@ -744,6 +901,57 @@ function run(dataDir) {
         issues.push({ severity: 'warn', check: 'duplicate-provider-reputation', detail: `reputations.json: providerId "${r.providerId}" のレコードが複数 (${seenProvider.get(r.providerId)}, ${r.id}) — 評判の分裂` });
       } else {
         seenProvider.set(r.providerId, r.id);
+      }
+    }
+  }
+
+  // sla.json — updateSLA は total++ と up++/down++ を必ずペアで進める
+  // （sla-tracker.js:50-53）ため、up+down≠total は手動編集・途中クラッシュの兆候。
+  // カウンタの非数・負値も uptimeRate 計算（:73）を破損する。
+  {
+    const sla = extraObjects.get('sla.json');
+    if (sla) {
+      for (const k of ['total', 'up', 'down']) {
+        if (sla[k] !== undefined && !(typeof sla[k] === 'number' && Number.isFinite(sla[k]) && sla[k] >= 0)) {
+          issues.push({ severity: 'warn', check: 'sla-counter-invalid', detail: `sla.json: ${k} "${sla[k]}" は非数・負値（uptimeRate 計算を破損）` });
+        }
+      }
+      if (typeof sla.up === 'number' && typeof sla.down === 'number' && typeof sla.total === 'number'
+          && sla.up + sla.down !== sla.total) {
+        issues.push({ severity: 'warn', check: 'sla-counter-mismatch', detail: `sla.json: up(${sla.up})+down(${sla.down}) != total(${sla.total}) — カウンタの不整合（手動編集・途中クラッシュの兆候）` });
+      }
+      if (sla.history !== undefined) {
+        if (!Array.isArray(sla.history)) {
+          issues.push({ severity: 'warn', check: 'sla-history-invalid', detail: 'sla.json: history が配列でない（死活履歴の破損）' });
+        } else {
+          const bad = sla.history.filter((h) => !h || typeof h.time !== 'string' || typeof h.alive !== 'boolean').length;
+          if (bad > 0) {
+            issues.push({ severity: 'warn', check: 'sla-history-invalid', detail: `sla.json: history に形式外の要素が ${bad} 件（{time, alive} 形でない）` });
+          }
+        }
+      }
+    }
+  }
+
+  // uptime.json — providerId で1レコード（UptimeRepository.js の getByProviderId
+  // 単発検索、upsert で一意担保）。重複は片方が集計から見えない稼働実績の分裂。
+  // beats/gapEvents/sessions の非数・負値は稼働率算出を破損する。
+  {
+    const uptimes = (extraCollections.find(([n]) => n === 'uptime.json') || [null, []])[1];
+    const seenProvider = new Map();
+    for (const u of uptimes) {
+      if (!u) continue;
+      if (u.providerId !== undefined) {
+        if (seenProvider.has(u.providerId)) {
+          issues.push({ severity: 'warn', check: 'duplicate-provider-uptime', detail: `uptime.json: providerId "${u.providerId}" のレコードが複数 (${seenProvider.get(u.providerId)}, ${u.id}) — 稼働実績の分裂` });
+        } else {
+          seenProvider.set(u.providerId, u.id);
+        }
+      }
+      for (const k of ['beats', 'gapEvents', 'sessions']) {
+        if (u[k] !== undefined && !(typeof u[k] === 'number' && Number.isFinite(u[k]) && u[k] >= 0)) {
+          issues.push({ severity: 'warn', check: 'invalid-uptime-counter', detail: `uptime.json: id "${u.id}" の ${k} "${u[k]}" は非数・負値（稼働率算出を破損）` });
+        }
       }
     }
   }

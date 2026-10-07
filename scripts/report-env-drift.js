@@ -138,11 +138,13 @@ function report(root = ROOT, envExamplePath = ENV_EXAMPLE) {
 
 function main() {
   const jsonMode = process.argv.includes('--json');
+  // --strict: コード参照があるのに .env.example 未記載の変数（=運用者が存在を
+  // 知れない変数）が1件でもあれば exit 1 — CI ゲート用。記載のみ・重複は情報扱い。
+  const strict = process.argv.includes('--strict');
   const r = report();
   if (jsonMode) {
     console.log(JSON.stringify(r, null, 2));
-    return;
-  }
+  } else {
   console.log('[report-env-drift]');
   console.log(`  code references: ${r.referenced} / .env.example documented: ${r.documented}`);
   if (r.undocumented.length) {
@@ -162,6 +164,11 @@ function main() {
   }
   if (!r.undocumented.length && !r.unreferenced.length && !r.duplicates.length) {
     console.log('  drift なし');
+  }
+  }
+  if (strict && r.undocumented.length) {
+    console.error(`\n  ${r.undocumented.length} 件の env 変数が .env.example に未記載 — .env.example へ追記するかコードから除去してください`);
+    process.exit(1);
   }
 }
 

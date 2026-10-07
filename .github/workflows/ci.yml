@@ -21,6 +21,8 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint || true
+      - name: Env drift check
+        run: npm run report-env-drift -- --strict
       - name: Run tests
         run: npm test
       - name: Notify on failure (Discord)

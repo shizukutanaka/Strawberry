@@ -39,4 +39,19 @@ describe('report-log-pii', () => {
     expect(r.error).toBeTruthy();
     expect(r.files).toEqual([]);
   });
+
+  test('資格情報パターン（jwt/bearer/apikey）を種別集計する', () => {
+    const f = path.join(tmpDir, 'creds.log');
+    fs.writeFileSync(f, [
+      'header ok',
+      'token eyJhbGciOiJIUzI1NiI.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5cE seen',
+      'auth Bearer AbCdEfGhIjKlMnOpQrSt1234 handled',
+      'cfg api_key = "sk_live_abcdef123456789"',
+    ].join('\n'));
+    const r = scanFile(f);
+    expect(r.byKind.jwt).toBe(1);
+    expect(r.byKind.bearer).toBe(1);
+    expect(r.byKind.apikey).toBe(1);
+    expect(r.hits).toBe(3);
+  });
 });

@@ -13,6 +13,7 @@
 // - テスト環境（NODE_ENV=test）では既定で起動しない。
 
 const { logger } = require('../utils/logger');
+const { registerDaemon, unregisterDaemon } = require('../utils/daemon-registry');
 
 // 起動中タイマーの共有ハンドル（stopBackupScheduler / 二重 start ガード用）
 let _timer = null;
@@ -78,6 +79,7 @@ function startBackupScheduler(options = {}) {
   // にするため — service-monitor._timer と同型）。
   _timer = setInterval(run, intervalMs);
   if (typeof _timer.unref === 'function') _timer.unref();
+  registerDaemon('backup-scheduler', stopBackupScheduler);
   logger.info(`backup-scheduler: started (every ${Math.round((intervalMs / 3600e3) * 100) / 100}h)`);
   return _timer;
 }
@@ -85,6 +87,7 @@ function startBackupScheduler(options = {}) {
 // 定期実行を停止する。未起動時は no-op（他デーモンの stopMonitor/stopSLATracker と
 // 同一規約 — graceful shutdown やデーモン registry 化の際に一括停止できるようにする）。
 function stopBackupScheduler() {
+  unregisterDaemon('backup-scheduler');
   if (_timer) {
     clearInterval(_timer);
     _timer = null;

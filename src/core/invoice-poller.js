@@ -7,6 +7,7 @@ const { logger } = require('../utils/logger');
 const PaymentRepository = require('../db/json/PaymentRepository');
 const OrderRepository = require('../db/json/OrderRepository');
 const { appendAuditLog } = require('../utils/audit-log');
+const { registerDaemon, unregisterDaemon } = require('../utils/daemon-registry');
 const { resolveDataDir } = require('../db/json/data-dir');
 
 const POLL_INTERVAL_MS = 15_000; // check every 15 s
@@ -224,6 +225,7 @@ function start(lightningService) {
     _timer = setInterval(pollOnce, POLL_INTERVAL_MS);
     // unref so the timer does not prevent process exit
     if (_timer.unref) _timer.unref();
+    registerDaemon('invoice-poller', stop);
     logger.info(`invoice-poller: started (interval=${POLL_INTERVAL_MS}ms)`);
   }
   // run immediately on start
@@ -231,6 +233,7 @@ function start(lightningService) {
 }
 
 function stop() {
+  unregisterDaemon('invoice-poller');
   if (_timer) {
     clearInterval(_timer);
     _timer = null;

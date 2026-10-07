@@ -1,5 +1,6 @@
 // src/core/service-monitor.js - サービス死活監視・自動復旧
 const { logger } = require('../utils/logger');
+const { registerDaemon, unregisterDaemon } = require('../utils/daemon-registry');
 // モジュール参照で保持して呼び出す（destructure で const に束縛するとテストの
 // jest.spyOn が効かず、監査記録の検証ができないため）。
 const auditLog = require('../utils/audit-log');
@@ -193,10 +194,12 @@ function startMonitor() {
   // unref: テスト等でプロセス終了を妨げない
   _timer = setInterval(monitorServices, interval);
   if (_timer.unref) _timer.unref();
+  registerDaemon('service-monitor', stopMonitor);
   logger.info(`[Monitor] Service monitor started (interval=${interval}ms)`);
 }
 
 function stopMonitor() {
+  unregisterDaemon('service-monitor');
   if (_timer) {
     clearInterval(_timer);
     _timer = null;

@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { atomicWriteJSON } = require('../../db/json/atomicWrite');
 const { resolveDataDir } = require('../../db/json/data-dir');
+const { logger } = require('../../utils/logger');
 
 const DENYLIST_PATH = path.join(resolveDataDir(), 'revoked-tokens.json');
 
@@ -48,8 +49,7 @@ function load() {
     // 破損ファイル読み込み失敗 — 必ず警告する。既ロード済みマップは維持する:
     // キャッシュを破棄すると過去の失効トークンを再受理してしまう（Devin Review 指摘）。
     // 初回ロード失敗時のみ空マップで起動継続する。
-    // eslint-disable-next-line no-console
-    console.error(`[token-denylist] WARN: Failed to load revoked-tokens.json (all prior revocations may be temporarily invalid): ${err.message}`);
+    logger.error(`[token-denylist] Failed to load revoked-tokens.json (all prior revocations may be temporarily invalid): ${err.message}`);
     try { require('../../utils/audit-log').appendAuditLog('denylist_load_failure', { error: err.message }); } catch (_) {}
     if (!denylist) denylist = fresh;
   }

@@ -807,3 +807,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: dispute-escrow-mismatch (2026-10)**: order=disputed だが escrow が PENDING/HELD のまま（注文側だけ係争表示で資金側は未係争）を warn。escrow を持たない LN 経路 order は除外。逆方向の既存 dispute-mismatch と対になるデシンク検査。72テスト緑。
 - **report-console-usage.js 新設 (2026-10・弱所#45)**: src/ 内の console.* 直書きを種別内訳で棚卸 — cli/logger 実装・audit-log フォールバックを「正当」分離し、drift は休眠 p2p 系 + token-denylist + openapi-generator の 7ファイル9呼出と特定（ロガー規約への集約判断材料）。4テスト緑。
 - **report-env-drift: public/ をスキャン対象へ追加 (2026-10)**: Electron シェル（public/electron.js/preload.js）が haystack 外で STRAWBERRY_URL が .env.example 未記載の実 drift を捕捉し記載。SCAN_DIRS 死定数も除去。10テスト緑・実測 drift 0（参照146/記載149）。
+- **console drift 修復: token-denylist・openapi-generator をロガー規約へ (2026-10)**: report-console-usage が特定した非休眠 drift 2箇所を logger へ統一。drift は休眠 p2p 系5ファイルのみへ縮小。probe40 のソース検査アサーションを「失敗を記録する」意図維持で `(logger|console).error` へ更新。関連16テスト緑。

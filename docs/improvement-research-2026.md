@@ -798,3 +798,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **verify-data-consistency: HELD escrow 解放情報検査 (2026-10)**: HELD なのに preimageHash（LN reveal 経路）・txBorrowerToOperator（btc-onchain 経路）双方を欠く「鍵を失った資金ロック」を warn。69テスト緑。
 - **verify-data-consistency: GPU スペック/可稼働範囲検査 (2026-10)**: clockMHz [100,20000]・powerWatt [1,20000]・hoursPerDay [1,24]・daysAvailable [0,6] の範囲外値を warn（登録 Joi スキーマの事後検証）。70テスト緑。
 - **report-env-drift: ルート *.js スキャン化 (2026-10)**: SCAN_DIRS が src/ と scripts/ のみでルート直下の起動・ツール系エントリ（lightning-service / virtual-gpu-manager / gpu_lending_setup_auto_register）が未検出だった。拡張後に実 drift 6件（GPU_*・STRAWBERRY_API_URL/STRAWBERRY_TOKEN）を検出し .env.example へ記載。同時に LND_PROTO_PATH/PLAYWRIGHT_CHROMIUM_PATH の unreferenced 誤検（ルート haystack 欠落）も解消。DOCKER_HOST/KUBERNETES_SERVICE_HOST を組み込み除外へ。8テスト緑。
+- **report-env-drift: duplicates 検出 (2026-10)**: .env.example 内の同名変数の重複記載（マージ残骸・二重定義の兆候）を `duplicates` として報告。9テスト緑。

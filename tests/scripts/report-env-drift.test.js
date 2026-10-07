@@ -115,4 +115,14 @@ describe('report-env-drift', () => {
     // ルート *.js に出る変数は unreferenced に出さない（haystack 側も効く）
     expect(r.unreferenced).not.toContain('ONLY_DOC');
   });
+
+  it('.env.example 内の重複記載を duplicates に出す', () => {
+    const repo = makeRepo({
+      files: { 'src/a.js': 'process.env.MY_FLAG;' },
+      envExample: 'MY_FLAG=\nOTHER=\nMY_FLAG=1\n',
+    });
+    dir = repo.dir;
+    const r = report(repo.dir, repo.envPath);
+    expect(r.duplicates).toEqual(['MY_FLAG']);
+  });
 });

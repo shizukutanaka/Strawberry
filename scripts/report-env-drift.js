@@ -100,18 +100,22 @@ function referencedVars(root = ROOT) {
 // コメントアウト例も「記載済み」と見なす — 任意設定の書き方規約）。
 function documentedVars(envExamplePath = ENV_EXAMPLE) {
   const documented = new Set();
+  const duplicates = new Set();
   const raw = fs.readFileSync(envExamplePath, 'utf8');
   for (const line of raw.split('\n')) {
     const m = line.match(/^\s*#?\s*([A-Z_][A-Z0-9_]*)\s*=/);
-    if (m) documented.add(m[1]);
+    if (m) {
+      if (documented.has(m[1])) duplicates.add(m[1]);
+      documented.add(m[1]);
+    }
   }
-  return documented;
+  return { documented, duplicates };
 }
 
 function report(root = ROOT, envExamplePath = ENV_EXAMPLE) {
   const { refs, contents } = referencedVars(root);
   const haystack = contents.join('\n');
-  const documented = documentedVars(envExamplePath);
+  const { documented, duplicates } = documentedVars(envExamplePath);
   const undocumented = [...refs.entries()]
     .filter(([name]) => !documented.has(name) && !BUILTIN_IGNORE.has(name))
     .map(([name, locs]) => ({ name, references: locs.slice(0, 5) }))
@@ -127,6 +131,8 @@ function report(root = ROOT, envExamplePath = ENV_EXAMPLE) {
     documented: documented.size,
     undocumented,
     unreferenced,
+    // .env.example 内の重複記載 — マージ残骸や陳腐化した二重定義の兆候
+    duplicates: [...duplicates].sort(),
   };
 }
 
@@ -150,7 +156,11 @@ function main() {
     for (const n of r.unreferenced.slice(0, 20)) console.log(`    - ${n}`);
     if (r.unreferenced.length > 20) console.log(`    ... 他 ${r.unreferenced.length - 20} 件`);
   }
-  if (!r.undocumented.length && !r.unreferenced.length) {
+  if (r.duplicates.length) {
+    console.log(`\n  [info] .env.example 内の重複記載 (${r.duplicates.length}) — マージ残骸や二重定義:`);
+    for (const n of r.duplicates) console.log(`    - ${n}`);
+  }
+  if (!r.undocumented.length && !r.unreferenced.length && !r.duplicates.length) {
     console.log('  drift なし');
   }
 }

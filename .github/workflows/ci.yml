@@ -29,6 +29,8 @@ jobs:
         run: npm run report-test-counts -- --strict
       - name: Run tests
         run: npm test
+      - name: Log credential leak check
+        run: npm run report-log-pii -- --strict
       - name: Notify on failure (Discord)
         if: failure()
         env:

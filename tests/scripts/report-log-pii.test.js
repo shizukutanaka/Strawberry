@@ -2,7 +2,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { report, scanFile } = require('../../scripts/report-log-pii');
+const { report, scanFile, credentialHits } = require('../../scripts/report-log-pii');
 
 describe('report-log-pii', () => {
   let tmpDir;
@@ -53,5 +53,17 @@ describe('report-log-pii', () => {
     expect(r.byKind.bearer).toBe(1);
     expect(r.byKind.apikey).toBe(1);
     expect(r.hits).toBe(3);
+  });
+
+  test('credentialHits は資格情報クラスのみ数え email を除外する（--strict のゲート対象）', () => {
+    fs.writeFileSync(path.join(tmpDir, 'app.log'), [
+      'user a@b.com logged in',
+      'token eyJhbGciOiJIUzI1NiI.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5cE',
+      'plain line',
+    ].join('\n'));
+    const r = report(tmpDir);
+    expect(credentialHits(r)).toBe(1);
+    fs.writeFileSync(path.join(tmpDir, 'app.log'), 'user a@b.com logged in\n');
+    expect(credentialHits(report(tmpDir))).toBe(0);
   });
 });

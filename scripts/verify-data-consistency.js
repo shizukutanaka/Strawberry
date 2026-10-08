@@ -1066,10 +1066,26 @@ function run(dataDir) {
           seenProvider.set(u.providerId, u.id);
         }
       }
-      for (const k of ['beats', 'gapEvents', 'sessions']) {
+      for (const k of ['beats', 'gapEvents', 'sessions', 'breaches']) {
         if (u[k] !== undefined && !(typeof u[k] === 'number' && Number.isFinite(u[k]) && u[k] >= 0)) {
           issues.push({ severity: 'warn', check: 'invalid-uptime-counter', detail: `uptime.json: id "${u.id}" の ${k} "${u[k]}" は非数・負値（稼働率算出を破損）` });
         }
+      }
+      // カウンタ間の不変条件 — セッションは必ず1ビートで開始され（recordProviderHeartbeat
+      // は isNewSession をビート受信時のみ増分）、gapEvents もビートの部分集合。
+      // よって sessions>beats・gapEvents>beats は書き込み経路外の破損。
+      // beats>0 なのに lastBeatAt 無しも同様（ビート毎に必ず更新される）。
+      const beats = Number(u.beats) || 0;
+      const sessions = Number(u.sessions) || 0;
+      const gapEvents = Number(u.gapEvents) || 0;
+      if (Number.isFinite(u.sessions) && Number.isFinite(u.beats) && sessions > beats) {
+        issues.push({ severity: 'warn', check: 'uptime-counter-drift', detail: `uptime.json: id "${u.id}" の sessions ${sessions} > beats ${beats}（セッションはビートで開始される約定に反する = 破損）` });
+      }
+      if (Number.isFinite(u.gapEvents) && Number.isFinite(u.beats) && gapEvents > beats) {
+        issues.push({ severity: 'warn', check: 'uptime-counter-drift', detail: `uptime.json: id "${u.id}" の gapEvents ${gapEvents} > beats ${beats}（gap はビートの部分集合の約定に反する = 破損）` });
+      }
+      if (beats > 0 && !u.lastBeatAt) {
+        issues.push({ severity: 'warn', check: 'uptime-counter-drift', detail: `uptime.json: id "${u.id}" の beats ${beats} だが lastBeatAt なし（ビート履歴の証跡欠落）` });
       }
     }
   }

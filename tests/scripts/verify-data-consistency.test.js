@@ -708,6 +708,35 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'no-active-admin')).toBe(true);
   });
 
+  it('warns on uptime counters violating the beat-started-session invariants', () => {
+    dir = makeDataDir({
+      'uptime.json': [
+        // sessions はビートで開始される — sessions>beats は経路外の破損
+        { id: 'u1', providerId: 'p1', beats: 2, sessions: 5, lastBeatAt: '2025-01-01T00:00:00Z' },
+        // gapEvents はビートの部分集合
+        { id: 'u2', providerId: 'p2', beats: 1, gapEvents: 3, breaches: -1, lastBeatAt: '2025-01-01T00:00:00Z' },
+        // beats>0 だが証跡欠落
+        { id: 'u3', providerId: 'p3', beats: 9, sessions: 2 },
+        // 健全: beats=0 の新規 breach 記録は許容（recordSlaBreach は beats:0 で作成可）
+        { id: 'u4', providerId: 'p4', beats: 0, gapEvents: 0, sessions: 0, breaches: 2, lastBreachAt: '2025-01-02T00:00:00Z' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    const drift = issues.filter((i) => i.check === 'uptime-counter-drift');
+    expect(drift.some((i) => i.detail.includes('u1') && i.detail.includes('sessions'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('u2') && i.detail.includes('gapEvents'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('u3') && i.detail.includes('lastBeatAt'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('u4'))).toBe(false);
+    // breaches の非数・負値はカウンタ検査側が捕捉
+    expect(issues.some((i) => i.check === 'invalid-uptime-counter' && i.detail.includes('breaches'))).toBe(true);
+  });
+
   it('does not warn about missing admin on an empty user store (pre-seed)', () => {
     dir = makeDataDir({
       'users.json': [],

@@ -26,7 +26,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
-      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com', role: 'admin' }],
     });
     const { issues, summary } = run(dir);
     expect(summary.ok).toBe(true);
@@ -690,6 +690,35 @@ describe('verify-data-consistency', () => {
     expect(stats.some((i) => i.detail.includes('r3'))).toBe(true);
     expect(stats.some((i) => i.detail.includes('r4'))).toBe(false);
     expect(stats.some((i) => i.detail.includes('r5'))).toBe(false);
+  });
+
+  it('warns when users exist but no active admin remains', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'u1@example.com', role: 'user' },
+        { id: 'u2', email: 'u2@example.com', role: 'admin', status: 'deactivated' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'no-active-admin')).toBe(true);
+  });
+
+  it('does not warn about missing admin on an empty user store (pre-seed)', () => {
+    dir = makeDataDir({
+      'users.json': [],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'no-active-admin')).toBe(false);
   });
 
   it('errors on orders with multiple paid payments', () => {

@@ -895,6 +895,18 @@ function run(dataDir) {
     }
   }
 
+  // 稼働 admin 不在 — role 変更・係争裁定・admin 系ルートは全て admin 権限を
+  // 要求し、API 側は最後の admin の降格/無効化を拒否する（user/index.js:341,
+  // :916, :984）ため、active admin 0 は手動編集・インポート・削除事故でしか
+  // 起きない運用デッドロック。ユーザー不在（シード前の新規環境）は正常なので
+  // 警告しない。
+  {
+    const hasActiveAdmin = users.some((u) => u && u.role === 'admin' && u.status !== 'deactivated');
+    if (users.length > 0 && !hasActiveAdmin) {
+      issues.push({ severity: 'warn', check: 'no-active-admin', detail: 'users.json: 稼働中の admin が不在（ユーザー存在下で admin 権限の経路が全て閉塞 — 手動編集/削除事故の兆候）' });
+    }
+  }
+
   // 同一メールの複数ユーザ（登録経路で大小文字正規化が揃っていないため衝突し得る:
   // OAuth は lowered、パスワード登録は非正規化。getByEmail が曖昧化する）
   const seenEmails = new Map();

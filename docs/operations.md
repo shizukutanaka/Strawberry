@@ -38,7 +38,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | sla-tracker（/health の稼働率集計、`GET /api/sla` の供給源） | 60s | — |
 | gpu-auto-heal（vGPU コンテナの自動修復・再スケジュール） | `GPU_AUTO_HEAL_INTERVAL_MS`（ミリ秒） | `GPU_AUTO_HEAL_INTERVAL_MS`, `GPU_AUTO_HEAL_FAILURE_THRESHOLD`（0・未設定 = 無効） |
 
-全デーモンは `src/utils/daemon-registry.js` に start 時に自己登録し、SIGTERM/SIGINT の graceful shutdown で `stopAllDaemons()` が逆順に停止する（ドレイン窓での残留書込み防止）。`registeredDaemons()` で起動中デーモン名を診断可能。
+全デーモンは `src/utils/daemon-registry.js` に start 時に自己登録し、SIGTERM/SIGINT の graceful shutdown で `stopAllDaemons()` が逆順に停止する（ドレイン窓での残留書込み防止）。`registeredDaemons()` で起動中デーモン名を診断可能。opt-in 起動の常駐タイマー（gpu-monitor・market-pricing-updates・perf-auto-optimize・auto-performance-optimizer）も start 呼出時に自己登録し、起動した場合のみ shutdown 対象になる。
 
 期限切れ注文の手動スイープ（インシデント対応用）: `POST /api/v1/admin/expire-orders`（admin のみ）。
 
@@ -77,7 +77,7 @@ Strawberry マーケットプレイス本体（Express API + JSON ファイル�
 | `npm run verify-audit-chain`（`node scripts/verify-audit-chain.js`） | `logs/audit.log` のハッシュ連鎖を改竄検証（不一致・ファイル欠落・形式外行を報告、失敗時 exit 1。`--json` 対応、`AUDIT_LOG_PATH`/`AUDIT_HASH_PATH` で差し替え可） | `AUDIT_LOG_PATH`, `AUDIT_HASH_PATH`（任意） |
 | `npm run report-env-drift`（`node scripts/report-env-drift.js`） | コード内 env 参照と `.env.example` 記載の差分を検出（記載漏れ=運用者が知れない変数・陳腐候補・重複記載。`--json` 対応、`--strict` で未記載 drift 時 exit 1 — CI の build-test ジョブでゲート中） | — |
 | `npm run report-audit-backlog`（`node scripts/report-audit-backlog.js`） | `npm audit` の積存を severity×修正可否（semver内 fix / メジャー更新要 / 経路のみ）で可視化（情報のみ） | — |
-| `npm run report-log-pii`（`node scripts/report-log-pii.js`） | `logs/*.log` のメールアドレス混入を件数・行番号で可視化（値自体は出力しない。情報のみ、終了コードは常に 0、`--json` 対応、引数/`STRAWBERRY_LOG_DIR` で対象 dir 指定） | `STRAWBERRY_LOG_DIR`（任意） |
+| `npm run report-log-pii`（`node scripts/report-log-pii.js`） | `logs/*.log` のメールアドレス・資格情報（jwt/bearer/apikey）混入を件数・行番号で可視化（値自体は出力しない。`--json` 対応、引数/`STRAWBERRY_LOG_DIR` で対象 dir 指定。`--strict` で資格情報クラス混入時 exit 1 — CI の build-test でテスト実行後にゲート中） | `STRAWBERRY_LOG_DIR`（任意） |
 | `npm run report-console-usage`（`node scripts/report-console-usage.js`） | `src/` 内の console.* 直書き残存を種別内訳で棚卸（cli/ロガー実装/audit フォールバックは正当分離。`--json`・`--strict` で drift 時 exit 1 → CI ゲート済み） | — |
 
 Google Sheets 系の OAuth セットアップ: `scripts/credentials.json`（GCP Console の OAuth クライアント JSON）と `scripts/token.json`（初回認可の発行トークン）を配置。詳細は `npm run <script>` 実行時のエラーメッセージに手順が出力される。

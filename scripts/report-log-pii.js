@@ -10,11 +10,13 @@
 // 使い方:
 //   node scripts/report-log-pii.js            人間可読レポート（PII 自体は出力しない）
 //   node scripts/report-log-pii.js --json     機械可読 JSON
+//   node scripts/report-log-pii.js --strict   資格情報クラス（jwt/bearer/apikey）の混入で exit 1
 //   node scripts/report-log-pii.js <dir>      対象ディレクトリの変更（既定: logs/）
 //   環境変数 STRAWBERRY_LOG_DIR でも差し替え可
 //
 // 注意: PII の値そのものは絶対に出力しない（行番号と件数のみ）。
-// 情報のみ — 終了コードは常に 0。
+// --strict は資格情報クラスのみ失敗にする — email はテスト fixture（u1@example.com 等）や
+// 監査イベントで正当に現れ得るため情報扱いのまま。CI のゲートは資格情報のみが対象。
 
 const fs = require('fs');
 const path = require('path');
@@ -80,37 +82,50 @@ function report(dir = path.join(ROOT, 'logs')) {
   return { dir, files: results };
 }
 
+// 資格情報クラスの種別 — --strict ゲートの対象。email は対象外（上記理由）。
+const CREDENTIAL_KINDS = new Set(['jwt', 'bearer', 'apikey']);
+
+function credentialHits(r) {
+  return (r.files || []).reduce((s, f) => s + Object.entries(f.byKind || {})
+    .filter(([k]) => CREDENTIAL_KINDS.has(k))
+    .reduce((a, [, n]) => a + n, 0), 0);
+}
+
 function main() {
   const jsonMode = process.argv.includes('--json');
-  const argv = process.argv.slice(2).filter((a) => a !== '--json');
+  const strict = process.argv.includes('--strict');
+  const argv = process.argv.slice(2).filter((a) => a !== '--json' && a !== '--strict');
   const dir = argv[0] ? path.resolve(argv[0]) : (process.env.STRAWBERRY_LOG_DIR || path.join(ROOT, 'logs'));
   const r = report(dir);
   if (jsonMode) {
     console.log(JSON.stringify(r, null, 2));
-    return;
+  } else {
+    console.log(`[report-log-pii] ${r.dir}`);
+    if (r.error) {
+      console.log(`  ディレクトリを読めません: ${r.error}`);
+    } else if (!r.files.length) {
+      console.log('  ログファイルなし');
+    } else {
+      const withHits = r.files.filter((f) => f.hits > 0);
+      const total = r.files.reduce((s, f) => s + (f.hits || 0), 0);
+      console.log(`  ${r.files.length} ファイル走査 — PII/資格情報候補 ${total} 件 / ${withHits.length} ファイル`);
+      for (const f of withHits) {
+        const kinds = Object.entries(f.byKind || {}).map(([k, n]) => `${k}:${n}`).join(', ');
+        console.log(`    - ${f.file}: ${f.hits} 件（${kinds}; 行 ${f.hitLines.join(', ')}${f.hits > f.hitLines.length ? ' 他' : ''}）`);
+      }
+      if (!withHits.length) console.log('  PII 混入なし');
+      console.log('  ※ 値は出力しません。詳細確認は該当行を手動で参照のこと');
+    }
   }
-  console.log(`[report-log-pii] ${r.dir}`);
-  if (r.error) {
-    console.log(`  ディレクトリを読めません: ${r.error}`);
-    return;
+  const credHits = credentialHits(r);
+  if (strict && credHits > 0) {
+    console.error(`report-log-pii: ${credHits} 件の資格情報混入（jwt/bearer/apikey）を検出 — ログへの秘密値記録経路を遮断してください`);
+    process.exit(1);
   }
-  if (!r.files.length) {
-    console.log('  ログファイルなし');
-    return;
-  }
-  const withHits = r.files.filter((f) => f.hits > 0);
-  const total = r.files.reduce((s, f) => s + (f.hits || 0), 0);
-  console.log(`  ${r.files.length} ファイル走査 — PII/資格情報候補 ${total} 件 / ${withHits.length} ファイル`);
-  for (const f of withHits) {
-    const kinds = Object.entries(f.byKind || {}).map(([k, n]) => `${k}:${n}`).join(', ');
-    console.log(`    - ${f.file}: ${f.hits} 件（${kinds}; 行 ${f.hitLines.join(', ')}${f.hits > f.hitLines.length ? ' 他' : ''}）`);
-  }
-  if (!withHits.length) console.log('  PII 混入なし');
-  console.log('  ※ 値は出力しません。詳細確認は該当行を手動で参照のこと');
 }
 
 if (require.main === module) {
   main();
 }
 
-module.exports = { report, scanFile };
+module.exports = { report, scanFile, credentialHits };

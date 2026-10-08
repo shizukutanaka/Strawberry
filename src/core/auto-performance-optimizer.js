@@ -19,6 +19,7 @@ class AutoPerformanceOptimizer {
     this.interval = setInterval(() => this.optimize(), intervalMs);
     // unref: 監視タイマーがプロセス終了を妨げない（SIGTERM 後の drain を待たせない）
     if (this.interval.unref) this.interval.unref();
+    require('../utils/daemon-registry').registerDaemon('auto-performance-optimizer', () => this.stop());
     logger.info(`AutoPerformanceOptimizer started (interval: ${intervalMs}ms)`);
   }
 

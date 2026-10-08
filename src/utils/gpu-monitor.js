@@ -73,6 +73,7 @@ function startGpuMonitor() {
   }, CHECK_INTERVAL);
   // unref: 監視タイマーがプロセス終了を妨げない
   if (_monitorTimer.unref) _monitorTimer.unref();
+  require('./daemon-registry').registerDaemon('gpu-monitor', stopGpuMonitor);
   return _monitorTimer;
 }
 

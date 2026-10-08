@@ -1278,4 +1278,109 @@ describe('escrow history FSM legality', () => {
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'escrow-history-state-drift' && i.detail.includes('e1'))).toBe(true);
   });
+
+  it('warns on paid payment below the order price lock', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 400, paidAt: '2025-01-02T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'payment-undercharge' && i.detail.includes('p1'))).toBe(true);
+  });
+
+  it('warns on non-onchain amount drift but tolerates btc_onchain fee-included totals', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 1200, paidAt: '2025-01-02T00:00:00Z' },
+        { id: 'p2', orderId: 'o1', status: 'paid', method: 'btc_onchain', amount: 1005, paidAt: '2025-01-03T00:00:00Z' },
+        { id: 'p3', orderId: 'o1', status: 'paid', method: 'manual', amount: 1000, paidAt: '2025-01-04T00:00:00Z' },
+        { id: 'p4', orderId: 'o1', status: 'pending', method: 'lightning', amount: 5 },
+      ],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'payment-amount-mismatch' && i.detail.includes('p3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'payment-undercharge' && i.detail.includes('p4'))).toBe(false);
+  });
+
+  it('warns on escrow locked below the order price', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 1000, paidAt: '2025-01-02T00:00:00Z' }],
+      'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'HELD', amountSats: 300 }],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'escrow-undercharge' && i.detail.includes('e1'))).toBe(true);
+  });
+
+  it('warns on non-onchain escrow amount drift, tolerates btc_onchain fee-included rows', () => {
+    dir = makeDataDir({
+      'orders.json': [{ id: 'o1', status: 'active', gpuId: 'g1', providerId: 'u1', userId: 'u1', totalPrice: 1000, createdAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', amount: 1000, paidAt: '2025-01-02T00:00:00Z' }],
+      'escrows.json': [
+        { id: 'e1', orderId: 'o1', state: 'HELD', amountSats: 1500 },
+        { id: 'e2', orderId: 'o1', state: 'HELD', amountSats: 1005, lenderWallet: 'bc1xyz', operatorWallet: 'bc1op', total: 0.001, payout: 0.0009 },
+        { id: 'e3', orderId: 'o1', state: 'PENDING', amountSats: 1000 },
+      ],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'escrow-amount-mismatch' && i.detail.includes('e1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'escrow-amount-mismatch' && i.detail.includes('e2'))).toBe(false);
+    expect(issues.some((i) => i.check === 'escrow-amount-mismatch' && i.detail.includes('e3'))).toBe(false);
+  });
+
+  it('warns on a corrupted reservation window', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'matched', gpuId: 'g1', providerId: 'u1', userId: 'u1', durationMinutes: 60, scheduledStartAt: '2025-06-01T00:00:00Z', scheduledEndAt: '2025-06-01T00:30:00Z', createdAt: '2025-05-01T00:00:00Z', matchedAt: '2025-05-02T00:00:00Z' },
+        { id: 'o2', status: 'matched', gpuId: 'g1', providerId: 'u1', userId: 'u1', durationMinutes: 60, scheduledStartAt: '2025-06-01T00:00:00Z', scheduledEndAt: '2025-06-01T00:00:00Z', createdAt: '2025-05-01T00:00:00Z', matchedAt: '2025-05-02T00:00:00Z' },
+        { id: 'o3', status: 'matched', gpuId: 'g1', providerId: 'u1', userId: 'u1', durationMinutes: 60, scheduledStartAt: '2025-06-01T00:00:00Z', scheduledEndAt: '2025-06-01T01:00:00Z', createdAt: '2025-05-01T00:00:00Z', matchedAt: '2025-05-02T00:00:00Z' },
+      ],
+      'payments.json': [{ id: 'p1', orderId: 'o1', status: 'paid', method: 'lightning', paidAt: '2025-05-02T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'reversed-schedule' && i.detail.includes('o2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'schedule-window-mismatch' && i.detail.includes('o3'))).toBe(false);
+  });
+
+  it('warns on slaBreach records missing settlement evidence', () => {
+    dir = makeDataDir({
+      'orders.json': [
+        { id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', slaBreach: true, completedAt: '2025-01-02T00:00:00Z', createdAt: '2025-01-01T00:00:00Z', matchedAt: '2025-01-01T01:00:00Z' },
+        { id: 'o2', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', slaBreach: true, deliveredRatio: 1.5, slaBreachReason: 'provider_heartbeat_lost', completedAt: '2025-01-02T00:00:00Z', createdAt: '2025-01-01T00:00:00Z', matchedAt: '2025-01-01T01:00:00Z' },
+        { id: 'o3', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', slaBreach: true, deliveredRatio: 0.4, slaBreachReason: 'provider_heartbeat_lost', completedAt: '2025-01-02T00:00:00Z', createdAt: '2025-01-01T00:00:00Z', matchedAt: '2025-01-01T01:00:00Z' },
+      ],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+    });
+    const { issues } = run(dir);
+    const breach = issues.filter((i) => i.check === 'incomplete-breach-record');
+    expect(breach.some((i) => i.detail.includes('o1'))).toBe(true);
+    expect(breach.some((i) => i.detail.includes('o2'))).toBe(true);
+    expect(breach.some((i) => i.detail.includes('o3'))).toBe(false);
+  });
 });

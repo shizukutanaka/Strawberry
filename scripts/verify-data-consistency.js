@@ -1150,6 +1150,41 @@ function run(dataDir) {
     }
   }
 
+  // settlement 内訳の保存時不変条件 — computeSettlement は
+  // payout + fee + refund === total を厳密に保証し（端数は fee に寄せ）、
+  // charged = payout + fee・refund = total - charged を約定する
+  // （settlement-calculator.js:64-81）。保存値がこの和を崩している = 清算額の
+  // 破損で、payout/refund のどちらかが帳簿外に消えている。
+  for (const e of escrows) {
+    const s = e && e.settlement;
+    if (!s || typeof s !== 'object') continue;
+    const total = Number(s.breakdown && s.breakdown.total !== undefined ? s.breakdown.total : e.amountSats);
+    const parts = ['providerPayoutSats', 'renterRefundSats', 'operatorFeeSats', 'chargedSats'];
+    const vals = {};
+    let badShape = false;
+    for (const k of parts) {
+      const v = s[k];
+      if (v === undefined) continue; // 部分 settlement は書き込み中の中断（warn 対象外）
+      if (!(typeof v === 'number' && Number.isFinite(v) && v >= 0)) {
+        issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement.${k} "${v}" が負値/非数（清算内訳の破損）` });
+        badShape = true;
+      } else {
+        vals[k] = v;
+      }
+    }
+    if (badShape || !Number.isFinite(total)) continue;
+    const { providerPayoutSats: pay, renterRefundSats: refund, operatorFeeSats: fee, chargedSats: charged } = vals;
+    if (pay !== undefined && refund !== undefined && fee !== undefined && Math.abs(pay + refund + fee - total) > 0) {
+      issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement 内訳 ${pay}+${refund}+${fee}=${pay + refund + fee} が total ${total} と不一致（清算額の行方不明）` });
+    }
+    if (charged !== undefined && pay !== undefined && fee !== undefined && Math.abs(pay + fee - charged) > 0) {
+      issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement.chargedSats ${charged} が payout+fee ${pay + fee} と不一致` });
+    }
+    if (charged !== undefined && refund !== undefined && Math.abs(charged + refund - total) > 0) {
+      issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement.refund+charged ${refund + charged} が total ${total} と不一致` });
+    }
+  }
+
   // jobId 未設定の verification — open(jobId,...) は jobId を必須とし
   // （verification-service.js:36-37）、getByJobId のフィールドキーでもある。
   // jobId のないレコードは finalize/参照の全経路から見えない孤立検証証跡。

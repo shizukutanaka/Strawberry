@@ -829,3 +829,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **reputation-stats-invalid 検査 (2026-10)**: reputations.stats の値域を検査 — 増分カウンタ（completedJobs 等）の非整数/負値、stake 負値、slaUptimePct∉[0,100]、interruptionRate∉[0,1] を warn。scorer が範囲外値を静黙クランプするため、破損がスコア歪み（信頼水増し）として姿を消すのを可視化。85テスト緑。
 - **no-active-admin 検査 (2026-10)**: ユーザー存在下で稼働 admin 0 件を warn — role 変更・係争裁定・admin ルートは全て admin 権限を要求し API は最後の admin の降格/無効化を拒否するため、active admin 0 は手動編集・削除事故でしか起きない運用デッドロック。87テスト緑。
 - **uptime カウンタ間不変条件 (2026-10)**: sessions>beats・gapEvents>beats・beats>0 で lastBeatAt 欠落を uptime-counter-drift warn で検出（セッションはビートで開始・gap はビートの部分集合の約定）。breaches を invalid-uptime-counter 対象へ追加しカウンタ網羅を完結。88テスト緑。
+- **settlement-sum-drift 検査 (2026-10)**: escrow.settlement の保存時不変条件 — payout+fee+refund===total・charged===payout+fee・refund===total-charged・各コンポーネント非負を検証（computeSettlement の厳密和約定からのずれ = 清算額の帳簿外消失）。89テスト緑。

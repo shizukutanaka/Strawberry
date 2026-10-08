@@ -737,6 +737,36 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'invalid-uptime-counter' && i.detail.includes('breaches'))).toBe(true);
   });
 
+  it('warns on stored settlements that violate the sum invariants', () => {
+    dir = makeDataDir({
+      'escrows.json': [
+        // payout+refund+fee !== total — 清算額の行方不明
+        { id: 'e1', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: 900, renterRefundSats: 0, operatorFeeSats: 50, chargedSats: 950, breakdown: { total: 1000 } } },
+        // charged !== payout+fee
+        { id: 'e2', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 800, breakdown: { total: 1000 } } },
+        // 負値コンポーネント
+        { id: 'e3', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: -5, renterRefundSats: 100, operatorFeeSats: 5, chargedSats: 0, breakdown: { total: 1000 } } },
+        // 健全: 全和一致
+        { id: 'e4', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 950, breakdown: { total: 1000 } } },
+      ],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com', role: 'admin' }],
+    });
+    const { issues } = run(dir);
+    const drift = issues.filter((i) => i.check === 'settlement-sum-drift');
+    expect(drift.some((i) => i.detail.includes('e1'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('e2'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('e3'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('e4'))).toBe(false);
+  });
+
   it('does not warn about missing admin on an empty user store (pre-seed)', () => {
     dir = makeDataDir({
       'users.json': [],

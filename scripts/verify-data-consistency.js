@@ -979,6 +979,36 @@ function run(dataDir) {
         seenProvider.set(r.providerId, r.id);
       }
     }
+    // stats の値域 — scorer は範囲外値を静黙クランプする（completedJobs:-5→0,
+    // slaUptimePct:500→1.0）ため、破損がスコア歪みとして姿を消す。書き込み側
+    // （reputation-service）は増分/非負のみを約定するため、範囲外 = 手動編集
+    // か破損の兆候。
+    const INT_COUNTERS = ['completedJobs', 'failedJobs', 'auditPasses', 'auditFails', 'attestationPasses', 'attestationFails', 'slashCount'];
+    for (const r of reputations) {
+      if (!r || r.providerId === undefined) continue;
+      const stats = r.stats;
+      if (stats === undefined || stats === null) continue; // stats 欠落は scorer の既定値が効く
+      if (typeof stats !== 'object' || Array.isArray(stats)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats がオブジェクトでない（スコア計算が既定値に沈黙フォールバック = 評判消失）` });
+        continue;
+      }
+      for (const k of INT_COUNTERS) {
+        if (stats[k] === undefined) continue; // 未記録イベントは省略される約定（recordAttestation 等）
+        const v = stats[k];
+        if (!(typeof v === 'number' && Number.isFinite(v) && v >= 0 && Number.isInteger(v))) {
+          issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.${k} "${v}" が非整数/負値/非数（+1 増分約定からのずれ = 破損）` });
+        }
+      }
+      if (stats.stake !== undefined && !(typeof stats.stake === 'number' && Number.isFinite(stats.stake) && stats.stake >= 0)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.stake "${stats.stake}" が負値/非数（信頼乗数を破損）` });
+      }
+      if (stats.slaUptimePct !== undefined && !(typeof stats.slaUptimePct === 'number' && stats.slaUptimePct >= 0 && stats.slaUptimePct <= 100)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.slaUptimePct "${stats.slaUptimePct}" が [0,100] 範囲外（scorer が静黙 1.0 へクランプし信頼を水増し）` });
+      }
+      if (stats.interruptionRate !== undefined && !(typeof stats.interruptionRate === 'number' && stats.interruptionRate >= 0 && stats.interruptionRate <= 1)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.interruptionRate "${stats.interruptionRate}" が [0,1] 範囲外（信頼性計算を破損）` });
+      }
+    }
   }
 
   // sla.json — updateSLA は total++ と up++/down++ を必ずペアで進める

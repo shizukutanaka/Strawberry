@@ -666,6 +666,32 @@ describe('verify-data-consistency', () => {
     expect(issues.some((i) => i.check === 'duplicate-provider-reputation' && i.detail.includes('p1'))).toBe(true);
   });
 
+  it('warns on reputation stats outside the scorer contract ranges', () => {
+    dir = makeDataDir({
+      'reputations.json': [
+        // scorer が静黙クランプする範囲外値 — +1 増分約定からのずれ
+        { id: 'r1', providerId: 'p1', stats: { completedJobs: -3, failedJobs: 1.5, slashCount: 'x' } },
+        { id: 'r2', providerId: 'p2', stats: { slaUptimePct: 250, interruptionRate: 1.7, stake: -1 } },
+        { id: 'r3', providerId: 'p3', stats: 'broken' },
+        // 健全レコードは警告を出さない（未記録カウンタの省略も約定どおり）
+        { id: 'r4', providerId: 'p4', stats: { completedJobs: 10, failedJobs: 2, slaUptimePct: 99.5, interruptionRate: 0.1, stake: 500000, slashCount: 1 } },
+        { id: 'r5', providerId: 'p5' }, // stats 欠落は scorer 既定値が効く
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    const stats = issues.filter((i) => i.check === 'reputation-stats-invalid');
+    expect(stats.some((i) => i.detail.includes('r1'))).toBe(true);
+    expect(stats.filter((i) => i.detail.includes('r2')).length).toBeGreaterThanOrEqual(2);
+    expect(stats.some((i) => i.detail.includes('r3'))).toBe(true);
+    expect(stats.some((i) => i.detail.includes('r4'))).toBe(false);
+    expect(stats.some((i) => i.detail.includes('r5'))).toBe(false);
+  });
+
   it('errors on orders with multiple paid payments', () => {
     dir = makeDataDir({
       'orders.json': [{ id: 'o1', status: 'matched', matchedAt: '2025-01-01T00:00:00Z' }],

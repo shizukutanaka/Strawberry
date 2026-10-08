@@ -1112,6 +1112,26 @@ function run(dataDir) {
     }
   }
 
+  // 未定義の支払いチャネル — 書き込み側は lightning/btc_onchain/manual の
+  // 3系統のみ生成する。それ以外の値は手動編集・将来仕様とのずれの兆候で、
+  // `method !== 'btc_onchain'` の既払い検出では「非onchain 支払い済み」として
+  // 扱われ、集計・監査経路を静黙に歪める。
+  // method/paymentMethod が両方あり値が食い違う場合は、どちらが真のチャネルか
+  // 分からない証跡の矛盾として別立てで warn。
+  const KNOWN_PAYMENT_METHODS = new Set(['lightning', 'btc_onchain', 'manual']);
+  for (const p of payments) {
+    if (!p) continue;
+    if (p.method !== undefined && !KNOWN_PAYMENT_METHODS.has(p.method)) {
+      issues.push({ severity: 'warn', check: 'unknown-payment-method', detail: `payments.json: id "${p.id}" の method "${p.method}" は未定義（3系統の支払いチャネル外 = 集計・監査経路を歪める混入値）` });
+    }
+    if (p.paymentMethod !== undefined && !KNOWN_PAYMENT_METHODS.has(p.paymentMethod)) {
+      issues.push({ severity: 'warn', check: 'unknown-payment-method', detail: `payments.json: id "${p.id}" の paymentMethod "${p.paymentMethod}" は未定義（3系統の支払いチャネル外 = 集計・監査経路を歪める混入値）` });
+    }
+    if (p.method !== undefined && p.paymentMethod !== undefined && p.method !== p.paymentMethod) {
+      issues.push({ severity: 'warn', check: 'conflicting-payment-method', detail: `payments.json: id "${p.id}" の method "${p.method}" と paymentMethod "${p.paymentMethod}" が不一致（チャネル証跡の矛盾）` });
+    }
+  }
+
   // 支払者不明 — payment 自身にも、その orderId が指す order にも
   // userId/providerId がないと「誰が払ったか」に辿り着けない
   // （返金・照会・監査で当事者を特定できない）。

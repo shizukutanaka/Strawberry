@@ -767,6 +767,26 @@ describe('verify-data-consistency', () => {
     expect(drift.some((i) => i.detail.includes('e4'))).toBe(false);
   });
 
+  it('warns on unknown and conflicting payment channels', () => {
+    dir = makeDataDir({
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'stripe', paidAt: '2025-01-01T00:00:00Z' },
+        { id: 'p2', orderId: 'o1', status: 'paid', method: 'lightning', paymentMethod: 'btc_onchain', paidAt: '2025-01-01T00:00:00Z' },
+        { id: 'p3', orderId: 'o1', status: 'paid', method: 'manual', paymentMethod: 'manual', paidAt: '2025-01-01T00:00:00Z' },
+      ],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com', role: 'admin' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unknown-payment-method' && i.detail.includes('stripe'))).toBe(true);
+    expect(issues.some((i) => i.check === 'conflicting-payment-method' && i.detail.includes('p2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'conflicting-payment-method' && i.detail.includes('p3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'unknown-payment-method' && i.detail.includes('manual'))).toBe(false);
+  });
+
   it('does not warn about missing admin on an empty user store (pre-seed)', () => {
     dir = makeDataDir({
       'users.json': [],

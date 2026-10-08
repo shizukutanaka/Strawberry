@@ -830,3 +830,4 @@ notifier.js の AXIOS_SAFE_CONFIG（timeout 10s / サイズ上限 1MiB / maxRedi
 - **no-active-admin 検査 (2026-10)**: ユーザー存在下で稼働 admin 0 件を warn — role 変更・係争裁定・admin ルートは全て admin 権限を要求し API は最後の admin の降格/無効化を拒否するため、active admin 0 は手動編集・削除事故でしか起きない運用デッドロック。87テスト緑。
 - **uptime カウンタ間不変条件 (2026-10)**: sessions>beats・gapEvents>beats・beats>0 で lastBeatAt 欠落を uptime-counter-drift warn で検出（セッションはビートで開始・gap はビートの部分集合の約定）。breaches を invalid-uptime-counter 対象へ追加しカウンタ網羅を完結。88テスト緑。
 - **settlement-sum-drift 検査 (2026-10)**: escrow.settlement の保存時不変条件 — payout+fee+refund===total・charged===payout+fee・refund===total-charged・各コンポーネント非負を検証（computeSettlement の厳密和約定からのずれ = 清算額の帳簿外消失）。89テスト緑。
+- **支払いチャネル検査拡張 (2026-10)**: method/paymentMethod の未定義値（lightning/btc_onchain/manual の3系統外）を unknown-payment-method、両フィールドの不一致を conflicting-payment-method で warn — チャネル証跡の矛盾・混入値が既払い検出と集計を静黙に歪めるのを可視化。90テスト緑。

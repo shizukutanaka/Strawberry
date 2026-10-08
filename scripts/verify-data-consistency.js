@@ -895,6 +895,18 @@ function run(dataDir) {
     }
   }
 
+  // 稼働 admin 不在 — role 変更・係争裁定・admin 系ルートは全て admin 権限を
+  // 要求し、API 側は最後の admin の降格/無効化を拒否する（user/index.js:341,
+  // :916, :984）ため、active admin 0 は手動編集・インポート・削除事故でしか
+  // 起きない運用デッドロック。ユーザー不在（シード前の新規環境）は正常なので
+  // 警告しない。
+  {
+    const hasActiveAdmin = users.some((u) => u && u.role === 'admin' && u.status !== 'deactivated');
+    if (users.length > 0 && !hasActiveAdmin) {
+      issues.push({ severity: 'warn', check: 'no-active-admin', detail: 'users.json: 稼働中の admin が不在（ユーザー存在下で admin 権限の経路が全て閉塞 — 手動編集/削除事故の兆候）' });
+    }
+  }
+
   // 同一メールの複数ユーザ（登録経路で大小文字正規化が揃っていないため衝突し得る:
   // OAuth は lowered、パスワード登録は非正規化。getByEmail が曖昧化する）
   const seenEmails = new Map();
@@ -979,6 +991,36 @@ function run(dataDir) {
         seenProvider.set(r.providerId, r.id);
       }
     }
+    // stats の値域 — scorer は範囲外値を静黙クランプする（completedJobs:-5→0,
+    // slaUptimePct:500→1.0）ため、破損がスコア歪みとして姿を消す。書き込み側
+    // （reputation-service）は増分/非負のみを約定するため、範囲外 = 手動編集
+    // か破損の兆候。
+    const INT_COUNTERS = ['completedJobs', 'failedJobs', 'auditPasses', 'auditFails', 'attestationPasses', 'attestationFails', 'slashCount'];
+    for (const r of reputations) {
+      if (!r || r.providerId === undefined) continue;
+      const stats = r.stats;
+      if (stats === undefined || stats === null) continue; // stats 欠落は scorer の既定値が効く
+      if (typeof stats !== 'object' || Array.isArray(stats)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats がオブジェクトでない（スコア計算が既定値に沈黙フォールバック = 評判消失）` });
+        continue;
+      }
+      for (const k of INT_COUNTERS) {
+        if (stats[k] === undefined) continue; // 未記録イベントは省略される約定（recordAttestation 等）
+        const v = stats[k];
+        if (!(typeof v === 'number' && Number.isFinite(v) && v >= 0 && Number.isInteger(v))) {
+          issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.${k} "${v}" が非整数/負値/非数（+1 増分約定からのずれ = 破損）` });
+        }
+      }
+      if (stats.stake !== undefined && !(typeof stats.stake === 'number' && Number.isFinite(stats.stake) && stats.stake >= 0)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.stake "${stats.stake}" が負値/非数（信頼乗数を破損）` });
+      }
+      if (stats.slaUptimePct !== undefined && !(typeof stats.slaUptimePct === 'number' && stats.slaUptimePct >= 0 && stats.slaUptimePct <= 100)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.slaUptimePct "${stats.slaUptimePct}" が [0,100] 範囲外（scorer が静黙 1.0 へクランプし信頼を水増し）` });
+      }
+      if (stats.interruptionRate !== undefined && !(typeof stats.interruptionRate === 'number' && stats.interruptionRate >= 0 && stats.interruptionRate <= 1)) {
+        issues.push({ severity: 'warn', check: 'reputation-stats-invalid', detail: `reputations.json: id "${r.id}" の stats.interruptionRate "${stats.interruptionRate}" が [0,1] 範囲外（信頼性計算を破損）` });
+      }
+    }
   }
 
   // sla.json — updateSLA は total++ と up++/down++ を必ずペアで進める
@@ -1024,10 +1066,26 @@ function run(dataDir) {
           seenProvider.set(u.providerId, u.id);
         }
       }
-      for (const k of ['beats', 'gapEvents', 'sessions']) {
+      for (const k of ['beats', 'gapEvents', 'sessions', 'breaches']) {
         if (u[k] !== undefined && !(typeof u[k] === 'number' && Number.isFinite(u[k]) && u[k] >= 0)) {
           issues.push({ severity: 'warn', check: 'invalid-uptime-counter', detail: `uptime.json: id "${u.id}" の ${k} "${u[k]}" は非数・負値（稼働率算出を破損）` });
         }
+      }
+      // カウンタ間の不変条件 — セッションは必ず1ビートで開始され（recordProviderHeartbeat
+      // は isNewSession をビート受信時のみ増分）、gapEvents もビートの部分集合。
+      // よって sessions>beats・gapEvents>beats は書き込み経路外の破損。
+      // beats>0 なのに lastBeatAt 無しも同様（ビート毎に必ず更新される）。
+      const beats = Number(u.beats) || 0;
+      const sessions = Number(u.sessions) || 0;
+      const gapEvents = Number(u.gapEvents) || 0;
+      if (Number.isFinite(u.sessions) && Number.isFinite(u.beats) && sessions > beats) {
+        issues.push({ severity: 'warn', check: 'uptime-counter-drift', detail: `uptime.json: id "${u.id}" の sessions ${sessions} > beats ${beats}（セッションはビートで開始される約定に反する = 破損）` });
+      }
+      if (Number.isFinite(u.gapEvents) && Number.isFinite(u.beats) && gapEvents > beats) {
+        issues.push({ severity: 'warn', check: 'uptime-counter-drift', detail: `uptime.json: id "${u.id}" の gapEvents ${gapEvents} > beats ${beats}（gap はビートの部分集合の約定に反する = 破損）` });
+      }
+      if (beats > 0 && !u.lastBeatAt) {
+        issues.push({ severity: 'warn', check: 'uptime-counter-drift', detail: `uptime.json: id "${u.id}" の beats ${beats} だが lastBeatAt なし（ビート履歴の証跡欠落）` });
       }
     }
   }
@@ -1051,6 +1109,26 @@ function run(dataDir) {
   for (const p of payments) {
     if (p && p.status === 'paid' && p.method === undefined && p.paymentMethod === undefined) {
       issues.push({ severity: 'warn', check: 'missing-method', detail: `payments.json: id "${p.id}" (paid) に method/paymentMethod がない（支払いチャネル不明 — 二重課金検査をすり抜ける）` });
+    }
+  }
+
+  // 未定義の支払いチャネル — 書き込み側は lightning/btc_onchain/manual の
+  // 3系統のみ生成する。それ以外の値は手動編集・将来仕様とのずれの兆候で、
+  // `method !== 'btc_onchain'` の既払い検出では「非onchain 支払い済み」として
+  // 扱われ、集計・監査経路を静黙に歪める。
+  // method/paymentMethod が両方あり値が食い違う場合は、どちらが真のチャネルか
+  // 分からない証跡の矛盾として別立てで warn。
+  const KNOWN_PAYMENT_METHODS = new Set(['lightning', 'btc_onchain', 'manual']);
+  for (const p of payments) {
+    if (!p) continue;
+    if (p.method !== undefined && !KNOWN_PAYMENT_METHODS.has(p.method)) {
+      issues.push({ severity: 'warn', check: 'unknown-payment-method', detail: `payments.json: id "${p.id}" の method "${p.method}" は未定義（3系統の支払いチャネル外 = 集計・監査経路を歪める混入値）` });
+    }
+    if (p.paymentMethod !== undefined && !KNOWN_PAYMENT_METHODS.has(p.paymentMethod)) {
+      issues.push({ severity: 'warn', check: 'unknown-payment-method', detail: `payments.json: id "${p.id}" の paymentMethod "${p.paymentMethod}" は未定義（3系統の支払いチャネル外 = 集計・監査経路を歪める混入値）` });
+    }
+    if (p.method !== undefined && p.paymentMethod !== undefined && p.method !== p.paymentMethod) {
+      issues.push({ severity: 'warn', check: 'conflicting-payment-method', detail: `payments.json: id "${p.id}" の method "${p.method}" と paymentMethod "${p.paymentMethod}" が不一致（チャネル証跡の矛盾）` });
     }
   }
 
@@ -1089,6 +1167,41 @@ function run(dataDir) {
   for (const e of escrows) {
     if (e && e.feeRate !== undefined && !(typeof e.feeRate === 'number' && e.feeRate >= 0 && e.feeRate <= 0.99)) {
       issues.push({ severity: 'warn', check: 'invalid-fee-rate', detail: `escrows.json: id "${e.id}" の feeRate "${e.feeRate}" は [0,0.99] 範囲外（清算時の支払い計算が破綻する）` });
+    }
+  }
+
+  // settlement 内訳の保存時不変条件 — computeSettlement は
+  // payout + fee + refund === total を厳密に保証し（端数は fee に寄せ）、
+  // charged = payout + fee・refund = total - charged を約定する
+  // （settlement-calculator.js:64-81）。保存値がこの和を崩している = 清算額の
+  // 破損で、payout/refund のどちらかが帳簿外に消えている。
+  for (const e of escrows) {
+    const s = e && e.settlement;
+    if (!s || typeof s !== 'object') continue;
+    const total = Number(s.breakdown && s.breakdown.total !== undefined ? s.breakdown.total : e.amountSats);
+    const parts = ['providerPayoutSats', 'renterRefundSats', 'operatorFeeSats', 'chargedSats'];
+    const vals = {};
+    let badShape = false;
+    for (const k of parts) {
+      const v = s[k];
+      if (v === undefined) continue; // 部分 settlement は書き込み中の中断（warn 対象外）
+      if (!(typeof v === 'number' && Number.isFinite(v) && v >= 0)) {
+        issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement.${k} "${v}" が負値/非数（清算内訳の破損）` });
+        badShape = true;
+      } else {
+        vals[k] = v;
+      }
+    }
+    if (badShape || !Number.isFinite(total)) continue;
+    const { providerPayoutSats: pay, renterRefundSats: refund, operatorFeeSats: fee, chargedSats: charged } = vals;
+    if (pay !== undefined && refund !== undefined && fee !== undefined && Math.abs(pay + refund + fee - total) > 0) {
+      issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement 内訳 ${pay}+${refund}+${fee}=${pay + refund + fee} が total ${total} と不一致（清算額の行方不明）` });
+    }
+    if (charged !== undefined && pay !== undefined && fee !== undefined && Math.abs(pay + fee - charged) > 0) {
+      issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement.chargedSats ${charged} が payout+fee ${pay + fee} と不一致` });
+    }
+    if (charged !== undefined && refund !== undefined && Math.abs(charged + refund - total) > 0) {
+      issues.push({ severity: 'warn', check: 'settlement-sum-drift', detail: `escrows.json: id "${e.id}" の settlement.refund+charged ${refund + charged} が total ${total} と不一致` });
     }
   }
 

@@ -26,7 +26,7 @@ describe('verify-data-consistency', () => {
       'escrows.json': [{ id: 'e1', orderId: 'o1', state: 'SETTLED' }],
       'verifications.json': [],
       'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
-      'users.json': [{ id: 'u1', email: 'u1@example.com' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com', role: 'admin' }],
     });
     const { issues, summary } = run(dir);
     expect(summary.ok).toBe(true);
@@ -664,6 +664,140 @@ describe('verify-data-consistency', () => {
     });
     const { issues } = run(dir);
     expect(issues.some((i) => i.check === 'duplicate-provider-reputation' && i.detail.includes('p1'))).toBe(true);
+  });
+
+  it('warns on reputation stats outside the scorer contract ranges', () => {
+    dir = makeDataDir({
+      'reputations.json': [
+        // scorer が静黙クランプする範囲外値 — +1 増分約定からのずれ
+        { id: 'r1', providerId: 'p1', stats: { completedJobs: -3, failedJobs: 1.5, slashCount: 'x' } },
+        { id: 'r2', providerId: 'p2', stats: { slaUptimePct: 250, interruptionRate: 1.7, stake: -1 } },
+        { id: 'r3', providerId: 'p3', stats: 'broken' },
+        // 健全レコードは警告を出さない（未記録カウンタの省略も約定どおり）
+        { id: 'r4', providerId: 'p4', stats: { completedJobs: 10, failedJobs: 2, slaUptimePct: 99.5, interruptionRate: 0.1, stake: 500000, slashCount: 1 } },
+        { id: 'r5', providerId: 'p5' }, // stats 欠落は scorer 既定値が効く
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    const stats = issues.filter((i) => i.check === 'reputation-stats-invalid');
+    expect(stats.some((i) => i.detail.includes('r1'))).toBe(true);
+    expect(stats.filter((i) => i.detail.includes('r2')).length).toBeGreaterThanOrEqual(2);
+    expect(stats.some((i) => i.detail.includes('r3'))).toBe(true);
+    expect(stats.some((i) => i.detail.includes('r4'))).toBe(false);
+    expect(stats.some((i) => i.detail.includes('r5'))).toBe(false);
+  });
+
+  it('warns when users exist but no active admin remains', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'u1@example.com', role: 'user' },
+        { id: 'u2', email: 'u2@example.com', role: 'admin', status: 'deactivated' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'no-active-admin')).toBe(true);
+  });
+
+  it('warns on uptime counters violating the beat-started-session invariants', () => {
+    dir = makeDataDir({
+      'uptime.json': [
+        // sessions はビートで開始される — sessions>beats は経路外の破損
+        { id: 'u1', providerId: 'p1', beats: 2, sessions: 5, lastBeatAt: '2025-01-01T00:00:00Z' },
+        // gapEvents はビートの部分集合
+        { id: 'u2', providerId: 'p2', beats: 1, gapEvents: 3, breaches: -1, lastBeatAt: '2025-01-01T00:00:00Z' },
+        // beats>0 だが証跡欠落
+        { id: 'u3', providerId: 'p3', beats: 9, sessions: 2 },
+        // 健全: beats=0 の新規 breach 記録は許容（recordSlaBreach は beats:0 で作成可）
+        { id: 'u4', providerId: 'p4', beats: 0, gapEvents: 0, sessions: 0, breaches: 2, lastBreachAt: '2025-01-02T00:00:00Z' },
+      ],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+      'users.json': [],
+    });
+    const { issues } = run(dir);
+    const drift = issues.filter((i) => i.check === 'uptime-counter-drift');
+    expect(drift.some((i) => i.detail.includes('u1') && i.detail.includes('sessions'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('u2') && i.detail.includes('gapEvents'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('u3') && i.detail.includes('lastBeatAt'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('u4'))).toBe(false);
+    // breaches の非数・負値はカウンタ検査側が捕捉
+    expect(issues.some((i) => i.check === 'invalid-uptime-counter' && i.detail.includes('breaches'))).toBe(true);
+  });
+
+  it('warns on stored settlements that violate the sum invariants', () => {
+    dir = makeDataDir({
+      'escrows.json': [
+        // payout+refund+fee !== total — 清算額の行方不明
+        { id: 'e1', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: 900, renterRefundSats: 0, operatorFeeSats: 50, chargedSats: 950, breakdown: { total: 1000 } } },
+        // charged !== payout+fee
+        { id: 'e2', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 800, breakdown: { total: 1000 } } },
+        // 負値コンポーネント
+        { id: 'e3', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: -5, renterRefundSats: 100, operatorFeeSats: 5, chargedSats: 0, breakdown: { total: 1000 } } },
+        // 健全: 全和一致
+        { id: 'e4', orderId: 'o1', state: 'SETTLED', amountSats: 1000,
+          settlement: { providerPayoutSats: 900, renterRefundSats: 50, operatorFeeSats: 50, chargedSats: 950, breakdown: { total: 1000 } } },
+      ],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
+      'payments.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com', role: 'admin' }],
+    });
+    const { issues } = run(dir);
+    const drift = issues.filter((i) => i.check === 'settlement-sum-drift');
+    expect(drift.some((i) => i.detail.includes('e1'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('e2'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('e3'))).toBe(true);
+    expect(drift.some((i) => i.detail.includes('e4'))).toBe(false);
+  });
+
+  it('warns on unknown and conflicting payment channels', () => {
+    dir = makeDataDir({
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'paid', method: 'stripe', paidAt: '2025-01-01T00:00:00Z' },
+        { id: 'p2', orderId: 'o1', status: 'paid', method: 'lightning', paymentMethod: 'btc_onchain', paidAt: '2025-01-01T00:00:00Z' },
+        { id: 'p3', orderId: 'o1', status: 'paid', method: 'manual', paymentMethod: 'manual', paidAt: '2025-01-01T00:00:00Z' },
+      ],
+      'orders.json': [{ id: 'o1', status: 'completed', gpuId: 'g1', providerId: 'u1', userId: 'u1', completedAt: '2025-01-01T00:00:00Z' }],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [{ id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090' }],
+      'users.json': [{ id: 'u1', email: 'u1@example.com', role: 'admin' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unknown-payment-method' && i.detail.includes('stripe'))).toBe(true);
+    expect(issues.some((i) => i.check === 'conflicting-payment-method' && i.detail.includes('p2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'conflicting-payment-method' && i.detail.includes('p3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'unknown-payment-method' && i.detail.includes('manual'))).toBe(false);
+  });
+
+  it('does not warn about missing admin on an empty user store (pre-seed)', () => {
+    dir = makeDataDir({
+      'users.json': [],
+      'orders.json': [],
+      'payments.json': [],
+      'escrows.json': [],
+      'verifications.json': [],
+      'gpus.json': [],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'no-active-admin')).toBe(false);
   });
 
   it('errors on orders with multiple paid payments', () => {

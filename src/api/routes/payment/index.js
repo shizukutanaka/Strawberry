@@ -505,13 +505,19 @@ router.post('/manual/approve/:id',
       const updated = result.row;
       // featured_listing 支払いの副作用（gpu.featuredUntil 延長）。
       // 支払い本体の承認は確定済み — 副作用の失敗は 500 にせず警告に留める。
-      try { require('../../../utils/promotions').onPaymentPaid(updated); }
-      catch (e) { logger.warn(`promotion side-effect failed for payment ${paymentId}: ${e.message}`); }
+      // 失敗しても featuredActivatedAt が付かないため、invoice-poller の和解
+      // （または次回 promote 購入）が再試行して回収する。
+      let featuredActivated;
+      if (updated.purpose === 'featured_listing') {
+        try { featuredActivated = !!require('../../../utils/promotions').onPaymentPaid(updated); }
+        catch (e) { featuredActivated = false; logger.warn(`promotion side-effect failed for payment ${paymentId}: ${e.message}`); }
+      }
       res.json({
         message: 'Manual payment approved',
         paymentId,
         status: updated.status,
-        paidAt: updated.paidAt
+        paidAt: updated.paidAt,
+        ...(featuredActivated !== undefined ? { featuredActivated } : {}),
       });
     });
   })

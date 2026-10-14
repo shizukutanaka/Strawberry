@@ -691,6 +691,10 @@ router.post('/:id/promote',
     const gpu = req.resource;
     return withLock(`promote:${gpu.id}`, async () => {
       const { priceSats, days } = promotions.promotionConfig();
+      // paid だが未適用のプロモーション支払いがあれば先に和解する
+      // （GPU 書込みの一時失敗で滞留した購入を回収 — 手動承認環境では
+      // ポーラーが動かないため購入経路が唯一の再試行点）。
+      promotions.reconcilePaidPromotions();
       // 冪等: 未消化の pending プロモーション支払いがあれば再利用する
       // （クライアント再送・二重クリックで二重インボイスを発行しない）。
       const existing = promotions.findPendingPromotion(gpu.id);
@@ -707,6 +711,11 @@ router.post('/:id/promote',
           message: 'A pending promotion payment already exists for this GPU. Reusing it instead of creating a duplicate.',
         });
       }
+      // 再利用しない stale pending を終端へ進める — invoice-poller は expiry より
+      // settle を先に判定するため、残したまま新インボイスを出すと旧インボイスの
+      // 後払いも paid+featured 化して二重課金になる。失格化の前にノードの実決済
+      // 状態を確認し、settle 済みなら購入成立（paid+適用）として扱う。
+      await promotions.failStalePromotions(gpu.id, { lightning });
       if (lightning) {
         const invoice = await lightning.createInvoice({
           value: priceSats,
@@ -954,6 +963,15 @@ router.delete('/:id',
       return res.status(409).json({
         error: 'Cannot delete GPU with active orders. Cancel or complete all orders first.',
         activeOrderCount: activeOrders.length,
+      });
+    }
+
+    // 未消化/未適用のプロモーション購入または有効な featured 期間がある GPU は
+    // 削除を拒否 — 支払い済みの価値（featuredUntil は GPU 行ごと消える）を
+    // 購入者から奪い、支払いを宙吊りにするため。
+    if (promotions.hasOpenPromotion(req.resource)) {
+      return res.status(409).json({
+        error: 'Cannot delete GPU with an open or active featured promotion. Wait for the featured period to end or pending payment to resolve.',
       });
     }
 

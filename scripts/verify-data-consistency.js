@@ -145,6 +145,15 @@ function run(dataDir) {
     }
   }
 
+  // paid だが未適用の featured_listing 支払い — featuredActivatedAt が無いまま
+  // paid 化したプロモーション購入は「課金済みだが featured 化していない」滞留。
+  // invoice-poller の和解が回収する設計だが、滞留が解消されない場合に可視化する。
+  for (const p of payments) {
+    if (p && p.purpose === 'featured_listing' && p.status === 'paid' && !p.featuredActivatedAt) {
+      issues.push({ severity: 'warn', check: 'unapplied-featured-payment', detail: `payments.json: featured_listing 支払い "${p.id}" が paid だが未適用（featuredActivatedAt なし — 課金済みだが featured 化していない）` });
+    }
+  }
+
   // エンティティ横断参照: gpuId→gpus、providerId/renterId/userId→users。
   // ユーザー削除等で dangling が正当な場合もあり得るため warn 止まり
   // （資金直結の orderId 参照だけ error）。

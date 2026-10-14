@@ -9,6 +9,7 @@ const OrderRepository = require('../db/json/OrderRepository');
 const { appendAuditLog } = require('../utils/audit-log');
 const { registerDaemon, unregisterDaemon } = require('../utils/daemon-registry');
 const { resolveDataDir } = require('../db/json/data-dir');
+const promotions = require('../utils/promotions');
 
 const POLL_INTERVAL_MS = 15_000; // check every 15 s
 const INVOICE_EXPIRE_BUFFER_MS = 60_000; // 1 min grace after invoiceExpiresAt
@@ -19,6 +20,7 @@ let _running = false;
 let _lightning = null; // set via start()
 let _lastStamp = null;   // `${mtimeMs}:${size}` — 前回スキャン時のファイル指紋
 let _lastPending = null; // 前回スキャンの pending 数（null=未走査）
+let _lastUnapplied = null; // 前回スキャンの paid 未適用 featured 支払い数
 
 function _fileStamp() {
   try {
@@ -38,13 +40,23 @@ async function pollOnce() {
     // （pending >0 のときは各インボイスの外部決済状態を毎回問い合わせるため
     // この経路は使わない — 静寂時の I/O をゼロにするための早期 return）
     const stamp = _fileStamp();
-    if (stamp !== null && stamp === _lastStamp && _lastPending === 0) return;
+    if (stamp !== null && stamp === _lastStamp && _lastPending === 0 && _lastUnapplied === 0) return;
     const allPayments = PaymentRepository.getAll();
     const pending = allPayments.filter(
       (p) => p.method === 'lightning' && p.status === 'pending' && p.paymentHash
     );
     _lastStamp = stamp;
     _lastPending = pending.length;
+    // featured 購入の和解: paid だが未適用（featuredActivatedAt なし）の
+    // featured_listing 支払いを毎 tick 回収する。pending が 0 でも走らせる —
+    // GPU 書込み一時失敗で滞留した paid を再試行する唯一の巡回点。
+    // _lastUnapplied も stat ゲートに含め、滞留中はファイル不変でも次 tick が回収する。
+    try {
+      _lastUnapplied = promotions.reconcilePaidPromotions(allPayments);
+    } catch (e) {
+      _lastUnapplied = 1; // 失敗時はゲートを開いたままにし次 tick で再試行
+      logger.warn(`promotion reconcile failed: ${e.message}`);
+    }
     if (pending.length === 0) return;
 
     // ループ内の注文/支払い参照は tick 冒頭のスナップショットで解決する —

@@ -135,9 +135,11 @@ function run(dataDir) {
   // orderId 未設定の escrow/payment — orderId フィールド自体を欠くレコードは
   // 上の dangling 検査をすり抜ける（!== undefined でしか判定しない）が、
   // どの注文の資金か判別不能 = 「誰の資金か不明」。清算・返金で注文へ戻れない。
+  // purpose を持つ payment（featured_listing 等の非注文支払い）は意図的に
+  // orderId を持たないため対象外。
   for (const [name, rows] of [['payments.json', payments], ['escrows.json', escrows]]) {
     for (const row of rows) {
-      if (row && row.orderId === undefined) {
+      if (row && row.orderId === undefined && !(name === 'payments.json' && row.purpose)) {
         issues.push({ severity: 'warn', check: 'missing-order-ref', detail: `${name}: id "${row.id}" に orderId がない（どの注文の資金か判別不能）` });
       }
     }

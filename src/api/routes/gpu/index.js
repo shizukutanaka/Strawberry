@@ -1,15 +1,19 @@
 // src/api/routes/gpu/index.js - GPU関連APIルート
 const express = require('express');
 const router = express.Router();
-const { asyncHandler } = require('../../../utils/error-handler');
+const { asyncHandler, APIError, ErrorTypes } = require('../../../utils/error-handler');
+const { config } = require('../../../utils/config');
 const { validateMiddleware, schemas, Joi } = require('../../../utils/validator');
 const { logger } = require('../../../utils/logger');
 const { authenticateJWT, checkRole, allowOwnerOrAdmin } = require('../../middleware/security');
 
 // コアサービスは共有のガード付きシングルトンから取得（未導入時は null）
-const { gpuDetector, vgpuManager, p2pNetwork, requireService } = require('../../../core/services');
+const { gpuDetector, vgpuManager, p2pNetwork, lightning, requireService } = require('../../../core/services');
 // ファイルベースJSONストレージリポジトリ
 const GpuRepository = require('../../../db/json/GpuRepository');
+const PaymentRepository = require('../../../db/json/PaymentRepository');
+// 出品プロモーション（有料ブースト）— featured 支払いの価格/期間・paid 適用
+const promotions = require('../../../utils/promotions');
 // GPU アテステーション（申告スペック vs デバイス計測の照合）
 const { createMockAttestationVerifier } = require('../../../security/gpu-attestation-verifier');
 // 開発/テスト時は Mock、本番では実 nvtrust アダプタへ置き換え可能（DI）
@@ -277,6 +281,13 @@ router.get('/', asyncHandler(async (req, res) => {
     // price (default)
     gpus.sort((a, b) => sortDir * (a.pricePerHour - b.pricePerHour));
   }
+  // 有料プロモーション: featuredUntil が現在より未来の出品を先頭へ
+  // （購入した視認性の提供。同一ブースト内は選択された sort 順を維持）。
+  const _featNow = Date.now();
+  gpus = [
+    ...gpus.filter((g) => promotions.isFeatured(g, _featNow)),
+    ...gpus.filter((g) => !promotions.isFeatured(g, _featNow)),
+  ];
   // ページネーション（limit: 1..200 既定50 / offset: 0..100000）
   // offset を上限化する理由: 未認証エンドポイントで offset=999999999 を指定されると
   // gpus 配列全体をロードした後 O(n) slice が走りイベントループをブロックする DoS になる。
@@ -310,6 +321,7 @@ router.get('/', asyncHandler(async (req, res) => {
           : { average: null, count: 0 },
         // 客観的な信頼性シグナル（プロバイダー身元は露出しない — 集計値のみ）
         reliability: { score: rel.score, tier: rel.tier, sessions: rel.sessions },
+        featured: promotions.isFeatured(gpu, _featNow),
       };
     }),
     timestamp: new Date().toISOString()
@@ -663,6 +675,93 @@ router.post('/:id/clone', authenticateJWT, checkRole(['provider', 'admin']), asy
   const { apiKey: _k, ...safe } = cloned;
   res.status(201).json({ message: 'GPU cloned successfully', gpu: safe, clonedFrom: sourceId });
 }));
+
+// 出品プロモーション購入（認証必須 — 所有者または管理者）
+// POST /gpus/:id/promote — featured 期間を購入し GPU 一覧の上位表示を得る。
+// 支払い経路は注文支払いと同じ2系統: Lightning インボイス（lightning 導入時）か
+// 手動承認（未導入時は pending で記録し管理者が /payments/manual/approve で承認）。
+// orderId を持たない purpose:'featured_listing' 支払いとして記録し、paid 遷移時に
+// promotions.onPaymentPaid が gpu.featuredUntil を延長する。
+router.post('/:id/promote',
+  authenticateJWT,
+  checkRole(['provider', 'admin']),
+  validateMiddleware(Joi.object({ id: Joi.string().uuid().required() }).unknown(true), 'params'),
+  allowOwnerOrAdmin((req) => GpuRepository.getById(req.params.id)),
+  asyncHandler(async (req, res) => {
+    const gpu = req.resource;
+    return withLock(`promote:${gpu.id}`, async () => {
+      const { priceSats, days } = promotions.promotionConfig();
+      // 冪等: 未消化の pending プロモーション支払いがあれば再利用する
+      // （クライアント再送・二重クリックで二重インボイスを発行しない）。
+      const existing = promotions.findPendingPromotion(gpu.id);
+      if (existing) {
+        return res.json({
+          status: 'pending',
+          idempotent: true,
+          paymentId: existing.id,
+          amountSats: existing.amount,
+          paymentMethod: existing.method,
+          paymentRequest: existing.paymentRequest || undefined,
+          expiresAt: existing.invoiceExpiresAt || undefined,
+          featuredDays: days,
+          message: 'A pending promotion payment already exists for this GPU. Reusing it instead of creating a duplicate.',
+        });
+      }
+      if (lightning) {
+        const invoice = await lightning.createInvoice({
+          value: priceSats,
+          memo: `Featured listing for GPU ${gpu.id}`,
+          expiry: config.lightning.invoiceExpirySeconds,
+        });
+        if (!invoice || !invoice.paymentRequest) {
+          throw new APIError(ErrorTypes.LIGHTNING_ERROR, 'Failed to create Lightning invoice', 502);
+        }
+        const expiresAt = new Date(Date.now() + (config.lightning.invoiceExpirySeconds || 3600) * 1000).toISOString();
+        const paymentRecord = PaymentRepository.create({
+          purpose: promotions.PROMOTION_PURPOSE,
+          gpuId: gpu.id,
+          userId: req.user.id,
+          amount: priceSats,
+          status: 'pending',
+          paymentHash: invoice.id,
+          paymentRequest: invoice.paymentRequest,
+          paidAt: null,
+          method: 'lightning',
+          invoiceExpiresAt: expiresAt,
+        });
+        return res.status(201).json({
+          status: 'pending',
+          paymentRequest: invoice.paymentRequest,
+          invoiceId: invoice.id,
+          paymentId: paymentRecord.id,
+          amountSats: priceSats,
+          featuredDays: days,
+          expiresAt,
+          message: 'Lightning invoice created. Pay using your Lightning wallet to activate the featured listing.',
+        });
+      }
+      // Lightning 未導入環境: 手動支払い pending で記録（管理者承認で featured 化）
+      const paymentRecord = PaymentRepository.create({
+        purpose: promotions.PROMOTION_PURPOSE,
+        gpuId: gpu.id,
+        userId: req.user.id,
+        amount: priceSats,
+        status: 'pending',
+        paymentHash: null,
+        paidAt: null,
+        method: 'manual',
+      });
+      return res.status(202).json({
+        status: 'pending',
+        paymentId: paymentRecord.id,
+        amountSats: priceSats,
+        paymentMethod: 'manual',
+        featuredDays: days,
+        message: 'Manual payment request recorded. The featured listing activates after admin approval.',
+      });
+    });
+  })
+);
 
 // GPU一括登録 (認証必須、最大20台)
 // POST /gpus/bulk — 同一プロバイダが複数の GPU をまとめて登録する。

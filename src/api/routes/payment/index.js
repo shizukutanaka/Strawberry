@@ -503,6 +503,10 @@ router.post('/manual/approve/:id',
         throw new APIError(ErrorTypes.VALIDATION, 'Payment cannot be approved in its current state', 400);
       }
       const updated = result.row;
+      // featured_listing 支払いの副作用（gpu.featuredUntil 延長）。
+      // 支払い本体の承認は確定済み — 副作用の失敗は 500 にせず警告に留める。
+      try { require('../../../utils/promotions').onPaymentPaid(updated); }
+      catch (e) { logger.warn(`promotion side-effect failed for payment ${paymentId}: ${e.message}`); }
       res.json({
         message: 'Manual payment approved',
         paymentId,

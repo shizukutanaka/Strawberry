@@ -144,6 +144,13 @@ async function pollOnce() {
             amount: payment.amount
           });
           logger.info(`Invoice settled: paymentId=${payment.id} orderId=${payment.orderId}`);
+          // featured_listing 支払いの副作用（gpu.featuredUntil 延長）。
+          // 決済の paid 記録は確定済み — 副作用失敗はポーラーを止めず警告に留める。
+          try {
+            require('../utils/promotions').onPaymentPaid(payment);
+          } catch (e) {
+            logger.warn(`promotion side-effect failed for payment ${payment.id}: ${e.message}`);
+          }
 
           // Advance order to 'matched' if it is still 'pending'.
           // Use updateIf so a concurrent cancel/reject/expire wins definitively:

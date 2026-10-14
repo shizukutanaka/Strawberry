@@ -6,13 +6,12 @@ const path = require('path');
 const { logger } = require('../utils/logger');
 const PaymentRepository = require('../db/json/PaymentRepository');
 const OrderRepository = require('../db/json/OrderRepository');
-const { appendAuditLog } = require('../utils/audit-log');
 const { registerDaemon, unregisterDaemon } = require('../utils/daemon-registry');
 const { resolveDataDir } = require('../db/json/data-dir');
 const promotions = require('../utils/promotions');
+const settlement = require('./invoice-settlement');
 
 const POLL_INTERVAL_MS = 15_000; // check every 15 s
-const INVOICE_EXPIRE_BUFFER_MS = 60_000; // 1 min grace after invoiceExpiresAt
 const PAYMENTS_FILE = path.join(resolveDataDir(), 'payments.json');
 
 let _timer = null;
@@ -72,143 +71,16 @@ async function pollOnce() {
       paymentsByOrder.set(p.orderId, list);
     }
 
+    // per-invoice の遷移 stage は invoice-settlement へ分離（細分化）—
+    // pollOnce は走査・スナップショット・dispatch のみを担う。
     for (const payment of pending) {
       try {
         const invoiceStatus = await _lightning.checkInvoice(payment.paymentHash);
 
         if (invoiceStatus && invoiceStatus.settled) {
-          // Underpayment guard: a Lightning invoice can be reported settled while
-          // the amount actually received is less than requested (partial/AMP
-          // settlement, or a misbehaving payer). Marking such a payment 'paid'
-          // would fulfil a full-price order for a fraction of its cost. Only the
-          // amount the invoice actually received counts — verify it covers the
-          // expected order amount before confirming.
-          const paidSats = Number(
-            invoiceStatus.amountPaid != null ? invoiceStatus.amountPaid : invoiceStatus.value
-          );
-          const expectedSats = Number(payment.amount);
-          if (Number.isFinite(expectedSats) && expectedSats > 0 &&
-              Number.isFinite(paidSats) && paidSats < expectedSats) {
-            PaymentRepository.update(payment.id, {
-              status: 'failed',
-              failedAt: new Date().toISOString(),
-              failReason: 'underpayment',
-              amountPaid: paidSats
-            });
-            appendAuditLog('payment_underpaid', {
-              paymentId: payment.id,
-              orderId: payment.orderId,
-              expected: expectedSats,
-              paid: paidSats
-            });
-            logger.warn(`Invoice underpaid: paymentId=${payment.id} expected=${expectedSats} paid=${paidSats}; order not advanced`);
-            continue;
-          }
-
-          // 注文状態ゲート: キャンセル/完了済み注文への支払いを拒否。
-          // Lightning インボイスは注文がキャンセルされた後も外部で決済できるため、
-          // ポーラー側で注文状態を再確認して孤立 paid レコードの生成を防ぐ。
-          if (payment.orderId) {
-            const currentOrder = orderById.get(payment.orderId);
-            const PAYABLE = new Set(['pending', 'matched']);
-            if (!currentOrder || !PAYABLE.has(currentOrder.status)) {
-              PaymentRepository.update(payment.id, {
-                status: 'failed',
-                failedAt: new Date().toISOString(),
-                failReason: 'order_not_payable',
-              });
-              appendAuditLog('payment_order_not_payable', {
-                paymentId: payment.id,
-                orderId: payment.orderId,
-                orderStatus: currentOrder ? currentOrder.status : 'not_found',
-              });
-              logger.warn(`Invoice settled but order not payable (orderId=${payment.orderId} status=${currentOrder ? currentOrder.status : 'missing'}); payment marked failed`);
-              continue;
-            }
-            // クロスメソッド二重支払いガード: 別の方式（BTC on-chain/手動）が
-            // 既に settled している場合、Lightning の paid 記録を作成しない。
-            const alreadyPaid = (paymentsByOrder.get(payment.orderId) || [])
-              .filter(p => p.status === 'paid' && p.method !== 'lightning');
-            if (alreadyPaid.length > 0) {
-              PaymentRepository.update(payment.id, {
-                status: 'failed',
-                failedAt: new Date().toISOString(),
-                failReason: 'already_paid_via_other_method',
-              });
-              appendAuditLog('payment_cross_method_duplicate_skipped', {
-                paymentId: payment.id, orderId: payment.orderId,
-              });
-              logger.warn(`Invoice settled but order already paid via another method; paymentId=${payment.id}`);
-              continue;
-            }
-          }
-
-          // Mark payment paid
-          PaymentRepository.update(payment.id, {
-            status: 'paid',
-            paidAt: new Date().toISOString(),
-            settledAt: invoiceStatus.settleDate || new Date().toISOString(),
-            ...(Number.isFinite(paidSats) ? { amountPaid: paidSats } : {})
-          });
-          appendAuditLog('payment_confirmed', {
-            paymentId: payment.id,
-            orderId: payment.orderId,
-            amount: payment.amount
-          });
-          logger.info(`Invoice settled: paymentId=${payment.id} orderId=${payment.orderId}`);
-          // featured_listing 支払いの副作用（gpu.featuredUntil 延長）。
-          // 決済の paid 記録は確定済み — 副作用失敗はポーラーを止めず警告に留める。
-          try {
-            require('../utils/promotions').onPaymentPaid(payment);
-          } catch (e) {
-            logger.warn(`promotion side-effect failed for payment ${payment.id}: ${e.message}`);
-          }
-
-          // Advance order to 'matched' if it is still 'pending'.
-          // Use updateIf so a concurrent cancel/reject/expire wins definitively:
-          // a plain getById+update race would let the poller resurrect a cancelled
-          // order back to 'matched', corrupting cancelReason/cancelledAt metadata
-          // and re-locking the GPU even though the user-cancel path already issued
-          // an escrow refund.
-          if (payment.orderId) {
-            const writeResult = OrderRepository.updateIf(
-              payment.orderId,
-              (o) => o.status === 'pending',
-              { status: 'matched', paidAt: new Date().toISOString() }
-            );
-            if (writeResult && writeResult.ok) {
-              appendAuditLog('order_payment_confirmed', { orderId: payment.orderId });
-              logger.info(`Order advanced to matched: orderId=${payment.orderId}`);
-            } else {
-              const curStatus = writeResult && writeResult.current && writeResult.current.status;
-              logger.warn(`Invoice settled but order not pending (status=${curStatus}); skipping match. paymentId=${payment.id}`);
-              appendAuditLog('order_payment_race_skipped', {
-                orderId: payment.orderId, paymentId: payment.id, orderStatus: curStatus,
-              });
-            }
-          }
-        } else if (_isExpired(payment)) {
-          // Invoice expired without payment — mark failed.
-          // 他経路（手動承認/on-chain/別 tick の settled 処理）が pending を終端へ
-          // 進めた直後にこの書き込みが走ると paid→failed へ回帰させるため、
-          // pending 前提の CAS でのみ failed 化する。
-          const writeResult = PaymentRepository.updateIf(
-            payment.id,
-            (p) => p.status === 'pending',
-            {
-              status: 'failed',
-              failedAt: new Date().toISOString(),
-              failReason: 'invoice_expired'
-            }
-          );
-          if (writeResult && writeResult.ok) {
-            appendAuditLog('payment_expired', { paymentId: payment.id, orderId: payment.orderId });
-            logger.warn(`Invoice expired without payment: paymentId=${payment.id}`);
-          } else {
-            const curStatus = writeResult && writeResult.current && writeResult.current.status;
-            logger.warn(`Invoice expired but payment already terminal (status=${curStatus}); skipping fail. paymentId=${payment.id}`);
-            appendAuditLog('payment_expire_race_skipped', { paymentId: payment.id, status: curStatus });
-          }
+          settlement.applySettledPayment(payment, invoiceStatus, { orderById, paymentsByOrder });
+        } else if (settlement.isInvoiceExpired(payment)) {
+          settlement.applyExpiredPayment(payment);
         }
       } catch (err) {
         // Per-invoice errors should not crash the whole poll cycle
@@ -220,11 +92,6 @@ async function pollOnce() {
   } finally {
     _running = false;
   }
-}
-
-function _isExpired(payment) {
-  if (!payment.invoiceExpiresAt) return false;
-  return Date.now() > new Date(payment.invoiceExpiresAt).getTime() + INVOICE_EXPIRE_BUFFER_MS;
 }
 
 function start(lightningService) {

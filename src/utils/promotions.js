@@ -46,32 +46,75 @@ function findPendingPromotion(gpuId) {
   ) || null;
 }
 
-// 同じ GPU への再購入時、生存不能な pending プロモーション支払いを failed 化。
+// 同じ GPU への再購入時、生存不能な pending プロモーション支払いを終端へ進める。
 // invoice-poller は expiry チェックより先に settle を判定するため、expired でも
 // pending のままのインボイスは後から settle して paid+featured 化しうる —
 // 新インボイスを出す前に旧 pending を終端へ進め、二重課金の余地をなくす。
-function failStalePromotions(gpuId) {
+// ただしローカル期限切れだけでは失格化しない: 期限後でもノード側で既に
+// settle 済みの可能性があり、「支払ったのに failed」の資金損失になるため、
+// まずノードの実決済状態を確認する。settle 済みなら paid+適用（購入成立）、
+// 未決済なら failReason:'replaced' で失格化、確認不能なら残置（poller の
+// 次 tick が settle を判定する — 楽観的に failed にしない）。
+// 返り値: { failed, settled } — settle 確認して paid 化した件数も返す。
+async function failStalePromotions(gpuId, { lightning } = {}) {
   const PaymentRepository = require('../db/json/PaymentRepository');
   const nowMs = Date.now();
   let failed = 0;
+  let settled = 0;
   for (const p of PaymentRepository.getAll() || []) {
-    if (p && p.purpose === PROMOTION_PURPOSE && p.gpuId === gpuId &&
-        p.status === 'pending' &&
-        p.invoiceExpiresAt && new Date(p.invoiceExpiresAt).getTime() <= nowMs) {
-      const r = PaymentRepository.updateIf(p.id, (x) => x.status === 'pending', {
-        status: 'failed',
-        failedAt: new Date().toISOString(),
-        failReason: 'replaced',
-      });
-      if (r && r.ok) failed++;
+    if (!(p && p.purpose === PROMOTION_PURPOSE && p.gpuId === gpuId &&
+          p.status === 'pending' &&
+          p.invoiceExpiresAt && new Date(p.invoiceExpiresAt).getTime() <= nowMs)) continue;
+    if (lightning && p.method === 'lightning' && p.paymentHash) {
+      try {
+        const st = await lightning.checkInvoice(p.paymentHash);
+        if (st && st.settled) {
+          // ノードでは決済済み — poller と同じ underpayment ガードを適用
+          const paidSats = Number(st.amountPaid != null ? st.amountPaid : st.value);
+          const expectedSats = Number(p.amount);
+          if (Number.isFinite(expectedSats) && expectedSats > 0 &&
+              Number.isFinite(paidSats) && paidSats < expectedSats) {
+            PaymentRepository.updateIf(p.id, (x) => x.status === 'pending', {
+              status: 'failed', failedAt: new Date().toISOString(),
+              failReason: 'underpayment', amountPaid: paidSats,
+            });
+            continue;
+          }
+          const r = PaymentRepository.updateIf(p.id, (x) => x.status === 'pending', {
+            status: 'paid',
+            paidAt: new Date().toISOString(),
+            settledAt: st.settleDate || new Date().toISOString(),
+            ...(Number.isFinite(paidSats) ? { amountPaid: paidSats } : {}),
+          });
+          if (r && r.ok) {
+            settled++;
+            try { onPaymentPaid(r.row); }
+            catch (e) { logger.warn(`promotion side-effect failed for payment ${p.id}: ${e.message}`); }
+          }
+          continue; // settle 済みは失格化しない
+        }
+      } catch (e) {
+        // 決済状態を確認できない — 失格化せず残置（poller が次 tick で判定する）
+        logger.warn(`promotion: could not verify stale invoice ${p.paymentHash}: ${e.message}`);
+        continue;
+      }
     }
+    const r = PaymentRepository.updateIf(p.id, (x) => x.status === 'pending', {
+      status: 'failed',
+      failedAt: new Date().toISOString(),
+      failReason: 'replaced',
+    });
+    if (r && r.ok) failed++;
   }
-  return failed;
+  return { failed, settled };
 }
 
 // 支払いが 'paid' へ遷移した際の副作用。featured_listing 目的の支払いなら
-// GPU の featuredUntil を延長し、支払いに featuredActivatedAt を記録する。
-// マーカーにより呼び出しは冪等（paid 確定後に再試行しても二重延長しない）—
+// GPU の featuredUntil を延長し、適用済み支払い id を gpu.featuredPayments に
+// 同じ原子的書込みで記録する。適用記録を支払い側の別ファイル書込み
+// （featuredActivatedAt）だけに頼ると、延長は保存されたのにマーカー書込み前に
+// クラッシュした場合、和解が同じ購入を二度延長する — 真の冪等キーは GPU 行内の
+// featuredPayments で、featuredActivatedAt はあくまで receipt（検査用）。
 // paid だが未適用のレコードは reconcilePaidPromotions が回収する。
 // 延長規則は max(paidAt, 現在の featuredUntil) + days — 残期間を捨てず加算し、
 // 適用が遅れても購入した期間を支払い時刻起点で満額与える。
@@ -87,16 +130,61 @@ function onPaymentPaid(payment, now = Date.now()) {
     logger.warn(`promotion: paid payment ${stored.id} references missing gpu ${stored.gpuId}`);
     return null;
   }
+  let appliedList = Array.isArray(gpu.featuredPayments) ? gpu.featuredPayments : null;
+  if (appliedList === null) {
+    appliedList = [];
+    const t = new Date(gpu.featuredUntil || 0).getTime();
+    if (Number.isFinite(t) && t > 0) {
+      // 移行: 本フィールド導入前に適用済みの履歴を算術で帰属する。
+      // 支払い時刻 paidAt + days ≤ featuredUntil なら、その購入の寄与は
+      // featuredUntil に既に含まれている計算が整合する（含まれていなければ
+      // featuredUntil は必ず paidAt+days 以上に延びていたはず）ため
+      // 「適用済み」へ移行し再付与しない。逆に超える購入は未適用が確定し、
+      // 通常適用へ進む（新規購入が移行で吸収される誤りを防ぐ）。
+      const unmarked = (PaymentRepository.getAll() || []).filter((x) =>
+        x && x.purpose === PROMOTION_PURPOSE && x.gpuId === gpu.id &&
+        x.status === 'paid' && !x.featuredActivatedAt);
+      const absorbed = unmarked.filter((x) => {
+        const pm = x.paidAt ? new Date(x.paidAt).getTime() : NaN;
+        return Number.isFinite(pm) && pm + days * 86_400_000 <= t;
+      });
+      if (absorbed.length > 0) {
+        GpuRepository.updateIf(gpu.id, () => true, {
+          featuredPayments: absorbed.map((x) => x.id),
+        });
+        const stamp = new Date().toISOString();
+        for (const x of absorbed) {
+          PaymentRepository.update(x.id, { featuredActivatedAt: stamp });
+        }
+        appliedList = absorbed.map((x) => x.id);
+        logger.info(`promotion: migrated ${absorbed.length} historical payment(s) on gpu ${gpu.id} to featuredPayments`);
+      }
+      if (absorbed.some((x) => x.id === stored.id)) return gpu;
+    }
+  }
+  if (appliedList.includes(stored.id)) {
+    // 延長は原子的に記録済みで receipt のみ欠落（マーカー書込み前に
+    // 中断したケース）— receipt を書き戻して終了。二度延長はしない。
+    PaymentRepository.update(stored.id, { featuredActivatedAt: new Date().toISOString() });
+    return gpu;
+  }
   const paidMs = stored.paidAt ? new Date(stored.paidAt).getTime() : now;
   const anchor = Number.isFinite(paidMs) ? paidMs : now;
   const current = new Date(gpu.featuredUntil || 0).getTime();
   const base = Number.isFinite(current) && current > anchor ? current : anchor;
   const featuredUntil = new Date(base + days * 86_400_000).toISOString();
-  const result = GpuRepository.updateIf(gpu.id, () => true, { featuredUntil });
+  // featuredUntil と適用記録を1回の原子書込みで保存 — 部分適用（延長は
+  // 保存されたが適用記録なし）を構造的に不可能にする。
+  const result = GpuRepository.updateIf(gpu.id, () => true, {
+    featuredUntil,
+    featuredPayments: [...appliedList, stored.id],
+  });
   if (!result || !result.ok) {
     logger.warn(`promotion: failed to set featuredUntil on gpu ${gpu.id} (payment ${stored.id})`);
     return null;
   }
+  // receipt: 失敗しても gpu.featuredPayments が真の冪等キーとして残っている
+  // ため、次回の呼び出しは延長せず receipt の再書込みだけで収束する。
   PaymentRepository.update(stored.id, { featuredActivatedAt: new Date().toISOString() });
   appendAuditLog('featured_listing_activated', {
     gpuId: gpu.id,

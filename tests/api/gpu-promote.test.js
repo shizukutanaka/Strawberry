@@ -131,17 +131,52 @@ describe('promotions hardening (Devin Review flags)', () => {
     if (p === undefined) delete process.env.FEATURED_LISTING_PRICE_SATS; else process.env.FEATURED_LISTING_PRICE_SATS = p;
   });
 
-  it('failStalePromotions terminally fails expired pending promotions', () => {
+  it('failStalePromotions terminally fails expired pending promotions (unsettled)', async () => {
     const gpu = GpuRepository.create({ name: 'Stale', vendor: 'NVIDIA', model: 'RTX-S', memoryGB: 8, pricePerHour: 10 });
     const stale = PaymentRepository.create({
       purpose: 'featured_listing', gpuId: gpu.id, userId: 'u-s', amount: 1000,
       status: 'pending', method: 'lightning', paymentHash: 'h1',
       invoiceExpiresAt: new Date(Date.now() - 1000).toISOString(),
     });
-    expect(promotions.failStalePromotions(gpu.id)).toBe(1);
+    const lightning = { checkInvoice: async () => ({ settled: false }) };
+    const res = await promotions.failStalePromotions(gpu.id, { lightning });
+    expect(res.failed).toBe(1);
+    expect(res.settled).toBe(0);
     const after = PaymentRepository.getById(stale.id);
     expect(after.status).toBe('failed');
     expect(after.failReason).toBe('replaced');
+  });
+
+  it('failStalePromotions honours node-settled invoices instead of failing them', async () => {
+    const gpu = GpuRepository.create({ name: 'Settled', vendor: 'NVIDIA', model: 'RTX-T', memoryGB: 8, pricePerHour: 10 });
+    const stale = PaymentRepository.create({
+      purpose: 'featured_listing', gpuId: gpu.id, userId: 'u-t', amount: 1000,
+      status: 'pending', method: 'lightning', paymentHash: 'h2',
+      invoiceExpiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    // 期限切れだがノード側では決済済み — 支払者の資金を失わないため
+    // ローカル期限だけでは失格化できない。
+    const lightning = { checkInvoice: async () => ({ settled: true, amountPaid: 1000 }) };
+    const res = await promotions.failStalePromotions(gpu.id, { lightning });
+    expect(res.failed).toBe(0);
+    expect(res.settled).toBe(1);
+    const after = PaymentRepository.getById(stale.id);
+    expect(after.status).toBe('paid');
+    // settle 済み購入は featured が適用される
+    expect(GpuRepository.getById(gpu.id).featuredUntil).toBeTruthy();
+  });
+
+  it('failStalePromotions leaves pending alone when node state is unverifiable', async () => {
+    const gpu = GpuRepository.create({ name: 'Unver', vendor: 'NVIDIA', model: 'RTX-U', memoryGB: 8, pricePerHour: 10 });
+    const stale = PaymentRepository.create({
+      purpose: 'featured_listing', gpuId: gpu.id, userId: 'u-u', amount: 1000,
+      status: 'pending', method: 'lightning', paymentHash: 'h3',
+      invoiceExpiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const lightning = { checkInvoice: async () => { throw new Error('lnd down'); } };
+    const res = await promotions.failStalePromotions(gpu.id, { lightning });
+    expect(res.failed).toBe(0);
+    expect(PaymentRepository.getById(stale.id).status).toBe('pending');
   });
 
   it('onPaymentPaid is idempotent via featuredActivatedAt and anchors at paidAt', () => {
@@ -160,6 +195,60 @@ describe('promotions hardening (Devin Review flags)', () => {
     // 二度目の呼び出しは no-op（延長しない）
     expect(promotions.onPaymentPaid(payment)).toBeNull();
     expect(GpuRepository.getById(gpu.id).featuredUntil).toBe(g1.featuredUntil);
+  });
+
+  it('onPaymentPaid never double-extends: idempotency lives on the gpu row', () => {
+    const gpu = GpuRepository.create({ name: 'Atomic', vendor: 'NVIDIA', model: 'RTX-A', memoryGB: 8, pricePerHour: 10 });
+    const payment = PaymentRepository.create({
+      purpose: 'featured_listing', gpuId: gpu.id, userId: 'u-a', amount: 1000,
+      status: 'paid', paidAt: new Date().toISOString(), method: 'manual',
+    });
+    const g1 = promotions.onPaymentPaid(payment);
+    const until1 = g1.featuredUntil;
+    // マーカー書込み前の中断を再現 — receipt を剥がしても gpu.featuredPayments
+    // には適用記録が残っているため再延長しない（部分適用の二重付与を防ぐ）。
+    PaymentRepository.update(payment.id, { featuredActivatedAt: null });
+    const again = promotions.onPaymentPaid(payment);
+    expect(GpuRepository.getById(gpu.id).featuredUntil).toBe(until1);
+    expect(GpuRepository.getById(gpu.id).featuredPayments).toEqual([payment.id]);
+    // receipt は再書込みで収束
+    expect(PaymentRepository.getById(payment.id).featuredActivatedAt).toBeTruthy();
+  });
+
+  it('migration: paidAt+days already covered by featuredUntil is marked applied (no re-grant)', () => {
+    const gpu = GpuRepository.create({
+      name: 'Legacy', vendor: 'NVIDIA', model: 'RTX-L', memoryGB: 8, pricePerHour: 10,
+      featuredUntil: new Date(Date.now() + 8 * 86_400_000).toISOString(),
+    });
+    // paidAt(1日前)+7日 ≤ featuredUntil(+8日) → 寄与は含まれていると算術整合
+    const payment = PaymentRepository.create({
+      purpose: 'featured_listing', gpuId: gpu.id, userId: 'u-l', amount: 1000,
+      status: 'paid', paidAt: new Date(Date.now() - 86_400_000).toISOString(), method: 'manual',
+    });
+    const before = GpuRepository.getById(gpu.id).featuredUntil;
+    promotions.onPaymentPaid(payment);
+    const after = GpuRepository.getById(gpu.id);
+    // 旧コードで適用済みとみなし延長しない
+    expect(after.featuredUntil).toBe(before);
+    expect(after.featuredPayments).toEqual([payment.id]);
+    expect(PaymentRepository.getById(payment.id).featuredActivatedAt).toBeTruthy();
+  });
+
+  it('migration boundary: paidAt+days exceeding featuredUntil proves unapplied → extends', () => {
+    const gpu = GpuRepository.create({
+      name: 'LegacyNew', vendor: 'NVIDIA', model: 'RTX-LN', memoryGB: 8, pricePerHour: 10,
+      featuredUntil: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+    // paidAt(now)+7日 > featuredUntil(+2日) → この購入の寄与は未適用が確定 → 延長
+    const payment = PaymentRepository.create({
+      purpose: 'featured_listing', gpuId: gpu.id, userId: 'u-ln', amount: 1000,
+      status: 'paid', paidAt: new Date().toISOString(), method: 'manual',
+    });
+    const before = new Date(GpuRepository.getById(gpu.id).featuredUntil).getTime();
+    promotions.onPaymentPaid(payment);
+    const after = GpuRepository.getById(gpu.id);
+    expect(new Date(after.featuredUntil).getTime()).toBeGreaterThan(before);
+    expect(after.featuredPayments).toEqual([payment.id]);
   });
 
   it('reconcilePaidPromotions recovers paid-but-unapplied payments', () => {

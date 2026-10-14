@@ -711,10 +711,11 @@ router.post('/:id/promote',
           message: 'A pending promotion payment already exists for this GPU. Reusing it instead of creating a duplicate.',
         });
       }
-      // 再利用しない stale pending は陽に失格化 — invoice-poller は expiry より
+      // 再利用しない stale pending を終端へ進める — invoice-poller は expiry より
       // settle を先に判定するため、残したまま新インボイスを出すと旧インボイスの
-      // 後払いも paid+featured 化して二重課金になる。
-      promotions.failStalePromotions(gpu.id);
+      // 後払いも paid+featured 化して二重課金になる。失格化の前にノードの実決済
+      // 状態を確認し、settle 済みなら購入成立（paid+適用）として扱う。
+      await promotions.failStalePromotions(gpu.id, { lightning });
       if (lightning) {
         const invoice = await lightning.createInvoice({
           value: priceSats,

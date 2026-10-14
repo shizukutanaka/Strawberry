@@ -88,3 +88,41 @@ describe('createJsonRepository fileName guard', () => {
     try { fs.rmSync(path.join(resolveDataDir(), 'ok.json'), { force: true }); } catch (_) { /* noop */ }
   });
 });
+
+describe('createJsonRepository identity preservation', () => {
+  const fileName = `identity-probe-${process.pid}-${Date.now()}.json`;
+  const filePath = path.join(resolveDataDir(), fileName);
+  const repo = createJsonRepository(fileName, {});
+
+  afterAll(() => {
+    try { fs.rmSync(filePath, { force: true }); } catch (_) { /* noop */ }
+  });
+
+  it('update preserves id and createdAt even when updates carry them', () => {
+    const row = repo.create({ v: 1 });
+    const updated = repo.update(row.id, { id: 'hijacked', createdAt: '1970-01-01T00:00:00.000Z', v: 2 });
+    expect(updated.id).toBe(row.id);
+    expect(updated.createdAt).toBe(row.createdAt);
+    expect(updated.v).toBe(2);
+    expect(repo.getById(row.id).id).toBe(row.id);
+    expect(repo.getById('hijacked')).toBeNull();
+    repo.delete(row.id);
+  });
+
+  it('updateIf preserves id and createdAt', () => {
+    const row = repo.create({ v: 1 });
+    const res = repo.updateIf(row.id, () => true, { id: 'x', createdAt: 'x', v: 2 });
+    expect(res.ok).toBe(true);
+    expect(res.row.id).toBe(row.id);
+    expect(res.row.createdAt).toBe(row.createdAt);
+    repo.delete(row.id);
+  });
+
+  it('updateMany preserves id and createdAt', () => {
+    const row = repo.create({ v: 1 });
+    const res = repo.updateMany([{ id: row.id, updates: { id: 'x', createdAt: 'x', v: 2 } }]);
+    expect(res.rows[0].id).toBe(row.id);
+    expect(res.rows[0].createdAt).toBe(row.createdAt);
+    repo.delete(row.id);
+  });
+});

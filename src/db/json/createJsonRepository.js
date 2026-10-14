@@ -36,6 +36,21 @@ function stripDangerousKeys(obj) {
   return cleaned;
 }
 
+// 部分 merge の不変条件: id と createdAt は既存行の値を常に保持する。
+// `{ ...row, ...updates }` の素直な merge だと、updates に混入した
+// id/createdAt が行を再採番してしまう — 参照キー（orders.gpuId、
+// payments.orderId 等）は古い id を指したまま宙吊りになり、
+// getById が別行を返す二重 ID 衝突も起きうる。createdAt の書き換えは
+// 監査の時系列（fund-before-order 検査等）を壊す。
+// strip ではなく復元にする理由: 呼び出し側が id を含む丸ごと行を渡しても
+// 静黙に既存値へ戻す方が、フィールドを落とすより事故を起こさない。
+function mergePreservingIdentity(row, updates) {
+  const merged = { ...row, ...stripDangerousKeys(updates) };
+  if (row.id !== undefined) merged.id = row.id;
+  if (row.createdAt !== undefined) merged.createdAt = row.createdAt;
+  return merged;
+}
+
 function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
   // fileName はリテラル文字列のみを期待する（呼び出し側は全てコード内定数）。
   // path.resolve の仕様上 fileName が絶対パスであれば data/ プレフィックスを無効化できる
@@ -161,7 +176,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         audit('update', { id, result: 'not_found' });
         return null;
       }
-      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+      rows[idx] = mergePreservingIdentity(rows[idx], updates);
       persist(rows);
       audit('update', { id, updates });
       return rows[idx];
@@ -179,7 +194,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         if (!entry || entry.id === undefined) continue;
         const idx = indexById.get(entry.id);
         if (idx === undefined) continue;
-        rows[idx] = { ...rows[idx], ...stripDangerousKeys(entry.updates) };
+        rows[idx] = mergePreservingIdentity(rows[idx], entry.updates);
         updatedRows.push(rows[idx]);
       }
       if (updatedRows.length > 0) persist(rows);
@@ -200,7 +215,7 @@ function createJsonRepository(fileName, { finders = {}, onAccess } = {}) {
         audit('updateIf', { id, result: 'condition_failed' });
         return { ok: false, reason: 'condition_failed', current: rows[idx] };
       }
-      rows[idx] = { ...rows[idx], ...stripDangerousKeys(updates) };
+      rows[idx] = mergePreservingIdentity(rows[idx], updates);
       persist(rows);
       audit('updateIf', { id, updates });
       return { ok: true, row: rows[idx] };

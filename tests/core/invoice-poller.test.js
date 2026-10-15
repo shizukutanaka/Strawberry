@@ -149,3 +149,101 @@ describe('invoice-poller N+1 batching', () => {
     expect(PaymentRepository.getById(payment.id).status).toBe('paid');
   });
 });
+
+// --- invoice-settlement stage functions (invoice-poller からの細分化) ---
+// pollOnce 経由の統合テストは上記にある。ここでは資金パスの各ガードを
+// stage 関数へ直接打って契約を固定する。
+const settlement = require('../../src/core/invoice-settlement');
+const GpuRepository = require('../../src/db/json/GpuRepository');
+
+describe('invoice-settlement stages', () => {
+  // pollOnce と同じ tick スナップショット構築（orderId → payment 配列）。
+  const maps = () => {
+    const orderById = new Map(OrderRepository.getAll().map((o) => [o.id, o]));
+    const paymentsByOrder = new Map();
+    for (const p of PaymentRepository.getAll()) {
+      if (!p.orderId) continue;
+      const list = paymentsByOrder.get(p.orderId) || [];
+      list.push(p);
+      paymentsByOrder.set(p.orderId, list);
+    }
+    return { orderById, paymentsByOrder };
+  };
+
+  it('isInvoiceExpired: バッファ内は false、超過で true', () => {
+    const p1 = { invoiceExpiresAt: new Date(Date.now() - 30_000).toISOString() };
+    const p2 = { invoiceExpiresAt: new Date(Date.now() - 120_000).toISOString() };
+    expect(settlement.isInvoiceExpired(p1)).toBe(false);
+    expect(settlement.isInvoiceExpired(p2)).toBe(true);
+    expect(settlement.isInvoiceExpired({})).toBe(false);
+  });
+
+  it('applySettledPayment: 不足支払いは underpaid を返し failed 化', () => {
+    const order = OrderRepository.create({ status: 'pending' });
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', amount: 1000, orderId: order.id,
+    });
+    const r = settlement.applySettledPayment(
+      payment, { settled: true, amountPaid: 10 }, maps());
+    expect(r).toBe('underpaid');
+    expect(PaymentRepository.getById(payment.id).failReason).toBe('underpayment');
+  });
+
+  it('applySettledPayment: 注文が非 payable なら order_not_payable で failed 化', () => {
+    const order = OrderRepository.create({ status: 'cancelled' });
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', amount: 1000, orderId: order.id,
+    });
+    const r = settlement.applySettledPayment(
+      payment, { settled: true, amountPaid: 1000 }, maps());
+    expect(r).toBe('order_not_payable');
+    expect(PaymentRepository.getById(payment.id).failReason).toBe('order_not_payable');
+  });
+
+  it('applySettledPayment: 他方式の paid 済みは duplicate_method で failed 化', () => {
+    const order = OrderRepository.create({ status: 'pending' });
+    PaymentRepository.create({
+      method: 'manual', status: 'paid', amount: 1000, orderId: order.id,
+    });
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', amount: 1000, orderId: order.id,
+    });
+    const r = settlement.applySettledPayment(
+      payment, { settled: true, amountPaid: 1000 }, maps());
+    expect(r).toBe('duplicate_method');
+    expect(PaymentRepository.getById(payment.id).failReason).toBe('already_paid_via_other_method');
+  });
+
+  it('applySettledPayment: 正常系は paid を返し注文を matched へ進める', () => {
+    const order = OrderRepository.create({ status: 'pending' });
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', amount: 1000, orderId: order.id,
+    });
+    const r = settlement.applySettledPayment(
+      payment, { settled: true, amountPaid: 1000 }, maps());
+    expect(r).toBe('paid');
+    expect(PaymentRepository.getById(payment.id).status).toBe('paid');
+    expect(OrderRepository.getById(order.id).status).toBe('matched');
+  });
+
+  it('applySettledPayment: featured_listing 支払いは featuredUntil を延長', () => {
+    const gpu = GpuRepository.create({ name: 'S', vendor: 'NVIDIA', model: 'RTX-S', memoryGB: 8, pricePerHour: 10 });
+    const payment = PaymentRepository.create({
+      method: 'lightning', status: 'pending', amount: 1000,
+      purpose: 'featured_listing', gpuId: gpu.id,
+    });
+    const r = settlement.applySettledPayment(
+      payment, { settled: true, amountPaid: 1000 }, maps());
+    expect(r).toBe('paid');
+    expect(GpuRepository.getById(gpu.id).featuredUntil).toBeTruthy();
+  });
+
+  it('applyExpiredPayment: pending は expired で failed 化、終端済みは already_terminal', () => {
+    const p1 = PaymentRepository.create({ method: 'lightning', status: 'pending', amount: 5 });
+    expect(settlement.applyExpiredPayment(p1)).toBe('expired');
+    expect(PaymentRepository.getById(p1.id).failReason).toBe('invoice_expired');
+    const p2 = PaymentRepository.create({ method: 'lightning', status: 'paid', amount: 5 });
+    expect(settlement.applyExpiredPayment(p2)).toBe('already_terminal');
+    expect(PaymentRepository.getById(p2.id).status).toBe('paid');
+  });
+});

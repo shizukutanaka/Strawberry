@@ -2,6 +2,7 @@
 // Probe 41 regression tests:
 // 41a-2: invoice-poller checks order status before marking payment paid (no orphaned paid on cancelled order)
 // 41a-1: invoice-poller checks for cross-method paid records before marking Lightning paid
+// (41a のガード実体は src/core/invoice-settlement.js へ細分化済み — ソースガードはそこを読む)
 // 41b-3: minRenterRating floor blocks renters with a KNOWN average below the floor.
 //        Unrated newcomers are allowed by default (marketplace onboarding); providers
 //        can opt into Sybil-resistant strictness with gpu.rejectUnratedRenters:true.
@@ -22,7 +23,7 @@ afterAll(() => {
 describe('invoice-poller: order status gate prevents paid record on cancelled order', () => {
   it('invoice-poller.js: checks order status (PAYABLE set) before marking payment paid', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/core/invoice-poller.js'), 'utf-8'
+      require.resolve('../../src/core/invoice-settlement.js'), 'utf-8'
     );
     expect(src).toMatch(/PAYABLE.*pending.*matched|pending.*matched.*PAYABLE/);
     expect(src).toMatch(/order_not_payable/);
@@ -31,7 +32,7 @@ describe('invoice-poller: order status gate prevents paid record on cancelled or
 
   it('invoice-poller.js: marks payment failed (not paid) when order is not payable', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/core/invoice-poller.js'), 'utf-8'
+      require.resolve('../../src/core/invoice-settlement.js'), 'utf-8'
     );
     const failIdx = src.indexOf("failReason: 'order_not_payable'");
     expect(failIdx).toBeGreaterThan(-1);
@@ -42,7 +43,7 @@ describe('invoice-poller: order status gate prevents paid record on cancelled or
 
   it('invoice-poller.js: logs warning and appends audit when order not payable', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/core/invoice-poller.js'), 'utf-8'
+      require.resolve('../../src/core/invoice-settlement.js'), 'utf-8'
     );
     expect(src).toMatch(/appendAuditLog.*payment_order_not_payable/);
     expect(src).toMatch(/logger\.warn.*order not payable/);
@@ -53,7 +54,7 @@ describe('invoice-poller: order status gate prevents paid record on cancelled or
 describe('invoice-poller: cross-method paid guard prevents double-pay', () => {
   it('invoice-poller.js: checks for existing paid records before marking Lightning paid', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/core/invoice-poller.js'), 'utf-8'
+      require.resolve('../../src/core/invoice-settlement.js'), 'utf-8'
     );
     expect(src).toMatch(/already_paid_via_other_method/);
     // Filter: paid records from non-Lightning methods
@@ -62,7 +63,7 @@ describe('invoice-poller: cross-method paid guard prevents double-pay', () => {
 
   it('invoice-poller.js: marks payment failed when another method already settled the order', () => {
     const src = require('fs').readFileSync(
-      require.resolve('../../src/core/invoice-poller.js'), 'utf-8'
+      require.resolve('../../src/core/invoice-settlement.js'), 'utf-8'
     );
     expect(src).toMatch(/failReason: 'already_paid_via_other_method'/);
     expect(src).toMatch(/appendAuditLog.*payment_cross_method_duplicate_skipped/);

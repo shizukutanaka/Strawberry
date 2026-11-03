@@ -154,6 +154,76 @@ function run(dataDir) {
     }
   }
 
+  // featured 健全性（課金された上位表示の帳簿保護）。
+  // featuredUntil は onPaymentPaid 経由でしか書かれず、延長規則は
+  // max(paidAt, 既存の期限) + days の連鎖。paid 購入列から期待できる期限の
+  // 上限を復元し（購入日数は現在の env 値で近似 — 過去の設定変更があると
+  // 厳密には一致しないため warn 止まり）、以下を検査する:
+  // (a) featuredUntil が日付解釈不能 → isFeatured が静黙に false を返し、
+  //     課金済み上位表示が姿を消す（ユーザーが見て気づけない値損失）。
+  // (b) featuredUntil が未来なのに paid featured 支払いが1件も無い →
+  //     手動編集による無償 featured（収益漏れ）か支払い記録欠落の兆候。
+  // (c) featuredUntil が復元した期待期限を超える → 過去購入を根拠にできない
+  //     不当な延長（無償 featured の変種）。
+  // (d) 課金・適用済みで期待期限が未来なのに featuredUntil が欠落 →
+  //     課金済み上位表示の消失（両方向の既存検査をすり抜ける）。
+  // (e) featuredPayments は二重延長防止の冪等台帳 — 配列でない型や、
+  //     存在しない/非 featured/別 GPU の支払いへの参照は台帳破損
+  //     （receipt 欠落支払いの再処理で二重延長し得る）。
+  {
+    const { promotionConfig } = require('../src/utils/promotions');
+    const { days: featuredDays } = promotionConfig();
+    const dayMs = featuredDays * 86_400_000;
+    const paymentById = new Map(payments.map((p) => [p && p.id, p]));
+    const paidPromotionsByGpu = new Map();
+    for (const p of payments) {
+      if (p && p.purpose === 'featured_listing' && p.status === 'paid' && p.gpuId) {
+        const list = paidPromotionsByGpu.get(p.gpuId) || [];
+        list.push(p);
+        paidPromotionsByGpu.set(p.gpuId, list);
+      }
+    }
+    const nowMs = Date.now();
+    for (const g of gpus) {
+      if (!g) continue;
+      // paid 購入列を paidAt 昇順で連鎖適用し期待期限の上限を復元。
+      // onPaymentPaid と同じく基点は max(前の期限, paidAt)。
+      const paid = (paidPromotionsByGpu.get(g.id) || [])
+        .map((p) => new Date(p.paidAt || p.createdAt || 0).getTime())
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+      let expectedEnd = -Infinity;
+      for (const paidMs of paid) expectedEnd = Math.max(expectedEnd, paidMs) + dayMs;
+
+      const hasUntil = g.featuredUntil !== undefined && g.featuredUntil !== null;
+      const untilMs = hasUntil ? new Date(g.featuredUntil).getTime() : NaN;
+      if (hasUntil && !Number.isFinite(untilMs)) {
+        issues.push({ severity: 'warn', check: 'invalid-featured-until', detail: `gpus.json: id "${g.id}" の featuredUntil "${g.featuredUntil}" は日付解釈不能（上位表示が静黙に無効化される）` });
+      } else if (hasUntil && untilMs > nowMs) {
+        if (paid.length === 0) {
+          issues.push({ severity: 'warn', check: 'unbacked-featured-window', detail: `gpus.json: id "${g.id}" の featuredUntil "${g.featuredUntil}" が未来だが paid featured_listing 支払いがない（無償 featured/支払い記録欠落の兆候）` });
+        } else if (untilMs > expectedEnd) {
+          issues.push({ severity: 'warn', check: 'unexplained-featured-window', detail: `gpus.json: id "${g.id}" の featuredUntil "${g.featuredUntil}" は paid 購入から説明できる期限 ${new Date(expectedEnd).toISOString()} を超える（不当な延長の兆候）` });
+        }
+      } else if (!hasUntil && expectedEnd > nowMs) {
+        issues.push({ severity: 'warn', check: 'missing-featured-until', detail: `gpus.json: id "${g.id}" は課金済み featured 期間が残るはずだが featuredUntil がない（課金済み上位表示の消失）` });
+      }
+
+      if (g.featuredPayments !== undefined && g.featuredPayments !== null) {
+        if (!Array.isArray(g.featuredPayments)) {
+          issues.push({ severity: 'warn', check: 'invalid-featured-ledger', detail: `gpus.json: id "${g.id}" の featuredPayments が配列でない（冪等台帳の型破損 — 再適用で二重延長し得る）` });
+        } else {
+          for (const pid of g.featuredPayments) {
+            const ref = paymentById.get(pid);
+            if (!ref || ref.purpose !== 'featured_listing' || ref.status !== 'paid' || ref.gpuId !== g.id) {
+              issues.push({ severity: 'warn', check: 'dangling-featured-ref', detail: `gpus.json: id "${g.id}" の featuredPayments が適用台帳に記録できない支払い "${pid}" を参照（冪等台帳の破損）` });
+            }
+          }
+        }
+      }
+    }
+  }
+
   // エンティティ横断参照: gpuId→gpus、providerId/renterId/userId→users。
   // ユーザー削除等で dangling が正当な場合もあり得るため warn 止まり
   // （資金直結の orderId 参照だけ error）。

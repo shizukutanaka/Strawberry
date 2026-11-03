@@ -509,6 +509,20 @@ function run(dataDir) {
     if (p && p.status === 'paid' && !p.paidAt) {
       issues.push({ severity: 'warn', check: 'missing-paid-timestamp', detail: `payments.json: id "${p.id}" は paid だが paidAt がない（支払い時刻が不明）` });
     }
+    // 対称: failed だが証跡（failedAt/failReason）を欠く支払い。
+    // 失格化経路は全て failedAt+failReason を書く（invoice-settlement /
+    // promotions / payment ルート）ため、欠落は経路外の手動編集か旧式破損 —
+    // 失敗理由が不明だと返金可否・二重課金の調査ができない。
+    // failReason の定義値集合は決済失格化の全書込み点からの列挙。
+    if (p && p.status === 'failed') {
+      if (!p.failedAt) {
+        issues.push({ severity: 'warn', check: 'missing-failed-timestamp', detail: `payments.json: id "${p.id}" は failed だが failedAt がない（失敗時刻の証跡欠落）` });
+      }
+      const KNOWN_FAIL_REASONS = new Set(['underpayment', 'order_not_payable', 'already_paid_via_other_method', 'invoice_expired', 'replaced']);
+      if (!p.failReason || !KNOWN_FAIL_REASONS.has(p.failReason)) {
+        issues.push({ severity: 'warn', check: 'unknown-fail-reason', detail: `payments.json: id "${p.id}" の failReason "${p.failReason}" は未定義値（失敗原因不明の failed 記録 — 返金・二重課金調査不能）` });
+      }
+    }
   }
 
   // 開始予定を大幅に過ぎた pending order — scheduledStartAt は作成時

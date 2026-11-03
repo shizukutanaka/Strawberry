@@ -1683,3 +1683,27 @@ describe('users.status 列挙値', () => {
     expect(issues.some((i) => i.check === 'unknown-user-status')).toBe(false);
   });
 });
+
+describe('failed 支払いの証跡', () => {
+  let dir;
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it('warns on a failed payment missing failedAt or carrying an unknown failReason', () => {
+    dir = makeDataDir({
+      'payments.json': [
+        { id: 'p1', orderId: 'o1', status: 'failed', method: 'lightning', failReason: 'invoice_expired' },
+        { id: 'p2', orderId: 'o1', status: 'failed', method: 'lightning', failedAt: '2025-01-01T00:00:00Z', failReason: 'typo_reason' },
+        { id: 'p3', orderId: 'o1', status: 'failed', method: 'lightning', failedAt: '2025-01-01T00:00:00Z', failReason: 'underpayment' },
+      ],
+      'orders.json': [{ id: 'o1', status: 'cancelled' }],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-failed-timestamp' && i.detail.includes('p1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'unknown-fail-reason' && i.detail.includes('p2'))).toBe(true);
+    expect(issues.some((i) => i.check === 'missing-failed-timestamp' && i.detail.includes('p3'))).toBe(false);
+    expect(issues.some((i) => i.check === 'unknown-fail-reason' && i.detail.includes('p3'))).toBe(false);
+  });
+});

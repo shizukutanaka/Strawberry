@@ -1578,3 +1578,73 @@ describe('featured 健全性', () => {
     expect(dangling.some((i) => i.detail.includes('p1'))).toBe(true); // paid だが別 GPU の支払い
   });
 });
+
+describe('featured 健全性（期限の根拠照合）', () => {
+  let dir;
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  const baseCollections = (gpus, payments = []) => ({
+    'orders.json': [],
+    'payments.json': payments,
+    'escrows.json': [],
+    'verifications.json': [],
+    'gpus.json': gpus,
+    'users.json': [],
+  });
+
+  it('warns when a paid purchase exists but cannot explain the future window', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredUntil: '2999-01-01T00:00:00Z', featuredPayments: ['p1'] },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g1', status: 'paid', paidAt: '2025-01-01T00:00:00Z', featuredActivatedAt: '2025-01-01T00:00:01Z' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unexplained-featured-window' && i.detail.includes('g1'))).toBe(true);
+    expect(issues.some((i) => i.check === 'unbacked-featured-window')).toBe(false);
+  });
+
+  it('chains multiple paid purchases when restoring the expected window', () => {
+    // 2件の7日分購入（2998-12-20/2998-12-25）→ 連鎖期待期限 = 2998-12-27+7日 = 2999-01-03。それ以下なら警告なし。
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredUntil: '2999-01-02T00:00:00Z', featuredPayments: ['p1', 'p2'] },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g1', status: 'paid', paidAt: '2998-12-20T00:00:00Z', featuredActivatedAt: '2998-12-20T00:00:01Z' },
+      { id: 'p2', purpose: 'featured_listing', gpuId: 'g1', status: 'paid', paidAt: '2998-12-25T00:00:00Z', featuredActivatedAt: '2998-12-25T00:00:01Z' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unexplained-featured-window')).toBe(false);
+    expect(issues.some((i) => i.check === 'unbacked-featured-window')).toBe(false);
+  });
+
+  it('warns when featuredUntil is missing but paid purchases still cover future time', () => {
+    const futurePaid = new Date(Date.now() + 86400000).toISOString();
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredPayments: ['p1'] },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g1', status: 'paid', paidAt: futurePaid, featuredActivatedAt: futurePaid },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-featured-until' && i.detail.includes('g1'))).toBe(true);
+  });
+
+  it('does not flag missing featuredUntil when all paid purchases already expired', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredPayments: ['p1'] },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g1', status: 'paid', paidAt: '2020-01-01T00:00:00Z', featuredActivatedAt: '2020-01-01T00:00:01Z' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'missing-featured-until')).toBe(false);
+  });
+
+  it('warns on a non-array featuredPayments ledger', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredPayments: 'p1' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-featured-ledger' && i.detail.includes('g1'))).toBe(true);
+  });
+});

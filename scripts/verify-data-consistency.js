@@ -988,6 +988,21 @@ function run(dataDir) {
     }
   }
 
+  // users.status の列挙値検査 — 認証/ログインは status === 'deactivated' のみを
+  // 拒否し（jwt-auth.js:84, user/index.js:151）、ロール変更は 'suspended' も
+  // 拒否する（user/index.js:971）。未定義・未知値（typo の 'deactivatd' や
+  // 独自の 'banned' 等）は全て稼働中として扱われるため、無効化したつもりの
+  // アカウントが全権限のまま残る静黙の権限残留になる。
+  {
+    const KNOWN_USER_STATUSES = new Set(['active', 'suspended', 'deactivated']);
+    for (const u of users) {
+      if (!u || u.status === undefined || u.status === null) continue;
+      if (!KNOWN_USER_STATUSES.has(u.status)) {
+        issues.push({ severity: 'warn', check: 'unknown-user-status', detail: `users.json: id "${u.id}" の status "${u.status}" は未定義値（稼働中扱いになる — 無効化の失敗/混入値の兆候）` });
+      }
+    }
+  }
+
   // 同一メールの複数ユーザ（登録経路で大小文字正規化が揃っていないため衝突し得る:
   // OAuth は lowered、パスワード登録は非正規化。getByEmail が曖昧化する）
   const seenEmails = new Map();

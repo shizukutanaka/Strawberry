@@ -1648,3 +1648,38 @@ describe('featured 健全性（期限の根拠照合）', () => {
     expect(issues.some((i) => i.check === 'invalid-featured-ledger' && i.detail.includes('g1'))).toBe(true);
   });
 });
+
+describe('users.status 列挙値', () => {
+  let dir;
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it('warns on an unknown user status (silently treated as active by auth)', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'a@example.com', role: 'user', status: 'banned' },
+        { id: 'u2', email: 'b@example.com', role: 'user', status: 'deactivatd' },
+        { id: 'u3', email: 'c@example.com', role: 'admin' },
+      ],
+    });
+    const { issues } = run(dir);
+    const hits = issues.filter((i) => i.check === 'unknown-user-status');
+    expect(hits.some((i) => i.detail.includes('u1'))).toBe(true);
+    expect(hits.some((i) => i.detail.includes('u2'))).toBe(true);
+    expect(hits.some((i) => i.detail.includes('u3'))).toBe(false); // status 未設定は正常
+  });
+
+  it('accepts known statuses without warning', () => {
+    dir = makeDataDir({
+      'users.json': [
+        { id: 'u1', email: 'a@example.com', role: 'user', status: 'suspended' },
+        { id: 'u2', email: 'b@example.com', role: 'user', status: 'deactivated' },
+        { id: 'u3', email: 'c@example.com', role: 'admin', status: 'active' },
+      ],
+    });
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unknown-user-status')).toBe(false);
+  });
+});

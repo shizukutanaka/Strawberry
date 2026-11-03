@@ -154,6 +154,42 @@ function run(dataDir) {
     }
   }
 
+  // featured 健全性（課金された上位表示の帳簿保護）。
+  // (a) featuredUntil が日付解釈不能 → promotions.isFeatured が静黙に false を
+  //     返し、課金済み上位表示が姿を消す（ユーザーが見て気づけない値損失）。
+  // (b) featuredUntil が未来なのに対応する paid featured_listing 支払いが1件も
+  //     無い → featuredUntil は onPaymentPaid 経由でしか書かれないため、手動編集
+  //     による無償 featured（収益漏れ）か支払い記録欠落の兆候。
+  // (c) featuredPayments は二重延長防止の冪等台帳 — 要素が存在しない支払い/
+  //     featured_listing 以外/別 GPU の支払いを指すと台帳破損（正当な再適用を
+  //     妨げる・適用履歴の証跡が失われる）。
+  {
+    const paymentById = new Map(payments.map((p) => [p && p.id, p]));
+    const paidPromotionGpuIds = new Set(
+      payments
+        .filter((p) => p && p.purpose === 'featured_listing' && p.status === 'paid')
+        .map((p) => p.gpuId)
+    );
+    const nowMs = Date.now();
+    for (const g of gpus) {
+      if (!g || g.featuredUntil === undefined || g.featuredUntil === null) continue;
+      const untilMs = new Date(g.featuredUntil).getTime();
+      if (!Number.isFinite(untilMs)) {
+        issues.push({ severity: 'warn', check: 'invalid-featured-until', detail: `gpus.json: id "${g.id}" の featuredUntil "${g.featuredUntil}" は日付解釈不能（上位表示が静黙に無効化される）` });
+      } else if (untilMs > nowMs && !paidPromotionGpuIds.has(g.id)) {
+        issues.push({ severity: 'warn', check: 'unbacked-featured-window', detail: `gpus.json: id "${g.id}" の featuredUntil "${g.featuredUntil}" が未来だが paid featured_listing 支払いがない（無償 featured/支払い記録欠落の兆候）` });
+      }
+      if (Array.isArray(g.featuredPayments)) {
+        for (const pid of g.featuredPayments) {
+          const ref = paymentById.get(pid);
+          if (!ref || ref.purpose !== 'featured_listing' || ref.status !== 'paid' || ref.gpuId !== g.id) {
+            issues.push({ severity: 'warn', check: 'dangling-featured-ref', detail: `gpus.json: id "${g.id}" の featuredPayments が適用台帳に記録できない支払い "${pid}" を参照（冪等台帳の破損）` });
+          }
+        }
+      }
+    }
+  }
+
   // エンティティ横断参照: gpuId→gpus、providerId/renterId/userId→users。
   // ユーザー削除等で dangling が正当な場合もあり得るため warn 止まり
   // （資金直結の orderId 参照だけ error）。

@@ -1518,3 +1518,63 @@ describe('escrow history FSM legality', () => {
     expect(breach.some((i) => i.detail.includes('o3'))).toBe(false);
   });
 });
+
+describe('featured 健全性', () => {
+  let dir;
+  afterEach(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  const baseCollections = (gpus, payments = []) => ({
+    'orders.json': [],
+    'payments.json': payments,
+    'escrows.json': [],
+    'verifications.json': [],
+    'gpus.json': gpus,
+    'users.json': [],
+  });
+
+  it('warns on a non-parseable featuredUntil (silent loss of paid visibility)', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredUntil: 'not-a-date' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'invalid-featured-until' && i.detail.includes('g1'))).toBe(true);
+  });
+
+  it('warns on a future featuredUntil with no paid featured payment (unbacked featured)', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredUntil: '2999-01-01T00:00:00Z' },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g1', status: 'pending' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unbacked-featured-window' && i.detail.includes('g1'))).toBe(true);
+  });
+
+  it('does not flag a future featuredUntil backed by a paid featured payment', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredUntil: '2999-01-01T00:00:00Z', featuredPayments: ['p1'] },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g1', status: 'paid', paidAt: '2998-12-25T00:00:00Z', featuredActivatedAt: '2998-12-25T00:00:01Z' },
+    ]));
+    const { issues } = run(dir);
+    expect(issues.some((i) => i.check === 'unbacked-featured-window')).toBe(false);
+    expect(issues.some((i) => i.check === 'invalid-featured-until')).toBe(false);
+    expect(issues.some((i) => i.check === 'dangling-featured-ref')).toBe(false);
+  });
+
+  it('warns when featuredPayments references a payment the ledger cannot vouch for', () => {
+    dir = makeDataDir(baseCollections([
+      { id: 'g1', providerId: 'u1', pricePerHour: 100, model: 'RTX 4090', featuredUntil: '2020-01-01T00:00:00Z', featuredPayments: ['ghost', 'p1'] },
+      { id: 'g2', providerId: 'u1', pricePerHour: 100, model: 'RTX 3080' },
+    ], [
+      { id: 'p1', purpose: 'featured_listing', gpuId: 'g2', status: 'paid', paidAt: '2019-12-01T00:00:00Z', featuredActivatedAt: '2019-12-01T00:00:01Z' },
+    ]));
+    const { issues } = run(dir);
+    const dangling = issues.filter((i) => i.check === 'dangling-featured-ref');
+    expect(dangling.some((i) => i.detail.includes('ghost'))).toBe(true);
+    expect(dangling.some((i) => i.detail.includes('p1'))).toBe(true); // paid だが別 GPU の支払い
+  });
+});

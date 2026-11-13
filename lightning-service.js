@@ -68,8 +68,11 @@ class LightningService extends EventEmitter {
         this.config = {
             host: process.env.LND_HOST || 'localhost:10009',
             certPath: process.env.LND_CERT_PATH || path.join(process.env.HOME, '.lnd/tls.cert'),
-            macaroonPath: process.env.LND_MACAROON_PATH || path.join(process.env.HOME, '.lnd/data/chain/bitcoin/mainnet/admin.macaroon'),
-            network: process.env.BITCOIN_NETWORK || 'mainnet'
+            // 既定は安全側の testnet（配布方針: testnet／モックのまま配布し、mainnet は
+            // 有効化しない）。mainnet を使う場合は BITCOIN_NETWORK と
+            // LND_MACAROON_PATH の両方を環境変数で明示指定すること。
+            macaroonPath: process.env.LND_MACAROON_PATH || path.join(process.env.HOME, '.lnd/data/chain/bitcoin/testnet/admin.macaroon'),
+            network: process.env.BITCOIN_NETWORK || 'testnet'
         };
         this.invoices = new Map();
         this.payments = new Map();

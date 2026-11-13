@@ -1,7 +1,7 @@
 {
   "name": "strawberry-gpu-marketplace",
   "version": "0.1.0",
-  "description": "P2P GPU Marketplace OSS (BTC Lightning対応/分散型/自動監視/多段通知/3重認証/Swagger UI対応)",
+  "description": "P2P GPU Marketplace OSS (BTC Lightning決済は testnet/モック限定・mainnet未対応/分散型/自動監視/多段通知/3重認証/Swagger UI対応)",
   "private": true,
   "license": "MIT",
   "repository": {

@@ -1,5 +1,11 @@
 # Lightning Network 連携ガイド
 
+> **⚠️ ネットワークに関する決定（2026-11-13 明記）**: 本プロジェクトでは **Bitcoin mainnet を有効化しません**。
+> 決済は testnet／モックのまま配布します。下記の `LND_MACAROON_PATH` の既定値はコード側で
+> mainnet のパスを指していますが、これは既定値が決定に合わせて変更されていないためで、
+> 利用する場合は **必ず testnet の macaroon パスと `BITCOIN_NETWORK=testnet` を明示指定**してください。
+> なお LND 未接続時はモックにフォールバックし、実際の送金は行われません。
+
 Strawberry の Lightning 連携は2系統あります。混同しやすいため分けて記載します。
 
 ## A. 注文エスクローの請求/着金確認 — LND gRPC（既定）

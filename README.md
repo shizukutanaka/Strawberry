@@ -1,10 +1,16 @@
 # Strawberry
 
-> **状態に関する注記（2026-06）**: 本READMEと `improvement_checklist2.md` には、実装より先行した
+> **状態に関する注記（2026-06、2026-11-13 更新）**: 本READMEと `improvement_checklist2.md` には、実装より先行した
 > （未実装を含む）記述があります。リポジトリの**実態・既知の制約・このブランチでの修正点**は
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照してください。
 > 現状は Express の Web API + JSON データ層が動作対象で、P2P/Lightning/仮想GPU の各サービスは
 > オプション（未配線）です。秘密鍵は `.env`（`.env.example` 参照）で設定してください。
+>
+> 各サービスの実態: **P2P は無効**（現行 libp2p が ESM 専用のため `require()` できず読み込めません）、
+> **Lightning は LND 未接続時はモック**で、エスクローの実 LN 払い出しはアダプタ未注入のため実行されません、
+> **仮想GPU はロード可能ですが Docker/Kubernetes の実機が必要**です。
+> また本プロジェクトの決済は **testnet／モックのまま配布し、Bitcoin mainnet は有効化しません**。
+> 本文に残る P2P 運用・自動化の記述は将来計画または `.env` 設定時の動作として読んでください。
 
 ### 1. 事前準備
 - Node.js（ノードジェイエス）をパソコンにインストールしてください
@@ -21,9 +27,9 @@
 - 注文や履歴の確認は画面またはAPI経由で可能です
 
 ### 4. トラブル発生時の対応
-- 障害や異常が発生した場合は、自動的にSlackやLINEなどに通知が届きます
+- 障害や異常が発生した場合は、`.env` に通知先（Slack/LINE等）を設定していれば通知が届きます（未設定の場合は届きません）
 - 詳細なエラー内容は `logs/` フォルダや画面で確認できます
-- 多くの障害は自動で復旧しますが、解決しない場合は管理者や担当者にご相談ください
+- 一部の障害は自動で復旧を試みますが、解決しない場合は管理者や担当者にご相談ください
 
 ### 5. セキュリティと記録の仕組み
 - すべての操作・イベントは監査ログとして記録されます
@@ -95,20 +101,21 @@ flowchart TD
 
 ## 概要
 
-Strawberryは、分散型GPUリソースの貸借を可能とするオープンソースのP2Pマーケットプレイスです。Lightning Networkによる決済、現金換算、監査証跡、死活監視、高可用性を重視した堅牢な設計を採用しています。
+Strawberryは、GPUリソースの貸借マーケットプレイスを目指すオープンソースプロジェクトです。現時点で実際に動作するのは Express の Web API（GPU・注文・支払いの管理）と JSON データ層で、現金換算・監査証跡・死活監視を含みます。P2P ネットワークと Lightning Network 決済は将来の構成要素としてコードは存在しますが未配線で、決済は testnet／モックのみが対象です（実態の詳細は冒頭の注記と [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照）。
 
 ---
 
 ## 主な機能・品質／セキュリティ強化ポイント（2025年6月版）
 
-- Google OAuth認証、APIキー＋JWTによる認可、ロールベースアクセス制御
-- Ed25519ピアIDおよび署名検証によるP2P信頼性担保
+- Google OAuth認証（`.env` 設定時のみ有効）、APIキー＋JWTによる認可、ロールベースアクセス制御
 - UUIDバリデーション、Joiスキーマによる厳格な入力検証
-- Lightning Network決済および現金換算API（多重API、Prometheus監視、監査証跡対応）
-- 死活監視、自動復旧、外部通知フック（Slack/Sentry等）
+- 現金換算API（多重API、Prometheus監視、監査証跡対応）
+- 死活監視、外部通知フック（Slack/Sentry等、いずれも `.env` 設定時のみ動作）
 - 詳細な監査証跡、改ざん検知、Prometheusメトリクスの提供
 - CORSやHelmet等のセキュリティヘッダー実装
 - API／CLI／GraphQLインターフェース対応
+- （未配線）Ed25519ピアIDおよび署名検証によるP2P信頼性担保 — `p2p-network.js` は現行 libp2p が ESM 専用で読み込めないため無効
+- （未配線）Lightning Network決済 — LND 未接続時はモック。エスクローの実払い出しはアダプタ未注入のため no-op。testnet／モックのみ対象で、mainnet は有効化しません
 
 ---
 
@@ -126,8 +133,8 @@ Strawberryは、分散型GPUリソースの貸借を可能とするオープン�
    # または
    node src/cli.js
    ```
-4. **P2Pノード構成**
-   - 複数の端末またはサーバーで同時に起動し、P2Pネットワークを構成します
+4. **（将来計画）P2Pノード構成**
+   - P2P は現在無効です（現行 libp2p が ESM 専用のため読み込めません）。複数端末で起動しても P2P ネットワークは構成されません。各端末は独立した Web API として動作します
 
 ---
 
@@ -177,7 +184,7 @@ sequenceDiagram
       "isCache": true
     }
     ```
-- `/api/payments`（Lightning決済/現金決済対応）
+- `/api/payments`（支払い記録・現金決済対応。Lightning は LND 未接続時はモックで、実際の送金は行われません）
 - `/metrics`（Prometheusメトリクス/死活監視/為替API監視）
   - 主要メトリクス例:
     - `exchange_rate_cache_hit_total`（為替APIキャッシュヒット回数）
@@ -219,8 +226,8 @@ sequenceDiagram
 
 ## 死活監視・監査証跡・障害通知
 
-- LightningService/P2PNetwork/VirtualGPUManager全サービスでisHealthy()による詳細死活監視
-- 異常時は自動再起動・監査証跡・Prometheusメトリクス・外部通知hook（Slack/Sentry等）
+- LightningService/P2PNetwork/VirtualGPUManager には `isHealthy()` が実装されているが、P2PNetwork は無効（libp2p 読み込み不可）、LightningService は LND 未接続時はモック、VirtualGPUManager は Docker/k8s 実機が必要で、いずれも標準構成では死活監視の対象として実働しない
+- Web API 本体の異常時は監査証跡・Prometheusメトリクス・外部通知hook（Slack/Sentry等、`.env` 設定時のみ）で記録・通知
 - 監査ログは改ざん検知付き・全操作を記録
 - 為替APIの障害も監査証跡・外部通知・メトリクス化
 
@@ -289,7 +296,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 - REST/GraphQL両方でrate/timestamp/isCacheを取得可能
 - キャッシュ効率や障害頻度もPrometheusで可視化
 - 障害時はデフォルトレート・監査証跡・外部通知hookで運用リスクを最小化
-- 監視・通知・自動復旧は全て自動化済み
+- 監視・監査証跡は自動記録されるが、通知は `.env` に通知先を設定した場合のみ送信され、自動復旧の対象は限定的（設定なしでは通知は届かない）
 
 ---
 
@@ -309,7 +316,10 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ---
 
-## P2Pノード運用・スケールアウト例
+## P2Pノード運用・スケールアウト例（将来計画 — 現在は未実装）
+
+> **注意**: P2P は現在無効です（現行 libp2p が ESM 専用のため `p2p-network.js` を読み込めません）。
+> 以下の構成図・Tips は有効化された場合の将来計画であり、現行コードでは動作しません。
 
 ### P2Pノード構成・障害時フロー図（Mermaid）
 ```mermaid
@@ -329,7 +339,8 @@ flowchart LR
   C[新ノードC1] -- 追加/再参加 --> ClusterA
 ```
 
-### P2P運用Tips
+### P2P運用Tips（将来計画）
+以下は P2P が有効化された場合の想定運用であり、現行ではいずれも動作しません。
 - ノードは複数台・複数クラスタで構成し、障害時は自動で切断/復旧/フェイルオーバー
 - 新ノードの追加・障害ノードの自動削除は全てP2Pネットワーク内で自律的に処理
 - 死活監視・Prometheus・障害通知hookでノード健全性を常時監視
@@ -342,10 +353,15 @@ flowchart LR
 
 ## 一人運用のための自動化ガイド
 
-### 1. 障害監視・通知の全自動化
-- 死活監視・Prometheus・service-monitorで全サービス/ノードの異常を自動検知
-- Slack/Sentry/LINE通知hookで障害を即時アラート
-- 監査証跡で全障害・復旧イベントを自動記録
+> **位置づけ**: この節は運用の推奨構成・将来計画を含む案内です。通知は `.env` に通知先
+> （SLACK_WEBHOOK_URL / SENTRY_DSN / LINE_TOKEN 等）を設定した場合のみ送信され、
+> 未設定では届きません。P2P ノードの自律運用は P2P 自体が無効なため現行では動作しません。
+> 実態は [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照してください。
+
+### 1. 障害監視・通知の自動化
+- 死活監視・Prometheus・service-monitorでWeb API本体の異常を自動検知
+- Slack/Sentry/LINE通知hookで障害をアラート（`.env` 設定時のみ）
+- 監査証跡で障害・復旧イベントを自動記録
 
 ### 2. 復旧・スケールアウト自動化
 - サービス/ノード異常時は自動再起動・切断・ノード追加/削除を実行
@@ -360,12 +376,13 @@ flowchart LR
 - 監査証跡は自動で時系列記録・改ざん検知
 - README・FAQ・運用Tips・障害対応フローも自動生成・更新（AI活用推奨）
 
-### 5. ノード追加/削除・障害時の自律運用
-- ノード追加/削除/障害時イベントは全て自動でP2Pネットワーク内に伝播
+### 5. ノード追加/削除・障害時の自律運用（将来計画）
+- P2P が無効な現行では、ノード追加/削除の伝播は動作しない
+- 以下は P2P 有効化後の想定: ノード追加/削除/障害時イベントは全て自動でP2Pネットワーク内に伝播
 - 追加/削除/障害通知・監査証跡も全自動
 
 ### 推奨運用フローまとめ
-1. サービス/ノード起動・監視は全て自動（手動介入不要）
+1. サービス起動後の監視・記録は自動（通知は `.env` 設定時のみ。ノードの自律運用は P2P 有効化後の将来計画）
 2. 障害発生→自動復旧/通知→監査証跡・運用者へアラート→必要に応じてAIでFAQ/README自動更新
 3. E2Eテスト・CI/CD・監査証跡・通知hookの組み合わせで一人でも安全・高品質運用
 
@@ -396,7 +413,7 @@ flowchart LR
 - 通知が来ない→.envのWebhook/Token/DSN値を再確認、curlで手動テスト
 - 監査証跡が記録されない→logs/audit-*.logや出力先パス、権限を確認
 - Prometheus/Grafanaでメトリクスが見えない→/metricsエンドポイントやPrometheusの設定を再確認
-- ノード自動追加/削除が反映されない→P2Pネットワークの疎通・死活監視ログをチェック
+- ノード自動追加/削除が反映されない→P2P は現行無効のため、この機能自体が動作していない（有効化は将来計画）
 - E2Eテストが失敗する→テスト用.envや外部APIのモック設定を見直し
 
 ### おすすめOSS/サービスでさらに自動化
@@ -506,7 +523,7 @@ flowchart LR
   ```
 - キャッシュミス急増: `exchange_rate_cache_miss_total`の急増を監視
 - 障害再発: 監査証跡で同一障害の連続発生を検知し通知
-- ノード離脱: ノード死活監視でP2Pノードの切断を即時アラート
+- ノード離脱: （将来計画）ノード死活監視でP2Pノードの切断を即時アラート ※P2P は現行無効
 - 監査証跡改ざん: ハッシュ値不整合を検知したらSlack/LINEへ即時通知
 
 ### AI月次レポートのテンプレート例
@@ -664,7 +681,7 @@ flowchart LR
 
 ### Q. 現金換算APIの注意点は？
 - REST/GraphQLどちらもrate/timestamp/isCacheを返却、クライアント側で取得時刻・キャッシュ状態を必ず確認
-- 監査証跡・障害通知・Prometheus監視も全て自動化済み
+- 監査証跡・Prometheus監視は自動記録。障害通知は `.env` に通知先を設定した場合のみ送信される
 
 ### Q. 障害通知先をさらに増やしたい場合は？
 - scripts/line-notify.jsの実装例を参考に、任意の外部サービスhookを容易に追加可能
@@ -679,8 +696,8 @@ flowchart LR
 
 ## 品質・セキュリティ強化ポイント（2025年6月最新／MVP構成）
 
-- **Google認証・OAuthアカウント認証**：Google（およびGitHub等）によるOAuth認証でユーザー識別・なりすまし防止
-- **ピアID（公開鍵）＋署名検証**：P2PノードはEd25519ピアIDで識別、すべての注文・支払い・GPUイベントは署名検証
+- **Google認証・OAuthアカウント認証**：GoogleによるOAuth認証でユーザー識別（`.env` 設定時のみ有効）
+- **ピアID（公開鍵）＋署名検証**：（未配線）P2PノードのEd25519ピアIDと署名検証は `p2p-network.js` 側の設計で、P2P が無効な現行では注文・支払い・GPUイベントへの署名検証は行われていない
 - **APIキー＋JWT認証＋ロール制御（中央API利用時）**：重要操作は多重認証＋権限チェック
 - **UUIDバリデーション・入力サニタイズ**：全リソースID/主要入力の厳格検証
 - **一貫したAPIレスポンス＆エラーハンドリング**：`{ message, ... }`形式で統一
@@ -724,16 +741,16 @@ flowchart LR
    ```sh
    npm install
    ```
-   - 必要に応じてlibp2p, @chainsafe/libp2p-noise, @libp2p/tcp, @libp2p/mplex, peer-id等を追加
+   - libp2p 系パッケージは現行では読み込めないため（ESM 専用）、P2P 用途では追加しても有効化されません
 
 2. **環境変数の設定**
    - `.env`ファイルまたは環境変数で`LINE_TOKEN`などを設定（障害アラート通知用）
 
-3. **P2Pノードの起動とCLI操作**
+3. **CLI操作**
    ```sh
    node src/cli.js
    ```
-   - 複数端末・サーバーで同時に起動することでP2Pネットワークを構成
+   - （将来計画）複数端末・サーバーでの P2P ネットワーク構成は、P2P が無効な現行では利用できません
 
 ---
 
@@ -807,7 +824,7 @@ flowchart LR
 ## コントリビュート・開発ガイド
 
 - PR・Issue歓迎！
-- `CONTRIBUTING.md` に開発フロー・ルールを記載予定
+- 開発フロー・ルールは `CONTRIBUTING.md` に記載
 - バグ報告・機能要望はGitHub Issueで受付
 
 ---
@@ -819,11 +836,10 @@ flowchart LR
 
 ---
 
-## CI/CD・品質バッジ
+## CI/CD・テスト状況
 
-- ![build](https://img.shields.io/badge/build-passing-brightgreen)
-- ![test](https://img.shields.io/badge/test-passing-brightgreen)
-- ![coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)
+- テストの実測状況は [`ARCHITECTURE.md`](./ARCHITECTURE.md) の「テスト状況（正直版）」を正とする（2026-10 時点で 247/249 スイート green）
+- カバレッジの根拠のないバッジ（coverage-90% 等）は掲示しない。カバレッジ実測は `npm run coverage` で取得できる
 
 ---
 

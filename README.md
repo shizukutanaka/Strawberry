@@ -838,7 +838,7 @@ flowchart LR
 
 ## CI/CD・テスト状況
 
-- テストの実測状況は [`ARCHITECTURE.md`](./ARCHITECTURE.md) の「テスト状況（正直版）」を正とする（2026-10 時点で 247/249 スイート green）
+- テストの実測状況は [`ARCHITECTURE.md`](./ARCHITECTURE.md) の「テスト状況（正直版）」を正とする（テスト数などの数値は陳腐化するため本書には記載しない）
 - カバレッジの根拠のないバッジ（coverage-90% 等）は掲示しない。カバレッジ実測は `npm run coverage` で取得できる
 
 ---

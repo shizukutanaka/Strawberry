@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { logger } = require('./src/utils/logger');
 const { appendAuditLog } = require('./src/utils/audit-log');
 const { schemas } = require('./src/utils/validator');
+const { resolveBitcoinNetwork } = require('./src/utils/network-guard');
 
 // unary RPC に既定 deadline を付けるチャネルオプションを構築する
 // （gRPC service config の methodConfig.timeout）。deadline 未設定だと、LND が
@@ -69,10 +70,11 @@ class LightningService extends EventEmitter {
             host: process.env.LND_HOST || 'localhost:10009',
             certPath: process.env.LND_CERT_PATH || path.join(process.env.HOME, '.lnd/tls.cert'),
             // 既定は安全側の testnet（配布方針: testnet／モックのまま配布し、mainnet は
-            // 有効化しない）。mainnet を使う場合は BITCOIN_NETWORK と
-            // LND_MACAROON_PATH の両方を環境変数で明示指定すること。
+            // 有効化しない）。この方針は network-guard が構造で守る: BITCOIN_NETWORK に
+            // mainnet を指定すると、接続を試みる前にここで例外になり起動できない。
+            // testnet/regtest/simnet は従来どおり環境変数で明示指定できる。
             macaroonPath: process.env.LND_MACAROON_PATH || path.join(process.env.HOME, '.lnd/data/chain/bitcoin/testnet/admin.macaroon'),
-            network: process.env.BITCOIN_NETWORK || 'testnet'
+            network: resolveBitcoinNetwork(process.env.BITCOIN_NETWORK, 'BITCOIN_NETWORK')
         };
         this.invoices = new Map();
         this.payments = new Map();

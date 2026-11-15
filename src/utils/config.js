@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { logger } = require('./logger');
+const { resolveBitcoinNetwork, assertBitcoinNetworkAllowed } = require('./network-guard');
 
 // .envファイルをロード
 dotenv.config();
@@ -63,7 +64,7 @@ const defaultConfig = {
   
   // Lightning Network設定
   lightning: {
-    network: 'testnet', // mainnet, testnet, regtest
+    network: 'testnet', // testnet, regtest, simnet のみ（mainnet は配布方針で無効化され、network-guard が拒否する）
     lndHost: '127.0.0.1:10009',
     certPath: '',
     macaroonPath: '',
@@ -148,8 +149,8 @@ function loadFromEnv() {
     config.gpu.kubernetesSupport = process.env.KUBERNETES_SUPPORT === 'true';
   }
   
-  // Lightning設定
-  if (process.env.BITCOIN_NETWORK) config.lightning.network = process.env.BITCOIN_NETWORK;
+  // Lightning設定（network は network-guard 経由: mainnet 指定は例外になり起動しない）
+  if (process.env.BITCOIN_NETWORK) config.lightning.network = resolveBitcoinNetwork(process.env.BITCOIN_NETWORK, 'BITCOIN_NETWORK');
   if (process.env.LND_HOST) config.lightning.lndHost = process.env.LND_HOST;
   if (process.env.LND_CERT_PATH) config.lightning.certPath = process.env.LND_CERT_PATH;
   if (process.env.LND_MACAROON_PATH) config.lightning.macaroonPath = process.env.LND_MACAROON_PATH;
@@ -252,6 +253,12 @@ function getConfig() {
   // 従来 `fileConfig || envConfig` はファイルが存在すると環境変数オーバーライド
   // （PORT 等）を丸ごと捨てていた。深いマージでキー単位の優先順位にする。
   const merged = fileConfig ? deepMergeConfig(envConfig, fileConfig) : envConfig;
+
+  // config.json 由来の lightning.network も env と同じガードを通す
+  // （ファイル設定が env より優先されるため、マージ後の最終値を検査する）。
+  if (merged.lightning && merged.lightning.network !== undefined) {
+    assertBitcoinNetworkAllowed(merged.lightning.network, 'config (lightning.network)');
+  }
 
   // config.json 由来の差分だけを検査する（env 経路は個別に safeInt/検証済み）
   if (fileConfig) {

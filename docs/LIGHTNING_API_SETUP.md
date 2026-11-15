@@ -2,8 +2,9 @@
 
 > **⚠️ ネットワークに関する決定（2026-11-13 明記）**: 本プロジェクトでは **Bitcoin mainnet を有効化しません**。
 > 決済は testnet／モックのまま配布します。既定もこの決定に合わせ、ネットワーク（`BITCOIN_NETWORK`）は
-> testnet、`LND_MACAROON_PATH` の既定は testnet のパスです。mainnet は `BITCOIN_NETWORK` と
-> `LND_MACAROON_PATH` の両方を環境変数で明示指定しない限り使われません（配布形態では有効化しないでください）。
+> testnet、`LND_MACAROON_PATH` の既定は testnet のパスです。この決定はコードの構造でも守られており、
+> `BITCOIN_NETWORK=mainnet` を指定すると `src/utils/network-guard.js` が起動時・送金時に例外にします
+> （設定だけでは mainnet を有効化できません）。
 > なお LND 未接続時はモックにフォールバックし、実際の送金は行われません。
 
 Strawberry の Lightning 連携は2系統あります。混同しやすいため分けて記載します。

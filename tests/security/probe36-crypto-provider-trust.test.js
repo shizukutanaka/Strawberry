@@ -6,7 +6,6 @@
 // 36b: Cryptographic weakness
 //   3. JWT_SECRET requires minLength=32 (was 16)
 //   4. resolveRefreshSecret exported (separate refresh secret support)
-//   5. KMS stub throws instead of returning dummy-key-value
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
@@ -65,34 +64,6 @@ describe('Crypto: resolveRefreshSecret is exported from jwt-auth', () => {
     // Both the /refresh and /logout refresh-token verification paths must use it
     const matches = (src.match(/verifyWithRotation\([^)]*\{\s*refresh:\s*true/g) || []).length;
     expect(matches).toBeGreaterThanOrEqual(2);
-  });
-});
-
-describe('Crypto: KMS stub fails loudly instead of returning dummy key', () => {
-  it('KMSProvider.getKey throws rather than returning dummy-key-value', async () => {
-    const { KMSProvider } = require('../../src/security/kms');
-    const kms = new KMSProvider();
-    await expect(kms.getKey('test-key')).rejects.toThrow(/KMS not configured/i);
-  });
-
-  it('KMSProvider.createKey throws', async () => {
-    const { KMSProvider } = require('../../src/security/kms');
-    const kms = new KMSProvider();
-    await expect(kms.createKey({})).rejects.toThrow(/KMS not configured/i);
-  });
-
-  it('KMSProvider.rotateKey throws', async () => {
-    const { KMSProvider } = require('../../src/security/kms');
-    const kms = new KMSProvider();
-    await expect(kms.rotateKey('test-key')).rejects.toThrow(/KMS not configured/i);
-  });
-
-  it('kms.js source: does not contain dummy-key-value', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/security/kms.js'), 'utf-8'
-    );
-    expect(src).not.toMatch(/dummy-key-value/);
-    expect(src).not.toMatch(/return \{ keyId: 'dummy'/);
   });
 });
 

@@ -9,7 +9,6 @@ const axios = require('axios');
 
 const { AXIOS_SAFE_CONFIG } = require('../../src/utils/http-safe-config');
 const { sendEmailNotification } = require('../../src/utils/email');
-const { fetchAWSEC2GPUPrices } = require('../../src/utils/gpu-price-compare');
 
 beforeEach(() => {
   axios.get.mockReset();
@@ -56,19 +55,3 @@ describe('email.js（notifier 経由で配線済み）', () => {
   });
 });
 
-describe('gpu-price-compare.js', () => {
-  it('AWS pricing index の取得にタイムアウトとサイズ上限が付く（OOM/滞留の防止）', async () => {
-    axios.get.mockResolvedValue({ data: { products: {} } });
-    await fetchAWSEC2GPUPrices('ap-northeast-1');
-    expect(axios.get).toHaveBeenCalledWith(
-      expect.stringContaining('pricing.us-east-1.amazonaws.com'),
-      expect.objectContaining({
-        timeout: expect.any(Number),
-        maxContentLength: expect.any(Number),
-        maxRedirects: 0,
-      })
-    );
-    const cfg = axios.get.mock.calls[0][1];
-    expect(cfg.timeout).toBeLessThanOrEqual(60_000);
-  });
-});

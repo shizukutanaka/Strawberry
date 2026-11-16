@@ -2,8 +2,8 @@
 //
 // src/core/services.js のガード契約を直接検証する。
 //
-// gpu-detector / virtual-gpu-manager / p2p-network / lightning-service は
-// ネイティブ・ESM・gRPC 依存を持つ任意サービスで、未導入環境では
+// gpu-detector / virtual-gpu-manager / lightning-service は
+// ネイティブ・gRPC 依存を持つ任意サービスで、未導入環境では
 // safeLoad が null にフォールバックする。requireService は null の
 // サービスを使うエンドポイントで 503 を返す共通ゲート。
 
@@ -42,8 +42,8 @@ describe('requireService ゲート', () => {
 });
 
 describe('safeLoad のフォールバック', () => {
-  test('4サービスのエクスポートが定義されている（利用可否は環境依存のため null も許容）', () => {
-    for (const key of ['gpuDetector', 'vgpuManager', 'p2pNetwork', 'lightning']) {
+  test('3サービスのエクスポートが定義されている（利用可否は環境依存のため null も許容）', () => {
+    for (const key of ['gpuDetector', 'vgpuManager', 'lightning']) {
       expect(key in services).toBe(true);
     }
   });

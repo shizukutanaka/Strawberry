@@ -20,7 +20,6 @@ const CONSOLE_RE = /\bconsole\.(log|error|warn|info|debug)\b/g;
 
 // console 出力が正当なファイル（CLI 標準出力、ロガー実装・そのフォールバック）
 const LEGIT = new Set([
-  'cli.js',
   path.join('utils', 'logger.js'),
   path.join('core', 'logger.js'),
   path.join('utils', 'audit-log.js'), // 監査ログ書込失敗時の最終フォールバック

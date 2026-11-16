@@ -1,17 +1,11 @@
 // tests/api/deprecated-headers.test.js — 非推奨パススルーの RFC 9745 ヘッダー契約を固定。
-// /order・/match・/payment の3ルートは長らく「Deprecated endpoint ... accessed」の
+// /payment ルートは長らく「Deprecated endpoint ... accessed」の
 // ログ警告のみで、クライアントへ機械判別可能な印が無かった。Deprecation(@unix秒)と
 // Link(successor-version) が実際のレスポンスへ出ることを固定する。
+// （旧 /order・/match は P2P 層の削除に伴い除去されたため対象から外した。）
 
 const request = require('supertest');
 
-jest.mock('../../p2p-network', () => ({
-  P2PNetwork: jest.fn().mockImplementation(() => ({
-    async initialize() {},
-    async broadcastOrder(o) { this.broadcasted = o; },
-    async matchOrder() { return { matchedOrderId: 'order-x' }; },
-  })),
-}));
 jest.mock('../../lightning-service', () => ({
   LightningService: jest.fn().mockImplementation(() => ({
     async initialize() {},
@@ -34,21 +28,6 @@ async function registerAndLogin(prefix) {
 describe('RFC 9745 Deprecation headers on deprecated pass-throughs', () => {
   let token;
   beforeAll(async () => { token = await registerAndLogin('dephdr'); });
-
-  it('/order exposes Deprecation + successor Link', async () => {
-    const res = await request(app).post('/api/v1/order').set('Authorization', `Bearer ${token}`).send({ type: 'rent', gpuId: 'g1' });
-    expect(res.status).toBe(201);
-    expect(res.headers.deprecation).toMatch(/^@\d{10}$/);
-    expect(res.headers.link).toContain('rel="successor-version"');
-    expect(res.headers.link).toContain('/api/v1/orders');
-  });
-
-  it('/match exposes Deprecation + successor Link', async () => {
-    const res = await request(app).post('/api/v1/match').set('Authorization', `Bearer ${token}`).send({ gpuId: 'g1' });
-    expect(res.status).toBe(200);
-    expect(res.headers.deprecation).toMatch(/^@\d{10}$/);
-    expect(res.headers.link).toContain('/api/v1/orders/:id/match');
-  });
 
   it('/payment exposes Deprecation + successor Link (even on validation 400)', async () => {
     const res = await request(app).post('/api/v1/payment').set('Authorization', `Bearer ${token}`).send({});

@@ -6,7 +6,7 @@
 // collector running in development, CI, or this sandbox, and every other
 // optional integration in this codebase (P2P network, Google/GitHub OAuth,
 // real LND) already follows the same "absent config -> disabled, not broken"
-// pattern (see src/core/services.js, lightning-service.js). Gating the
+// pattern (see src/core/services.js). Gating the
 // require() calls themselves (not just sdk.start()) means the ~140
 // @opentelemetry/* packages this pulls in are never loaded at all when
 // telemetry isn't configured — zero cost to the jest suite, which imports

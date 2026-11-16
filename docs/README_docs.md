@@ -11,7 +11,6 @@
 ## 3. 各種ドキュメントへのリンク整理
 - README.mdからdocs/各ファイルへの相対リンクを明記
 - 主要ドキュメント例:
-  - [LIGHTNING_API_SETUP.md](./LIGHTNING_API_SETUP.md)
   - [SECURITY_AUDIT.md](./SECURITY_AUDIT.md)
 
 ## 4. 運用・更新手順

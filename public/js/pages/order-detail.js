@@ -2,16 +2,15 @@
 // Renders differently based on order.status AND the viewer's relationship to
 // the order (renter = order.userId, provider = order.providerId, or admin).
 //
-// Cleanup contract: this page sets up polling intervals (payment status,
-// heartbeat) — render() returns a cleanup function that the router calls
-// before navigating away, or these intervals leak indefinitely.
-import { el, toast, statusBadge, timeline, fmtDate, fmtSats, fmtJpy, confirmDialog } from '../ui.js';
+// Cleanup contract: this page sets up polling intervals (heartbeat) —
+// render() returns a cleanup function that the router calls before
+// navigating away, or these intervals leak indefinitely.
+import { el, toast, statusBadge, timeline, fmtDate, confirmDialog } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { getUser } from '../auth.js';
 import { getRate, priceLine } from '../rate.js';
 import { navigate } from '../router.js';
 
-const PAYMENT_POLL_MS = 5000;
 const HEARTBEAT_MS = 60000;
 
 export async function render(container, params) {
@@ -25,12 +24,11 @@ export async function render(container, params) {
 
   async function load() {
     root.replaceChildren(el('div', { class: 'skeleton skeleton-line', style: 'width:40%' }));
-    let order, gpu, paymentInfo, rateInfo;
+    let order, gpu, rateInfo;
     try {
       order = (await api.getOrder(orderId)).order;
-      [gpu, paymentInfo, rateInfo] = await Promise.all([
+      [gpu, rateInfo] = await Promise.all([
         api.getGpu(order.gpuId).then((r) => r.gpu).catch(() => null),
-        api.getOrderPayment(orderId).catch(() => ({ payments: [], escrows: [] })),
         getRate(),
       ]);
     } catch (err) {
@@ -41,10 +39,10 @@ export async function render(container, params) {
       ));
       return;
     }
-    renderOrder(order, gpu, paymentInfo, rateInfo);
+    renderOrder(order, gpu, rateInfo);
   }
 
-  function renderOrder(order, gpu, paymentInfo, rateInfo) {
+  function renderOrder(order, gpu, rateInfo) {
     timers.forEach((t) => clearInterval(t));
     timers.length = 0;
 
@@ -72,7 +70,7 @@ export async function render(container, params) {
     root.replaceChildren(card);
 
     if (order.status === 'pending') renderPending(body, order, isRenter, isProvider, isAdmin);
-    else if (order.status === 'matched') renderMatched(body, order, paymentInfo, isRenter, isProvider, isAdmin, rateInfo);
+    else if (order.status === 'matched') renderMatched(body, order, isRenter, isProvider, isAdmin);
     else if (order.status === 'active') renderActive(body, order, isRenter, isProvider, isAdmin);
     else if (order.status === 'completed') renderCompleted(body, order, isRenter);
     else if (order.status === 'cancelled') body.appendChild(el('div', { class: 'banner banner-warning' }, 'この注文はキャンセルされました。'));
@@ -81,11 +79,7 @@ export async function render(container, params) {
 
   // Only the renter, the GPU's provider, or an admin may raise a dispute — the
   // server enforces this too (403 otherwise), but hiding it client-side avoids
-  // showing an action that would just fail for an unrelated viewer. Server
-  // also requires a paid payment for 'matched'-state disputes (unpaid orders
-  // can't be disputed to prevent a free-GPU DoS via griefing); callers of this
-  // helper for 'matched' only invoke it once a paid payment is confirmed, so
-  // that rule doesn't need duplicating here.
+  // showing an action that would just fail for an unrelated viewer.
   function renderDisputeAction(body, order, isRenter, isProvider, isAdmin) {
     if (!isRenter && !isProvider && !isAdmin) return;
     const openBtn = el('button', { class: 'btn btn-ghost btn-sm', style: 'margin-top:8px' }, '係争を申請する');
@@ -148,7 +142,7 @@ export async function render(container, params) {
         [refundBtn, upholdBtn].forEach((b) => b.classList.remove('btn-primary'));
         e.target.classList.add('btn-primary');
       },
-    }, '返金（借り手勝訴）');
+    }, '借り手の主張を認容');
     const upholdBtn = el('button', {
       class: 'btn btn-ghost',
       onClick: (e) => {
@@ -162,7 +156,7 @@ export async function render(container, params) {
       class: 'btn btn-danger',
       onClick: async () => {
         if (!decision) { toast('裁定を選択してください', 'error'); return; }
-        const ok = await confirmDialog(`この注文を「${decision === 'refund' ? '返金' : '棄却'}」で裁定しますか？取り消せません。`);
+        const ok = await confirmDialog(`この注文を「${decision === 'refund' ? '借り手の主張を認容' : '棄却'}」で裁定しますか？取り消せません。`);
         if (!ok) return;
         submitBtn.disabled = true;
         try {
@@ -220,148 +214,36 @@ export async function render(container, params) {
     }
   }
 
-  function renderMatched(body, order, paymentInfo, isRenter, isProvider, isAdmin, rateInfo) {
-    const paidPayment = paymentInfo.payments.find((p) => p.status === 'paid');
-    const pendingPayment = paymentInfo.payments.find((p) => p.status === 'pending');
-
+  function renderMatched(body, order, isRenter, isProvider, isAdmin) {
     if (!isRenter) {
-      // The backend allows disputing a paid 'matched' order from either side
-      // (e.g. the renter paid but never starts the session) — surface that
-      // to the provider too instead of only ever showing a generic waiting
-      // banner regardless of payment state.
-      body.appendChild(el('div', { class: 'banner banner-info' },
-        paidPayment ? '支払いが完了しました。借り手の利用開始をお待ちください。' : '借り手の支払いをお待ちください。'));
-      if (paidPayment) renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
-      return;
-    }
-
-    if (paidPayment) {
-      body.appendChild(el('div', { class: 'banner banner-success' }, '支払いが完了しました。利用を開始できます。'));
-      const startBtn = el('button', {
-        class: 'btn btn-primary',
-        onClick: async () => {
-          startBtn.disabled = true;
-          startBtn.textContent = '開始中…';
-          try {
-            const res = await api.startOrder(order.id);
-            if (res.allocationDetails && res.allocationDetails.accessInfo && res.allocationDetails.accessInfo.deliveryImplemented === false) {
-              toast('利用を開始しました（接続情報の自動配信は準備中です）', 'info');
-            } else {
-              toast('利用を開始しました', 'success');
-            }
-            await load();
-          } catch (err) {
-            toast(err instanceof ApiError ? err.message : '開始に失敗しました', 'error');
-            startBtn.disabled = false;
-            startBtn.textContent = '利用を開始する';
-          }
-        },
-      }, '利用を開始する');
-      body.appendChild(startBtn);
+      body.appendChild(el('div', { class: 'banner banner-info' }, 'マッチしました。借り手の利用開始をお待ちください。'));
       renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
       return;
     }
 
-    if (pendingPayment) {
-      renderPendingPaymentPanel(body, order, pendingPayment, rateInfo);
-      return;
-    }
-
-    renderPaymentMethodChooser(body, order, rateInfo);
-  }
-
-  function renderPendingPaymentPanel(body, order, payment, rateInfo) {
-    if (payment.method === 'lightning') {
-      body.appendChild(el('div', { class: 'banner banner-info' }, 'Lightning請求書への支払いをお待ちしています。'));
-      pollPaymentStatus(body, payment.id, order);
-    } else {
-      const price = priceLine(order.totalPrice, rateInfo);
-      body.appendChild(
-        el('div', { class: 'banner banner-warning' },
-          `銀行振込の確認待ちです。金額: ${price.jpy || fmtJpy(null)}。振込完了後、管理者の承認をお待ちください。`)
-      );
-      pollPaymentStatus(body, payment.id, order);
-    }
-  }
-
-  function pollPaymentStatus(body, paymentId, order) {
-    const statusLine = el('p', { class: 'muted' }, '状態を確認しています…');
-    body.appendChild(statusLine);
-    const timer = setInterval(async () => {
-      try {
-        const status = await api.paymentStatus(paymentId);
-        if (status.status === 'paid') {
-          clearInterval(timer);
-          toast('支払いが確認されました', 'success');
-          await load();
-        }
-      } catch (_err) { /* transient poll failure — keep trying */ }
-    }, PAYMENT_POLL_MS);
-    timers.push(timer);
-  }
-
-  function renderPaymentMethodChooser(body, order, rateInfo) {
-    const resultBox = el('div');
-    const lightningBtn = el('button', {
+    body.appendChild(el('div', { class: 'banner banner-success' }, 'マッチしました。利用を開始できます。'));
+    const startBtn = el('button', {
       class: 'btn btn-primary',
       onClick: async () => {
-        lightningBtn.disabled = true;
+        startBtn.disabled = true;
+        startBtn.textContent = '開始中…';
         try {
-          const res = await api.createPayment(order.id, 'lightning');
-          renderLightningInvoice(resultBox, res, order);
+          const res = await api.startOrder(order.id);
+          if (res.allocationDetails && res.allocationDetails.accessInfo && res.allocationDetails.accessInfo.deliveryImplemented === false) {
+            toast('利用を開始しました（接続情報の自動配信は準備中です）', 'info');
+          } else {
+            toast('利用を開始しました', 'success');
+          }
+          await load();
         } catch (err) {
-          toast(err instanceof ApiError ? err.message : '請求書の作成に失敗しました', 'error');
-          lightningBtn.disabled = false;
+          toast(err instanceof ApiError ? err.message : '開始に失敗しました', 'error');
+          startBtn.disabled = false;
+          startBtn.textContent = '利用を開始する';
         }
       },
-    }, '⚡ Lightningで支払う');
-    const bankBtn = el('button', {
-      class: 'btn btn-ghost',
-      onClick: async () => {
-        bankBtn.disabled = true;
-        try {
-          const res = await api.createPayment(order.id, 'bank_transfer');
-          toast('銀行振込の申請を記録しました', 'success');
-          resultBox.replaceChildren(el('div', { class: 'banner banner-warning' },
-            `振込金額: ${fmtJpy(res.amountPaidJPY)}。振込完了後、管理者の承認をお待ちください。`));
-          pollPaymentStatus(body, res.paymentId, order);
-        } catch (err) {
-          toast(err instanceof ApiError ? err.message : '申請に失敗しました', 'error');
-          bankBtn.disabled = false;
-        }
-      },
-    }, '🏦 銀行振込で支払う');
-    body.appendChild(el('div', { class: 'stack' },
-      el('p', {}, 'お支払い方法を選択してください。'),
-      el('div', { class: 'row' }, lightningBtn, bankBtn),
-      resultBox,
-    ));
-  }
-
-  function renderLightningInvoice(box, paymentRes, order) {
-    const copyBtn = el('button', {
-      class: 'btn btn-ghost btn-sm',
-      onClick: async () => {
-        try {
-          await navigator.clipboard.writeText(paymentRes.paymentRequest);
-          toast('コピーしました', 'success');
-        } catch (_err) {
-          toast('コピーに失敗しました', 'error');
-        }
-      },
-    }, 'コピー');
-    box.replaceChildren(
-      el('div', { class: 'stack' },
-        el('p', {}, `請求額: ${fmtSats(paymentRes.amountSats)}`),
-        el('div', { class: 'copy-box' },
-          el('div', { class: 'mono' }, paymentRes.paymentRequest),
-          copyBtn,
-        ),
-        el('a', { href: `lightning:${paymentRes.paymentRequest}`, class: 'btn btn-primary btn-block' }, 'ウォレットで開く'),
-        el('p', { class: 'muted', style: 'font-size:0.8rem' }, '支払い完了後、自動的に反映されます。'),
-      )
-    );
-    pollPaymentStatus(box.parentElement, paymentRes.paymentId, order);
+    }, '利用を開始する');
+    body.appendChild(startBtn);
+    renderDisputeAction(body, order, isRenter, isProvider, isAdmin);
   }
 
   function renderActive(body, order, isRenter, isProvider, isAdmin) {
@@ -418,12 +300,12 @@ export async function render(container, params) {
   }
 
   function renderCompleted(body, order, isRenter) {
-    // SLA 違反による自動終了は、通常完了と区別して理由と返金を明示する（正直なUI原則）。
+    // SLA 違反による自動終了は、通常完了と区別して理由を明示する（正直なUI原則）。
     if (order.slaBreach) {
       const pct = typeof order.deliveredRatio === 'number' ? Math.round(order.deliveredRatio * 100) : null;
       body.appendChild(el('div', { class: 'banner banner-warning' },
         isRenter
-          ? `提供元GPUの応答が途絶したため自動終了しました。${pct != null ? `実提供 ${pct}% 分のみ課金され、残りは返金対象です。` : '未提供分は返金対象です。'}`
+          ? `提供元GPUの応答が途絶したため自動終了しました。${pct != null ? `実提供率は ${pct}% でした。` : ''}`
           : `ハートビート途絶により自動終了しました。稼働信頼性スコアに影響します。${pct != null ? `（実提供 ${pct}%）` : ''}`,
       ));
     }

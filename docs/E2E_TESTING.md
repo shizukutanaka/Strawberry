@@ -45,7 +45,6 @@ E2E_BASE_URL=http://localhost:3000 npm run test:e2e   # webServer 起動をス�
 | `marketplace.spec.js` | marketplace |
 | `gpu-detail-and-summaries.spec.js` | GPU detail page・provider earnings・order stats on the orders list |
 | `order-lifecycle.spec.js` | order lifecycle |
-| `admin-payments.spec.js` | admin payments |
 | `admin.spec.js` | admin dashboard |
 | `dispute.spec.js` | dispute |
 | `accessibility.spec.js` | accessibility regression guards |

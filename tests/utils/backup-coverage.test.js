@@ -1,7 +1,8 @@
 // tests/utils/backup-coverage.test.js
 // backup.js の対象列挙網羅性と backups/ の gitignore 登録を検証する。
-// 資金・認証系ファイル（profit-addresses / revoked-tokens / users）が
-// バックアップ対象から漏れると消失時に資金経路停止・失効トークン復活となる。
+// 認証系ファイル（revoked-tokens / users）がバックアップ対象から漏れると
+// 消失時に失効トークン復活となる。（旧 payments/escrows/profit-addresses は
+// 金銭機能の廃止に伴いデータ自体が存在しない。）
 const fs = require('fs');
 const path = require('path');
 
@@ -19,16 +20,13 @@ const { TARGET_FILES, _targetFiles } = require('../../src/utils/backup');
 describe('backup target coverage', () => {
   const CRITICAL = [
     'users.json',             // パスワードハッシュ
-    'payments.json',          // 決済記録
-    'escrows.json',           // 資金ロック状態
-    'profit-addresses.json',  // 運営利益の送金先
     'revoked-tokens.json',    // 失効 JWT — 消失するとログアウト済みトークンが復活
     'orders.json',
     'gpus.json',
     'reputations.json',
   ];
 
-  it('TARGET_FILES covers every security/money-critical data file', () => {
+  it('TARGET_FILES covers every security-critical data file', () => {
     for (const f of CRITICAL) {
       expect(TARGET_FILES).toContain(f);
     }

@@ -1,6 +1,6 @@
 // tests/e2e/dispute.spec.js — raising a dispute on an active order and the
 // admin resolution panel (refund vs. uphold), including the confirm-before-
-// resolve safety gate (this moves real funds/reputation, per the backend's
+// resolve safety gate (this moves reputation, per the backend's
 // own comments on POST /:id/dispute/resolve).
 const { test, expect } = require('@playwright/test');
 const { loginUI, apiRegisterAndLogin, apiCreateGpu, promoteToAdmin, uniqueId, trackConsoleErrors } = require('./helpers');
@@ -15,16 +15,10 @@ async function setUpActiveOrder(request, baseURL, prefix) {
   });
   const { orderId } = await orderRes.json();
   await request.post(`${baseURL}/api/v1/orders/${orderId}/accept`, { headers: { Authorization: `Bearer ${provider.token}` } });
-  const payRes = await request.post(`${baseURL}/api/v1/payments/order/${orderId}`, {
-    headers: { Authorization: `Bearer ${renter.token}` },
-    data: { paymentMethod: 'bank_transfer' },
-  });
-  const { paymentId } = await payRes.json();
   const admin = await apiRegisterAndLogin(request, baseURL, { prefix: `${prefix}admin` });
-  const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
-  await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  await promoteToAdmin(request, baseURL, admin.email, admin.password);
   await request.post(`${baseURL}/api/v1/orders/${orderId}/start`, { headers: { Authorization: `Bearer ${renter.token}` } });
-  return { provider, renter, admin, adminToken, orderId };
+  return { provider, renter, admin, orderId };
 }
 
 test.describe('dispute', () => {
@@ -41,14 +35,14 @@ test.describe('dispute', () => {
     await expect(page.locator('.badge-disputed')).toBeVisible({ timeout: 5000 });
     // Exact "申請者: 借り手" text -- a bare "借り手" substring locator is
     // ambiguous once the admin resolve panel is present, since its refund
-    // button label ("返金（借り手勝訴）") also contains the substring.
+    // button label ("借り手の主張を認容") also contains the substring.
     await expect(page.locator('text=申請者: 借り手')).toBeVisible();
 
     await page.evaluate(() => localStorage.clear());
     await loginUI(page, admin.email, admin.password);
     await page.goto(`/#/orders/${orderId}`);
     await expect(page.locator('text=管理者裁定')).toBeVisible({ timeout: 5000 });
-    await page.click('button:has-text("返金（借り手勝訴）")');
+    await page.click('button:has-text("借り手の主張を認容")');
     await page.fill('textarea', 'Verified provider fault');
     await page.click('button:has-text("裁定を確定")');
     await page.waitForSelector('.modal', { timeout: 3000 });

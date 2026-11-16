@@ -1,21 +1,26 @@
 // src/marketplace/marketplace-service.js
 // マーケットプレイス合成サービス（docs/SPECIFICATION.md §6-2 配線の中核）。
-// 価格(feature-pricer)・レピュテーション・検証・エスクローの各サービスを束ね、
+// 価格(feature-pricer)・レピュテーション・検証の各サービスを束ね、
 // 高レベルのドメインフローに合成する。HTTP ルートハンドラはこのサービスを呼ぶ薄い
 // ラッパとして実装すればよい（ルート直書きを避け、テスト可能性を確保）。
 // 各サブサービスは DI（テストはインメモリ repo を注入）。
+//
+// 2026-11-16: 金銭機能（エスクロー・精算）の廃止に伴い、本サービスから
+// escrowService への依存を除去した。検証（Proof-of-Compute）は貸し借りの
+// 品質担保として残し、verifyAndSettle は検証専用の verifyJob へ置き換えた
+// （旧実装は検証 verdict からエスクローの解放/係争イベントを導出していたが、
+// 資金移動が無くなったため verdict はレピュテーション反映のみに使う）。
 const featurePricer = require('../pricing/feature-pricer');
 const { runAuction } = require('./auction-engine');
 
 function createMarketplaceService({
-  escrowService,
   verificationService,
   reputationService,
   pricer = featurePricer,
   pricingOpts = {},
 } = {}) {
-  if (!escrowService || !verificationService || !reputationService) {
-    throw new Error('escrowService, verificationService, reputationService are required');
+  if (!verificationService || !reputationService) {
+    throw new Error('verificationService, reputationService are required');
   }
 
   /** GPU 特徴量＋需給から時給を見積もる。 */
@@ -48,67 +53,27 @@ function createMarketplaceService({
   }
 
   /**
-   * 注文に対し価格を確定し、hold-invoice エスクローを開く（PENDING）。
-   * @returns {{escrow, quote, amountSats, providerId}}
+   * ジョブ結果を検証し、verdict をプロバイダのレピュテーションへ反映する。
+   * 検証自体の監査記録（recordAudit）は verificationService.finalize が担う。
+   * ここではジョブ成否として recordJobResult を追加で記録する
+   * （verified → 成功、failed → 失敗、inconclusive → 記録しない）。
+   * @returns {{verdict, record}}
    */
-  function openOrderEscrow({ orderId, providerId = null, gpu = {}, durationMinutes = 0, market = {}, feeRate = 0, amountSatOverride }) {
-    if (!orderId) throw new Error('orderId required');
-    const quote = quoteGpu(gpu, market);
-    const hours = Math.max(0, durationMinutes) / 60;
-    // amountSatOverride: HTTP ルートが注文の price-locked totalPrice を渡す。
-    // 渡されない場合（ユニットテスト・直接呼び出し）は quote から計算する。
-    const amountSats = typeof amountSatOverride === 'number' ? amountSatOverride : Math.round(quote.pricePerHour * hours);
-    const escrow = escrowService.create({ orderId, amountSats, feeRate, invoice: null });
-    return { escrow, quote, amountSats, providerId };
-  }
-
-  /** hold invoice 入金（PENDING→HELD）。 */
-  function recordPaid(escrowId) {
-    return escrowService.markPaid(escrowId);
-  }
-
-  /**
-   * ジョブ結果を検証し、エスクローを解放/係争へ進め、レピュテーションを更新する。
-   * @returns {{verdict, event, escrow, actions}}
-   */
-  function verifyAndSettle({ jobId, escrowId, providerId = null, primaryOutput, utilSamples = [], replicas = [], auditRate }) {
-    if (!jobId || !escrowId) throw new Error('jobId and escrowId are required');
-    verificationService.open(jobId, { providerId, escrowId, auditRate });
+  function verifyJob({ jobId, providerId = null, primaryOutput, utilSamples = [], replicas = [], auditRate }) {
+    if (!jobId) throw new Error('jobId is required');
+    verificationService.open(jobId, { providerId, auditRate });
     verificationService.recordPrimary(jobId, primaryOutput, { utilSamples });
     for (const r of replicas) verificationService.submitReplica(jobId, r);
     const v = verificationService.finalize(jobId);
 
-    const result = escrowService.evaluate(escrowId, v.verificationCtx);
-
     if (providerId) {
-      if (result.event === 'DELIVER_OK') reputationService.recordJobResult(providerId, true);
-      else if (result.event === 'DELIVER_FAIL') reputationService.recordJobResult(providerId, false);
+      if (v.verdict === 'verified') reputationService.recordJobResult(providerId, true);
+      else if (v.verdict === 'failed') reputationService.recordJobResult(providerId, false);
     }
-    return { verdict: v.verdict, event: result.event, escrow: result.escrow, actions: result.actions };
+    return { verdict: v.verdict, record: v.record };
   }
 
-  /** 係争の解決（'settle'/'refund'）。refund 時はプロバイダを slash。 */
-  function resolveDispute(escrowId, decision, providerId = null) {
-    const r = escrowService.resolveDispute(escrowId, decision);
-    if (providerId && decision === 'refund') reputationService.slash(providerId);
-    return r;
-  }
-
-  /**
-   * 実使用量・SLA に応じた従量按分の精算内訳を計算・記録する。
-   * heartbeat で計測した accumulatedSeconds と予約時間から deliveredRatio を求めて渡す。
-   * @returns {{escrow, settlement}}
-   */
-  function settleByUsage(escrowId, usage = {}, opts = {}) {
-    return escrowService.settle(escrowId, usage, opts);
-  }
-
-  /** エスクローの現在状態を取得（読み取り）。 */
-  function getEscrow(escrowId) {
-    return escrowService.get(escrowId);
-  }
-
-  return { quoteGpu, rankCandidates, selectProvider, openOrderEscrow, recordPaid, verifyAndSettle, settleByUsage, resolveDispute, getEscrow };
+  return { quoteGpu, rankCandidates, selectProvider, verifyJob };
 }
 
 module.exports = { createMarketplaceService };

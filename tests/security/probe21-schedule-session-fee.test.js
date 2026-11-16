@@ -3,7 +3,6 @@
 // 1. GET /gpus/:id/schedule no longer exposes status field in blockedSlots
 // 2. POST /:id/start rejects orders with future scheduledStartAt
 // 3. DELETE /me sets sessionsRevokedAt — sibling tokens become invalid immediately
-// 4. BTC_FEE_RATE validated at module load (NaN / out-of-range → throw)
 
 const request = require('supertest');
 
@@ -88,36 +87,3 @@ describe('DELETE /me: sessionsRevokedAt invalidates sibling tokens', () => {
   });
 });
 
-describe('BTC_FEE_RATE validation at module load', () => {
-  it('valid default FEE_RATE (0.015) passes validation', () => {
-    // Module already loaded with default — if it threw, this test file would error
-    const { FEE_RATE } = require('../../src/api/utils/btc-payment');
-    expect(FEE_RATE).toBe(0.015);
-    expect(Number.isFinite(FEE_RATE)).toBe(true);
-    expect(FEE_RATE).toBeGreaterThanOrEqual(0);
-    expect(FEE_RATE).toBeLessThan(1);
-  });
-
-  it('FEE_RATE in [0, 1) is valid (boundary checks)', () => {
-    const validate = (rate) => {
-      if (!Number.isFinite(rate) || rate < 0 || rate >= 1) {
-        throw new Error(`Invalid BTC_FEE_RATE: "${rate}". Must be a finite number in [0, 1).`);
-      }
-      return true;
-    };
-    expect(validate(0)).toBe(true);
-    expect(validate(0.015)).toBe(true);
-    expect(validate(0.999)).toBe(true);
-    expect(() => validate(1.0)).toThrow(/Invalid BTC_FEE_RATE/);
-    expect(() => validate(-0.1)).toThrow(/Invalid BTC_FEE_RATE/);
-    expect(() => validate(NaN)).toThrow(/Invalid BTC_FEE_RATE/);
-    expect(() => validate(Infinity)).toThrow(/Invalid BTC_FEE_RATE/);
-    expect(() => validate(1.5)).toThrow(/Invalid BTC_FEE_RATE/);
-  });
-});
-
-afterAll((done) => {
-  const { server } = require('../../src/api/server');
-  if (server && server.close) server.close(() => done());
-  else done();
-});

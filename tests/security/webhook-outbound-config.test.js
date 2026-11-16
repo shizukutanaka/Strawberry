@@ -75,12 +75,3 @@ describe('sendWebhook が SSRF 安全設定付きで送信する', () => {
   });
 });
 
-describe('lightning-api の外向き呼び出しに安全設定がある', () => {
-  it('両プロバイダとも SAFE_AXIOS_CONFIG を axios.post に渡す（ソースガード）', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/utils/lightning-api.js'), 'utf-8'
-    );
-    const calls = src.match(/axios\.post\([\s\S]*?SAFE_AXIOS_CONFIG/g) || [];
-    expect(calls.length).toBe(2); // opennode + lnbits
-  });
-});

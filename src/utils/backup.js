@@ -21,12 +21,9 @@ const BACKUP_DIR = path.resolve(__dirname, '../../backups');
 // テスト用に凍結した固定名一覧。実行時は _targetFiles() が動的に列挙する）。
 const TARGET_FILES = [
   'orders.json',
-  'payments.json',
   'gpus.json',
   'users.json',             // パスワードハッシュ・API キーを含む — 流出しないよう BACKUP_DIR に隔離
-  'escrows.json',           // 資金ロック状態
   'reputations.json',
-  'profit-addresses.json',  // 運営利益の送金先 — 消失すると利益経路が止まる
   'revoked-tokens.json',    // 失効トークン — 消失すると logout 済み JWT が復活する
   'notification-settings.json',
   'watches.json',

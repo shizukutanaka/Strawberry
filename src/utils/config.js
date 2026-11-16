@@ -4,7 +4,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { logger } = require('./logger');
-const { resolveBitcoinNetwork, assertBitcoinNetworkAllowed } = require('./network-guard');
 
 // .envファイルをロード
 dotenv.config();
@@ -60,17 +59,6 @@ const defaultConfig = {
     dockerSupport: true,
     kubernetesSupport: false,
     priceUpdateIntervalMs: 300000, // 5分
-  },
-  
-  // Lightning Network設定
-  lightning: {
-    network: 'testnet', // testnet, regtest, simnet のみ（mainnet は配布方針で無効化され、network-guard が拒否する）
-    lndHost: '127.0.0.1:10009',
-    certPath: '',
-    macaroonPath: '',
-    invoiceExpirySeconds: 3600, // 1時間
-    minPaymentSatoshis: 10,
-    maxPaymentSatoshis: 1000000,
   },
   
   // セキュリティ設定
@@ -148,12 +136,6 @@ function loadFromEnv() {
   if (process.env.KUBERNETES_SUPPORT) {
     config.gpu.kubernetesSupport = process.env.KUBERNETES_SUPPORT === 'true';
   }
-  
-  // Lightning設定（network は network-guard 経由: mainnet 指定は例外になり起動しない）
-  if (process.env.BITCOIN_NETWORK) config.lightning.network = resolveBitcoinNetwork(process.env.BITCOIN_NETWORK, 'BITCOIN_NETWORK');
-  if (process.env.LND_HOST) config.lightning.lndHost = process.env.LND_HOST;
-  if (process.env.LND_CERT_PATH) config.lightning.certPath = process.env.LND_CERT_PATH;
-  if (process.env.LND_MACAROON_PATH) config.lightning.macaroonPath = process.env.LND_MACAROON_PATH;
   
   // セキュリティ設定
   if (process.env.JWT_SECRET) config.security.jwtSecret = process.env.JWT_SECRET;
@@ -253,12 +235,6 @@ function getConfig() {
   // 従来 `fileConfig || envConfig` はファイルが存在すると環境変数オーバーライド
   // （PORT 等）を丸ごと捨てていた。深いマージでキー単位の優先順位にする。
   const merged = fileConfig ? deepMergeConfig(envConfig, fileConfig) : envConfig;
-
-  // config.json 由来の lightning.network も env と同じガードを通す
-  // （ファイル設定が env より優先されるため、マージ後の最終値を検査する）。
-  if (merged.lightning && merged.lightning.network !== undefined) {
-    assertBitcoinNetworkAllowed(merged.lightning.network, 'config (lightning.network)');
-  }
 
   // config.json 由来の差分だけを検査する（env 経路は個別に safeInt/検証済み）
   if (fileConfig) {

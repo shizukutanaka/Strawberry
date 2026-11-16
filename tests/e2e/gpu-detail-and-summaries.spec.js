@@ -1,5 +1,5 @@
 // tests/e2e/gpu-detail-and-summaries.spec.js — GPU detail page (specs +
-// reviews), the price-watch toggle, provider earnings, and the orders-list
+// reviews), the price-watch toggle, and the orders-list
 // stats header. Grouped together as smaller, related features rather than
 // one file per page.
 const { test, expect } = require('@playwright/test');
@@ -12,14 +12,6 @@ async function completeOneOrder(request, baseURL, { providerToken, providerEmail
   });
   const { orderId } = await orderRes.json();
   await request.post(`${baseURL}/api/v1/orders/${orderId}/accept`, { headers: { Authorization: `Bearer ${providerToken}` } });
-  const payRes = await request.post(`${baseURL}/api/v1/payments/order/${orderId}`, {
-    headers: { Authorization: `Bearer ${renterToken}` },
-    data: { paymentMethod: 'bank_transfer' },
-  });
-  const { paymentId } = await payRes.json();
-  const admin = await apiRegisterAndLogin(request, baseURL, { prefix: `sumadmin${uniqueId()}`.slice(0, 12) });
-  const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
-  await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`, { headers: { Authorization: `Bearer ${adminToken}` } });
   await request.post(`${baseURL}/api/v1/orders/${orderId}/start`, { headers: { Authorization: `Bearer ${renterToken}` } });
   await request.post(`${baseURL}/api/v1/orders/${orderId}/stop`, { headers: { Authorization: `Bearer ${renterToken}` } });
   return orderId;
@@ -118,22 +110,8 @@ test.describe('GPU detail page', () => {
   });
 });
 
-test.describe('provider earnings', () => {
-  test('shows completed revenue and a per-GPU breakdown after a sale', async ({ page, request, baseURL }) => {
-    const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'earnprov', role: 'provider' });
-    const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Earn GPU ${uniqueId()}`, pricePerHour: 1300 });
-    const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'earnrent' });
-    await completeOneOrder(request, baseURL, { providerToken: provider.token, renterToken: renter.token, gpuId: gpu.id });
-
-    await loginUI(page, provider.email, provider.password);
-    await page.goto('/#/earnings');
-    await expect(page.locator('.grid')).toContainText('1,300 sats', { timeout: 5000 });
-    await expect(page.locator('table.data-table')).toContainText(gpu.name);
-  });
-});
-
 test.describe('order stats on the orders list', () => {
-  test('renter sees spend total; provider on the same order sees both cards', async ({ page, request, baseURL }) => {
+  test('renter and provider each see their order-count card', async ({ page, request, baseURL }) => {
     const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'statprov', role: 'provider' });
     const gpu = await apiCreateGpu(request, baseURL, provider.token, { name: `Stat GPU ${uniqueId()}`, pricePerHour: 2400 });
     const renter = await apiRegisterAndLogin(request, baseURL, { prefix: 'statrent' });
@@ -142,7 +120,7 @@ test.describe('order stats on the orders list', () => {
     await loginUI(page, renter.email, renter.password);
     await page.goto('/#/orders');
     await page.waitForSelector('.grid', { timeout: 5000 });
-    await expect(page.locator('.grid')).toContainText('2,400 sats');
+    await expect(page.locator('.grid')).toContainText('借り手として');
     await expect(page.locator('.grid')).toContainText('完了 1件');
 
     await page.evaluate(() => localStorage.clear());
@@ -150,6 +128,6 @@ test.describe('order stats on the orders list', () => {
     await page.goto('/#/orders');
     await page.waitForSelector('.grid', { timeout: 5000 });
     await expect(page.locator('.grid')).toContainText('プロバイダーとして');
-    await expect(page.locator('.grid')).toContainText('収益合計');
+    await expect(page.locator('.grid')).toContainText('完了 1件');
   });
 });

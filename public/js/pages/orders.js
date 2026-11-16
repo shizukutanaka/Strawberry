@@ -1,7 +1,7 @@
 // public/js/pages/orders.js — the current user's orders (as renter and/or provider),
 // with a stats summary header (GET /orders/stats — available to every user,
 // not just providers; previously had zero frontend reach).
-import { el, skeleton, emptyState, statusBadge, fmtDate, fmtSats, fmtJpy } from '../ui.js';
+import { el, skeleton, emptyState, statusBadge, fmtDate, fmtSats } from '../ui.js';
 import { api, ApiError } from '../api.js';
 import { navigate } from '../router.js';
 
@@ -21,9 +21,6 @@ function statsHeader(stats) {
       el('div', { class: 'muted', style: 'font-size:0.8rem' }, '借り手として'),
       el('div', { style: 'font-size:1.2rem;font-weight:700' }, `${stats.asRenter.total}件`),
       el('div', { class: 'muted', style: 'font-size:0.8rem' }, statusBreakdown(stats.asRenter.byStatus)),
-      stats.asRenter.totalSpentSats > 0
-        ? el('div', { style: 'margin-top:4px' }, `支出合計: ${fmtSats(stats.asRenter.totalSpentSats)}（約${fmtJpy(stats.asRenter.totalSpentJPY)}）`)
-        : null,
     ),
   ];
   if (stats.asProvider) {
@@ -31,9 +28,6 @@ function statsHeader(stats) {
       el('div', { class: 'muted', style: 'font-size:0.8rem' }, 'プロバイダーとして'),
       el('div', { style: 'font-size:1.2rem;font-weight:700' }, `${stats.asProvider.total}件`),
       el('div', { class: 'muted', style: 'font-size:0.8rem' }, statusBreakdown(stats.asProvider.byStatus)),
-      stats.asProvider.totalEarnedSats > 0
-        ? el('div', { style: 'margin-top:4px' }, `収益合計: ${fmtSats(stats.asProvider.totalEarnedSats)}（約${fmtJpy(stats.asProvider.totalEarnedJPY)}）`)
-        : null,
     ));
   }
   return el('div', { class: 'grid' }, ...cards);

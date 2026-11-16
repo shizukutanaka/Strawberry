@@ -8,11 +8,15 @@
 > `server.js` 先頭で配線済み（D-2 の「外部トレースバックエンド連携」残課題を解消。
 > `OTEL_EXPORTER_OTLP_ENDPOINT` 未設定時は完全 no-op）、probe 系セキュリティテストは
 > 60 件超へ拡充（§5「probe 01〜50」は当時の数）、§4 表「抜粋」外に `/admin/*`
-> （stats/verifications/escrow/expire-orders/cache-purge）・`/marketplace/escrow/*`・
+> （stats/verifications/expire-orders/cache-purge）・
 > `/gpus/:id/estimate`（価格参照）・`/gpus/:id/watch`（値下げ通知）等が追加済み。
-> エスクローは `src/payments/escrow-*` + `EscrowRepository` で状態機械として実装済み
-> （LN hold-invoice の実機アダプタ配線のみ残）。未マージ PR にのみ存在する機能は
-> 「実装済み」には含めていない。
+> 未マージ PR にのみ存在する機能は「実装済み」には含めていない。
+>
+> **2026-11-16 追補（現行の正）**: 所有者の方針により**金銭のやり取り機能を全て削除**した。
+> 本文・§2〜§5 に残る決済／Lightning／エスクロー／運営受取アドレスの記述は**当時の記録**であり、
+> 現行 main には存在しない。現行の構成は GPU の貸し借り（出品・注文・割当・稼働・
+> Proof-of-Compute 検証・レピュテーション・係争裁定）のみ。`/payments`・
+> `/marketplace/escrow/*`・`/api/profit-addresses`・`/node-info`・`/channels` は廃止済み。
 
 本書は Strawberry の **実態に基づく** 仕様書である。README / `improvement_checklist2.md` の
 「実装済み」表記には実態と乖離があるため、本書はソースコードを一次情報として記述する。
@@ -25,10 +29,10 @@
 Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketplace）である。
 
 - **プロバイダ（貸し手）**: GPU を登録し、稼働条件（価格・最低借り手評価・メンテ枠）を設定する。
-- **借り手（renter）**: GPU を検索し、注文を作成し、Lightning / オンチェーン BTC で支払う。
-- **運営**: 手数料を受け取り、紛争を裁定し、管理操作を行う。
+- **借り手（renter）**: GPU を検索し、注文を作成して利用する（金銭の支払いは行わない。2026-11-16 に決済機能を全廃）。
+- **運営**: 紛争を裁定し、管理操作を行う（手数料は受け取らない）。
 
-決済は Lightning Network（LND）とオンチェーン BTC を想定。P2P レイヤ（libp2p）と
+P2P レイヤ（libp2p）と
 仮想 GPU 管理（Docker/K8s）はオプション扱いで、未導入でも API 本体は起動する。
 
 ### 1.1 技術スタック
@@ -39,9 +43,9 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | 認証 | JWT（HS256, アクセス+リフレッシュ, ローテーション付き）、Google/GitHub OAuth、マスター3重認証（OAuth+TOTP+メール） |
 | データ層 | JSON ファイルリポジトリ（`src/db/json/*`、`atomicWrite` による `fs.rename` 原子書き込み） |
 | セキュリティ | helmet（CSP）、cors、express-rate-limit、bcrypt、speakeasy（TOTP） |
-| 監視 | prom-client（`/metrics`）、service-monitor、invoice-poller |
+| 監視 | prom-client（`/metrics`）、service-monitor |
 | API ドキュメント | joi-to-swagger |
-| オプション | libp2p（P2P）、@grpc/grpc-js（LND）、dockerode / @kubernetes/client-node（仮想GPU） |
+| オプション | libp2p（P2P）、dockerode / @kubernetes/client-node（仮想GPU） |
 
 ---
 
@@ -54,7 +58,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
                  └───────────────┬──────────────────────────┘
                                  │ src/api/routes/index.js (/api/v1)
         ┌────────────┬───────────┼───────────┬───────────┬───────────┐
-      /gpus       /orders     /payments    /users    /marketplace  /auth
+      /gpus       /orders     /users    /marketplace  /auth
         │            │            │            │
         ▼            ▼            ▼            ▼
                  src/db/json/*Repository  (createJsonRepository)
@@ -63,8 +67,8 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
                      data/*.json  (atomicWrite: fs.rename)
 
   オプション（未導入時は null フォールバック → 503）:
-    core/services.js → LightningService / P2PNetwork / VirtualGPUManager
-  バックグラウンド: service-monitor, invoice-poller
+    core/services.js → P2PNetwork / VirtualGPUManager
+  バックグラウンド: service-monitor
 ```
 
 ### 2.1 データ層の特性（重要）
@@ -88,8 +92,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | User | id, email, username, password(bcrypt), role, peerId, passwordChangedAt, sessionsRevokedAt, twoFactorSecret | センシティブ項目は `sanitizeUser()` で除去 |
 | GPU | id, providerId, name, vendor, model, memoryGB, pricePerHour, minRenterRating, **rejectUnratedRenters**, manualBlocks[] | providerId/manualBlocks は非オーナーに非開示 |
 | Order | id, gpuId, userId, status, matchedAt, startedAt, stoppedAt, completedAt, dispute, review, renterReview | status: pending→matched→active→completed/cancelled |
-| Payment | id, orderId, userId, method(lightning/onchain/manual), status, paidAt | userId は **order.userId**（作成者ではない） |
-| Escrow / Reputation / Verification | — | エスクロー残高・評価・GPU 属性検証 |
+| Reputation / Verification | — | 評価・GPU 属性検証 |
 
 ### 3.1 セッション無効化モデル（`isSessionInvalidated`）
 
@@ -120,9 +123,6 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 | `DELETE /gpus/:id/block/:blockId` | JWT(owner/admin) | ブロック削除（id=UUID 検証、blockId=不在なら 404） |
 | `POST /orders` | JWT | 注文作成（minRenterRating フロア適用） |
 | `POST /orders/:id/accept` | JWT(GPU owner/admin) | 受諾（updateIf 内で GPU 所有権を再検証＝TOCTOU 封鎖） |
-| `POST /payments/manual/approve/:id` | JWT(admin) | 手動承認（withLock + updateIf CAS） |
-| `GET/POST/DELETE /api/profit-addresses` | JWT(admin) | 運営受取アドレス管理 |
-| `GET /node-info`, `/channels` | JWT(admin) | Lightning ノード情報（未導入時 503） |
 | `/master-auth/*` | OAuth+TOTP+メール | マスター3重認証 |
 | `GET /metrics` | 公開 | Prometheus メトリクス |
 
@@ -145,8 +145,6 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
   payment/usb 等）を全拒否。
 - **CORS**: ワイルドカード時は `credentials:false` を強制（仕様違反の `*`+credentials を回避）。
 - **レート制限**: `TRUST_PROXY` を正整数 hop のみ受理し、XFF 偽装によるバイパスを防止。
-- **決済の健全性**: 送金失敗は例外送出（`dummy-txid` を成功偽装しない）。invoice-poller は
-  注文ステータスゲート＋クロスメソッド二重支払いガードを実装。
 - **PII 最小化**: `sanitizeUser()` で password/apiKey/twoFactorSecret/jti 等を除去。
   peerid の `/admin/all` は email を返さない（peerId×email 相関による脱匿名化を防止）。
 - **監査ログ**: SHA-256 ハッシュチェーンによる改竄検知付き append-only ログ。
@@ -158,7 +156,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
 
 ## 6. 長所（Strengths）
 
-1. **深いセキュリティハードニング**: 50 回の敵対的 probe により、認証・認可・決済・PII の
+1. **深いセキュリティハードニング**: 50 回の敵対的 probe により、認証・認可・PII の
    各層で OWASP 準拠のコントロールが積み上がっている。JWT alg 固定、CSP、XFF 偽装対策、
    監査ハッシュチェーンなど、実運用を意識した防御が揃う。
 2. **明快なデータ原子性**: `updateIf`（CAS）＋ `withLock` ＋ `atomicWrite`（rename）で、
@@ -176,7 +174,7 @@ Strawberry は遊休 GPU を貸し借りする二面市場（two-sided marketpla
    競合防止が崩れる。JSON ファイル層も高頻度書き込みで I/O ボトルネック・破損リスクがある。
 2. **ドキュメントと実態の乖離**: README / `improvement_checklist2.md` の `[x]` が実装を保証
    しない（自動生成テンプレ断片の残骸もあった）。新規参加者が誤認しやすい。
-3. **インフラ層が未完**: P2P / 仮想 GPU / Lightning は本実装が薄く、`*-fixed.js` の孤立
+3. **インフラ層が未完**: P2P / 仮想 GPU は本実装が薄く、`*-fixed.js` の孤立
    モジュールや未使用依存（knex/sqlite3/pg/ioredis）が残る。
 4. **テスト実行の分断**: probe テストのみを個別実行していたため、統合テストとの **契約矛盾**
    （minRenterRating / block 404）が長く検出されなかった（本サイクルで是正）。

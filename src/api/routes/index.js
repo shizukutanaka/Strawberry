@@ -8,16 +8,14 @@ const { logger } = require('../../utils/logger');
 // 各ルートモジュールをインポート
 const gpuRoutes = require('./gpu');
 const orderRoutes = require('./order');
-const paymentRoutes = require('./payment');
 const userRoutes = require('./user');
 const marketplaceRoutes = require('./marketplace');
 const authRoutes = require('./auth');
 
 // --- core層の主要サービスは共有のガード付きシングルトンから取得 ---
-const { gpuDetector, vgpuManager, lightning, requireService } = require('../../core/services');
+const { gpuDetector, vgpuManager } = require('../../core/services');
 const { asyncHandler } = require('../../utils/error-handler');
-const { deprecated } = require('../middleware/deprecated');
-const { cacheMiddleware, purgeCache } = require('../middleware/cache');
+const { purgeCache } = require('../middleware/cache');
 
 // 初期化処理（各ステップを個別にガード。一部のサービスが未導入でも継続し、
 // Web API 本体は常に起動できるようにする）
@@ -32,10 +30,6 @@ const { cacheMiddleware, purgeCache } = require('../middleware/cache');
     if (vgpuManager && typeof vgpuManager.initialize === 'function') {
       logger.info('Initializing Virtual GPU Manager...');
       await vgpuManager.initialize(gpus);
-    }
-    if (lightning && typeof lightning.initialize === 'function') {
-      logger.info('Connecting to Lightning Network...');
-      await lightning.initialize();
     }
     logger.info('Core services initialization finished');
   } catch (e) {
@@ -90,37 +84,11 @@ router.use(auditLogger);
 // 各ルートモジュールをマウント
 router.use('/gpus', gpuRoutes);
 router.use('/orders', orderRoutes);
-router.use('/payments', paymentRoutes);
 router.use('/users', userRoutes);
 router.use('/marketplace', marketplaceRoutes);
 router.use('/auth', authRoutes);
 // 通知設定 CRUD（モジュール内パスが /notification-settings/:userId のためプレフィックスなしでマウント）
 router.use(require('../notification-settings').router);
-
-// Lightningノード情報API（管理者のみ: ノード公開鍵・ピア情報・容量を含む）
-// payment/index.js の同等エンドポイントと同じ admin ガードを適用する。
-// 認証済み一般ユーザーがチャネル残高・ピア接続情報を閲覧できると
-// チャネル枯渇・フィースナイプ等の Lightning 攻撃計画を補助する。
-router.get('/node-info', jwtAuth, rbac('admin'), cacheMiddleware(), async (req, res) => {
-  if (!requireService(lightning, res)) return;
-  try {
-    const info = await lightning.getNodeInfo();
-    res.json(info);
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to get node info' });
-  }
-});
-
-// Lightningチャネル情報API（管理者のみ）
-router.get('/channels', jwtAuth, rbac('admin'), cacheMiddleware(), async (req, res) => {
-  if (!requireService(lightning, res)) return;
-  try {
-    const channels = Array.from(lightning.channels.values());
-    res.json(channels);
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to get channels' });
-  }
-});
 
 // キャッシュ全体パージAPI（管理者のみ）
 router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {
@@ -132,7 +100,7 @@ router.post('/admin/cache/purge', jwtAuth, rbac('admin'), (req, res) => {
   }
 });
 
-// マーケットプレイス統計API（管理者のみ）— GMV・注文状況・GPU 稼働の俯瞰
+// マーケットプレイス統計API（管理者のみ）— 注文状況・GPU 稼働の俯瞰
 router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
   const UserRepository = require('../../db/json/UserRepository');
   const GpuRepository = require('../../db/json/GpuRepository');
@@ -146,14 +114,8 @@ router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
   for (const u of users) usersByRole[u.role || 'user'] = (usersByRole[u.role || 'user'] || 0) + 1;
 
   const ordersByStatus = {};
-  let gmvSats = 0;
-  let gmvJPY = 0;
   for (const o of orders) {
     ordersByStatus[o.status] = (ordersByStatus[o.status] || 0) + 1;
-    if (o.status === 'completed') {
-      gmvSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
-      gmvJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
-    }
   }
 
   const BLOCKING = new Set(['pending', 'matched', 'active']);
@@ -168,7 +130,6 @@ router.get('/admin/stats', jwtAuth, rbac('admin'), asyncHandler(async (req, res)
       available: gpus.filter(g => !occupiedGpuIds.has(g.id)).length,
     },
     orders: { total: orders.length, byStatus: ordersByStatus },
-    gmv: { completedSats: gmvSats, completedJPY: gmvJPY },
   });
 }));
 
@@ -201,23 +162,6 @@ router.get('/admin/verifications/:jobId', jwtAuth, rbac('admin'), asyncHandler(a
   const record = VerificationRepository.getByJobId(req.params.jobId);
   if (!record) return res.status(404).json({ error: 'Verification record not found' });
   res.json(record);
-}));
-
-// エスクロー一覧（管理者のみ）— orderId・state で絞り込み可能。
-// 注文当事者は GET /orders/:id/payment で自分の注文のエスクローを閲覧できるが、
-// 管理者が全エスクローをクロス検索する手段がなかった。
-router.get('/admin/escrow', jwtAuth, rbac('admin'), asyncHandler(async (req, res) => {
-  const EscrowRepository = require('../../db/json/EscrowRepository');
-  let escrows = EscrowRepository.getAll();
-  if (req.query.orderId) escrows = escrows.filter(e => e.orderId === req.query.orderId);
-  if (req.query.state) escrows = escrows.filter(e => e.state === req.query.state);
-  const limitRaw = parseInt(req.query.limit, 10);
-  const offsetRaw = parseInt(req.query.offset, 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
-  const total = escrows.length;
-  const page = escrows.slice(offset, offset + limit);
-  res.json({ total, limit, offset, escrows: page });
 }));
 
 // 期限切れ注文の手動スイープ（管理者のみ）— インシデント対応・テストで使用。
@@ -255,39 +199,10 @@ router.get('/system/info', rbac('admin'), asyncHandler(async (req, res) => {
   res.json(systemInfo);
 }));
 
-// 後方互換性のための古いエンドポイント（非推奨）
+// 後方互換性のための古いエンドポイントは全て除去済み。
 // 注: 旧 GET /gpus はここより前に gpuRoutes（router.use('/gpus')）が必ず応答するため
-// 到達不能となっており削除済み。旧 POST /order・/match は P2P 層（p2p-network.js）の
-// 削除に伴い除去した（同層は libp2p 未導入のため常時無効で、両エンドポイントは
-// 常時 503 しか返せなかった）。
-// セキュリティ: /payment は生のインフラ・パススルー（任意インボイス送金）
-// であり、運営ノードから任意の BOLT11 を送金できてしまう。注文所有権等の
-// 検証を行う正規エンドポイントへ移行するまでの間、admin ロールに限定する。
-router.post('/payment', rbac('admin'), deprecated('/api/v1/payments/pay'), asyncHandler(async (req, res) => {
-  logger.warn('Deprecated endpoint /payment accessed, use /api/v1/payments/pay instead');
-  if (!requireService(lightning, res)) return;
-  const { paymentRequest, amount, orderId } = req.body;
-  // BOLT11 最低限の形式チェック: lnbc/lntb/lnbcrt で始まる文字列のみ受け入れる
-  if (typeof paymentRequest !== 'string' || !/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(paymentRequest)) {
-    return res.status(400).json({ error: 'paymentRequest must be a valid BOLT11 invoice string' });
-  }
-  // 注文相関チェック: 任意送金によるノードドレインを防ぐため、orderId を必須とし
-  // 実在する注文の totalPrice を超える送金を拒否する（上限を注文額に束縛）。
-  if (!orderId || typeof orderId !== 'string') {
-    return res.status(400).json({ error: 'orderId is required — payment must correspond to a real order' });
-  }
-  const OrderRepository = require('../../db/json/OrderRepository');
-  const order = OrderRepository.getById(orderId);
-  if (!order) {
-    return res.status(404).json({ error: `Order ${orderId} not found` });
-  }
-  const orderMaxSats = order.totalPrice && order.totalPrice > 0 ? Math.ceil(order.totalPrice * 1.05) : 100000;
-  if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > orderMaxSats)) {
-    return res.status(400).json({ error: `amount must be a positive number not exceeding the order total (${orderMaxSats} sats)` });
-  }
-  const result = await lightning.payInvoice(paymentRequest, amount);
-  res.json({ status: 'paid', result });
-}));
+// 到達不能となっており削除済み。旧 POST /order・/match は P2P 層の削除に伴い除去。
+// 旧 POST /payment（任意 BOLT11 送金）は金銭機能の廃止（2026-11-16）に伴い除去した。
 
 // --- 共通エラーハンドリング ---
 const { errorMiddleware } = require('../../utils/error-handler');

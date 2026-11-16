@@ -83,7 +83,7 @@ if (googleOAuthEnabled) {
 
 // --- セッション ---
 // 共有インスタンス（src/api/middleware/master-session.js）を使う。ここで独自に
-// session(...) を呼ぶと、profit-addresses.js 等が requireMasterAuth のために
+// session(...) を呼ぶと、他ルートが requireMasterAuth のために
 // 別途 session(...) を呼んだ場合に別々の MemoryStore を持ってしまい、
 // このルートで確立したセッションを他ルートの req.session から参照できなくなる。
 router.use(masterSession);

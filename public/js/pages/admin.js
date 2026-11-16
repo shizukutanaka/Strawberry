@@ -1,9 +1,8 @@
 // public/js/pages/admin.js — admin dashboard: marketplace stats, verification
-// audit results, escrow states, and ops actions (expiry sweep, cache purge).
+// audit results, and ops actions (expiry sweep, cache purge).
 // Backed entirely by the existing /api/v1/admin/* endpoints.
-import { el, skeleton, emptyState, toast, fmtDate, fmtSats, fmtJpy, confirmDialog, statusLabel } from '../ui.js';
+import { el, skeleton, emptyState, toast, fmtDate, confirmDialog, statusLabel } from '../ui.js';
 import { api, ApiError } from '../api.js';
-import { navigate } from '../router.js';
 
 const VERDICT_LABELS = {
   verified: '検証OK',
@@ -21,7 +20,7 @@ function statCard(title, big, sub) {
 }
 
 function renderStats(box, stats) {
-  const { users, gpus, orders, gmv } = stats;
+  const { users, gpus, orders } = stats;
   const roleText = Object.entries(users.byRole || {}).map(([r, n]) => `${r}: ${n}`).join(' / ') || '—';
   const statusText = Object.entries(orders.byStatus || {})
     .map(([s, n]) => `${statusLabel(s)}: ${n}`).join(' / ') || '—';
@@ -30,7 +29,6 @@ function renderStats(box, stats) {
       statCard('ユーザー', String(users.total), roleText),
       statCard('GPU', String(gpus.total), `空き ${gpus.available} / 占有 ${gpus.occupied}`),
       statCard('注文', String(orders.total), statusText),
-      statCard('累計GMV（完了注文）', fmtSats(gmv.completedSats), fmtJpy(gmv.completedJPY)),
     )
   );
 }
@@ -46,27 +44,9 @@ function verificationRow(v) {
   );
 }
 
-function escrowRow(e) {
-  return el('tr', {},
-    el('td', {
-      'data-label': '注文', class: 'mono', style: 'cursor:pointer;color:var(--color-primary)',
-      onClick: () => e.orderId && navigate(`#/orders/${e.orderId}`),
-    }, (e.orderId || '').slice(0, 8) || '—'),
-    el('td', { 'data-label': '状態' }, e.state || '—'),
-    el('td', { 'data-label': '金額' }, fmtSats(e.amountSats ?? e.amount)),
-    el('td', { 'data-label': '作成日時' }, fmtDate(e.createdAt)),
-  );
-}
-
 export async function render(container) {
   const statsBox = el('div', {}, skeleton('card', 4));
   const verBox = el('div', { class: 'table-wrap' }, skeleton('line', 4));
-  const escrowBox = el('div', { class: 'table-wrap' }, skeleton('line', 4));
-  const escrowFilter = el('select', {},
-    el('option', { value: '' }, 'すべて'),
-    ...['PENDING', 'HELD', 'SETTLED', 'CANCELED', 'DISPUTED'].map((s) => el('option', { value: s }, s)),
-  );
-  escrowFilter.addEventListener('change', loadEscrow);
 
   async function expireSweep() {
     const ok = await confirmDialog('期限切れ注文のスイープを実行しますか？（pending/matched/disputed/active 全対象）');
@@ -94,24 +74,6 @@ export async function render(container) {
     }
   }
 
-  async function loadEscrow() {
-    escrowBox.replaceChildren(skeleton('line', 4));
-    try {
-      const res = await api.adminEscrow({ state: escrowFilter.value || undefined, limit: 50 });
-      if (!res.escrows.length) {
-        escrowBox.replaceChildren(emptyState('📭', 'エスクローはありません', ''));
-        return;
-      }
-      escrowBox.replaceChildren(el('table', { class: 'data-table' },
-        el('thead', {}, el('tr', {},
-          el('th', {}, '注文'), el('th', {}, '状態'), el('th', {}, '金額'), el('th', {}, '作成日時'))),
-        el('tbody', {}, ...res.escrows.map(escrowRow)),
-      ));
-    } catch (err) {
-      escrowBox.replaceChildren(emptyState('⚠️', '取得に失敗しました', err instanceof ApiError ? err.message : ''));
-    }
-  }
-
   container.appendChild(
     el('div', { class: 'stack' },
       el('div', { class: 'row-between' },
@@ -124,11 +86,6 @@ export async function render(container) {
       statsBox,
       el('h2', {}, '検証監査（最新50件）'),
       verBox,
-      el('div', { class: 'row-between' },
-        el('h2', {}, 'エスクロー'),
-        el('label', { class: 'row muted', style: 'gap:6px;font-size:0.85rem' }, '状態:', escrowFilter),
-      ),
-      escrowBox,
     )
   );
 
@@ -152,5 +109,4 @@ export async function render(container) {
     })
     .catch((err) => verBox.replaceChildren(
       emptyState('⚠️', '取得に失敗しました', err instanceof ApiError ? err.message : '')));
-  await loadEscrow();
 }

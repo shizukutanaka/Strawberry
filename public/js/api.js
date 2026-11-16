@@ -117,9 +117,7 @@ export const api = {
   // --- orders ---
   listOrders: (query) => request('/api/v1/orders', { query }),
   orderStats: () => request('/api/v1/orders/stats'),
-  providerEarnings: (query) => request('/api/v1/orders/provider/earnings', { query }),
   getOrder: (id) => request(`/api/v1/orders/${id}`),
-  getOrderPayment: (id) => request(`/api/v1/orders/${id}/payment`),
   createOrder: (gpuId, durationMinutes) => request('/api/v1/orders', { method: 'POST', body: { gpuId, durationMinutes } }),
   acceptOrder: (id) => request(`/api/v1/orders/${id}/accept`, { method: 'POST' }),
   rejectOrder: (id) => request(`/api/v1/orders/${id}/reject`, { method: 'POST' }),
@@ -130,16 +128,9 @@ export const api = {
   raiseDispute: (id, reason) => request(`/api/v1/orders/${id}/dispute`, { method: 'POST', body: { reason } }),
   resolveDispute: (id, decision, note) => request(`/api/v1/orders/${id}/dispute/resolve`, { method: 'POST', body: { decision, note } }),
 
-  // --- payments ---
-  createPayment: (orderId, paymentMethod) => request(`/api/v1/payments/order/${orderId}`, { method: 'POST', body: { paymentMethod } }),
-  paymentStatus: (paymentId) => request(`/api/v1/payments/${paymentId}/status`),
-  approveManualPayment: (paymentId) => request(`/api/v1/payments/manual/approve/${paymentId}`, { method: 'POST' }),
-  pendingManualPayments: () => request('/api/v1/payments/admin/pending'),
-
   // --- admin ---
   adminStats: () => request('/api/v1/admin/stats'),
   adminVerifications: (query) => request('/api/v1/admin/verifications', { query }),
-  adminEscrow: (query) => request('/api/v1/admin/escrow', { query }),
   adminExpireOrders: (types) => request('/api/v1/admin/expire-orders', { method: 'POST', body: types ? { types } : {} }),
   adminCachePurge: () => request('/api/v1/admin/cache/purge', { method: 'POST' }),
 

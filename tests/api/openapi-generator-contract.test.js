@@ -1,8 +1,10 @@
 // OpenAPI ジェネレータの生成契約テスト（Jest）。
-// schemas には (A) グループ形 { name: schema, ... }（gpu/order/...）と
-// (B) 単体スキーマ形（lightningNode/lightningChannel）の2形態が混在する。
-// 旧ジェネレータは (B) を (A) として走査して Joi 内部プロパティを j2s に渡し
-// クラッシュしていた — normalizeGroup の両形対応を回帰固定する。
+// schemas は (A) グループ形 { name: schema, ... }（gpu/order/...）で構成される。
+// 旧ジェネレータは (B) 単体スキーマ形を (A) として走査して Joi 内部プロパティを
+// j2s に渡しクラッシュしていた — normalizeGroup の両形対応を回帰固定する。
+// （(B) 形だった lightningNode/lightningChannel は Lightning 廃止に伴い削除済み。
+//   現在の schemas は全て (A) 形のため、(B) 形の回帰は「混在しても生成できる」
+//   ことではなく生成自体が両形対応のまま壊れないことを骨格テストで担保する。）
 // また persist=false 既定では openapi.json を disk に書かない
 // （未認証 /openapi.json リクエストで冷えたキャッシュから disk IO が走った旧不具合の固定）。
 
@@ -25,18 +27,10 @@ describe('generateOpenAPISpec の生成契約', () => {
     expect(typeof openapi.components.schemas).toBe('object');
   });
 
-  it('形 (B) 単体スキーマもコンポーネント化される（過去のクラッシュ経路）', () => {
-    // lightningNode はグループを持たない単体 Joi スキーマ — normalizeGroup が
-    // { lightningNode: schema } として代表名を付けないと components から欠落する。
-    expect(openapi.components.schemas.lightningNode_lightningNode).toBeDefined();
-    expect(openapi.components.schemas.lightningChannel_lightningChannel).toBeDefined();
-  });
-
   it('形 (A) グループの各スキーマがコンポーネント化される', () => {
     expect(openapi.components.schemas.gpu_register).toBeDefined();
     expect(openapi.components.schemas.order_create).toBeDefined();
     expect(openapi.components.schemas.user_register).toBeDefined();
-    expect(openapi.components.schemas.payment_createInvoice).toBeDefined();
   });
 
   it('requestBody の $ref は全て実在するコンポーネントを指す（幻影参照なし）', () => {

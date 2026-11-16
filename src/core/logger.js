@@ -175,34 +175,6 @@ logger.gpuEvent = (event, data) => {
     logger.info(`GPU Event: ${event}`, data);
 };
 
-// 決済イベント専用ロガー
-logger.paymentEvent = (event, data) => {
-    const paymentLogPath = path.join(logDir, 'payment-events.log');
-    const timestamp = new Date().toISOString();
-    const logEntry = {
-        timestamp,
-        event,
-        data: {
-            ...data,
-            // センシティブ情報のマスキング
-            paymentRequest: data.paymentRequest ? `${data.paymentRequest.substring(0, 20)}...` : undefined,
-            paymentPreimage: data.paymentPreimage ? `${data.paymentPreimage.substring(0, 10)}...` : undefined
-        }
-    };
-    
-    fs.appendFile(
-        paymentLogPath,
-        JSON.stringify(logEntry) + '\n',
-        (err) => {
-            if (err) {
-                logger.error('Failed to write payment event log:', err);
-            }
-        }
-    );
-    
-    logger.info(`Payment Event: ${event}`, logEntry.data);
-};
-
 // セキュリティイベント専用ロガー
 logger.securityEvent = (event, data) => {
     const securityLogPath = path.join(logDir, 'security-events.log');

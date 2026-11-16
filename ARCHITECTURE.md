@@ -26,8 +26,15 @@
   見える画面が存在しなかった）。`#/`始まりのハッシュルーティング（`public/js/router.js`）。
   厳格CSP（`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。`/swagger.html`
   も同様の理由で CDN+インライン版から同一オリジンの自前ビューア（`public/js/docs.js`）に
-  置換済み。未実装: GPU接続情報の実配信（`accessInfo.deliveryImplemented` が false の間は
-  その旨を正直に表示するのみ）。
+  置換済み。GPU接続情報の実配信は native 経路で実装済み（2026-11-16）:
+  割り当てごとに実在する HTTP セッションゲートウェイをホスト上に立て、
+  endpoint とトークンを借り手へ受け渡す（注文詳細画面にも表示）。
+  `STRAWBERRY_NATIVE_UPSTREAM_URL` が設定されていれば、そのホスト上の
+  ローカル GPU サービスへ中継し、未設定なら生存確認のみ応答して計算パスは
+  502 で正直に返す。解放でゲートウェイは閉じられる。残る制約: ゲートウェイは
+  サーバと同一ホスト内が前提（別マシンのプロバイダ GPU への到達性は
+  プロバイダ側エージェントの仕事で未実装）、実 GPU の利用統計は
+  nvidia-smi 前提で、無い環境では null を返す。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
   `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
   （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`

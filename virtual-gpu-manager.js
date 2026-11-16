@@ -21,6 +21,8 @@ const { logger } = require('./src/utils/logger');
 // child_process には .promises が存在しないため、util.promisify で exec を生成する
 // (元コードの `require('child_process').promises` は undefined となり全 exec 呼び出しが壊れていた)
 const exec = require('util').promisify(require('child_process').exec);
+const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs').promises;
 const fsSync = require('fs'); // existsSync 等の同期APIは fs.promises に無いため別途参照
 const path = require('path');
@@ -856,24 +858,130 @@ nvidia-cuda-mps-control -d
         };
     }
 
+    // native セッションゲートウェイの保持マップ（allocationId → {server, token}）。
+    // コンストラクタを経ない生成（テストの Object.create 等）でも壊れないよう遅延初期化する。
+    // サーバハンドルはここにだけ置き、allocation 本体には混ぜない（allocation は
+    // 注文レコードとして JSON 永続化されるため、循環参照を持つ Server を入れると
+    // /start の書き込みが JSON.stringify で落ちる）。
+    _getNativeSessions() {
+        if (!this._nativeSessions) this._nativeSessions = new Map();
+        return this._nativeSessions;
+    }
+
     async setupNativeAccess(vgpu, allocation) {
-        // ネイティブアクセス設定。
-        // 旧実装は実在しない `strawberry-gpu-proxy` バイナリを spawn し、誰も listen して
-        // いない endpoint URL を「成功」として返していた（renter は支払い後に接続できない
-        // 空約束を受け取っていた）。実プロキシ配線は別途のフォローアップ課題とし、ここでは
-        // 割り当て自体（課金・スケジューリング・状態遷移）を正しく完了させることを優先する。
-        // トークンは実際に発行して記録するが、endpoint は null にし
-        // deliveryImplemented:false で「まだ配信未実装」であることを明示する。
+        // ネイティブアクセス設定（セッションの受け渡し）。
+        // 旧実装は endpoint:null / deliveryImplemented:false を返し、借り手は
+        // 「割り当てられたが接続先が無い」状態だった（さらに旧々実装は実在しない
+        // プロキシバイナリを spawn して空約束の URL を返していた）。
+        // ここでは割り当てごとに実在する HTTP ゲートウェイをこのホスト上に立て、
+        // 借り手へ endpoint とトークンを受け渡す:
+        //   - 全リクエストにトークン必須（Authorization: Bearer / x-strawberry-token）
+        //   - GET / と /health はセッション状態を返す
+        //   - STRAWBERRY_NATIVE_UPSTREAM_URL が設定されていれば、その他のパスは
+        //     このホスト上の GPU サービス（Ollama 等のローカル推論サーバ）へ中継する
+        //   - 未設定なら 502 で「ホスト側に GPU サービス未設定」を正直に返す
+        // 解放時は releaseNativeAccess がゲートウェイを閉じる（endpoint は接続不能になる）。
         const accessToken = this.generateAccessToken();
+        const upstreamUrl = (process.env.STRAWBERRY_NATIVE_UPSTREAM_URL || '').trim() || null;
+        const bindHost = (process.env.STRAWBERRY_NATIVE_BIND_HOST || '127.0.0.1').trim() || '127.0.0.1';
+        const sessions = this._getNativeSessions();
+
+        const tokenOk = (req) => {
+            const presented = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '')
+                || req.headers['x-strawberry-token'] || '';
+            const a = Buffer.from(String(presented));
+            const b = Buffer.from(accessToken);
+            return a.length === b.length && crypto.timingSafeEqual(a, b);
+        };
+        const sendJson = (res, status, obj) => {
+            const body = JSON.stringify(obj);
+            res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+            res.end(body);
+        };
+
+        const server = http.createServer((req, res) => {
+            if (!tokenOk(req)) {
+                sendJson(res, 401, { error: 'Unauthorized: a valid access token is required' });
+                return;
+            }
+            const pathname = (req.url || '/').split('?')[0];
+            if (req.method === 'GET' && (pathname === '/' || pathname === '/health')) {
+                sendJson(res, 200, {
+                    status: 'active',
+                    type: 'native',
+                    allocationId: allocation.id,
+                    vgpuId: vgpu.id,
+                    upstream: upstreamUrl ? 'configured' : 'not-configured',
+                });
+                return;
+            }
+            if (!upstreamUrl) {
+                sendJson(res, 502, {
+                    error: 'No GPU service is configured on this host',
+                    hint: 'The host operator must set STRAWBERRY_NATIVE_UPSTREAM_URL to the local GPU service (e.g. http://127.0.0.1:11434) for requests to be forwarded.',
+                });
+                return;
+            }
+            // ローカルの GPU サービスへ中継（ストリーミング）。
+            // SSRF 対策: 絶対形式の request-target（http://別ホスト/...）を受け付けると
+            // new URL が base を無視して任意ホストへ向き、トークン保持者が内側の
+            // 別サービスへ到達できてしまう。origin-form（/ 始まり）だけを許可し、
+            // 解決後の origin が設定済み upstream と一致することも確認する。
+            if (!req.url.startsWith('/')) {
+                sendJson(res, 400, { error: 'Only origin-form request targets are accepted' });
+                return;
+            }
+            let target;
+            try {
+                target = new URL(req.url, upstreamUrl);
+                if (target.origin !== new URL(upstreamUrl).origin) throw new Error('origin mismatch');
+            } catch (_) {
+                sendJson(res, 502, { error: 'Invalid upstream URL' });
+                return;
+            }
+            const headers = { ...req.headers };
+            delete headers['authorization'];
+            delete headers['x-strawberry-token'];
+            headers['host'] = target.host;
+            const upstreamReq = http.request({
+                hostname: target.hostname,
+                port: target.port || 80,
+                path: target.pathname + target.search,
+                method: req.method,
+                headers,
+            }, (upstreamRes) => {
+                res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
+                upstreamRes.pipe(res);
+            });
+            upstreamReq.on('error', (e) => {
+                logger.warn(`Native session gateway upstream error (allocation ${allocation.id}): ${e.message}`);
+                if (!res.headersSent) sendJson(res, 502, { error: 'GPU service on this host is unreachable' });
+                else res.destroy();
+            });
+            req.pipe(upstreamReq);
+        });
+
+        await new Promise((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, bindHost, resolve);
+        });
+        const port = server.address().port;
+        sessions.set(allocation.id, { server, token: accessToken });
+
+        const endpoint = `http://${bindHost}:${port}`;
+        logger.info(`Native GPU session gateway listening for allocation ${allocation.id} at ${endpoint} (upstream: ${upstreamUrl ? 'configured' : 'not-configured'})`);
 
         return {
             type: 'native',
-            endpoint: null,
+            endpoint,
             credentials: {
                 token: accessToken
             },
-            deliveryImplemented: false,
-            message: 'GPU access delivery is not yet implemented for native allocations. Billing, scheduling, and rental state are fully active.',
+            deliveryImplemented: true,
+            upstream: upstreamUrl ? 'configured' : 'not-configured',
+            message: upstreamUrl
+                ? 'GPU access session is live. Send requests to the endpoint with the access token (Authorization: Bearer); they are forwarded to the GPU service running on this host.'
+                : 'GPU access session is live on this host and answers health checks with the access token. No local GPU service is configured on the host yet (the operator can set STRAWBERRY_NATIVE_UPSTREAM_URL), so compute requests cannot be forwarded until then.',
         };
     }
 
@@ -894,9 +1002,28 @@ nvidia-cuda-mps-control -d
     }
 
     async releaseNativeAccess(vgpu, allocation) {
-        // プロキシプロセス終了。setupNativeAccess で記録した allocation.proxyPid を
-        // 第一手段とする。pkill -f パターンは「同一 vgpuId の別割当を巻き込む / 再 exec で
-        // cmdline が変わり取り逃す」リスクがあり、孤児プロキシとバインドポートをリークさせる。
+        // 第一手段: setupNativeAccess が立てたセッションゲートウェイを閉じる。
+        // close だけでは keep-alive 接続が残りポートが解放されない場合があるため、
+        // closeAllConnections（Node >= 18.2）があれば併用する。
+        const sessions = this._getNativeSessions();
+        const session = allocation && sessions.get(allocation.id);
+        if (session) {
+            sessions.delete(allocation.id);
+            await new Promise((resolve) => {
+                try {
+                    session.server.close(() => resolve());
+                    if (typeof session.server.closeAllConnections === 'function') {
+                        session.server.closeAllConnections();
+                    }
+                } catch (_) { resolve(); }
+            });
+            logger.info(`Native GPU session gateway closed for allocation ${allocation.id}`);
+            return;
+        }
+        // フォールバック（旧形式の割当）: プロキシプロセス終了。setupNativeAccess で
+        // 記録した allocation.proxyPid を使う。pkill -f パターンは「同一 vgpuId の
+        // 別割当を巻き込む / 再 exec で cmdline が変わり取り逃す」リスクがあり、
+        // 孤児プロキシとバインドポートをリークさせる。
         const pid = allocation && allocation.proxyPid;
         if (pid) {
             try {

@@ -277,6 +277,25 @@ export async function render(container, params) {
 
     body.appendChild(el('div', { class: 'stack' }, statusLine, heartbeatLine));
 
+    // 接続情報の受け渡し: 開始時に割り当てられたセッションの endpoint と
+    // トークンを借り手に表示する。これが無いと、サーバ側で割り当てが成立しても
+    // 借り手は接続先を知る手段が無く「貸し借り」が画面上で完結しない。
+    const accessInfo = order.allocationDetails && order.allocationDetails.accessInfo;
+    if (isRenter && accessInfo && accessInfo.endpoint) {
+      const children = [
+        el('p', {}, el('strong', {}, '接続情報')),
+        el('p', { class: 'muted', style: 'font-size:0.85rem;word-break:break-all' }, `接続先: ${accessInfo.endpoint}`),
+      ];
+      if (accessInfo.credentials && accessInfo.credentials.token) {
+        children.push(el('p', { class: 'muted', style: 'font-size:0.85rem;word-break:break-all' }, `アクセストークン: ${accessInfo.credentials.token}`));
+        children.push(el('p', { class: 'muted', style: 'font-size:0.85rem' }, 'リクエストには Authorization: Bearer <アクセストークン> を付けてください。'));
+      }
+      if (accessInfo.upstream === 'not-configured') {
+        children.push(el('p', { class: 'muted', style: 'font-size:0.85rem' }, 'ホスト側で GPU サービスが未設定のため、計算リクエストの中継はまだ有効ではありません（接続先の生存確認には応答します）。'));
+      }
+      body.appendChild(el('div', { class: 'stack' }, ...children));
+    }
+
     if (isRenter) {
       const stopBtn = el('button', {
         class: 'btn btn-danger',

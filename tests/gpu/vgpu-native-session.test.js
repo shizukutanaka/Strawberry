@@ -149,8 +149,12 @@ describe('VirtualGPUManager native session handover', () => {
     const ok = await request(endpoint, { token: alloc.accessInfo.credentials.token });
     expect(ok.status).toBe(200);
     await mgr.releaseGPU('gpu-session-6', 'rental-6');
-    await expect(request(endpoint, { token: alloc.accessInfo.credentials.token }))
-      .rejects.toMatchObject({ code: 'ECONNREFUSED' });
+    // 解放後は接続できないこと。エラーコードはプラットフォームで異なる
+    // （接続拒否 ECONNREFUSED / 接続リセット ECONNRESET のどちらも「到達不能」を示す）
+    const err = await request(endpoint, { token: alloc.accessInfo.credentials.token })
+      .then(() => null, (e) => e);
+    expect(err).not.toBeNull();
+    expect(['ECONNREFUSED', 'ECONNRESET']).toContain(err.code);
     // 解放後は同じ GPU を再び割り当てられる
     const again = await mgr.allocateGPU('gpu-session-6', 'rental-7', GPU_RECORD);
     expect(again.success).toBe(true);

@@ -351,6 +351,16 @@ if (require.main === module) {
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
+  // 提供者エージェントの WebSocket ハブを同じ HTTP サーバへ取り付ける
+  // （別マシンの提供者が外向き接続で到達可能になる）。失敗しても API 本体は
+  // 起動を継続する（エージェント経路だけが無効になる）。
+  try {
+    require('../services/provider-agent-hub').hub.attachToServer(server);
+    logger.info('Provider agent hub attached (WebSocket: /api/v1/agent/connect)');
+  } catch (e) {
+    logger.warn(`Provider agent hub unavailable; provider-agent forwarding disabled: ${e.message}`);
+  }
+
   // グレースフルシャットダウン（30秒でタイムアウト — ハングしたハンドラで無限待機しない）。
   // SIGTERM(オーケストレータ)と SIGINT(Ctrl-C/開発・一部環境) の両方を扱う。未処理シグナルでの
   // ハード終了は進行中レスポンス・ファイル書込みを切断するため。二重受信に備え冪等化する。

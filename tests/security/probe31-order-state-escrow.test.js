@@ -1,8 +1,6 @@
 // tests/security/probe31-order-state-escrow.test.js
 // Probe 31 regression tests:
 // 1. Admin PUT cannot set status='completed' directly (must use /stop)
-// 2. Admin PUT to 'cancelled' triggers escrow cancel side effects (source check)
-// 3. DELETE escrow cancel failures for HELD escrows are not silently swallowed (source check)
 // 4. ReDoS: all validation regexes are safe (no catastrophic backtracking)
 
 const request = require('supertest');
@@ -98,39 +96,6 @@ describe('Admin PUT /:id: status=completed is blocked', () => {
 });
 
 // ─── 2. Source: PUT → cancelled triggers escrow cancel, not swallowed ────────
-describe('Source guards: admin PUT status=cancelled and DELETE escrow handling', () => {
-  it('order/index.js: PUT handler cancels escrow before changing order status', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    // Must check updateData.status === 'cancelled' and call escrowSvc.cancel() in PUT handler
-    expect(src).toMatch(/updateData\.status === 'cancelled'/);
-    // escrowSvc.cancel is called in DELETE and in the new PUT handler
-    const cancelMatches = (src.match(/escrowSvc\.cancel/g) || []).length;
-    expect(cancelMatches).toBeGreaterThanOrEqual(2); // at least DELETE + PUT
-  });
-
-  it("order/index.js: PUT handler blocks 'completed' status", () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    expect(src).toMatch(/sanitized\.status === 'completed'/);
-    expect(src).toMatch(/Use POST.*stop.*to complete/);
-  });
-
-  it('order/index.js: DELETE handler does NOT silently swallow HELD escrow cancel failures', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/order/index.js'), 'utf-8'
-    );
-    // Must distinguish HELD escrows from non-HELD (no blanket try/catch around HELD cancel)
-    expect(src).toMatch(/escrow\.state === 'HELD'/);
-    // Must NOT wrap the HELD cancel path in a try/catch that silently continues
-    // (the fix: HELD cancel throws propagate — only non-HELD paths get best-effort catch)
-    expect(src).toMatch(/Non-critical escrow cancel failed/);
-  });
-});
-
-// ─── 3. Admin PUT status=cancelled on pending order works ────────────────────
 describe('Admin PUT status=cancelled: normal flow (pending order, no escrow)', () => {
   let orderId;
 

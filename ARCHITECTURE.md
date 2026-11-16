@@ -1,4 +1,10 @@
-# Strawberry アーキテクチャと現状（2026-06）
+# Strawberry アーキテクチャと現状（2026-06、2026-11-16 更新）
+
+> **2026-11-16 の変更**: 所有者の方針により**金銭のやり取り機能を全て削除**した。
+> 支払い（Lightning／銀行振込／BTC オンチェーン）、エスクロー、精算、運営利益アドレス、
+> 収益・GMV 集計は存在しない。Strawberry は **GPU の貸し借り専用**であり、価格は
+> GPU の掲載情報（表示・見積もり）としてのみ残る。Proof-of-Compute 検証と
+> レピュテーションは貸し借りの品質担保として残置した。
 
 このドキュメントは、リポジトリの**実態**を簡潔にまとめたもの。README や
 `improvement_checklist2.md` の一部記述は実装より先行（aspirational）しているため、
@@ -14,8 +20,8 @@
   配布パッケージング（electron-builder 等）は未配線。
 - **`public/` は実際に動くフロントエンド**（2026-07 追加）。ビルド不要の静的SPA
   （素の HTML + CSS + ネイティブ ES modules、依存追加ゼロ）。`http://localhost:3000`
-  で登録/ログイン・GPUマーケット閲覧・注文（Lightning/銀行振込決済含む）・稼働中セッション
-  （ハートビート・停止）・レビュー・係争の申請/管理者裁定・管理者の決済承認まで、実際に
+  で登録/ログイン・GPUマーケット閲覧・注文・稼働中セッション
+  （ハートビート・停止）・レビュー・係争の申請/管理者裁定まで、実際に
   画面から一通り操作できる（以前は `public/index.html` が1行の空スタブで、ブラウザで
   見える画面が存在しなかった）。`#/`始まりのハッシュルーティング（`public/js/router.js`）。
   厳格CSP（`script-src 'self'` のみ、インラインスクリプト禁止）に対応済み。`/swagger.html`
@@ -37,31 +43,30 @@ src/api/server.js
  ├─ /master-auth      → routes/master-auth.js (Google OAuth は env 設定時のみ有効)
  ├─ /api/exchange-rate→ routes/exchange-rate.js
  └─ /api/v1 (routes/index.js)  ※ /system/info 以外は JWT 必須
-      ├─ /gpus /orders /payments /users  → JSON リポジトリで動作
+      ├─ /gpus /orders /users /marketplace  → JSON リポジトリで動作
       └─ コアサービス: src/core/services.js 経由のガード付きシングルトン
            ├─ virtual-gpu-manager.js (dockerode/k8s)   … ロード可（要 Docker/k8s 実機）
            ├─ gpu-detector-extended.js                  … ロード可
-           ├─ lightning-service.js (gRPC)               … ロード可（要 LND。未接続時は mock）
            └─ p2p-network.js (libp2p)                   … 削除済み（libp2p 未導入で常時無効だったため）
 ```
 
 ### コアサービスのガード方針（重要）
 
-`virtual-gpu-manager` / `lightning-service` はリポジトリ直下に置かれた
-大型モジュールで、ネイティブ依存（dockerode・gRPC）を持つ。これらをモジュール読込時に `new` していたため、
+`virtual-gpu-manager` はリポジトリ直下に置かれた
+大型モジュールで、ネイティブ依存（dockerode）を持つ。これをモジュール読込時に `new` していたため、
 従来は Web API 全体が起動不能だった。
 
 現在は `src/core/services.js` が全て **try/catch で安全に読み込み、失敗時は `null`**
 （無効化モード）にフォールバックする。各サービスを使うエンドポイントは `requireService()`
 で **503** を返す。これにより JSON データ層で動く API 本体は常に起動できる。
 
-コードレビュー後の修正で、`virtual-gpu-manager` / `gpu-detector-extended` /
-`lightning-service` の読込阻害バグ（誤った `../utils/logger` 相対パス、
-`child_process.promises`・`fs.promises` 誤用、`lightning-service` のブレース不整合に
-よる構文エラー）を解消し、これら3つは**ロード・インスタンス化が可能**になった
-（実機能は Docker/k8s・LND 実機が必要。`virtual-gpu-manager` のコマンド実行は
+コードレビュー後の修正で、`virtual-gpu-manager` / `gpu-detector-extended`
+の読込阻害バグ（誤った `../utils/logger` 相対パス、
+`child_process.promises`・`fs.promises` 誤用）を解消し、**ロード・インスタンス化が可能**になった
+（実機能は Docker/k8s 実機が必要。`virtual-gpu-manager` のコマンド実行は
 識別子サニタイズ済み）。`p2p-network` は libp2p 未導入で `require()` 自体が
-失敗し常時無効だったため、後に削除した。
+失敗し常時無効だったため、後に削除した。`lightning-service` は金銭機能の
+全廃（2026-11-16）に伴い削除した。
 
 これらインフラ系依存は `package.json` の `optionalDependencies`（libp2p 一式は未宣言）に置く。
 
@@ -74,15 +79,14 @@ src/api/server.js
   `validator.js` の二重 `const Joi` などを修正。`server.js` は直接実行時のみ listen。
 - **重大セキュリティ修正**:
   - ハードコード秘密鍵フォールバック廃止 → `config.requireSecret()` で本番 fail-fast / 開発は一時鍵。
-  - `routes/profit-addresses.js`（運営受取アドレス）に `jwtAuth + admin` を必須化。
-  - `btc-payment.sendBTC` の `dummy-txid` 成功偽装を廃止し、失敗は例外伝播。
   - `virtual-gpu-manager` のシェル実行を識別子サニタイズでインジェクション対策。
   - `.env.example` に必須 env を明記。
 
 ## テスト状況（正直版）
 
-`npm test`（Jest, `--forceExit`）は **247/249 スイート green**（1982/1985 テスト、2 スイート
-＋3 テストが環境依存で skip。2026-10 時点）。当初あった aspirational な失敗群（未実装エンドポイント・旧スキーマ
+`npm test`（Jest, `--forceExit`）は **215/218 スイート green**（1702/1706 テスト、2 スイート
+＋3 テストが環境依存で skip、残る失敗 1 件は公開 URL の DNS 解決に依存する SSRF テストで
+実行環境要因。2026-11-16 時点、金銭機能のテスト群は機能ごと削除済み）。当初あった aspirational な失敗群（未実装エンドポイント・旧スキーマ
 参照）は逐ー是正済み。`--forceExit` が必要なのは起動時のサービス初期化タイマー類が
 イベントループに残るためで、テストの成否とは無関係。
 
@@ -92,7 +96,7 @@ src/api/server.js
 
 ## フォローアップ（未対応・推奨順）
 
-1. P2P が必要になれば別実装として新規に切り出す（旧 `p2p-network` は削除済み）。他3サービスは実機(Docker/k8s/LND)での結合検証。
+1. P2P が必要になれば別実装として新規に切り出す（旧 `p2p-network` は削除済み）。残るサービスは実機(Docker/k8s)での結合検証。
 2. データ層を一本化（当面 JSON 維持、将来 Prisma へ。未配線のまま残っていた `prisma/schema.prisma`
    は削除済みで、移行には未着手のスキーマ設計から必要）。
 3. サービスの DI/シングルトン統一（`*-fixed.js` 孤立ファイルは削除済）。
@@ -106,19 +110,11 @@ src/api/server.js
    `build/` への `netlify deploy` で、ステートフルな Express アプリには元々デプロイ先として
    不適切だった。
 
-### 既知の重大ギャップ（要対応・資金フロー）
+### 既知の重大ギャップ（要対応）
 
-- **エスクローの実 LN 結線（money-movement gap の残り）**: `escrow-state-machine` が
-  返す `reveal_preimage`/`payout_provider`/`collect_fee` 等の actions は
-  `escrow-service.runActions` → `action-executor.executeActions` へ DI 経由で接続済。
-  ただし本番の呼び出し側（order ルート・order-expiry・marketplace/default）は
-  `createEscrowService()` を **`lnAdapter` 未指定**で呼ぶため runActions は no-op。
-  `settle()` の `providerPayoutSats` は `ctx.payoutSats` へ渡される実装済。
-  結果、エスクロー状態遷移・精算計算・永続化は動作するが、実 LN 払い出しは
-  adapter を注入するまで実行されない。**残作業は実 LND/CLN アダプタと呼出側への注入**。
 - **JSON 層のクロスプロセス lost-update**: `createJsonRepository` の書き込みは
   temp+rename で単一プロセス内は原子的だが、PM2 クラスタ等の複数ワーカーでは
   flock 相当のクロスプロセス排他がないため「両者 load → 別キー更新 → 後勝ち rename」で
   更新消失が起こりうる。マルチプロセス運用前に flock もしくは単一ライタープロセス化が必要。
-  （単一プロセス運用では問題なし。`profit-addresses`/`peerID`/`notification-settings` は
+  （単一プロセス運用では問題なし。`peerID`/`notification-settings` は
   プロセス内 `withLock` で直列化済み。）

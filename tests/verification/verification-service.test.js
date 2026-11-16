@@ -1,7 +1,5 @@
 // tests/verification/verification-service.test.js
 const { createVerificationService } = require('../../src/verification/verification-service');
-const { createEscrowService } = require('../../src/payments/escrow-service');
-const { STATES } = require('../../src/payments/escrow-state-machine');
 
 function makeMemoryRepo() {
   const rows = new Map();
@@ -72,7 +70,7 @@ describe('verification-service', () => {
     expect(r.verificationCtx.verified).toBe(false);
   });
 
-  it('audited job without replicas is inconclusive (escrow should WAIT)', () => {
+  it('audited job without replicas is inconclusive (verdict withheld)', () => {
     const s = svc();
     s.open('j', { auditRate: 1 });
     s.recordPrimary('j', [1, 2], { utilSamples: [80] });
@@ -89,28 +87,6 @@ describe('verification-service', () => {
     s.recordPrimary('j', [1], { utilSamples: [90] });
     s.finalize('j');
     expect(calls).toEqual([['prov-1', true]]);
-  });
-
-  it('integrates with escrow: finalize ctx drives settle/dispute', () => {
-    const verification = svc();
-    const escrow = createEscrowService({ repository: (function () {
-      const rows = new Map(); let n = 0;
-      return {
-        create: (rec) => { const id = `e-${++n}`; const row = { ...rec, id }; rows.set(id, row); return row; },
-        getById: (id) => rows.get(id) || null,
-        update: (id, u) => { const c = rows.get(id); if (!c) return null; const x = { ...c, ...u }; rows.set(id, x); return x; },
-      };
-    })() });
-
-    const e = escrow.create({ orderId: 'o', amountSats: 1000 });
-    escrow.markPaid(e.id);
-
-    // honest job -> verified -> escrow settles
-    verification.open('job-ok', { auditRate: 0 });
-    verification.recordPrimary('job-ok', [1, 2], { utilSamples: [80, 85] });
-    const v = verification.finalize('job-ok');
-    const settled = escrow.evaluate(e.id, v.verificationCtx);
-    expect(settled.escrow.state).toBe(STATES.SETTLED);
   });
 
   describe('audit sampling secret (auditee-unpredictable)', () => {

@@ -142,44 +142,6 @@ class MetricsCollector {
             })
         };
 
-        // Lightning Network メトリクス
-        this.lightningMetrics = {
-            channelBalance: new promClient.Gauge({
-                registers: [this.register],
-                name: 'strawberry_lightning_channel_balance_sats',
-                help: 'Lightning channel balance in satoshis',
-                labelNames: ['channel_id', 'balance_type'] // 'local' or 'remote'
-            }),
-            
-            paymentVolume: new promClient.Counter({
-                registers: [this.register],
-                name: 'strawberry_lightning_payment_volume_sats',
-                help: 'Total Lightning payment volume',
-                labelNames: ['payment_type'] // 'sent' or 'received'
-            }),
-            
-            paymentCount: new promClient.Counter({
-                registers: [this.register],
-                name: 'strawberry_lightning_payment_count',
-                help: 'Total number of Lightning payments',
-                labelNames: ['payment_type', 'status'] // 'success' or 'failed'
-            }),
-            
-            invoiceSettleTime: new promClient.Histogram({
-                registers: [this.register],
-                name: 'strawberry_lightning_invoice_settle_time_seconds',
-                help: 'Time to settle Lightning invoices',
-                buckets: [1, 5, 10, 30, 60, 300]
-            }),
-            
-            routingFees: new promClient.Counter({
-                registers: [this.register],
-                name: 'strawberry_lightning_routing_fees_sats',
-                help: 'Total routing fees collected',
-                labelNames: ['channel_id']
-            })
-        };
-
         // システムメトリクス
         this.systemMetrics = {
             cpuUsage: new promClient.Gauge({
@@ -258,7 +220,6 @@ class MetricsCollector {
             ...Object.values(this.gpuMetrics),
             ...Object.values(this.rentalMetrics),
             ...Object.values(this.networkMetrics),
-            ...Object.values(this.lightningMetrics),
             ...Object.values(this.systemMetrics),
             ...Object.values(this.businessMetrics)
         ];
@@ -460,53 +421,6 @@ class MetricsCollector {
 
         } catch (error) {
             logger.error('Failed to record network metrics:', error);
-        }
-    }
-
-    // Lightning メトリクス記録
-    recordLightningMetrics(lightningData) {
-        try {
-            const {
-                channel_id,
-                local_balance,
-                remote_balance,
-                payment_amount,
-                payment_type,
-                payment_status,
-                settle_time
-            } = lightningData;
-
-            if (local_balance !== undefined) {
-                this.lightningMetrics.channelBalance.set(
-                    { channel_id, balance_type: 'local' },
-                    local_balance
-                );
-            }
-
-            if (remote_balance !== undefined) {
-                this.lightningMetrics.channelBalance.set(
-                    { channel_id, balance_type: 'remote' },
-                    remote_balance
-                );
-            }
-
-            if (payment_amount !== undefined) {
-                this.lightningMetrics.paymentVolume.inc(
-                    { payment_type },
-                    payment_amount
-                );
-
-                this.lightningMetrics.paymentCount.inc(
-                    { payment_type, status: payment_status }
-                );
-            }
-
-            if (settle_time !== undefined) {
-                this.lightningMetrics.invoiceSettleTime.observe(settle_time);
-            }
-
-        } catch (error) {
-            logger.error('Failed to record Lightning metrics:', error);
         }
     }
 

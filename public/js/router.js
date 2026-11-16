@@ -1,7 +1,7 @@
 // public/js/router.js — minimal hash router.
 // Each route's render(container, params) may return a cleanup function; it is
 // called before the next route renders. This contract matters: pages that set
-// up setInterval polling (order-detail's payment/heartbeat tickers) MUST return
+// up setInterval polling (order-detail's heartbeat ticker) MUST return
 // a cleanup that clears them, or navigating away leaks timers.
 import { isAuthenticated, isRole } from './auth.js';
 

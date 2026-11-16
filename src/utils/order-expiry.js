@@ -1,7 +1,7 @@
-// src/utils/order-expiry.js - 未決済/未開始注文の自動失効
-// pending: 決済タイムアウト（既定 30 分）
+// src/utils/order-expiry.js - 未開始注文の自動失効
+// pending: 放置タイムアウト（既定 30 分）
 // matched: マッチ後に renter/provider がジョブを開始しない場合のタイムアウト（既定 60 分）
-// disputed: 管理者が裁定しない場合の自動解決（既定 7 日 → 返金）
+// disputed: 管理者が裁定しない場合の自動解決（既定 7 日 → 借り手の主張を認容）
 // タイムアウトは env 変数で上書き可能。呼出し毎に解決してテスト・運用での動的変更を許容。
 const OrderRepository = require('../db/json/OrderRepository');
 const { logger } = require('./logger');
@@ -17,49 +17,6 @@ function resolveTimeoutMinutes() {
   if (raw === undefined || raw === '') return DEFAULT_TIMEOUT_MINUTES;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_TIMEOUT_MINUTES;
-}
-
-/**
- * 注文キャンセルに伴い孤立する HELD エスクローを FSM 経由で解放する。
- * /stop・dispute 自動解決はエスクローを精算するが、タイムアウト系スイープは
- * 従来キャンセルだけ行い、支払済み資金が HELD のまま永久ロックされていた。
- * - mode 'refund': HELD → CANCELED（借り手へ返金）。GPU が未提供の失効に用いる。
- * - mode 'prorate': /stop と同じ壁時計フォールバックで deliveredRatio を算出し
- *   HELD → SETTLED（提供者へ出来高払い）。active タイムアウトに用いる。
- * ベストエフォート: 個別失敗は warn ログのみで失効処理を妨げない。
- * @param {object} order 遷移確定後の注文
- * @param {'refund'|'prorate'} mode
- */
-function releaseEscrowsOnTimeout(order, mode) {
-  try {
-    const EscrowRepository = require('../db/json/EscrowRepository');
-    const { createEscrowService } = require('../payments/escrow-service');
-    const escrowSvc = createEscrowService();
-    const escrows = (EscrowRepository.getByOrderId
-      ? EscrowRepository.getByOrderId(order.id)
-      : (EscrowRepository.getAll() || []).filter(e => e.orderId === order.id)
-    ).filter(e => e.state === 'HELD');
-    for (const esc of escrows) {
-      try {
-        if (mode === 'prorate') {
-          const elapsedSeconds = order.startedAt
-            ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
-            : 0;
-          const deliveredRatio = order.durationMinutes
-            ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
-            : 0;
-          escrowSvc.settle(esc.id, { deliveredRatio, slaUptimePct: 100 });
-          escrowSvc.apply(esc.id, 'DELIVER_OK');
-        } else {
-          escrowSvc.cancel(esc.id);
-        }
-      } catch (inner) {
-        logger.warn(`Escrow timeout release failed (escrow=${esc.id}, mode=${mode}): ${inner.message}`);
-      }
-    }
-  } catch (e) {
-    logger.warn(`Escrow timeout release failed (order=${order.id}, mode=${mode}): ${e.message}`);
-  }
 }
 
 /**
@@ -93,21 +50,18 @@ function expireStaleOrders() {
     //   - sweep が直前に確定した pending→matched を無条件 update で踏み潰す
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'pending', {
       status: 'cancelled',
-      cancelReason: 'payment_timeout',
+      cancelReason: 'pending_timeout',
       cancelledAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
     if (!result.ok) continue; // 既に他経路で確定済み（冪等）
     expired++;
-    // 支払済みエスクローが残っていれば借り手へ返金（オンチェーン事前決済等で
-    // HELD のまま pending 失効した資金をロックしない）
-    releaseEscrowsOnTimeout(order, 'refund');
-    logger.info(`Order auto-expired (payment timeout): ${order.id}`);
-    // 借り手へ失効通知（決済タイムアウトで自動キャンセルされたことを即時周知）
+    logger.info(`Order auto-expired (pending timeout): ${order.id}`);
+    // 借り手へ失効通知（放置タイムアウトで自動キャンセルされたことを即時周知）
     try {
       const { notifyUser } = require('./user-notify');
       notifyUser(order.userId, 'order_expired',
-        `【Strawberry】注文が決済タイムアウトにより自動キャンセルされました\n注文: #${order.id}`,
+        `【Strawberry】注文が時間内に進まなかったため自動キャンセルされました\n注文: #${order.id}`,
         { subject: `【Strawberry】注文 #${order.id} 自動キャンセル通知` });
     } catch (_) { /* 通知失敗は失効処理を妨げない */ }
   }
@@ -138,9 +92,6 @@ function expireStaleMatchedOrders() {
     });
     if (!result.ok) continue; // 既に他経路で確定済み（冪等）
     expired++;
-    // マッチ後未開始の失効: GPU は一度も提供されていないため支払済み
-    // エスクローは借り手へ全額返金する。
-    releaseEscrowsOnTimeout(order, 'refund');
     logger.info(`Order auto-expired (match timeout): ${order.id}`);
     try {
       const { notifyUser } = require('./user-notify');
@@ -153,9 +104,10 @@ function expireStaleMatchedOrders() {
 }
 
 /**
- * 管理者が長期間放置した係争注文を自動解決する（既定 7 日 → 返金）。
- * 資産凍結リスクを限定し、プロバイダが応答しない場合の借り手保護にもなる。
- * AUTO_DISPUTE_DECISION env で 'uphold'（提供者支持）に変更可（既定 'refund'）。
+ * 管理者が長期間放置した係争注文を自動解決する（既定 7 日 → 借り手の主張を認容）。
+ * 注文が宙ぶらりんになる期間を限定し、プロバイダが応答しない場合の借り手保護にもなる。
+ * AUTO_DISPUTE_DECISION env で 'uphold'（提供者支持）に変更可（既定 'refund'。
+ * decision 名は裁定結果の互換ラベルで、資金の移動は伴わない）。
  * @returns {number} 自動解決した件数
  */
 function expireStaleDisputedOrders() {
@@ -166,10 +118,6 @@ function expireStaleDisputedOrders() {
   const cutoff = Date.now() - timeoutMs;
   const decision = (process.env.AUTO_DISPUTE_DECISION === 'uphold') ? 'uphold' : 'refund';
   let resolved = 0;
-  // 解決が実際に走った注文ごとに escrows.json を全量読み込みしないよう、
-  // 初回の解決時にだけ orderId でグルーピングした Map を構築して使い回す。
-  // 各注文のエスクローは1回しか遷移されないため、スナップショットの陳腐化は無害。
-  let heldEscrowsByOrder = null;
 
   for (const order of OrderRepository.getAll()) {
     if (order.status !== 'disputed') continue;
@@ -184,8 +132,7 @@ function expireStaleDisputedOrders() {
     };
 
     // 原子的に disputed→(cancelled|completed) へ遷移する。書込み時点でも disputed の
-    // 場合のみ確定し、並行 sweep や管理者の手動裁定との二重解決・エスクロー二重返金・
-    // 二重通知を防ぐ。
+    // 場合のみ確定し、並行 sweep や管理者の手動裁定との二重解決・二重通知を防ぐ。
     const updates = decision === 'refund'
       ? {
           status: 'cancelled',
@@ -203,46 +150,11 @@ function expireStaleDisputedOrders() {
     const result = OrderRepository.updateIf(order.id, (o) => o.status === 'disputed', updates);
     if (!result.ok) continue; // 既に他経路で解決済み（冪等）
 
-    // エスクロー精算（状態確定後にのみ実行。失敗してもログのみ）。
-    // 重要: 旧実装は decision を問わず一律 state='SETTLED'（=プロバイダへ払い出し）に
-    // 生 update していた。refund 決定（借り手返金）なのに資金フローが逆転し、かつ
-    // 状態機械の CAS を迂回して CANCELED 等を踏み潰す危険があった。
-    // 必ず FSM 経由で遷移させる: HELD からの正規イベントは
-    //   refund → CANCEL（cancel_invoice + refund_renter → CANCELED）
-    //   uphold → DELIVER_OK（reveal_preimage + payout_provider → SETTLED）。
-    try {
-      const EscrowRepository = require('../db/json/EscrowRepository');
-      const { createEscrowService } = require('../payments/escrow-service');
-      const escrowSvc = createEscrowService();
-      if (!heldEscrowsByOrder) {
-        heldEscrowsByOrder = new Map();
-        for (const e of EscrowRepository.getAll()) {
-          if (e.state !== 'HELD') continue;
-          const list = heldEscrowsByOrder.get(e.orderId) || [];
-          list.push(e);
-          heldEscrowsByOrder.set(e.orderId, list);
-        }
-      }
-      const escrows = heldEscrowsByOrder.get(order.id) || [];
-      for (const esc of escrows) {
-        try {
-          if (decision === 'refund') {
-            escrowSvc.cancel(esc.id);            // HELD → CANCELED（借り手へ返金）
-          } else {
-            escrowSvc.apply(esc.id, 'DELIVER_OK'); // HELD → SETTLED（プロバイダへ払い出し）
-          }
-        } catch (inner) {
-          logger.warn(`Auto-dispute escrow transition failed (escrow=${esc.id}, decision=${decision}): ${inner.message}`);
-        }
-      }
-    } catch (e) {
-      logger.warn(`Auto-dispute escrow settle failed (order=${order.id}, decision=${decision}): ${e.message}`);
-    }
     resolved++;
     logger.info(`Dispute auto-resolved (${decision}) after ${days}d: order=${order.id}`);
     try {
       const { notifyUser } = require('./user-notify');
-      const msg = `【Strawberry】係争が自動裁定（${decision === 'refund' ? '返金' : '提供者支持'}）されました\n注文: #${order.id}`;
+      const msg = `【Strawberry】係争が自動裁定（${decision === 'refund' ? '借り手の主張を認容' : '提供者支持'}）されました\n注文: #${order.id}`;
       if (order.userId)     notifyUser(order.userId,     'dispute_auto_resolved', msg, {});
       if (order.providerId) notifyUser(order.providerId, 'dispute_auto_resolved', msg, {});
     } catch (_) { /* 通知失敗は失効処理を妨げない */ }
@@ -276,9 +188,6 @@ function expireStaleActiveOrders() {
       updatedAt: now,
     });
     if (!result.ok) continue;
-    // active タイムアウト: GPU は実際に稼働していた可能性があるため、/stop と
-    // 同じ壁時計フォールバックで経過時間分を出来高払いし残額を借り手へ返す。
-    releaseEscrowsOnTimeout(order, 'prorate');
     expired.push({ id: order.id, gpuId: order.gpuId });
     logger.info(`Order auto-expired (active timeout): ${order.id}`);
     try {

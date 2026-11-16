@@ -1,15 +1,17 @@
 # Strawberry
 
-> **状態に関する注記（2026-06、2026-11-13 更新）**: 本READMEと `improvement_checklist2.md` には、実装より先行した
+> **状態に関する注記（2026-06、2026-11-16 更新）**: 本READMEと `improvement_checklist2.md` には、実装より先行した
 > （未実装を含む）記述があります。リポジトリの**実態・既知の制約・このブランチでの修正点**は
 > [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照してください。
-> 現状は Express の Web API + JSON データ層が動作対象で、P2P/Lightning/仮想GPU の各サービスは
+> 現状は Express の Web API + JSON データ層が動作対象で、P2P/仮想GPU の各サービスは
 > オプション（未配線）です。秘密鍵は `.env`（`.env.example` 参照）で設定してください。
 >
+> **2026-11-16、所有者の方針により金銭のやり取り機能を全て削除しました。**
+> Strawberry は **GPU の貸し借り専用**です。支払い・Lightning・エスクロー・精算・
+> 収益集計といった「お金が動く／お金を預かる」経路は存在しません。価格は GPU の
+> 掲載情報（表示と見積もり）としてのみ残ります。
 > 各サービスの実態: **P2P は無効**（現行 libp2p が ESM 専用のため `require()` できず読み込めません）、
-> **Lightning は LND 未接続時はモック**で、エスクローの実 LN 払い出しはアダプタ未注入のため実行されません、
 > **仮想GPU はロード可能ですが Docker/Kubernetes の実機が必要**です。
-> また本プロジェクトの決済は **testnet／モックのまま配布し、Bitcoin mainnet は有効化しません**。
 > 本文に残る P2P 運用・自動化の記述は将来計画または `.env` 設定時の動作として読んでください。
 
 ### 1. 事前準備
@@ -101,7 +103,7 @@ flowchart TD
 
 ## 概要
 
-Strawberryは、GPUリソースの貸借マーケットプレイスを目指すオープンソースプロジェクトです。現時点で実際に動作するのは Express の Web API（GPU・注文・支払いの管理）と JSON データ層で、現金換算・監査証跡・死活監視を含みます。Lightning Network 決済は将来の構成要素としてコードは存在しますが未配線で、決済は testnet／モックのみが対象です（P2P ネットワークの実装は、libp2p 未導入で常時無効だったため削除しました）（実態の詳細は冒頭の注記と [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照）。
+Strawberryは、GPUリソースの貸借マーケットプレイスを目指すオープンソースプロジェクトです。現時点で実際に動作するのは Express の Web API（GPU・注文の管理）と JSON データ層で、現金換算（価格表示用）・監査証跡・死活監視を含みます。金銭のやり取り機能（支払い・Lightning・エスクロー・精算）は 2026-11-16 に所有者方針で全て削除され、本プロジェクトは GPU の貸し借り専用です（P2P ネットワークの実装は、libp2p 未導入で常時無効だったため削除しました）（実態の詳細は冒頭の注記と [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照）。
 
 ---
 
@@ -115,7 +117,7 @@ Strawberryは、GPUリソースの貸借マーケットプレイスを目指す�
 - CORSやHelmet等のセキュリティヘッダー実装
 - API／CLI／GraphQLインターフェース対応
 - （削除済み）Ed25519ピアIDおよび署名検証によるP2P信頼性担保 — `p2p-network.js` は libp2p を読み込めず常時無効だったため削除
-- （未配線）Lightning Network決済 — LND 未接続時はモック。エスクローの実払い出しはアダプタ未注入のため no-op。testnet／モックのみ対象で、mainnet は有効化しません
+- （削除済み）Lightning Network決済・エスクロー・精算 — 2026-11-16 に所有者方針で金銭機能を全廃。Strawberry は GPU 貸し借り専用で、お金の移動・保管は一切行いません
 
 ---
 
@@ -184,7 +186,6 @@ sequenceDiagram
       "isCache": true
     }
     ```
-- `/api/payments`（支払い記録・現金決済対応。Lightning は LND 未接続時はモックで、実際の送金は行われません）
 - `/metrics`（Prometheusメトリクス/死活監視/為替API監視）
   - 主要メトリクス例:
     - `exchange_rate_cache_hit_total`（為替APIキャッシュヒット回数）
@@ -226,7 +227,7 @@ sequenceDiagram
 
 ## 死活監視・監査証跡・障害通知
 
-- LightningService/P2PNetwork/VirtualGPUManager には `isHealthy()` が実装されているが、P2PNetwork は無効（libp2p 読み込み不可）、LightningService は LND 未接続時はモック、VirtualGPUManager は Docker/k8s 実機が必要で、いずれも標準構成では死活監視の対象として実働しない
+- P2PNetwork/VirtualGPUManager には `isHealthy()` が実装されているが、P2PNetwork は無効（libp2p 読み込み不可）、VirtualGPUManager は Docker/k8s 実機が必要で、いずれも標準構成では死活監視の対象として実働しない
 - Web API 本体の異常時は監査証跡・Prometheusメトリクス・外部通知hook（Slack/Sentry等、`.env` 設定時のみ）で記録・通知
 - 監査ログは改ざん検知付き・全操作を記録
 - 為替APIの障害も監査証跡・外部通知・メトリクス化
@@ -302,7 +303,7 @@ LINE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 ## 改善履歴・今後の推奨運用
 
-- Lightning/P2P/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
+- P2P/GPU/為替/監査/死活監視の各レイヤーで堅牢化・自動化を順次実装
 - 今後は外部通知hook本実装、現金換算ロジックの外部API化、E2E監視・テスト自動化を推奨
 - 詳細は`improvement_checklist2.md`参照
 
@@ -697,7 +698,7 @@ flowchart LR
 ## 品質・セキュリティ強化ポイント（2025年6月最新／MVP構成）
 
 - **Google認証・OAuthアカウント認証**：GoogleによるOAuth認証でユーザー識別（`.env` 設定時のみ有効）
-- **ピアID（公開鍵）＋署名検証**：（未配線）P2PノードのEd25519ピアIDと署名検証は `p2p-network.js` 側の設計で、P2P が無効な現行では注文・支払い・GPUイベントへの署名検証は行われていない
+- **ピアID（公開鍵）＋署名検証**：（未配線）P2PノードのEd25519ピアIDと署名検証は `p2p-network.js` 側の設計で、P2P が無効な現行では注文・GPUイベントへの署名検証は行われていない
 - **APIキー＋JWT認証＋ロール制御（中央API利用時）**：重要操作は多重認証＋権限チェック
 - **UUIDバリデーション・入力サニタイズ**：全リソースID/主要入力の厳格検証
 - **一貫したAPIレスポンス＆エラーハンドリング**：`{ message, ... }`形式で統一
@@ -764,10 +765,6 @@ flowchart LR
   ```
   order order01 gpu01 1000
   ```
-- 支払い情報の伝播:
-  ```
-  payment pay01 order01 1000
-  ```
 - 終了:
   ```
   exit
@@ -800,7 +797,7 @@ flowchart LR
 
 ---
 
-- `orders.json`, `payments.json`, `gpus.json`, `health.json`は各ノードローカルで自動生成・永続化
+- `orders.json`, `gpus.json`, `health.json`は各ノードローカルで自動生成・永続化
 - ノード障害時も他ノードから再同期可能
 - 監査ログ・バックアップ・異常検知は今後も自動化・強化予定
 
@@ -877,7 +874,7 @@ flowchart LR
 ## コミュニティ・貢献
 
 - Issue・Pull Request・フィードバック歓迎！
-- Lightning/仮想GPU技術・分散システムに興味のある方はぜひ開発参加を
+- 仮想GPU技術・分散システムに興味のある方はぜひ開発参加を
 - 詳細は [CONTRIBUTING.md] をご覧ください
 
 ---

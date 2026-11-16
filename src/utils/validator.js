@@ -5,31 +5,6 @@ const { APIError, ErrorTypes } = require('./error-handler');
 
 // 共通バリデーションスキーマ
 const schemas = {
-  // Lightningノード情報
-  lightningNode: Joi.object({
-    pubkey: Joi.string().required(),
-    alias: Joi.string().required(),
-    activeChannels: Joi.number().min(0).required(),
-    peers: Joi.number().min(0).required(),
-    blockHeight: Joi.number().min(0).required(),
-    synced: Joi.boolean().required(),
-    version: Joi.string().required(),
-    network: Joi.string().valid('mainnet', 'testnet', 'regtest', 'simnet').required(),
-    uris: Joi.array().items(Joi.string())
-  }),
-  // Lightningチャネル情報
-  lightningChannel: Joi.object({
-    active: Joi.boolean().required(),
-    remotePubkey: Joi.string().required(),
-    channelPoint: Joi.string().required(),
-    chanId: Joi.string().required(),
-    capacity: Joi.number().min(0).required(),
-    localBalance: Joi.number().min(0).required(),
-    remoteBalance: Joi.number().min(0).required(),
-    totalSent: Joi.number().min(0),
-    totalReceived: Joi.number().min(0),
-    unsettledBalance: Joi.number().min(0)
-  }),
   // GPU関連
   gpu: {
     // GPU登録用スキーマ
@@ -170,7 +145,6 @@ const schemas = {
       // 無制限だと totalPrice 計算が天文学的な値になりオーバーフロー/DoS の温床になる。
       durationMinutes: Joi.number().integer().min(5).max(43200).multiple(5).required(),
       description: Joi.string().max(1000).optional(),
-      paymentMethod: Joi.string().valid('lightning', 'onchain').optional(),
       // gpuId 指定時はハンドラ側で maxPricePerHour との併用を拒否する（排他）
       maxPricePerHour: Joi.number().min(0.00001).optional(),
       location: Joi.object({
@@ -192,23 +166,6 @@ const schemas = {
       orderId: Joi.string().required(),
       maxResults: Joi.number().min(1).max(50).default(10),
       timeout: Joi.number().min(1000).max(30000).default(5000)
-    })
-  },
-  
-  // 決済関連
-  payment: {
-    // インボイス作成用スキーマ
-    createInvoice: Joi.object({
-      amount: Joi.number().min(1).required(),
-      description: Joi.string().required(),
-      expiry: Joi.number().min(60).max(86400).default(3600)
-    }),
-    
-    // 決済実行用スキーマ
-    pay: Joi.object({
-      paymentRequest: Joi.string().required(),
-      amount: Joi.number().min(1),
-      maxFeePercent: Joi.number().min(0).max(10).default(1)
     })
   },
   

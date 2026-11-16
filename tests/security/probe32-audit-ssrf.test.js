@@ -2,7 +2,6 @@
 // Probe 32 regression tests:
 // 1. Password change is now audit-logged
 // 2. Role change is now audit-logged with acting admin ID
-// 3. Payout address change is now audit-logged
 // 4. Admin order status override is now audit-logged
 // 5. resilient-notify.js has SSRF guard (assertPublicUrl) before dispatching
 // 6. webhook.js sendWebhook has SSRF guard before dispatching
@@ -60,13 +59,6 @@ describe('Audit log: sensitive operations are now recorded', () => {
     );
     expect(src).toMatch(/appendAuditLog\('user_role_changed'/);
     expect(src).toMatch(/previousRole.*target\.role|changedBy.*req\.user\.id/s);
-  });
-
-  it('user/index.js: payout address change calls appendAuditLog', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/user/index.js'), 'utf-8'
-    );
-    expect(src).toMatch(/appendAuditLog\('user_payout_address_changed'/);
   });
 
   it('order/index.js: admin status override calls appendAuditLog', () => {

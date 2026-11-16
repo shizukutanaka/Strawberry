@@ -1,7 +1,6 @@
 // GPU貸出/借入監視の自動リカバリ・自己修復ユーティリティ
 const { getAll: getOrders, updateIf: updateOrderIf } = require('../db/json/OrderRepository');
 const GpuRepository = require('../db/json/GpuRepository');
-const PaymentRepository = require('../db/json/PaymentRepository');
 const { resilientNotify } = require('./resilient-notify');
 const { appendAuditLog } = require('./audit-log');
 const { reportAnomaly } = require('./anomaly-detector');
@@ -36,22 +35,6 @@ async function monitorAndRecover() {
       if (!writeResult || !writeResult.ok) continue;
       await appendAuditLog('gpu_auto_recover', { orderId: order.id, gpuId: order.gpuId, userId: order.userId });
       await reportAnomaly('gpu_lending_auto_recover', { orderId: order.id, gpuId: order.gpuId, userId: order.userId });
-      // 返金処理（支払い済みの場合）。getByOrderId は many:true で配列を返す。
-      // 実エスクローの解放は cancel/dispute 系の経路（escrow 連携）側の責務 — ここでは
-      // gpu-auto-recovery.js と同規約で支払いレコードを refunded へ落とす。
-      // 返金も paid 前提の CAS: 読込以降に他経路（手動承認/on-chain 等）が状態を
-      // 進めた決済を refunded へ上書きしない。
-      const payments = await PaymentRepository.getByOrderId(order.id) || [];
-      for (const payment of payments) {
-        const refundResult = PaymentRepository.updateIf(
-          payment.id,
-          (p) => p.status === 'paid',
-          { status: 'refunded', refundedAt: new Date().toISOString() }
-        );
-        if (refundResult && refundResult.ok) {
-          await appendAuditLog('gpu_auto_refund', { paymentId: payment.id, orderId: order.id });
-        }
-      }
       // 多重通知
       await resilientNotify(`[Strawberry] GPU貸出/借入異常を自動リカバリしました\nOrderID: ${order.id}\nGPU: ${gpu ? gpu.name : order.gpuId}`);
     }

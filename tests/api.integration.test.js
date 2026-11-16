@@ -70,11 +70,6 @@ describe('API Integration', () => {
       const res = await request(app).post('/api/v1/orders').send({});
       expect(res.statusCode).toBe(401);
     });
-
-    it('POST /api/v1/payments without a token → 401', async () => {
-      const res = await request(app).post('/api/v1/payments').send({});
-      expect(res.statusCode).toBe(401);
-    });
   });
 
   describe('Public endpoints', () => {
@@ -210,7 +205,7 @@ describe('API Integration', () => {
     });
   });
 
-  // 新規実装機能（health / openapi / logout / pagination / earnings / auto-expiry）
+  // 新規実装機能（health / openapi / logout / pagination / auto-expiry）
   describe('Product gap features', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const seedGpu = () => GpuRepository.create({
@@ -336,20 +331,6 @@ describe('API Integration', () => {
       expect(page2.body.offset).toBe(2);
     });
 
-    it('GET /orders/provider/earnings → 200 for provider, 403 for user', async () => {
-      const providerToken = await registerAndLogin('pe', 'provider');
-      const userToken = await registerAndLogin('ue');
-      const ok = await request(app)
-        .get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(ok.statusCode).toBe(200);
-      expect(ok.body.earnings).toHaveProperty('completedSats');
-      const denied = await request(app)
-        .get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${userToken}`);
-      expect(denied.statusCode).toBe(403);
-    });
-
     it('GET /admin/stats → 200 for admin with marketplace aggregates, 403 for user', async () => {
       const UserRepository = require('../src/db/json/UserRepository');
       // admin はレポ直更新で昇格（自己登録では admin を取得できない仕様のため）
@@ -368,7 +349,6 @@ describe('API Integration', () => {
       expect(ok.statusCode).toBe(200);
       expect(ok.body.users.total).toBeGreaterThanOrEqual(1);
       expect(ok.body.orders).toHaveProperty('byStatus');
-      expect(ok.body.gmv).toHaveProperty('completedSats');
       expect(ok.body.gpus).toHaveProperty('available');
 
       const userToken = await registerAndLogin('ns');
@@ -378,7 +358,7 @@ describe('API Integration', () => {
       expect(denied.statusCode).toBe(403);
     });
 
-    it('auto-expires stale pending orders (payment timeout)', async () => {
+    it('auto-expires stale pending orders (pending timeout)', async () => {
       const token = await registerAndLogin('ex');
       const create = await request(app)
         .post('/api/v1/orders')
@@ -525,7 +505,6 @@ describe('API Integration', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const UserRepository = require('../src/db/json/UserRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
-    const PaymentRepository = require('../src/db/json/PaymentRepository');
 
     let renterToken, providerToken, otherToken;
     let gpuId, providerId, renterId;
@@ -629,9 +608,8 @@ describe('API Integration', () => {
         .send({ gpuId, durationMinutes: 30 });
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
-      // force to completed + add paid payment (required for review)
+      // force to completed (review requires a completed order)
       OrderRepository.update(orderId, { status: 'completed' });
-      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       const review = await request(app)
         .post(`/api/v1/orders/${orderId}/review`)
@@ -668,7 +646,6 @@ describe('API Integration', () => {
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
       OrderRepository.update(orderId, { status: 'completed' });
-      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       await request(app).post(`/api/v1/orders/${orderId}/review`)
         .set('Authorization', `Bearer ${renterToken}`).send({ rating: 4 });
@@ -713,7 +690,6 @@ describe('API Integration', () => {
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
       OrderRepository.update(orderId, { status: 'completed' });
-      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       const bad = await request(app)
         .post(`/api/v1/orders/${orderId}/review`)
@@ -752,11 +728,8 @@ describe('API Integration', () => {
         .send({ gpuId, durationMinutes: 30 });
       expect(create.statusCode).toBe(201);
       const orderId = create.body.order.id;
-      // stop ハンドラは active 状態と支払い済みレコードを要求するので直接遷移させる
+      // stop ハンドラは active 状態を要求するので直接遷移させる
       OrderRepository.update(orderId, { status: 'active', providerId });
-      const PaymentRepository = require('../src/db/json/PaymentRepository');
-      const orderUserId = create.body.order.userId;
-      PaymentRepository.create({ orderId, userId: orderUserId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
 
       const stop = await request(app)
         .post(`/api/v1/orders/${orderId}/stop`)
@@ -1555,12 +1528,10 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Order payment/escrow visibility + provider→renter reviews', () => {
+  describe('Provider→renter reviews', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
     const UserRepository = require('../src/db/json/UserRepository');
-    const PaymentRepository = require('../src/db/json/PaymentRepository');
-    const EscrowRepository = require('../src/db/json/EscrowRepository');
 
     let renterToken, renterId, providerToken, providerId, otherToken, gpuId;
 
@@ -1598,44 +1569,9 @@ describe('API Integration', () => {
       return create.body.order.id;
     }
 
-    it('GET /orders/:id/payment returns payments + escrows for the order owner', async () => {
-      const orderId = await makeOrder();
-      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 100, method: 'lightning', paidAt: new Date().toISOString() });
-      EscrowRepository.create({ orderId, amountSats: 100, feeRate: 0 });
-
-      const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
-        .set('Authorization', `Bearer ${renterToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.orderId).toBe(orderId);
-      expect(Array.isArray(res.body.payments)).toBe(true);
-      expect(res.body.payments.length).toBeGreaterThanOrEqual(1);
-      expect(res.body.payments[0].status).toBe('paid');
-      expect(Array.isArray(res.body.escrows)).toBe(true);
-      expect(res.body.escrows.length).toBeGreaterThanOrEqual(1);
-      OrderRepository.update(orderId, { status: 'cancelled' });
-    });
-
-    it('GET /orders/:id/payment is visible to the GPU provider too', async () => {
-      const orderId = await makeOrder();
-      OrderRepository.update(orderId, { providerId });
-      const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(res.statusCode).toBe(200);
-      OrderRepository.update(orderId, { status: 'cancelled' });
-    });
-
-    it('GET /orders/:id/payment is forbidden to an unrelated user (403)', async () => {
-      const orderId = await makeOrder();
-      const res = await request(app).get(`/api/v1/orders/${orderId}/payment`)
-        .set('Authorization', `Bearer ${otherToken}`);
-      expect(res.statusCode).toBe(403);
-      OrderRepository.update(orderId, { status: 'cancelled' });
-    });
-
     it('provider can review the renter on a completed order (201)', async () => {
       const orderId = await makeOrder();
       OrderRepository.update(orderId, { status: 'completed', providerId });
-      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       const res = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
         .set('Authorization', `Bearer ${providerToken}`)
         .send({ rating: 4, comment: 'prompt payment' });
@@ -1656,7 +1592,6 @@ describe('API Integration', () => {
     it('duplicate renter review → 409', async () => {
       const orderId = await makeOrder();
       OrderRepository.update(orderId, { status: 'completed', providerId });
-      PaymentRepository.create({ orderId, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
         .set('Authorization', `Bearer ${providerToken}`).send({ rating: 3 });
       const dup = await request(app).post(`/api/v1/orders/${orderId}/renter-review`)
@@ -1794,63 +1729,6 @@ describe('API Integration', () => {
     it('GET /users/:id/renter-profile for unknown user → 404', async () => {
       const res = await request(app).get('/api/v1/users/00000000-0000-4000-8000-000000000000/renter-profile');
       expect(res.statusCode).toBe(404);
-    });
-  });
-
-  describe('Provider earnings date range filter (#30)', () => {
-    const GpuRepository = require('../src/db/json/GpuRepository');
-    const OrderRepository = require('../src/db/json/OrderRepository');
-    const UserRepository = require('../src/db/json/UserRepository');
-
-    let providerToken, providerId;
-
-    beforeAll(async () => {
-      const p = `erp${unique}`.slice(0, 28);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
-      providerToken = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
-      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
-      const gpu = GpuRepository.create({ name: 'Earn GPU', vendor: 'AMD', model: 'RX-EARN', memoryGB: 8, pricePerHour: 0.1, providerId });
-      // Create one completed order in the past, one recent
-      OrderRepository.create({ gpuId: gpu.id, providerId, userId: 'earn-seed', status: 'completed',
-        durationMinutes: 60, totalPrice: 100, totalPriceJPY: 50000, createdAt: '2025-01-15T12:00:00.000Z' });
-      OrderRepository.create({ gpuId: gpu.id, providerId, userId: 'earn-seed2', status: 'completed',
-        durationMinutes: 60, totalPrice: 200, totalPriceJPY: 100000, createdAt: '2026-06-01T12:00:00.000Z' });
-    });
-
-    it('GET /orders/provider/earnings returns all-time totals (no filter)', async () => {
-      const res = await request(app).get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.earnings.completedCount).toBeGreaterThanOrEqual(2);
-      expect(res.body.earnings.from).toBeNull();
-      expect(res.body.earnings.to).toBeNull();
-    });
-
-    it('GET /orders/provider/earnings?from=2026-01-01 filters to recent orders only', async () => {
-      const res = await request(app).get('/api/v1/orders/provider/earnings?from=2026-01-01')
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(res.statusCode).toBe(200);
-      // Only the 2026-06-01 order should match
-      expect(res.body.earnings.completedCount).toBeGreaterThanOrEqual(1);
-      expect(res.body.earnings.completedSats).toBeGreaterThanOrEqual(200);
-      expect(res.body.earnings.from).toBe('2026-01-01');
-    });
-
-    it('GET /orders/provider/earnings?to=2025-12-31 filters to old orders only', async () => {
-      const res = await request(app).get('/api/v1/orders/provider/earnings?to=2025-12-31')
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(res.statusCode).toBe(200);
-      // Only the 2025-01-15 order should match
-      const sats = res.body.earnings.completedSats;
-      expect(sats).toBeLessThan(200); // 2026 order excluded
-    });
-
-    it('invalid from date → 400', async () => {
-      const res = await request(app).get('/api/v1/orders/provider/earnings?from=not-a-date')
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(res.statusCode).toBe(400);
     });
   });
 
@@ -2035,56 +1913,6 @@ describe('API Integration', () => {
         .set('Authorization', `Bearer ${renterToken}`);
       expect(res.statusCode).toBe(200);
       expect(res.body.orders.length).toBe(0);
-    });
-  });
-
-  describe('Admin escrow query (#39)', () => {
-    const EscrowRepository = require('../src/db/json/EscrowRepository');
-    const UserRepository = require('../src/db/json/UserRepository');
-
-    let adminToken, escrowOrderId;
-
-    beforeAll(async () => {
-      const adm = `esadm${unique}`.slice(0, 28);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: adm, email: `${adm}@example.com`, password: 'Test1234!' });
-      const admUser = UserRepository.getByEmail(`${adm}@example.com`);
-      UserRepository.update(admUser.id, { role: 'admin' });
-      adminToken = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${adm}@example.com`, password: 'Test1234!' })).body.token;
-      // Use unique orderId per run to avoid accumulation from previous test runs sharing data/escrows.json
-      escrowOrderId = `esc-${unique}-1`;
-      EscrowRepository.create({ orderId: escrowOrderId, amountSats: 500, feeRate: 0, state: 'HELD' });
-      EscrowRepository.create({ orderId: `esc-${unique}-2`, amountSats: 1000, feeRate: 1, state: 'SETTLED' });
-    });
-
-    it('GET /admin/escrow returns all escrows for admin', async () => {
-      const res = await request(app).get('/api/v1/admin/escrow')
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toHaveProperty('total');
-      expect(res.body).toHaveProperty('escrows');
-      expect(res.body.total).toBeGreaterThanOrEqual(2);
-    });
-
-    it('GET /admin/escrow?state=HELD filters by state', async () => {
-      const res = await request(app).get('/api/v1/admin/escrow?state=HELD')
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.escrows.every(e => e.state === 'HELD')).toBe(true);
-    });
-
-    it('GET /admin/escrow?orderId=X filters by orderId', async () => {
-      const res = await request(app).get(`/api/v1/admin/escrow?orderId=${escrowOrderId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.escrows.length).toBe(1);
-      expect(res.body.escrows[0].orderId).toBe(escrowOrderId);
-    });
-
-    it('GET /admin/escrow requires admin (401 without auth, 403 for non-admin)', async () => {
-      const noAuth = await request(app).get('/api/v1/admin/escrow');
-      expect(noAuth.statusCode).toBe(401);
     });
   });
 
@@ -2372,10 +2200,9 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Escrow auto-release on order completion (#61)', () => {
+  describe('Order completion via /stop (#61)', () => {
     const GpuRepository = require('../src/db/json/GpuRepository');
     const OrderRepository = require('../src/db/json/OrderRepository');
-    const EscrowRepository = require('../src/db/json/EscrowRepository');
     const UserRepository = require('../src/db/json/UserRepository');
 
     let renterToken, renterId, gpuId, providerId;
@@ -2391,35 +2218,11 @@ describe('API Integration', () => {
       gpuId = GpuRepository.create({ name: 'Escrow GPU', vendor: 'NVIDIA', model: 'RTX-ESC', memoryGB: 8, pricePerHour: 0.5, providerId }).id;
     });
 
-    it('HELD escrow transitions to SETTLED when order completes via /stop', async () => {
+    it('order completes successfully via /stop', async () => {
       const order = OrderRepository.create({
         gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
         createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
       });
-      // Inject a HELD escrow and a paid payment record for this order
-      const escrow = EscrowRepository.create({
-        orderId: order.id, amountSats: 1000, feeRate: 0.02, state: 'HELD',
-        history: [], createdAt: new Date().toISOString(),
-      });
-      const PaymentRepository = require('../src/db/json/PaymentRepository');
-      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1000, method: 'lightning', paidAt: new Date().toISOString() });
-
-      const res = await request(app)
-        .post(`/api/v1/orders/${order.id}/stop`)
-        .set('Authorization', `Bearer ${renterToken}`);
-      expect(res.statusCode).toBe(200);
-
-      const updatedEscrow = EscrowRepository.getById(escrow.id);
-      expect(updatedEscrow.state).toBe('SETTLED');
-    });
-
-    it('order without escrow still completes successfully', async () => {
-      const order = OrderRepository.create({
-        gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
-        createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
-      });
-      const PaymentRepository = require('../src/db/json/PaymentRepository');
-      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       const res = await request(app)
         .post(`/api/v1/orders/${order.id}/stop`)
         .set('Authorization', `Bearer ${renterToken}`);
@@ -2623,8 +2426,6 @@ describe('API Integration', () => {
         gpuId, userId: renterId, providerId, durationMinutes: 30, status: 'active',
         createdAt: new Date().toISOString(), startedAt: new Date().toISOString(),
       });
-      const PaymentRepository = require('../src/db/json/PaymentRepository');
-      PaymentRepository.create({ orderId: order.id, userId: renterId, status: 'paid', amount: 1, method: 'lightning', paidAt: new Date().toISOString() });
       // renter stops the order (renter or admin can call /stop)
       const res = await request(app)
         .post(`/api/v1/orders/${order.id}/stop`)
@@ -3084,70 +2885,6 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Provider earnings per-GPU breakdown (#47)', () => {
-    const GpuRepository = require('../src/db/json/GpuRepository');
-    const OrderRepository = require('../src/db/json/OrderRepository');
-    const UserRepository = require('../src/db/json/UserRepository');
-
-    let providerToken, providerId, gpu1Id, gpu2Id;
-
-    beforeAll(async () => {
-      const p = `egp${unique}`.slice(0, 28);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: p, email: `${p}@example.com`, password: 'Test1234!', role: 'provider' });
-      providerToken = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${p}@example.com`, password: 'Test1234!' })).body.token;
-      providerId = UserRepository.getByEmail(`${p}@example.com`)?.id;
-
-      gpu1Id = GpuRepository.create({ name: 'Earn GPU 1', vendor: 'NVIDIA', model: 'RTX-E1', memoryGB: 8, pricePerHour: 1.0, providerId }).id;
-      gpu2Id = GpuRepository.create({ name: 'Earn GPU 2', vendor: 'AMD',    model: 'RX-E2',  memoryGB: 8, pricePerHour: 0.5, providerId }).id;
-
-      OrderRepository.create({ gpuId: gpu1Id, userId: 'u1', providerId, durationMinutes: 60, status: 'completed', totalPrice: 1000, totalPriceJPY: 1500, createdAt: new Date().toISOString() });
-      OrderRepository.create({ gpuId: gpu1Id, userId: 'u2', providerId, durationMinutes: 60, status: 'completed', totalPrice: 800,  totalPriceJPY: 1200, createdAt: new Date().toISOString() });
-      OrderRepository.create({ gpuId: gpu2Id, userId: 'u3', providerId, durationMinutes: 60, status: 'completed', totalPrice: 500,  totalPriceJPY: 750,  createdAt: new Date().toISOString() });
-    });
-
-    it('earnings response includes byGpu array', async () => {
-      const res = await request(app)
-        .get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${providerToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(Array.isArray(res.body.earnings.byGpu)).toBe(true);
-    });
-
-    it('byGpu shows correct per-GPU completed counts and earnings', async () => {
-      const res = await request(app)
-        .get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${providerToken}`);
-      const g1 = res.body.earnings.byGpu.find(g => g.gpuId === gpu1Id);
-      const g2 = res.body.earnings.byGpu.find(g => g.gpuId === gpu2Id);
-      expect(g1).toBeDefined();
-      expect(g1.completedCount).toBe(2);
-      expect(g1.completedSats).toBe(1800);
-      expect(g2).toBeDefined();
-      expect(g2.completedCount).toBe(1);
-      expect(g2.completedSats).toBe(500);
-    });
-
-    it('byGpu is sorted by completedSats descending (highest earner first)', async () => {
-      const res = await request(app)
-        .get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${providerToken}`);
-      const byGpu = res.body.earnings.byGpu;
-      for (let i = 1; i < byGpu.length; i++) {
-        expect(byGpu[i - 1].completedSats).toBeGreaterThanOrEqual(byGpu[i].completedSats);
-      }
-    });
-
-    it('byGpu includes gpuName from the GPU registry', async () => {
-      const res = await request(app)
-        .get('/api/v1/orders/provider/earnings')
-        .set('Authorization', `Bearer ${providerToken}`);
-      const g1 = res.body.earnings.byGpu.find(g => g.gpuId === gpu1Id);
-      expect(g1.gpuName).toBe('Earn GPU 1');
-    });
-  });
-
   describe('Marketplace public stats endpoint (#48)', () => {
     it('GET /marketplace/stats returns without auth (public)', async () => {
       const res = await request(app).get('/api/v1/marketplace/stats');
@@ -3298,7 +3035,7 @@ describe('API Integration', () => {
       expect(res.body).toHaveProperty('asRenter');
       expect(res.body.asRenter).toHaveProperty('total');
       expect(res.body.asRenter).toHaveProperty('byStatus');
-      expect(res.body.asRenter).toHaveProperty('totalSpentSats');
+      expect(res.body.asRenter).toHaveProperty('byStatus');
     });
 
     it('asProvider stats are returned for providers', async () => {
@@ -3323,7 +3060,7 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Escrow cleanup on order reject (#72)', () => {
+  describe('Order reject behavior (#72)', () => {
     let providerToken, renterToken, gpuId, orderId;
     const u72p = `rej72p${unique}`.slice(0, 28);
     const u72r = `rej72r${unique}`.slice(0, 28);
@@ -3835,7 +3572,7 @@ describe('API Integration', () => {
       expireStaleOrders();
       const expired = OrderRepository.getById(order.id);
       expect(expired.status).toBe('cancelled');
-      expect(expired.cancelReason).toBe('payment_timeout');
+      expect(expired.cancelReason).toBe('pending_timeout');
       OrderRepository.delete(order.id);
     });
   });
@@ -4051,89 +3788,6 @@ describe('API Integration', () => {
     });
   });
 
-  describe('Payment history pagination (#75)', () => {
-    let userToken;
-
-    beforeAll(async () => {
-      const u = `p75${Date.now().toString(36)}`.slice(0, 18);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
-      userToken = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
-    });
-
-    it('GET /payments/history requires authentication', async () => {
-      const res = await request(app).get('/api/v1/payments/history');
-      expect(res.statusCode).toBe(401);
-    });
-
-    it('GET /payments/history returns total/limit/offset/payments structure', async () => {
-      const res = await request(app).get('/api/v1/payments/history')
-        .set('Authorization', `Bearer ${userToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toHaveProperty('total');
-      expect(res.body).toHaveProperty('limit');
-      expect(res.body).toHaveProperty('offset');
-      expect(res.body).toHaveProperty('payments');
-      expect(Array.isArray(res.body.payments)).toBe(true);
-    });
-
-    it('?limit=1 caps result at 1 item', async () => {
-      const res = await request(app).get('/api/v1/payments/history?limit=1')
-        .set('Authorization', `Bearer ${userToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.limit).toBe(1);
-      expect(res.body.payments.length).toBeLessThanOrEqual(1);
-    });
-
-    it('?offset=9999 returns empty payments array but preserves total', async () => {
-      const res = await request(app).get('/api/v1/payments/history?offset=9999')
-        .set('Authorization', `Bearer ${userToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.payments).toHaveLength(0);
-      expect(typeof res.body.total).toBe('number');
-    });
-  });
-
-  describe('Payment idempotency on retry (no double-charge)', () => {
-    const GpuRepository = require('../src/db/json/GpuRepository');
-    let token;
-    let orderId;
-
-    beforeAll(async () => {
-      const u = `pidem${Date.now().toString(36)}`.slice(0, 18);
-      await request(app).post('/api/v1/users/register')
-        .send({ username: u, email: `${u}@example.com`, password: 'Test1234!' });
-      token = (await request(app).post('/api/v1/users/login')
-        .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
-      const gpuId = GpuRepository.create({
-        name: 'Idem GPU', vendor: 'NVIDIA', model: 'RTX-ID', memoryGB: 24, pricePerHour: 0.5,
-      }).id;
-      const order = await request(app).post('/api/v1/orders')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ gpuId, durationMinutes: 60 });
-      orderId = order.body.order.id;
-    });
-
-    it('a retried manual payment reuses the existing pending payment instead of duplicating', async () => {
-      const first = await request(app)
-        .post(`/api/v1/payments/order/${orderId}`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ paymentMethod: 'manual' });
-      expect(first.statusCode).toBe(200);
-      expect(first.body.paymentId).toBeTruthy();
-
-      const second = await request(app)
-        .post(`/api/v1/payments/order/${orderId}`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ paymentMethod: 'manual' });
-      expect(second.statusCode).toBe(200);
-      expect(second.body.idempotent).toBe(true);
-      // Same payment record — no duplicate was created.
-      expect(second.body.paymentId).toBe(first.body.paymentId);
-    });
-  });
-
   describe('Password change invalidates all existing sessions', () => {
     let token;
     let refreshToken;
@@ -4245,7 +3899,7 @@ describe('API Integration', () => {
         .send({ email: `${u}@example.com`, password: 'Test1234!' })).body.token;
     });
 
-    it('locks pricePerHour onto the order so a later GPU price hike does not change the bill', async () => {
+    it('locks pricePerHour onto the order so a later GPU price hike does not change the quoted total', async () => {
       const gpuId = GpuRepository.create({
         name: 'Lock GPU', vendor: 'NVIDIA', model: 'RTX-LK', memoryGB: 24, pricePerHour: 0.5,
       }).id;
@@ -4259,13 +3913,13 @@ describe('API Integration', () => {
       // Provider raises the GPU price 10x after the renter committed.
       GpuRepository.update(gpuId, { pricePerHour: 5.0 });
 
-      // Paying must still bill the locked 0.5/h total, not the new 5.0/h.
-      const pay = await request(app)
-        .post(`/api/v1/payments/order/${order.body.order.id}`)
-        .set('Authorization', `Bearer ${token}`)
-        .send({ paymentMethod: 'manual' });
-      expect(pay.statusCode).toBe(200);
-      expect(pay.body.amountPaid).toBe(lockedTotal);
+      // The order record must still carry the locked 0.5/h price and total.
+      const after = await request(app)
+        .get(`/api/v1/orders/${order.body.order.id}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(after.statusCode).toBe(200);
+      expect(after.body.order.pricePerHour).toBe(0.5);
+      expect(after.body.order.totalPrice).toBe(lockedTotal);
     });
   });
 });

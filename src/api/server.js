@@ -7,7 +7,6 @@ const express = require('express');
 const path = require('path');
 const routes = require('./routes');
 const masterAuthRouter = require('./routes/master-auth');
-const profitAddressesRouter = require('./routes/profit-addresses');
 const exchangeRateRouter = require('./routes/exchange-rate');
 const { config } = require('../utils/config');
 const { logger } = require('../utils/logger');
@@ -32,20 +31,6 @@ const client = require('prom-client');
 const collectDefaultMetrics = client.collectDefaultMetrics;
 collectDefaultMetrics();
 
-// LightningServiceからメトリクスを取得するための参照（必要に応じて適切なimportに修正）
-let lightningService;
-try {
-  lightningService = require('../../lightning-service');
-} catch (e) {
-  // LightningServiceが存在しない場合はスキップ
-}
-
-// チャネル数・容量・失敗数などのカスタムメトリクス
-const channelCountGauge = new client.Gauge({ name: 'lightning_channel_count', help: 'Number of Lightning channels' });
-const channelCapacityGauge = new client.Gauge({ name: 'lightning_channel_total_capacity', help: 'Total capacity of Lightning channels (sats)' });
-const paymentFailureCounter = new client.Counter({ name: 'lightning_payment_failure_total', help: 'Total number of payment failures' });
-const reconnectCounter = new client.Counter({ name: 'lightning_reconnect_total', help: 'Total number of Lightning gRPC reconnects' });
-
 // 仮想GPUプールの運用メトリクス（割当状況の可視化 — Prometheus/Grafana 向け）
 const vgpuStatusGauge = new client.Gauge({ name: 'vgpu_instances', help: 'Virtual GPU instances by status', labelNames: ['status'] });
 const vgpuActiveAllocationsGauge = new client.Gauge({ name: 'vgpu_allocations_active', help: 'Virtual GPU allocations currently active' });
@@ -63,28 +48,14 @@ function updateVgpuMetrics() {
   vgpuActiveAllocationsGauge.set(snapshot.activeAllocations);
 }
 
-async function updateOperationalMetrics() {
-  await updateLightningMetrics();
+function updateOperationalMetrics() {
   updateVgpuMetrics();
-}
-
-// メトリクス更新関数
-async function updateLightningMetrics() {
-  if (lightningService && lightningService.channels) {
-    channelCountGauge.set(lightningService.channels.size);
-    let totalCapacity = 0;
-    for (const ch of lightningService.channels.values()) {
-      totalCapacity += ch.capacity || 0;
-    }
-    channelCapacityGauge.set(totalCapacity);
-  }
-  // 支払い失敗数・再接続回数はLightningService側からインクリメント呼び出しを想定
 }
 // 10秒ごとに更新（unref: テスト等でプロセス終了を妨げないように）
 // NODE_ENV==='test' では起動しない。Jest はテストファイルごとにモジュール
 // レジストリを分離するため、このファイルを require する各テストが独自の
 // setInterval を作るが、実タイマーは同一プロセスのイベントループに残り続ける。
-// 135 スイート分積み上がると 10 秒周期の Lightning メトリクス更新が延々と
+// 135 スイート分積み上がると 10 秒周期のメトリクス更新が延々と
 // 発火し、後続スイートの supertest リクエストが 30 秒のテストタイムアウトを
 // 超える（単体実行では PASS するのに全体実行だけ落ちる、の原因）。
 // /metrics ハンドラは毎回 updateOperationalMetrics() を await するので、
@@ -107,16 +78,15 @@ const { setServices, startMonitor, serviceRestartCounter, serviceDownCounter } =
 
 // コアサービス参照のセットと監視起動
 try {
-  const { lightning, p2pNetwork, vgpuManager } = require('../core/services');
+  const { p2pNetwork, vgpuManager } = require('../core/services');
   const svcRefs = {};
-  if (lightning) svcRefs.LightningService = lightning;
   if (p2pNetwork) svcRefs.P2PNetwork = p2pNetwork;
   if (vgpuManager) svcRefs.VirtualGPUManager = vgpuManager;
   if (Object.keys(svcRefs).length > 0) {
     setServices(svcRefs);
     // NODE_ENV==='test' では監視ループを起動しない。metricsInterval と同じ理由で、
     // テストファイルごとに積み上がる 10 秒周期のヘルスチェックがイベントループを
-    // 占有する。加えて監視は「不健全」と判定した LightningService/VirtualGPUManager
+    // 占有する。加えて監視は「不健全」と判定した VirtualGPUManager
     // の initialize() を毎周期呼び直すため、Jest 環境の破棄後に require が走り
     // 「You are trying to `import` a file after the Jest environment has been torn
     // down」を撒き散らしていた。監視ロジック自体は tests/service-monitor.e2e.test.js
@@ -129,20 +99,8 @@ try {
   logger.warn('Service monitor could not be started:', e);
 }
 
-// Lightningインボイス入金確認ループ（15秒間隔でポーリング、Lightning未導入時は無効）
-// テスト環境でのタイマー抑止は invoice-poller.start() 側で行う（start() は
-// Lightning サービス参照のバインドも兼ねており、ここで呼び出しごとスキップすると
-// pollOnce() を直接叩くテストが「poller not started」で動かなくなるため）。
-try {
-  const invoicePoller = require('../core/invoice-poller');
-  const { lightning: lightningForPoller } = require('../core/services');
-  invoicePoller.start(lightningForPoller);
-} catch (e) {
-  logger.warn(`invoice-poller: failed to start: ${e.message}`);
-}
-
 // SLA 稼働率トラッカー（1分間隔で /health を叩き uptime を集計。GET /api/sla の供給源）
-// テスト環境でのタイマー抑止は startSLATracker 側で行う（invoice-poller と同じ方針）。
+// テスト環境でのタイマー抑止は startSLATracker 側で行う。
 try {
   require('../utils/sla-tracker').startSLATracker();
 } catch (e) {
@@ -170,7 +128,7 @@ try {
 }
 
 // /metricsエンドポイント（Prometheus スクレイプ用）。
-// Lightning チャネル容量・支払い失敗数などの運用データを含むため認証必須。
+// 運用データを含むため認証必須。
 // METRICS_AUTH_TOKEN が設定されている場合は Bearer <token> で照合する。
 // 未設定かつ本番環境では 503 を返す（fail-closed）。テスト環境では素通り。
 app.get('/metrics', apiLimiter, (req, res, next) => {
@@ -211,7 +169,7 @@ app.get('/health', (req, res) => {
 // /ready — レディネスプローブ（/health の静的 ok と異なり、データ層が実際に使えるかを検証する）。
 // JSON データ層が本プロダクトの唯一必須の依存。data ディレクトリへ実際に temp ファイルを書き
 // 削除し、リポジトリ読込が例外を投げないことを確認する。失敗時は 503 を返し、LB/k8s が
-// トラフィックを流さないようにする。オプショナルサービス（Lightning/P2P）は情報として
+// トラフィックを流さないようにする。オプショナルサービス（P2P）は情報として
 // 併記するが readiness のゲートには含めない（未導入でも API 本体は機能するため）。
 // 同期 I/O を含むため専用レート制限を設ける（グローバル apiLimiter より前にマウントされるが
 // このエンドポイント単体には 30 req/min のガードを掛ける）。
@@ -252,8 +210,8 @@ app.get('/ready', readyLimiter, (req, res) => {
   // オプショナルサービス（情報のみ。readiness をブロックしない）
   let optional = {};
   try {
-    const { lightning, p2pNetwork } = require('../core/services');
-    optional = { lightning: lightning ? 'available' : 'disabled', p2pNetwork: p2pNetwork ? 'available' : 'disabled' };
+    const { p2pNetwork } = require('../core/services');
+    optional = { p2pNetwork: p2pNetwork ? 'available' : 'disabled' };
   } catch (_) { /* services 未解決時は省略 */ }
 
   res.status(ready ? 200 : 503).json({
@@ -324,9 +282,6 @@ app.use(express.static(path.join(__dirname, '../../public')));
 
 // マスター認証ルート（/master-auth）
 app.use('/master-auth', masterAuthRouter.router);
-
-// 運営利益受取アドレス管理（admin 認証必須。ルータ側で jwtAuth + rbac('admin') を適用）
-app.use('/api/profit-addresses', profitAddressesRouter);
 
 // 為替レート API。ミドルウェア群より前にマウントされていると、時限データである
 // レート応答が no-store/セキュリティヘッダーなしで配信され、ブラウザや中間

@@ -1,12 +1,12 @@
 // tests/e2e/order-lifecycle.spec.js — the core transaction the marketplace
-// exists for: pending -> matched -> paid -> active -> completed -> reviewed,
+// exists for: pending -> matched -> active -> completed -> reviewed,
 // driven through the real order-detail state machine in the UI (not just the
 // API), across two accounts (renter + provider) switching sessions mid-flow.
 const { test, expect } = require('@playwright/test');
 const { registerAndLoginUI, loginUI, apiRegisterAndLogin, apiCreateGpu, uniqueId, trackConsoleErrors, promoteToAdmin } = require('./helpers');
 
 test.describe('order lifecycle', () => {
-  test('full cycle via UI: create, accept, pay (bank transfer), start, heartbeat, stop, review', async ({ page, request, baseURL }) => {
+  test('full cycle via UI: create, accept, start, heartbeat, stop, review', async ({ page, request, baseURL }) => {
     const consoleErrors = trackConsoleErrors(page);
     // Provider + GPU set up via API (faster; not what this test is verifying).
     const provider = await apiRegisterAndLogin(request, baseURL, { prefix: 'lcprov', role: 'provider' });
@@ -33,26 +33,8 @@ test.describe('order lifecycle', () => {
     await page.click('button:has-text("承認する")');
     await expect(page.locator('.badge-matched')).toBeVisible({ timeout: 5000 });
 
-    // Renter pays via bank transfer, then an admin approves out-of-band via
-    // the API (the admin-payments UI itself is covered by its own spec).
-    await page.evaluate(() => localStorage.clear());
-    await loginUI(page, renter.email, renter.password);
-    await page.goto(`/#/orders/${orderId}`);
-    await page.click('button:has-text("銀行振込で支払う")');
-    await expect(page.locator('.banner-warning')).toContainText('管理者の承認');
-
-    const paymentInfo = await request.get(`${baseURL}/api/v1/orders/${orderId}/payment`, {
-      headers: { Authorization: `Bearer ${renter.token}` },
-    }).then((r) => r.json());
-    const pendingPayment = paymentInfo.payments.find((p) => p.status === 'pending');
-    const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'lcadmin' });
-    const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
-    await request.post(`${baseURL}/api/v1/payments/manual/approve/${pendingPayment.id}`, {
-      headers: { Authorization: `Bearer ${adminToken}` },
-    });
-
-    // Renter's UI poll picks up the approval without a manual reload.
-    await expect(page.locator('button:has-text("利用を開始する")')).toBeVisible({ timeout: 15000 });
+    // Matched: the renter can start immediately (no payment step).
+    await expect(page.locator('button:has-text("利用を開始する")')).toBeVisible({ timeout: 5000 });
     await page.click('button:has-text("利用を開始する")');
     await expect(page.locator('.badge-active')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('text=ハートビート')).toBeVisible({ timeout: 3000 });
@@ -89,14 +71,6 @@ test.describe('order lifecycle', () => {
     });
     const { orderId } = await orderRes.json();
     await request.post(`${baseURL}/api/v1/orders/${orderId}/accept`, { headers: { Authorization: `Bearer ${provider.token}` } });
-    const payRes = await request.post(`${baseURL}/api/v1/payments/order/${orderId}`, {
-      headers: { Authorization: `Bearer ${renter.token}` },
-      data: { paymentMethod: 'bank_transfer' },
-    });
-    const { paymentId } = await payRes.json();
-    const admin = await apiRegisterAndLogin(request, baseURL, { prefix: 'nostopadmin' });
-    const adminToken = await promoteToAdmin(request, baseURL, admin.email, admin.password);
-    await request.post(`${baseURL}/api/v1/payments/manual/approve/${paymentId}`, { headers: { Authorization: `Bearer ${adminToken}` } });
     await request.post(`${baseURL}/api/v1/orders/${orderId}/start`, { headers: { Authorization: `Bearer ${renter.token}` } });
 
     await loginUI(page, provider.email, provider.password);

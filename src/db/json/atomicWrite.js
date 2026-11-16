@@ -5,8 +5,8 @@
 // Durability: the temp file is fsync'd before the rename and the containing
 // directory is fsync'd after, so a committed write survives a power loss / OS
 // crash. Without this, a crash after renameSync could leave the old contents —
-// or a zero-length file on some filesystems — which for persisted escrow/payment
-// state would silently lose a committed transition and strand funds.
+// or a zero-length file on some filesystems — which for persisted order state
+// would silently lose a committed transition.
 const fs = require('fs');
 const path = require('path');
 const { randomBytes } = require('crypto');

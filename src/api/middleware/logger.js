@@ -7,7 +7,7 @@ const { logger } = require('../../utils/logger');
 // 置き換える。対象はキー名で判定 — password/token/paymentRequest だけでは
 // refreshToken・idToken（Google）・currentPassword/newPassword・code（メール
 // 認証コード）・apiKey 等が平文で dev ログへ残ってしまう。セッションを盗む
-// 資格情報・秘密値に限る（payoutAddress 等のプロフィール値は対象外）。
+// 資格情報・秘密値に限る（プロフィール値等は対象外）。
 const SENSITIVE_BODY_KEY = /^(password|currentPassword|newPassword|token|refreshToken|accessToken|idToken|paymentRequest|code|mailCode|apiKey|totp|secret|peerKey)$/i;
 // 配列ボディ（POST /gpus/bulk 等）やネストしたオブジェクト内の資格情報も
 // 漏れないよう再帰する。深度上限で循環参照・病的に深い入力で無限再帰しない。

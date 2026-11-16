@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-// ルート直下の *.js（lightning-service.js / virtual-gpu-manager.js /
+// ルート直下の *.js（virtual-gpu-manager.js /
 // gpu_lending_setup_auto_register.js 等の起動・ツール系エントリ）も
 // スキャン対象 — src/ 外にあるため drift 検出をすり抜けていた。
 const ROOT_JS = true;

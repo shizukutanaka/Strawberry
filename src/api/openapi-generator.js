@@ -9,7 +9,7 @@ const { logger } = require('../utils/logger');
 
 // schemas のトップレベル要素は2形態ある:
 //  (A) グループ ＝ { name: JoiSchema, ... }（例: gpu, order, user）
-//  (B) 単体スキーマ ＝ それ自体が Joi スキーマ（例: lightningNode, lightningChannel）
+//  (B) 単体スキーマ ＝ それ自体が Joi スキーマ（現在は該当なし。将来の混在に備え両形対応を維持）
 // 旧ジェネレータは (B) を (A) として走査し、Joi 内部プロパティを j2s に渡してクラッシュしていた。
 // 各グループを正規化し、{ name -> JoiSchema } の形に揃える（非 Joi はスキップ）。
 function normalizeGroup(group, value) {

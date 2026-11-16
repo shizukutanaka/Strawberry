@@ -1,10 +1,9 @@
-// GPU障害時の自動停止・返金・補償フロー自動化モジュール
+// GPU障害時の自動停止・通知フロー自動化モジュール
 const { logger } = require('../utils/logger');
 const { sendNotification, NotifyType } = require('../utils/notifier');
-// これらのリポジトリはメソッド集合を直接 module.exports する（{ OrderRepository } で
+// このリポジトリはメソッド集合を直接 module.exports する（{ OrderRepository } で
 // 分割代入すると undefined になり実行時クラッシュする）。デフォルト import で受ける。
 const OrderRepository = require('../db/json/OrderRepository');
-const PaymentRepository = require('../db/json/PaymentRepository');
 
 async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
   // 1. オーダー自動停止
@@ -19,21 +18,8 @@ async function autoHandleGpuFailure(orderId, gpuId, userId, reason) {
   if (cancelResult.ok) {
     logger.info(`[AUTO-RECOVERY] Order ${orderId} cancelled due to GPU error: ${reason}`);
   }
-  // 2. 返金処理（支払い済みの場合）
-  // getByOrderId は many:true で配列を返すため、単体オブジェクトとして扱うバグを修正。
-  const payments = PaymentRepository.getByOrderId(orderId) || [];
-  for (const payment of payments) {
-    // CAS: 読取と書込の間に settled/failed 等へ進んだ支払いを refunded へ回帰させない。
-    const res = PaymentRepository.updateIf(payment.id,
-      (p) => p.status === 'paid',
-      { status: 'refunded', refundedAt: new Date().toISOString() });
-    if (res.ok) {
-      logger.info(`[AUTO-RECOVERY] Payment ${payment.id} marked as refunded for order ${orderId}`);
-      // TODO: 実際の返金処理（Lightning/銀行API等）は今後拡張
-    }
-  }
-  // 3. 多段通知
-  const msg = `【GPU障害自動対応】\n注文: ${orderId}\nGPU: ${gpuId}\nユーザー: ${userId}\n理由: ${reason}\n\nオーダー停止・返金処理を自動実行しました。`;
+  // 2. 多段通知
+  const msg = `【GPU障害自動対応】\n注文: ${orderId}\nGPU: ${gpuId}\nユーザー: ${userId}\n理由: ${reason}\n\nオーダーを自動停止しました。`;
   const channels = [
     process.env.LINE_TOKEN ? { type: NotifyType.LINE, opts: { token: process.env.LINE_TOKEN } } : null,
     process.env.DISCORD_WEBHOOK ? { type: NotifyType.DISCORD, opts: { webhookUrl: process.env.DISCORD_WEBHOOK } } : null,

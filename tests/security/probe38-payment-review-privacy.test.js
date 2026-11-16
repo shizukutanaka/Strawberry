@@ -1,7 +1,5 @@
 // tests/security/probe38-payment-review-privacy.test.js
 // Probe 38 regression tests:
-// 38a-1: BTC on-chain payment rejects active orders (double-charge prevention)
-// 38a-2: Manual payment approval checks order status (no orphaned paid records)
 // 38b-1: renter-profile recentReviews does not include orderId
 // 38b-3: /me/activity review_received does not expose reviewedBy
 
@@ -19,54 +17,6 @@ afterAll(() => {
 });
 
 // ─── 38a-1: BTC on-chain status gate ─────────────────────────────────────────
-describe('BTC on-chain: active orders are rejected', () => {
-  it('btc-onchain.js: ALLOWED_BTC_PAYMENT_STATUSES excludes active', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/btc-onchain.js'), 'utf-8'
-    );
-    // Must NOT allow active
-    expect(src).not.toMatch(/ALLOWED_BTC_PAYMENT_STATUSES.*active/);
-    // Must still allow pending and matched
-    expect(src).toMatch(/ALLOWED_BTC_PAYMENT_STATUSES.*pending/);
-    expect(src).toMatch(/ALLOWED_BTC_PAYMENT_STATUSES.*matched/);
-  });
-
-  it('POST /payment/btc returns 409 for an active order', async () => {
-    // We need an active order to test; simulate by checking source-level guard
-    // (integration test for active orders requires full Lightning setup).
-    // Verify the guard constant doesn't include 'active'.
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/btc-onchain.js'), 'utf-8'
-    );
-    const match = src.match(/new Set\(\[([^\]]+)\]\)/);
-    expect(match).not.toBeNull();
-    const allowedStatuses = match[1];
-    expect(allowedStatuses).not.toContain("'active'");
-    expect(allowedStatuses).toContain("'pending'");
-    expect(allowedStatuses).toContain("'matched'");
-  });
-});
-
-// ─── 38a-2: Manual payment approval order-status guard ───────────────────────
-describe('Manual payment approval: order status guard', () => {
-  it('payment/index.js: manual approve reads order and checks status', () => {
-    const src = require('fs').readFileSync(
-      require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
-    );
-    expect(src).toMatch(/payment\.orderId/);
-    expect(src).toMatch(/OrderRepository\.getById\(payment\.orderId\)/);
-    expect(src).toMatch(/pending.*matched.*order.status|order.status.*pending.*matched/);
-  });
-
-  it('POST /payment/manual/approve returns 401 without admin token', async () => {
-    const res = await request(app)
-      .post('/api/v1/payment/manual/approve/nonexistent-id')
-      .send({});
-    expect([401, 403]).toContain(res.statusCode);
-  });
-});
-
-// ─── 38b-1: renter-profile does not leak orderId ─────────────────────────────
 describe('renter-profile: orderId stripped from recentReviews', () => {
   it('user/index.js: renter-profile map does not include orderId', () => {
     const src = require('fs').readFileSync(

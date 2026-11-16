@@ -4,16 +4,13 @@
 // not keep the renter paying for a dead GPU until the multi-hour max-duration
 // timeout. sweepHeartbeatSlaBreaches() detects an active order whose provider
 // (lender) heartbeat has gone stale beyond the SLA grace window, terminates it,
-// settles the escrow pro-rata for only the delivered portion (no setup-fee floor
-// since the fault is the provider's), and penalizes the provider's reliability.
+// records the delivered ratio, and penalizes the provider's reliability.
 
 const orderRouter = require('../../src/api/routes/order');
 const OrderRepository = require('../../src/db/json/OrderRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
-const EscrowRepository = require('../../src/db/json/EscrowRepository');
 const UptimeRepository = require('../../src/db/json/UptimeRepository');
 const providerUptime = require('../../src/reputation/provider-uptime');
-const { createEscrowService } = require('../../src/payments/escrow-service');
 
 const sessions = orderRouter._usageSessions;
 const OrderUsageSession = orderRouter._OrderUsageSession;
@@ -25,7 +22,7 @@ function cleanupProvider(providerId) {
 }
 
 describe('SLA heartbeat-breach sweep', () => {
-  it('terminates a stalled active order, settles pro-rata, and penalizes the provider', () => {
+  it('terminates a stalled active order, records delivered ratio, and penalizes the provider', () => {
     const providerId = `slaprov-${Date.now()}`;
     const gpu = GpuRepository.create({
       name: 'SLA GPU', vendor: 'NVIDIA', model: 'RTX-SLA', memoryGB: 8,
@@ -36,12 +33,6 @@ describe('SLA heartbeat-breach sweep', () => {
       status: 'active', durationMinutes: 60, pricePerHour: 1000, totalPrice: 1000,
       startedAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
     });
-
-    // A funded (HELD) escrow for the order.
-    const escrowSvc = createEscrowService();
-    const escrow = escrowSvc.create({ orderId: order.id, amountSats: 1000, feeRate: 0 });
-    escrowSvc.markPaid(escrow.id);
-    expect(EscrowRepository.getById(escrow.id).state).toBe('HELD');
 
     // A live session that delivered 30 of 60 minutes, whose provider heartbeat
     // then went stale 10 minutes ago (well beyond the 5-minute SLA default).
@@ -62,11 +53,6 @@ describe('SLA heartbeat-breach sweep', () => {
     expect(after.slaBreach).toBe(true);
     expect(after.slaBreachReason).toBe('provider_heartbeat_lost');
     expect(after.deliveredRatio).toBeCloseTo(0.5, 2);
-
-    // Escrow settled for the delivered portion.
-    const settledEscrow = EscrowRepository.getById(escrow.id);
-    expect(settledEscrow.state).toBe('SETTLED');
-    expect(settledEscrow.settlement).toBeTruthy();
 
     // Provider reliability penalized: a breach recorded, score dips.
     const rel = providerUptime.getReliability(providerId);

@@ -418,11 +418,6 @@ const ALLOWED_PROFILE_FIELDS = {
   avatar:      v => v === '' || (typeof v === 'string' && v.length <= 500 &&
                     (/^https?:\/\//i.test(v) ||
                      /^data:image\/(png|jpeg|jpg|gif|webp|avif);base64,/i.test(v))),
-  // payoutAddress: プロバイダ（貸し手）が受取に使う Lightning / on-chain アドレス。
-  // 決済(btc-onchain)はこの登録済みアドレスを「正」として使い、リクエストボディで
-  // 送金先を差し替えられる詐称・妨害(借り手が貸し手への payout を別アドレスへ流す)を防ぐ。
-  // 形式はプロバイダ依存(bolt11/LNURL/オンチェーン)のため緩めに検証。空文字で削除可。
-  payoutAddress: v => v === '' || (typeof v === 'string' && v.length >= 10 && v.length <= 500 && !/\s/.test(v)),
 };
 
 router.put('/me',
@@ -434,8 +429,8 @@ router.put('/me',
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    // 退会済みアカウントがレガシートークン（jti なし）を使って payout address 等を
-    // 変更し資金を横取りする攻撃を防ぐ。
+    // 退会済みアカウントがレガシートークン（jti なし）を使ってプロフィールを
+    // 変更する攻撃を防ぐ。
     if (user.status === 'deactivated') {
       return res.status(403).json({ error: 'Account is deactivated. Contact support to reactivate.' });
     }
@@ -459,15 +454,6 @@ router.put('/me',
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ error: `No updatable fields provided. Allowed: ${Object.keys(ALLOWED_PROFILE_FIELDS).join(', ')}` });
     }
-    // payoutAddress はプロバイダの受取アドレス＝資金ルーティング情報。JWT 所持のみで
-    // 差し替えられると次回決済が攻撃者宛に流れるため、DELETE /me と同じ再認証を
-    // 要求する（他プロフィール項目の変更には不要 — 資金への直結度が違う）。
-    if ('payoutAddress' in updateData) {
-      const denied = await verifySensitiveConfirmation(user, req.body);
-      if (denied) {
-        return res.status(denied.status).json({ error: denied.error });
-      }
-    }
     // ユーザー名の重複チェック
     if (updateData.username) {
       const existing = UserRepository.getAll().find(u => u.username === updateData.username && u.id !== req.user.id);
@@ -477,10 +463,6 @@ router.put('/me',
       ...updateData,
       updatedAt: new Date().toISOString()
     });
-    // Audit log for security-sensitive field changes (payout address, username).
-    if (updateData.payoutAddress !== undefined) {
-      appendAuditLog('user_payout_address_changed', { userId: req.user.id }, req.user.id);
-    }
     res.json({
       message: 'User profile updated successfully',
       user: sanitizeUser(updatedUser)

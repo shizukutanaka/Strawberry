@@ -90,19 +90,16 @@ function reapUsageSessions() {
 
 // --- SLA 違反スイープ（プロバイダーのハートビート途絶＝実質ダウンの自動処理）---
 // なぜ必要か: レンタル中に「箱が落ちた」場合、これまでは最大レンタル時間の
-// タイムアウト（数時間後）まで何も起きず、借り手は死んだ GPU に対して満額を
-// 支払い続けかねなかった。DePIN 市場で企業導入の最大障壁は「強制力のある SLA の
-// 不在」（Messari State of DePIN 2025）。ここではプロバイダーのハートビートが
-// SLA 猶予を超えて途絶した active 注文を検知し、実提供分だけ按分課金して残りを
-// 借り手へ返金し、プロバイダーの信頼性を減点する（TensorDock 型の稼働ペナルティ）。
+// タイムアウト（数時間後）まで何も起きず、借り手は死んだ GPU を占有され続けた。
+// ここではプロバイダーのハートビートが SLA 猶予を超えて途絶した active 注文を
+// 検知し、実提供率を記録して注文を終端へ進め、プロバイダーの信頼性を減点する
+// （TensorDock 型の稼働ペナルティ）。
 //
 // 安全側の設計:
 //  - 「プロバイダーのハートビートが一度届いた後に途絶した」場合のみ発火する
 //    （lastLenderHeartbeat が truthy）。一度も届いていない注文は、箱が落ちたのか
 //    エージェント未導入なのか判別できないため触らず、既存の最大時間タイムアウトに委ねる。
-//  - 按分は実利用秒（session.getUsageSeconds()）ベース。プロバイダー起因の障害では
-//    セットアップ最低料金（minChargeRatio）を 0 に上書きし、借り手に不当な床料金を課さない。
-//  - 金銭移動（エスクロー精算）は best-effort。失敗しても注文の終端遷移は行う。
+//  - 実提供率は実利用秒（session.getUsageSeconds()）ベースで記録する。
 const SLA_PROVIDER_TIMEOUT_MS = Math.max(
   30000,
   Number(process.env.SLA_PROVIDER_HEARTBEAT_TIMEOUT_MS) || 5 * 60 * 1000,
@@ -145,20 +142,6 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
       try { Promise.resolve(vgpuManager.releaseGPU(order.gpuId, orderId)).catch(() => {}); } catch (_) {}
     }
 
-    // エスクロー按分精算（プロバイダー起因 → 最低料金床なし）。best-effort。
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const { createEscrowService } = require('../../../payments/escrow-service');
-      const escrowSvc = createEscrowService();
-      const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
-      for (const escrow of escrows) {
-        escrowSvc.settle(escrow.id, { deliveredRatio, slaUptimePct: Math.round(deliveredRatio * 100) }, { minChargeRatio: 0 });
-        escrowSvc.apply(escrow.id, 'DELIVER_OK');
-      }
-    } catch (e) {
-      logger.warn(`[sla-sweep] escrow settle failed for order ${orderId}: ${e.message}`);
-    }
-
     // プロバイダー信頼性の減点: 稼働スコアへ SLA 違反、ジョブ成否へ失敗を記録。
     if (order.providerId) {
       try { providerUptime.recordSlaBreach(order.providerId, nowMs); } catch (_) {}
@@ -174,7 +157,7 @@ function sweepHeartbeatSlaBreaches(nowMs = Date.now()) {
       const pct = Math.round(deliveredRatio * 100);
       if (order.userId) {
         notifyUser(order.userId, 'order_sla_breach',
-          `【Strawberry】提供元GPUの応答が途絶したため注文を自動終了しました\n注文: #${orderId}\n実提供 ${pct}% 分のみ課金し、残りは返金対象です。`, {});
+          `【Strawberry】提供元GPUの応答が途絶したため注文を自動終了しました\n注文: #${orderId}\n実提供率は ${pct}% でした。`, {});
       }
       if (order.providerId) {
         notifyUser(order.providerId, 'order_sla_breach',
@@ -391,8 +374,8 @@ router.get('/',
 );
 
 // ユーザー自身の注文統計 (認証必須 — 全ロール)
-// 借り手として: 総支出・完了件数・キャンセル件数・係争件数
-// 提供者として: 収益サマリは /provider/earnings を参照（こちらはより軽量）
+// 借り手・提供者それぞれの注文件数と状態別内訳を返す。
+// 金額の集計（支出・収益）は金銭機能の廃止に伴い提供しない。
 router.get('/stats',
   authenticateJWT,
   asyncHandler(async (req, res) => {
@@ -412,100 +395,18 @@ router.get('/stats',
       return counts;
     };
 
-    const totalSpentSats = asRenter
-      .filter(o => o.status === 'completed')
-      .reduce((s, o) => s + (typeof o.totalPrice === 'number' ? o.totalPrice : 0), 0);
-    const totalSpentJPY = asRenter
-      .filter(o => o.status === 'completed')
-      .reduce((s, o) => s + (typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0), 0);
-
-    const totalEarnedSats = asProvider
-      .filter(o => o.status === 'completed')
-      .reduce((s, o) => s + (typeof o.totalPrice === 'number' ? o.totalPrice : 0), 0);
-    const totalEarnedJPY = asProvider
-      .filter(o => o.status === 'completed')
-      .reduce((s, o) => s + (typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0), 0);
-
     res.json({
       userId,
       asRenter: {
         total: asRenter.length,
         byStatus: countByStatus(asRenter),
-        totalSpentSats,
-        totalSpentJPY,
       },
       // 提供者・管理者は asProvider を常に返す（件数 0 でも null にしない）
       asProvider: (req.user.role === 'provider' || req.user.role === 'admin') ? {
         total: asProvider.length,
         byStatus: countByStatus(asProvider),
-        totalEarnedSats,
-        totalEarnedJPY,
       } : null,
     });
-  })
-);
-
-// プロバイダ収益サマリ (認証必須, provider/admin)
-// 自身が providerId の注文を集計し、完了済み収益と進行中の見込み額を返す。
-router.get('/provider/earnings',
-  authenticateJWT,
-  checkRole(['provider', 'admin']),
-  asyncHandler(async (req, res) => {
-    const providerId = req.user.id;
-    // 任意の日付範囲フィルタ（from=ISO&to=ISO）
-    const fromMs = req.query.from ? Date.parse(req.query.from) : null;
-    const toMs = req.query.to ? Date.parse(req.query.to) : null;
-    if (req.query.from && isNaN(fromMs)) {
-      return res.status(400).json({ error: 'Invalid from date' });
-    }
-    if (req.query.to && isNaN(toMs)) {
-      return res.status(400).json({ error: 'Invalid to date' });
-    }
-    let orders = OrderRepository.getAll().filter(o => o.providerId === providerId);
-    if (fromMs) orders = orders.filter(o => Date.parse(o.createdAt) >= fromMs);
-    if (toMs) orders = orders.filter(o => Date.parse(o.createdAt) <= toMs);
-    const summary = {
-      providerId,
-      from: req.query.from || null,
-      to: req.query.to || null,
-      completedCount: 0,
-      completedSats: 0,
-      completedJPY: 0,
-      activeCount: 0,
-      activeSats: 0,
-      cancelledCount: 0,
-    };
-    for (const o of orders) {
-      const sats = typeof o.totalPrice === 'number' ? o.totalPrice : 0;
-      if (o.status === 'completed') {
-        summary.completedCount++;
-        summary.completedSats += sats;
-        summary.completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
-      } else if (o.status === 'active') {
-        summary.activeCount++;
-        summary.activeSats += sats;
-      } else if (o.status === 'cancelled') {
-        summary.cancelledCount++;
-      }
-    }
-    // GPU別収益内訳
-    const GpuRepository = require('../../../db/json/GpuRepository');
-    const byGpu = {};
-    for (const o of orders) {
-      if (o.status !== 'completed') continue;
-      const gid = o.gpuId;
-      if (!byGpu[gid]) byGpu[gid] = { gpuId: gid, gpuName: null, completedCount: 0, completedSats: 0, completedJPY: 0 };
-      byGpu[gid].completedCount++;
-      byGpu[gid].completedSats += typeof o.totalPrice === 'number' ? o.totalPrice : 0;
-      byGpu[gid].completedJPY += typeof o.totalPriceJPY === 'number' ? o.totalPriceJPY : 0;
-    }
-    for (const entry of Object.values(byGpu)) {
-      const gpu = GpuRepository.getById(entry.gpuId);
-      entry.gpuName = gpu ? gpu.name : null;
-    }
-    summary.byGpu = Object.values(byGpu).sort((a, b) => b.completedSats - a.completedSats);
-
-    res.json({ message: 'Provider earnings summary', earnings: summary });
   })
 );
 
@@ -608,45 +509,6 @@ router.get('/:id',
   })
 );
 
-// オーダーの課金・エスクロー状況（注文当事者＝借り手/プロバイダ/管理者のみ）
-// これまで支払状況は別の paymentId 経由（支払者しか知らない）、エスクローは管理者限定でしか
-// 見えず、注文当事者が自分の注文の決済状態を確認できなかった。orderId 起点で一括照会する。
-router.get('/:id/payment',
-  authenticateJWT,
-  validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
-  allowOwnerOrAdmin((req) => OrderRepository.getById(req.params.id)),
-  asyncHandler(async (req, res) => {
-    const order = req.resource;
-    const PaymentRepository = require('../../../db/json/PaymentRepository');
-    const EscrowRepository = require('../../../db/json/EscrowRepository');
-
-    const payments = (PaymentRepository.getByOrderId(order.id) || []).map(p => ({
-      id: p.id,
-      status: p.status,
-      amount: p.amount,
-      method: p.method,
-      paidAt: p.paidAt || null,
-      invoiceExpiresAt: p.invoiceExpiresAt || null,
-    }));
-    const escrows = (EscrowRepository.getByOrderId(order.id) || []).map(e => ({
-      id: e.id,
-      state: e.state,
-      amountSats: e.amountSats,
-      feeRate: e.feeRate,
-      createdAt: e.createdAt || null,
-    }));
-
-    res.json({
-      orderId: order.id,
-      orderStatus: order.status,
-      totalPrice: typeof order.totalPrice === 'number' ? order.totalPrice : null,
-      totalPriceJPY: typeof order.totalPriceJPY === 'number' ? order.totalPriceJPY : null,
-      payments,
-      escrows,
-    });
-  })
-);
-
 // オーダー更新 (認証必須)
 router.put('/:id',
   authenticateJWT,
@@ -684,9 +546,9 @@ router.put('/:id',
           400);
       }
       // 'completed' への直接遷移は POST /:id/stop のみが正規ルート。
-      // admin PUT で active→completed させると escrow 精算・GPU 解放・評価記録が実行されず、
-      // 資金が HELD のまま永久にロックされる（エスクロー不整合）。
-      // admin は /stop を使うか、係争解決経由で completed に誘導すること。
+      // admin PUT で active→completed させると GPU 解放・評価記録が実行されず、
+      // 注文の後処理が欠落する。admin は /stop を使うか、係争解決経由で
+      // completed に誘導すること。
       if (sanitized.status === 'completed') {
         throw new APIError(ErrorTypes.VALIDATION,
           "Use POST /:id/stop to complete an order. Setting status to 'completed' directly is not allowed.",
@@ -707,29 +569,6 @@ router.put('/:id',
     const updateData = req.user.role === 'admin'
       ? Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_ADMIN.has(k)))
       : Object.fromEntries(Object.entries(sanitized).filter(([k]) => MUTABLE_BY_OWNER.has(k)));
-    // admin が PUT で status を 'cancelled' にする場合、エスクローを先にキャンセルする。
-    // これが無いと HELD 資金が永久にロックされ借り手は返金を受けられない（escrow 不整合）。
-    // HELD エスクローのキャンセル失敗は致命的: 注文更新を中断してエラーを返す。
-    if (updateData.status === 'cancelled') {
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id) || [];
-        if (escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
-          for (const escrow of escrows) {
-            if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
-            // HELD escrow cancel failure must not be silently swallowed — propagate it.
-            escrowSvc.cancel(escrow.id);
-          }
-        }
-      } catch (e) {
-        logger.error(`Order cancel: escrow cancellation failed (order=${order.id}): ${e.message}`);
-        throw new APIError(ErrorTypes.INTERNAL,
-          'Cannot cancel order: escrow cancellation failed. Retry or resolve escrow manually.',
-          502);
-      }
-    }
     // オーダーを更新（update() は内部で merge するため delta のみ渡す。
     // 旧コードの { ...order, ...sanitized } は getById〜update 間の並行書き込みを上書きする
     // stale-spread anti-pattern だった）
@@ -740,7 +579,7 @@ router.put('/:id',
     if (order.providerId && order.providerId !== req.user.id) invalidateUserCache(order.providerId);
     // Admin status overrides must be audit-logged with the acting admin's ID.
     // Without this, a malicious or compromised admin can silently alter order states
-    // (e.g., cancel a disputed order to deny a renter's refund) with no tamper-evident record.
+    // (e.g., cancel a disputed order to bury a renter's claim) with no tamper-evident record.
     if (updateData.status && updateData.status !== prevStatus && req.user.role === 'admin') {
       appendAuditLog('admin_order_status_override', {
         orderId: order.id,
@@ -782,50 +621,19 @@ router.delete('/:id',
     const order = req.resource;
     // DELETE (soft-cancel) is the renter's self-cancel path. allowOwnerOrAdmin also
     // admits providers via order.providerId, but providers must use POST /:id/reject.
-    // Allowing providers here lets them forge a 'user_cancelled' reason, forfeiting
-    // the renter's escrow deposit and breaking dispute resolution.
+    // Allowing providers here lets them forge a 'user_cancelled' reason and break
+    // dispute resolution.
     if (req.user.role !== 'admin' && order.userId !== req.user.id) {
       throw new APIError(ErrorTypes.FORBIDDEN, 'Only the order creator or an admin can cancel an order via DELETE. Providers must use POST /:id/reject.', 403);
     }
     logger.info(`Deleting order: ${order.id}`);
-    // 注文単位の mutex: 並行するキャンセルリクエストが escrowSvc.cancel() を
-    // 二重呼出しする前に updateIf CAS が実行されるよう直列化する。
+    // 注文単位の mutex: 並行するキャンセルリクエストに対して updateIf CAS が
+    // 直列化されるよう、キャンセル処理全体をロックする。
     return withLock(`order:${order.id}:cancel`, async () => {
     // 状態チェック（ロック内で再読み込みして最新状態を確認）
     const freshOrder = OrderRepository.getById(order.id);
     if (!freshOrder || !['pending', 'matched'].includes(freshOrder.status)) {
       throw new APIError(ErrorTypes.VALIDATION, 'Only pending or matched orders can be deleted', 400);
-    }
-    // エスクローが存在する場合は返金キャンセルを試みる。
-    // HELD エスクロー（入金済）のキャンセル失敗は致命的: 注文をキャンセル状態にすると
-    // 資金が HELD のまま永久にロックされるため、失敗時は注文キャンセルを中断してエラーを返す。
-    // PENDING エスクローは未入金なので失敗しても資金喪失はなく、ベストエフォートで扱う。
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const escrows = EscrowRepository.getByOrderId(order.id);
-      if (Array.isArray(escrows) && escrows.length > 0) {
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
-        for (const escrow of escrows) {
-          if (['CANCELED', 'SETTLED'].includes(escrow.state)) continue;
-          if (escrow.state === 'HELD') {
-            // HELD escrow cancel failure must block the delete — do NOT swallow.
-            escrowSvc.cancel(escrow.id);
-          } else {
-            // PENDING/DISPUTED: best-effort cancel; failure is logged but non-blocking.
-            try { escrowSvc.cancel(escrow.id); } catch (e) {
-              logger.warn(`Non-critical escrow cancel failed for ${escrow.id} (${escrow.state}): ${e.message}`);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      if (e.name === 'APIError') throw e;
-      // Escrow lookup failure or HELD cancel failure — block the order cancellation.
-      logger.error(`Order cancel: escrow operation failed (order=${order.id}): ${e.message}`);
-      throw new APIError(ErrorTypes.INTERNAL,
-        'Cannot cancel order: escrow operation failed. Retry or contact support.',
-        502);
     }
     // ハード削除ではなくソフトキャンセル（audit trail / 係争 / 統計を保全）。
     // updateIf で CAS を使う: 並行する /accept が pending→matched へ遷移させた後に
@@ -1180,24 +988,6 @@ router.post('/:id/reject',
     if (!rejectResult.ok) {
       throw new APIError(ErrorTypes.CONFLICT, 'Order status changed before reject could complete; please retry', 409);
     }
-    // エスクローが存在する場合は返金キャンセルを試みる（ベストエフォート）
-    try {
-      const EscrowRepository = require('../../../db/json/EscrowRepository');
-      const escrows = EscrowRepository.getByOrderId(order.id);
-      if (Array.isArray(escrows) && escrows.length > 0) {
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
-        for (const escrow of escrows) {
-          if (!['CANCELED', 'SETTLED'].includes(escrow.state)) {
-            try { escrowSvc.cancel(escrow.id); } catch (e) {
-              logger.warn(`Escrow cancel failed on reject (id=${escrow.id}): ${e.message}`);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      logger.warn(`Escrow lookup on order reject failed (order=${order.id}): ${e.message}`);
-    }
     // 借り手（レンター）へ通知
     const { notifyUser } = require('../../../utils/user-notify');
     const gpuName = gpu ? gpu.name : order.gpuId;
@@ -1270,7 +1060,7 @@ router.post('/:id/accept',
 
 // 係争申請（active/matched 注文の当事者〈借り手 or プロバイダ〉が管理者介入を要求）
 // POST /orders/:id/dispute { reason: string }
-// 管理者は別途 POST /api/v1/marketplace/escrow/:id/resolve で決済する。
+// 管理者は別途 POST /orders/:id/dispute/resolve で裁定する。
 router.post('/:id/dispute',
   authenticateJWT,
   validateMiddleware(Joi.object({ id: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(true), 'params'),
@@ -1288,15 +1078,6 @@ router.post('/:id/dispute',
     }
     if (!['active', 'matched'].includes(order.status)) {
       throw new APIError(ErrorTypes.VALIDATION, `Cannot dispute an order in '${order.status}' state (only active or matched orders can be disputed)`, 400);
-    }
-    // matched状態の係争は支払い済みの場合のみ許可（無支払いでプロバイダGPUをDoSする攻撃を防止）
-    if (order.status === 'matched' && req.user.role !== 'admin') {
-      const PaymentRepository = require('../../../db/json/PaymentRepository');
-      const payments = PaymentRepository.getByOrderId(order.id) || [];
-      const hasPaidPayment = payments.some(p => p.status === 'paid');
-      if (!hasPaidPayment) {
-        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot dispute a matched order without confirmed payment. Complete payment first or wait for the provider to start the session.', 402);
-      }
     }
     // 連続グリーフィング防止 — ただし「率」で判定する（#23 の絶対カウント永久バンを是正）。
     // プロバイダ評判が成功「率」(Bayesian)で測られるのと対称に、申請者も棄却「率」で測る。
@@ -1367,8 +1148,10 @@ router.post('/:id/dispute',
 // かつ「実フロー」のレピュテーションへ失敗を反映する（これまで失敗系は抽象 auction 経路でしか
 // 記録されず、実際の注文ライフサイクルでは reputation が単調増加しかしなかった欠陥を是正）。
 // POST /orders/:id/dispute/resolve { decision: 'refund'|'uphold', note?: string }
-//  - refund: 借り手勝訴（プロバイダ過失）→ 注文を cancelled、エスクロー返金、
+//  - refund: 借り手勝訴（プロバイダ過失）→ 注文を cancelled、
 //            provider に recordJobResult(false) + slash（評判を減点）。
+//            （decision 名は裁定結果の互換ラベル。金銭の返金処理は廃止済みで、
+//              資金の移動は一切伴わない。）
 //  - uphold: 係争棄却（プロバイダ正当）→ 注文を completed、provider に recordJobResult(true)。
 router.post('/:id/dispute/resolve',
   authenticateJWT,
@@ -1380,9 +1163,9 @@ router.post('/:id/dispute/resolve',
     // を防ぐため、order 単位の mutex で全フローを直列化する。CAS だけだと CAS 前の副作用
     // （raiser の getById+update、reputation の getById+update）が並行に走り得る。
     // ロックキーを `order:${orderId}` に統一: /start・/stop と同一 mutex を共有することで、
-    // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が escrow 精算を
-    // 並行実行し GPU が二重解放・二重精算されるリスクを排除する（旧: dispute-resolve
-    // キーが /start・/stop と別 namespace で完全な排他になっていなかった）。
+    // /stop の vgpuManager.releaseGPU() が進行中に dispute/resolve が並行実行され
+    // GPU が二重解放されるリスクを排除する（旧: dispute-resolve キーが /start・/stop と
+    // 別 namespace で完全な排他になっていなかった）。
     return withLock(`order:${orderId}`, async () => {
     const order = OrderRepository.getById(orderId);
     if (!order) throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
@@ -1401,7 +1184,7 @@ router.post('/:id/dispute/resolve',
     const gpu = GpuRepository.getById(order.gpuId);
     const gpuName = gpu ? gpu.name : order.gpuId;
 
-    // TOCTOU防止: 二重裁定による reputation/escrow 副作用の二重実行を防ぐ。
+    // TOCTOU防止: 二重裁定による reputation 副作用の二重実行を防ぐ。
     // updateIf が null を返した場合は別の管理者リクエストが先に状態遷移済みなので 409 を返す。
     if (decision === 'refund') {
       // 注文を終端へ（cancelled）。dispute オブジェクトに裁定結果を併記。
@@ -1413,22 +1196,6 @@ router.post('/:id/dispute/resolve',
       });
       if (!resolveRefundResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
-      }
-      // エスクロー返金（存在すれば、ベストエフォート）
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id);
-        if (Array.isArray(escrows) && escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
-          for (const e of escrows) {
-            if (!['CANCELED', 'SETTLED'].includes(e.state)) {
-              try { escrowSvc.cancel(e.id); } catch (err) { logger.warn(`Escrow cancel failed for ${e.id}: ${err.message}`); }
-            }
-          }
-        }
-      } catch (e) {
-        logger.warn(`Escrow refund on dispute resolve failed (order=${order.id}): ${e.message}`);
       }
       // レピュテーション減点（実フローでの失敗反映）— ベストエフォート
       if (order.providerId) {
@@ -1463,37 +1230,6 @@ router.post('/:id/dispute/resolve',
       if (!resolveUpholdResult.ok) {
         throw new APIError(ErrorTypes.CONFLICT, 'Dispute was already resolved by another request', 409);
       }
-      // エスクロー精算（uphold = 仕事は有効 → HELD 資金をプロバイダへ解放）。
-      // refund 側が escrowSvc.cancel で返金するのと対称に、uphold 側でも明示的に
-      // SETTLED へ遷移させないと HELD のまま資金が永久ロックされ、プロバイダは
-      // 正当に裁定勝ちしても入金されない（resolveUphold が status だけ completed に
-      // して escrow を放置していた漏れの修正）。escrow の現状態に応じて正しい
-      // イベント（HELD→DELIVER_OK / DISPUTED→RESOLVE_SETTLE）を選ぶ。
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const escrows = EscrowRepository.getByOrderId(order.id);
-        if (Array.isArray(escrows) && escrows.length > 0) {
-          const { createEscrowService } = require('../../../payments/escrow-service');
-          const escrowSvc = createEscrowService();
-          for (const e of escrows) {
-            if (['SETTLED', 'CANCELED'].includes(e.state)) continue;
-            const event = e.state === 'DISPUTED' ? 'RESOLVE_SETTLE'
-              : e.state === 'HELD' ? 'DELIVER_OK'
-              : null;
-            if (!event) continue; // PENDING 等、まだ入金されていないものは精算対象外
-            try {
-              // 全量納品・SLA 満たしたものとして精算内訳を記録してから SETTLED へ遷移。
-              escrowSvc.settle(e.id, { deliveredRatio: 1, slaUptimePct: 100 });
-              escrowSvc.apply(e.id, event);
-              logger.info(`Escrow ${e.id} settled (dispute uphold) for order ${order.id}`);
-            } catch (err) {
-              logger.warn(`Escrow settle on dispute uphold failed for ${e.id}: ${err.message}`);
-            }
-          }
-        }
-      } catch (e) {
-        logger.warn(`Escrow settlement on dispute uphold failed (order=${order.id}): ${e.message}`);
-      }
       if (order.providerId) {
         try {
           const { createReputationService } = require('../../../reputation/reputation-service');
@@ -1516,7 +1252,7 @@ router.post('/:id/dispute/resolve',
     }
 
     // 両当事者へ裁定結果を通知
-    const verdictText = decision === 'refund' ? '借り手への返金（プロバイダ過失）' : '係争棄却（注文は有効）';
+    const verdictText = decision === 'refund' ? '借り手の主張を認容（プロバイダ過失）' : '係争棄却（注文は有効）';
     for (const uid of [order.userId, order.providerId]) {
       if (uid) {
         notifyUser(uid, 'order_dispute_resolved',
@@ -1563,15 +1299,6 @@ router.post('/:id/review',
         throw new APIError(ErrorTypes.VALIDATION, 'Reviews must be submitted within 30 days of order completion', 400);
       }
     }
-    // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
-    if (req.user.role !== 'admin') {
-      const PaymentRepository = require('../../../db/json/PaymentRepository');
-      const payments = PaymentRepository.getByOrderId(order.id) || [];
-      const hasPaidPayment = payments.some(p => p.status === 'paid');
-      if (!hasPaidPayment) {
-        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot review an order without confirmed payment', 402);
-      }
-    }
     const rating = Number(req.body.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       throw new APIError(ErrorTypes.VALIDATION, 'rating must be an integer between 1 and 5', 400);
@@ -1612,7 +1339,7 @@ router.post('/:id/review',
 );
 
 // プロバイダ→借り手レビュー（完了済み注文の GPU プロバイダのみ、1 注文 1 回のみ）。
-// 借り手→プロバイダ評価(#17)の対称: 難あり借り手（不払い・濫用・不当係争）を記録できる手段。
+// 借り手→プロバイダ評価(#17)の対称: 難あり借り手（濫用・不当係争）を記録できる手段。
 // POST /orders/:id/renter-review { rating: 1-5, comment?: string }
 router.post('/:id/renter-review',
   authenticateJWT,
@@ -1640,15 +1367,6 @@ router.post('/:id/renter-review',
       const daysSinceCompletion = (Date.now() - new Date(renterReviewWindowAnchor).getTime()) / (1000 * 60 * 60 * 24);
       if (daysSinceCompletion > 30) {
         throw new APIError(ErrorTypes.VALIDATION, 'Renter reviews must be submitted within 30 days of order completion', 400);
-      }
-    }
-    // 支払い未確認の注文へのレビューを禁止（係争後の裁定でcompletedになった無支払い注文への悪用防止）
-    if (req.user.role !== 'admin') {
-      const PaymentRepository = require('../../../db/json/PaymentRepository');
-      const payments = PaymentRepository.getByOrderId(order.id) || [];
-      const hasPaidPayment = payments.some(p => p.status === 'paid');
-      if (!hasPaidPayment) {
-        throw new APIError(ErrorTypes.FORBIDDEN, 'Cannot submit renter review for an order without confirmed payment', 402);
       }
     }
     const rating = Number(req.body.rating);
@@ -1790,21 +1508,6 @@ router.post('/:id/start',
         }
       }
 
-      // 支払い確認: 無償で GPU を起動されないよう、確定済み支払いレコードを要求する。
-      // 管理者は手動割り当て・テスト環境のために免除。
-      if (req.user.role !== 'admin') {
-        const PaymentRepository = require('../../../db/json/PaymentRepository');
-        const payments = PaymentRepository.getByOrderId(order.id) || [];
-        const hasPaidPayment = payments.some(p => p.status === 'paid');
-        if (!hasPaidPayment) {
-          throw new APIError(
-            ErrorTypes.FORBIDDEN,
-            'Cannot start order: no confirmed payment found. Complete the payment first.',
-            402
-          );
-        }
-      }
-
       // GPU割り当てには vgpuManager が必要
       if (!requireService(vgpuManager, res)) return;
       // vgpuManager.virtualGPUs は物理検出（nvidia-smi 等）を経た GPU のみを保持する。
@@ -1852,17 +1555,17 @@ router.post('/:id/stop',
     const orderId = req.params.id;
     logger.info(`Stopping order execution: ${orderId}`);
 
-    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU,
-    // double-recording reputation, and double-settling escrow for the same order.
+    // Per-order mutex: prevents concurrent /stop calls from both releasing the GPU
+    // and double-recording reputation for the same order.
     return withLock(`order:${orderId}`, async () => {
       const order = OrderRepository.getById(orderId);
       if (!order) {
         throw new APIError(ErrorTypes.NOT_FOUND, 'Order not found', 404);
       }
-      // /stop は通常完了経路（status='completed', deliveredRatio→100%payout）。
-      // プロバイダがこれを呼べると「accept→renter pay→renter start→provider 即 stop」で
-      // 借り手の支払いを 0 秒の労働で全額受け取れる zero-work theft が成立する。
-      // プロバイダが終了させたい場合は /dispute を使い admin 介在で settle/refund を決める。
+      // /stop は通常完了経路（status='completed'）。
+      // プロバイダがこれを呼べると「accept→start→provider 即 stop」で借り手の
+      // 予約時間を 0 秒の労働で完了扱いにできる zero-work 濫用が成立する。
+      // プロバイダが終了させたい場合は /dispute を使い admin 介在で裁定を決める。
       const canStop = req.user.role === 'admin'
         || order.userId === req.user.id;
       if (!canStop) {
@@ -1877,23 +1580,6 @@ router.post('/:id/stop',
       }
       if (order.status !== 'active') {
         throw new APIError(ErrorTypes.VALIDATION, 'Order cannot be stopped', 400, { details: `Current status: ${order.status}` });
-      }
-
-      // 支払い確認: active な注文は Lightning インボイス支払い済み、または管理者手動承認済みの
-      // 決済レコードが存在するはずである。未払いのまま /stop を呼んで completed にされると
-      // GPU 利用を無償で受け取り、レピュテーションも加点される。
-      // 管理者は決済記録なしでも停止できる（手動割り当て・テスト環境等の例外処理に対応）。
-      if (req.user.role !== 'admin') {
-        const PaymentRepository = require('../../../db/json/PaymentRepository');
-        const payments = PaymentRepository.getByOrderId(order.id) || [];
-        const hasPaidPayment = payments.some(p => p.status === 'paid');
-        if (!hasPaidPayment) {
-          throw new APIError(
-            ErrorTypes.FORBIDDEN,
-            'Cannot stop order: no confirmed payment found. Complete the payment before stopping the order.',
-            402
-          );
-        }
       }
 
       // GPU解放（vgpuManager が利用可能な場合のみ）
@@ -1914,7 +1600,7 @@ router.post('/:id/stop',
       _deleteHeartbeatsForOrder(orderId);
 
       // Atomic compare-and-swap: only write completed if still active.
-      // Reputation and escrow settlement only run when this write succeeds,
+      // Reputation recording only runs when this write succeeds,
       // preventing double-increment if a second concurrent stop somehow slipped through.
       const now43g = new Date().toISOString();
       const updateData = { status: 'completed', stoppedAt: now43g, completedAt: now43g, usageStats };
@@ -1934,38 +1620,6 @@ router.post('/:id/stop',
         } catch (e) {
           logger.warn(`reputation recordJobResult failed for order ${orderId}: ${e.message}`);
         }
-      }
-
-      // エスクロー自動解放（HELD → SETTLED）。支払済みエスクローがある場合に精算する。
-      // 失敗してもオーダー完了は妨げない（エスクローはベストエフォート）。
-      try {
-        const EscrowRepository = require('../../../db/json/EscrowRepository');
-        const { createEscrowService } = require('../../../payments/escrow-service');
-        const escrowSvc = createEscrowService();
-        const escrows = EscrowRepository.getByOrderId(orderId).filter(e => e.state === 'HELD');
-        // 借り手停止時のフォールバック: usageStats が無い／0 秒のときに 100% 払い出しを
-        // 既定にしていたが、計測欠落を借り手の不利益として全額決済するのは fail-open。
-        // settlement-calculator 側の minChargeRatio が下限を担うため、ここでは
-        // measured 値が無いときは 0 を渡し、計算器のポリシーで最低料金が適用される。
-        // Fallback delivered ratio: when vgpuManager is absent (no usageStats),
-        // use wall-clock elapsed time rather than 0. Without this a renter could
-        // call /start then /stop immediately, receive measured=0, and pay near
-        // nothing if the minChargeRatio floor is below 1.0.
-        const elapsedSeconds = order.startedAt
-          ? Math.max(0, (Date.now() - new Date(order.startedAt).getTime()) / 1000)
-          : 0;
-        for (const escrow of escrows) {
-          const measured = usageStats && Number.isFinite(usageStats.usageSeconds) && order.durationMinutes
-            ? Math.max(0, Math.min(1, usageStats.usageSeconds / (order.durationMinutes * 60)))
-            : order.durationMinutes
-              ? Math.max(0, Math.min(1, elapsedSeconds / (order.durationMinutes * 60)))
-              : 0;
-          escrowSvc.settle(escrow.id, { deliveredRatio: measured, slaUptimePct: 100 });
-          escrowSvc.apply(escrow.id, 'DELIVER_OK');
-          logger.info(`Escrow ${escrow.id} auto-released (DELIVER_OK) for order ${orderId}`);
-        }
-      } catch (e) {
-        logger.warn(`Escrow auto-release failed for order ${orderId}: ${e.message}`);
       }
 
       // 借り手へ完了通知（支払い確認と利用時間サマリを含む）

@@ -77,7 +77,7 @@ function getSLAStats() {
 
 function startSLATracker() {
   if (_timer) return;
-  // テスト環境でのタイマー抑止は invoice-poller / service-monitor と同じ方針。
+  // テスト環境でのタイマー抑止は service-monitor と同じ方針。
   // Jest はテストファイルごとにモジュールを再ロードするため、ここで周期
   // タイマーを張ると実タイマーが各スイートで残存しイベントループを圧迫する。
   if (process.env.NODE_ENV === 'test') return;

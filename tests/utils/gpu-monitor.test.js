@@ -1,18 +1,16 @@
 // gpu-monitor の自動リカバリ回帰テスト — 旧実装は
 // (a) OrderRepository.updateStatus（存在しないメソッド）呼び出しで TypeError クラッシュ、
 // (b) ORDER_STATES 非登録の 'auto_recovered' を書き込み注文を遷移不能にする、
-// (c) getByOrderId（many:true=配列）を単体オブジェクト扱いし refundPayment（不在）を呼ぶ、
-// という三重の実害を持っていた。
+// (c) リポジトリの返り値の形を取り違える、という実害を持っていた。
 jest.mock('../../src/utils/resilient-notify', () => ({ resilientNotify: jest.fn().mockResolvedValue() }));
 jest.mock('../../src/utils/anomaly-detector', () => ({ reportAnomaly: jest.fn() }));
 
 const OrderRepository = require('../../src/db/json/OrderRepository');
 const GpuRepository = require('../../src/db/json/GpuRepository');
-const PaymentRepository = require('../../src/db/json/PaymentRepository');
 const { monitorAndRecover, startGpuMonitor, stopGpuMonitor } = require('../../src/utils/gpu-monitor');
 
 describe('gpu-monitor monitorAndRecover', () => {
-  it('死活応答の無い GPU の active 注文を cancelled へ落とし支払いを refunded にする', async () => {
+  it('死活応答の無い GPU の active 注文を cancelled へ落とす', async () => {
     const gpu = GpuRepository.create({
       name: 'dead-gpu', providerId: 'p1', pricePerHour: 100,
       lastHeartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // 10分前
@@ -21,14 +19,9 @@ describe('gpu-monitor monitorAndRecover', () => {
       userId: 'u1', gpuId: gpu.id, status: 'active',
       durationMinutes: 60, totalPrice: 100,
     });
-    const payment = PaymentRepository.create({
-      orderId: order.id, userId: 'u1', status: 'paid', amount: 100,
-    });
-
     await monitorAndRecover();
 
     expect(OrderRepository.getById(order.id).status).toBe('cancelled');
-    expect(PaymentRepository.getById(payment.id).status).toBe('refunded');
   });
 
   it('tick 中に注文が終端へ進んだ場合は cancelled へ回帰させない（CAS）', async () => {
@@ -39,9 +32,6 @@ describe('gpu-monitor monitorAndRecover', () => {
     const order = OrderRepository.create({
       userId: 'u1', gpuId: gpu.id, status: 'active',
       durationMinutes: 60, totalPrice: 100,
-    });
-    const payment = PaymentRepository.create({
-      orderId: order.id, userId: 'u1', status: 'paid', amount: 100,
     });
     // getOrders のスナップショット時点では active — その後の GPU 一括読込の隙間に
     // 「利用停止」で completed へ進んだ状況を getAll 内の副作用として再現
@@ -55,7 +45,6 @@ describe('gpu-monitor monitorAndRecover', () => {
     jest.restoreAllMocks();
 
     expect(OrderRepository.getById(order.id).status).toBe('completed');
-    expect(PaymentRepository.getById(payment.id).status).toBe('paid');
   });
 
   it('鮮度のある GPU の active 注文は触らない', async () => {

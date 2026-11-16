@@ -2,8 +2,6 @@
 // Probe 49 regression tests:
 // 49a: Password change now sets BOTH passwordChangedAt AND sessionsRevokedAt
 //      (defense-in-depth: independent invalidation fields stay consistent)
-// 49b: Manual payment approval wraps order-status guard + updateIf CAS in withLock
-//      to close the TOCTOU window between the order-status check and the write.
 
 const request = require('supertest');
 const { app } = require('../../src/api/server');
@@ -64,40 +62,3 @@ describe('password change: both invalidation fields written', () => {
 });
 
 // ─── 49b: manual payment approval guarded by withLock ─────────────────────
-describe('manual payment approval: withLock guards check + CAS', () => {
-  const src = require('fs').readFileSync(
-    require.resolve('../../src/api/routes/payment/index.js'), 'utf-8'
-  );
-
-  it('payment/index.js: manual/approve handler wraps body in withLock', () => {
-    const idx = src.indexOf("'/manual/approve/:id'");
-    expect(idx).toBeGreaterThan(-1);
-    // Within the handler, a withLock keyed on the paymentId must appear
-    const block = src.slice(idx, idx + 2400);
-    expect(block).toMatch(/withLock\(\s*`payment:\$\{paymentId\}`/);
-  });
-
-  it('payment/index.js: withLock opens BEFORE the order-status guard', () => {
-    const idx = src.indexOf("'/manual/approve/:id'");
-    const block = src.slice(idx, idx + 2400);
-    const lockIdx = block.indexOf('withLock(');
-    const orderGuardIdx = block.indexOf('only pending/matched orders accept payment approval');
-    expect(lockIdx).toBeGreaterThan(-1);
-    expect(orderGuardIdx).toBeGreaterThan(-1);
-    expect(lockIdx).toBeLessThan(orderGuardIdx);
-  });
-
-  it('payment/index.js: withLock opens BEFORE the updateIf CAS', () => {
-    const idx = src.indexOf("'/manual/approve/:id'");
-    const block = src.slice(idx, idx + 2400);
-    const lockIdx = block.indexOf('withLock(');
-    const updateIfIdx = block.indexOf('PaymentRepository.updateIf(');
-    expect(lockIdx).toBeGreaterThan(-1);
-    expect(updateIfIdx).toBeGreaterThan(-1);
-    expect(lockIdx).toBeLessThan(updateIfIdx);
-  });
-
-  it('payment/index.js: withLock is imported from async-lock', () => {
-    expect(src).toMatch(/withLock.*require\(.*async-lock|require\(.*async-lock.*withLock/s);
-  });
-});

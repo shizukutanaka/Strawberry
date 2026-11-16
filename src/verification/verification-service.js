@@ -1,7 +1,7 @@
 // src/verification/verification-service.js
 // 検証サービス（docs/SPECIFICATION.md F2）。work-verifier（純関数）と VerificationRepository
 // （永続化）を束ね、ジョブの監査要否決定・出力収集・consensus/ゼロ負荷判定で verdict を確定する。
-// finalize は escrow-service.evaluate にそのまま渡せる verificationCtx を返し、
+// finalize は呼び出し側（marketplace の verifyJob）が使える verificationCtx を返し、
 // 監査結果を reputationService へ反映する（いずれも DI、テストはインメモリ/省略可能）。
 const { shouldAudit, outputsMatch, ternaryConsensus, detectZeroLoad } = require('./work-verifier');
 
@@ -115,7 +115,7 @@ function createVerificationService({
       return {
         record: saved,
         verdict,
-        // escrow-service.evaluate にそのまま渡せる（inconclusive は null=WAIT）
+        // 呼び出し側の判定にそのまま渡せる（inconclusive は null=判定保留）
         verificationCtx: { verified, suspectedZeroLoad },
       };
     },

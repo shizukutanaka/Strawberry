@@ -1,7 +1,7 @@
 // tests/security/probe17-marketplace-lock.test.js
 // Probe 17 regression tests:
-// 1. /escrow/:id/resolve now uses withLock — mismatched providerId returns 400, unknown escrow 404
-// 2. notification-settings loadSettings() is fail-closed on corrupt JSON
+// 1. notification-settings loadSettings() is fail-closed on corrupt JSON
+//    （旧: marketplace escrow /resolve の検証はエスクロー廃止に伴い削除）
 
 const request = require('supertest');
 const fs = require('fs');
@@ -53,45 +53,6 @@ function seedEscrowedOrder(providerId = 'prov-p17-test') {
     createdAt: new Date().toISOString(),
   });
 }
-
-describe('escrow /resolve: withLock + providerId validation', () => {
-  it('rejects non-admin with 403', async () => {
-    const res = await asUser(request(app).post('/api/v1/marketplace/escrow/any-id/resolve'))
-      .send({ decision: 'settle' });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('rejects invalid decision with 400', async () => {
-    const res = await asAdmin(request(app).post('/api/v1/marketplace/escrow/any-id/resolve'))
-      .send({ decision: 'invalid' });
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toMatch(/decision must be/);
-  });
-
-  it('returns 404 when escrow does not exist and providerId is given', async () => {
-    const res = await asAdmin(request(app).post('/api/v1/marketplace/escrow/does-not-exist/resolve'))
-      .send({ decision: 'refund', providerId: 'some-provider' });
-    expect(res.statusCode).toBe(404);
-    expect(res.body.error).toMatch(/escrow not found/);
-  });
-
-  it('returns 400 when providerId does not match the escrow order provider', async () => {
-    const order = seedEscrowedOrder('real-provider-id');
-    // Open escrow
-    const opened = await asAdmin(request(app).post('/api/v1/marketplace/escrow/open'))
-      .send({ orderId: order.id, feeRate: 0 });
-    expect(opened.statusCode).toBe(201);
-    const escrowId = opened.body.escrow.id;
-
-    // Attempt resolve with wrong providerId
-    const res = await asAdmin(request(app).post(`/api/v1/marketplace/escrow/${escrowId}/resolve`))
-      .send({ decision: 'refund', providerId: 'WRONG-provider-id' });
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toMatch(/providerId does not match/);
-
-    OrderRepository.update(order.id, { status: 'cancelled' });
-  });
-});
 
 describe('notification-settings: loadSettings() fail-closed on corrupt JSON', () => {
   const backupPath = `${SETTINGS_PATH}.bak`;

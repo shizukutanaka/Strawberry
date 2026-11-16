@@ -29,7 +29,7 @@ function computeOrderPricing(order, rateInfo = null) {
   const pricePer5Min = pricePerHour / 12;
 
   // 価格ロック: 注文作成時に確定した totalPrice が保存されている場合はそれを権威値とする。
-  // 再計算すると、プロバイダが注文後に GPU 価格を変更したとき Lightning 請求額が
+  // 再計算すると、プロバイダが注文後に GPU 価格を変更したとき表示価格が
   // 合意額より増減する（プロバイダ不正値上げ or 値下げによる損失）。
   // レガシー注文（totalPrice 未保存）のみ以下の再計算にフォールバックする。
   let totalPrice;

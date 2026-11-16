@@ -61,7 +61,6 @@ test('各デーモンが start 時にレジストリへ自己登録する', () =
   const fs = require('fs');
   const path = require('path');
   const sites = [
-    ['src/core/invoice-poller.js', "registerDaemon('invoice-poller'"],
     ['src/utils/sla-tracker.js', "registerDaemon('sla-tracker'"],
     ['src/core/service-monitor.js', "registerDaemon('service-monitor'"],
     ['src/core/backup-scheduler.js', "registerDaemon('backup-scheduler'"],

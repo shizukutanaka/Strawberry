@@ -101,7 +101,7 @@ flowchart TD
 
 ## 概要
 
-Strawberryは、GPUリソースの貸借マーケットプレイスを目指すオープンソースプロジェクトです。現時点で実際に動作するのは Express の Web API（GPU・注文・支払いの管理）と JSON データ層で、現金換算・監査証跡・死活監視を含みます。P2P ネットワークと Lightning Network 決済は将来の構成要素としてコードは存在しますが未配線で、決済は testnet／モックのみが対象です（実態の詳細は冒頭の注記と [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照）。
+Strawberryは、GPUリソースの貸借マーケットプレイスを目指すオープンソースプロジェクトです。現時点で実際に動作するのは Express の Web API（GPU・注文・支払いの管理）と JSON データ層で、現金換算・監査証跡・死活監視を含みます。Lightning Network 決済は将来の構成要素としてコードは存在しますが未配線で、決済は testnet／モックのみが対象です（P2P ネットワークの実装は、libp2p 未導入で常時無効だったため削除しました）（実態の詳細は冒頭の注記と [`ARCHITECTURE.md`](./ARCHITECTURE.md) を参照）。
 
 ---
 
@@ -114,7 +114,7 @@ Strawberryは、GPUリソースの貸借マーケットプレイスを目指す�
 - 詳細な監査証跡、改ざん検知、Prometheusメトリクスの提供
 - CORSやHelmet等のセキュリティヘッダー実装
 - API／CLI／GraphQLインターフェース対応
-- （未配線）Ed25519ピアIDおよび署名検証によるP2P信頼性担保 — `p2p-network.js` は現行 libp2p が ESM 専用で読み込めないため無効
+- （削除済み）Ed25519ピアIDおよび署名検証によるP2P信頼性担保 — `p2p-network.js` は libp2p を読み込めず常時無効だったため削除
 - （未配線）Lightning Network決済 — LND 未接続時はモック。エスクローの実払い出しはアダプタ未注入のため no-op。testnet／モックのみ対象で、mainnet は有効化しません
 
 ---

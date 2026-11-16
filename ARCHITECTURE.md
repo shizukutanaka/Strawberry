@@ -42,14 +42,13 @@ src/api/server.js
            ├─ virtual-gpu-manager.js (dockerode/k8s)   … ロード可（要 Docker/k8s 実機）
            ├─ gpu-detector-extended.js                  … ロード可
            ├─ lightning-service.js (gRPC)               … ロード可（要 LND。未接続時は mock）
-           └─ p2p-network.js (libp2p, **ESM**)          … 無効（libp2p が ESM 専用で require 不可）
+           └─ p2p-network.js (libp2p)                   … 削除済み（libp2p 未導入で常時無効だったため）
 ```
 
 ### コアサービスのガード方針（重要）
 
-`virtual-gpu-manager` / `p2p-network` / `lightning-service` はリポジトリ直下に置かれた
-大型モジュールで、ネイティブ/ESM 依存（dockerode・libp2p・gRPC）を持つ。とくに現行
-`libp2p` は **ESM 専用で `require()` 不可**。これらをモジュール読込時に `new` していたため、
+`virtual-gpu-manager` / `lightning-service` はリポジトリ直下に置かれた
+大型モジュールで、ネイティブ依存（dockerode・gRPC）を持つ。これらをモジュール読込時に `new` していたため、
 従来は Web API 全体が起動不能だった。
 
 現在は `src/core/services.js` が全て **try/catch で安全に読み込み、失敗時は `null`**
@@ -61,8 +60,8 @@ src/api/server.js
 `child_process.promises`・`fs.promises` 誤用、`lightning-service` のブレース不整合に
 よる構文エラー）を解消し、これら3つは**ロード・インスタンス化が可能**になった
 （実機能は Docker/k8s・LND 実機が必要。`virtual-gpu-manager` のコマンド実行は
-識別子サニタイズ済み）。`p2p-network` のみ **libp2p が ESM 専用で `require()` 不可**の
-ため依然無効。
+識別子サニタイズ済み）。`p2p-network` は libp2p 未導入で `require()` 自体が
+失敗し常時無効だったため、後に削除した。
 
 これらインフラ系依存は `package.json` の `optionalDependencies`（libp2p 一式は未宣言）に置く。
 
@@ -93,10 +92,9 @@ src/api/server.js
 
 ## フォローアップ（未対応・推奨順）
 
-1. `p2p-network` の有効化（libp2p ESM 対応 or 代替実装）。他3サービスは実機(Docker/k8s/LND)での結合検証。
-2. データ層を一本化（当面 JSON 維持、将来 Prisma へ。`prisma/schema.prisma` は User/Feedback/Task
-   のみで GPU/Order/Payment/Escrow 等の実ドメインモデルを欠いており、移行には未着手のスキーマ
-   設計から必要）。
+1. P2P が必要になれば別実装として新規に切り出す（旧 `p2p-network` は削除済み）。他3サービスは実機(Docker/k8s/LND)での結合検証。
+2. データ層を一本化（当面 JSON 維持、将来 Prisma へ。未配線のまま残っていた `prisma/schema.prisma`
+   は削除済みで、移行には未着手のスキーマ設計から必要）。
 3. サービスの DI/シングルトン統一（`*-fixed.js` 孤立ファイルは削除済）。
 4. ~~Electron の本実装 or 撤去判断~~ → **解決済み（2026-07）**: Electron 断片は削除し、
    代わりに `public/` の実フロントエンド（上記）を新規実装。デスクトップアプリが必要になれば

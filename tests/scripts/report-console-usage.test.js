@@ -1,4 +1,5 @@
 // tests/scripts/report-console-usage.test.js — report-console-usage.js の契約テスト。
+const path = require('path');
 const { report } = require('../../scripts/report-console-usage');
 
 describe('report-console-usage', () => {
@@ -9,10 +10,10 @@ describe('report-console-usage', () => {
     expect(r.files.every((f) => f.file && typeof f.count === 'number')).toBe(true);
   });
 
-  test('CLI・ロガー実装は legit として分離される', () => {
-    const cli = r.files.find((f) => f.file === 'cli.js');
-    expect(cli).toBeDefined();
-    expect(cli.legit).toBe(true);
+  test('ロガー実装・監査ログは legit として分離される', () => {
+    const auditLog = r.files.find((f) => f.file === path.join('utils', 'audit-log.js'));
+    expect(auditLog).toBeDefined();
+    expect(auditLog.legit).toBe(true);
     expect(r.summary.driftFiles).toBeLessThan(r.summary.filesWithConsole);
   });
 

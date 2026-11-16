@@ -37,13 +37,10 @@ module.exports = {
   // 「全 .js ファイル走査」に変わり、未ロードの大量のファイル（public/ の
   // フロントエンド、ops スクリプト群など）が 0% として混入してしまう。
   // こちらは既定の計測集合を保ったまま該当ファイルだけを除く。
-  //   p2p-network.js           … libp2p（optional・未導入）が必要でロード不可
   //   virtual-gpu-manager.js   … Docker/k8s/GPU 実機が前提
   //   gpu-detector-extended.js … 実 GPU（nvidia-smi/rocm）が前提
-  // この3ファイルだけで計 737 行が CI 上で永遠にカバー不能。
   coveragePathIgnorePatterns: [
     '/node_modules/',
-    '/p2p-network\\.js$',
     '/virtual-gpu-manager\\.js$',
     '/gpu-detector-extended\\.js$',
   ],

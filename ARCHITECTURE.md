@@ -31,10 +31,9 @@
   endpoint とトークンを借り手へ受け渡す（注文詳細画面にも表示）。
   `STRAWBERRY_NATIVE_UPSTREAM_URL` が設定されていれば、そのホスト上の
   ローカル GPU サービスへ中継し、未設定なら生存確認のみ応答して計算パスは
-  502 で正直に返す。解放でゲートウェイは閉じられる。残る制約: ゲートウェイは
-  サーバと同一ホスト内が前提（別マシンのプロバイダ GPU への到達性は
-  プロバイダ側エージェントの仕事で未実装）、実 GPU の利用統計は
-  nvidia-smi 前提で、無い環境では null を返す。
+  502 で正直に返す。解放でゲートウェイは閉じられる。別マシンのプロバイダ GPU
+  への到達性は**提供者エージェント**（下記）で実装済み（2026-11-16）。
+  残る制約: 実 GPU の利用統計は nvidia-smi 前提で、無い環境では null を返す。
 - データ永続化は **`src/db/json/*` の JSON ファイルリポジトリが実際に稼働**している層。
   `prisma/` は依然として存在するが未配線・未使用。`src/core/database.js`
   （`pg`/`ioredis` — いずれもパッケージ未インストール）と `src/core/security.js`
@@ -49,6 +48,8 @@ src/api/server.js
  ├─ middleware/security, middleware/logger, prom-client(/metrics)
  ├─ /master-auth      → routes/master-auth.js (Google OAuth は env 設定時のみ有効)
  ├─ /api/exchange-rate→ routes/exchange-rate.js
+ ├─ WebSocket Upgrade: /api/v1/agent/connect → services/provider-agent-hub
+ │    （提供者エージェントの外向き接続。JWT 認証。server 起動時のみ attach）
  └─ /api/v1 (routes/index.js)  ※ /system/info 以外は JWT 必須
       ├─ /gpus /orders /users /marketplace  → JSON リポジトリで動作
       └─ コアサービス: src/core/services.js 経由のガード付きシングルトン
@@ -56,6 +57,49 @@ src/api/server.js
            ├─ gpu-detector-extended.js                  … ロード可
            └─ p2p-network.js (libp2p)                   … 削除済み（libp2p 未導入で常時無効だったため）
 ```
+
+### 提供者エージェント（別マシンの提供者 GPU への中継）
+
+marketplace GPU は提供者のマシン上に実在するため、サーバと同一ホストの
+ローカル上流では届かない。そのための経路が提供者エージェント:
+
+```
+借り手 → セッションゲートウェイ（サーバ上、割り当てごと）
+       → 提供者ハブ（サーバ上、WebSocket レジストリ）
+       → 提供者エージェント（提供者のマシン、agent/provider-agent.js）
+       → 提供者のローカル GPU サービス（Ollama 等）
+```
+
+- **接続は提供者から外向き**（WebSocket、`GET /api/v1/agent/connect` の
+  Upgrade）。NAT の内側の提供者にも届き、サーバ側から提供者へは接続しない。
+  実装は Node 標準のみ（`src/services/ws-rfc6455.js` の最小 RFC 6455 実装 +
+  `src/services/provider-agent-hub.js`）。新規依存は追加していない。
+- **認証**: エージェント接続は提供者本人のアクセストークン（JWT）を
+  既存 jwt-auth と同一手順で検証する。借り手のセッショントークンは
+  ゲートウェイが先に検証し、トークンの無いリクエストはエージェントへ届かない。
+- **認可の不変条件**: 中継の宛先は GPU レコードの `providerId` で決める。
+  エージェントが受け取れるのは自分の GPU へのリクエストだけであり、
+  他人のエージェントへ中継されることはない（テストで固定）。
+- **SSRF 対策**: ゲートウェイは origin-form 以外の request-target を 400 で
+  拒否し（ローカル経路と共通）、エージェントは起動時に指定した
+  `STRAWBERRY_UPSTREAM_URL` の origin へしか中継しない（二重防御）。
+- **経路の優先順位**: 提供者のエージェントが接続していればエージェント経路、
+  無ければ `STRAWBERRY_NATIVE_UPSTREAM_URL` のローカル中継、どちらも無ければ
+  理由つきの 502。接続状態は割り当ての `accessInfo.providerAgent` と
+  ゲートウェイの `/health` に正直に出る。
+
+正直な限界:
+
+- **ストリーミングはしない**。トンネルは JSON+base64 のバッファリング方式で、
+  リクエスト/レスポンスとも上限 15MB。Ollama 等のストリーミング応答も
+  一括で返る（トークンの逐次表示はできない）。
+- **再接続時のセッション扱い**: エージェントが切断されると、その間の
+  ゲートウェイへの計算リクエストは 502 になる。セッション自体（ゲートウェイと
+  トークン）は維持され、エージェントが再接続すれば同じセッションへ再び届く。
+  接続中に切断されたリクエストは再送されない（借り手側のリトライが必要）。
+- **サーバ再起動で接続は切れる**。エージェントは指数バックオフで自動再接続する。
+- 実 GPU・実 Ollama での検証は未実施（スタブ上流での実走スモーク
+  `scripts/smoke-provider-agent.js` とテストで一往復を固定している）。
 
 ### コアサービスのガード方針（重要）
 
@@ -91,9 +135,9 @@ src/api/server.js
 
 ## テスト状況（正直版）
 
-`npm test`（Jest, `--forceExit`）は **215/218 スイート green**（1702/1706 テスト、2 スイート
+`npm test`（Jest, `--forceExit`）は **218/221 スイート green**（1722/1726 テスト、2 スイート
 ＋3 テストが環境依存で skip、残る失敗 1 件は公開 URL の DNS 解決に依存する SSRF テストで
-実行環境要因。2026-11-16 時点、金銭機能のテスト群は機能ごと削除済み）。当初あった aspirational な失敗群（未実装エンドポイント・旧スキーマ
+実行環境要因。2026-11-16 時点。提供者エージェントのテスト 2 スイートを含む）。当初あった aspirational な失敗群（未実装エンドポイント・旧スキーマ
 参照）は逐ー是正済み。`--forceExit` が必要なのは起動時のサービス初期化タイマー類が
 イベントループに残るためで、テストの成否とは無関係。
 

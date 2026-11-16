@@ -23,6 +23,16 @@ const { logger } = require('./src/utils/logger');
 const exec = require('util').promisify(require('child_process').exec);
 const http = require('http');
 const crypto = require('crypto');
+// 提供者エージェントのハブは遅延ロードする（読込失敗時に native ゲートウェイ
+// 全体を巻き込まないため。失敗時は null = エージェント経路だけ無効化）。
+let _agentHub;
+function getAgentHub() {
+  if (_agentHub === undefined) {
+    try { _agentHub = require('./src/services/provider-agent-hub').hub; }
+    catch (_) { _agentHub = null; }
+  }
+  return _agentHub;
+}
 const fs = require('fs').promises;
 const fsSync = require('fs'); // existsSync 等の同期APIは fs.promises に無いため別途参照
 const path = require('path');
@@ -664,6 +674,9 @@ nvidia-cuda-mps-control -d
             physicalGPUId: gpuId,
             name: gpuRecord.name || 'Marketplace GPU',
             type: 'marketplace',
+            // 提供者のユーザー ID。セッションゲートウェイが、その提供者の
+            // エージェントへだけ中継するために使う（認可の宛先キー）。
+            providerId: gpuRecord.providerId || gpuRecord.ownerId || null,
             config: {},
             resources: {
                 vram: typeof gpuRecord.memoryGB === 'number' ? gpuRecord.memoryGB : null,
@@ -879,12 +892,19 @@ nvidia-cuda-mps-control -d
         //   - GET / と /health はセッション状態を返す
         //   - STRAWBERRY_NATIVE_UPSTREAM_URL が設定されていれば、その他のパスは
         //     このホスト上の GPU サービス（Ollama 等のローカル推論サーバ）へ中継する
-        //   - 未設定なら 502 で「ホスト側に GPU サービス未設定」を正直に返す
+        //   - marketplace GPU の提供者のエージェントが接続していれば、その他のパスは
+        //     エージェント経由で提供者のマシン上の GPU サービスへ中継する
+        //     （宛先は GPU レコードの providerId で決める。本人以外のエージェントへは
+        //     絶対に中継しない。エージェント経路があればローカル上流より優先する）
+        //   - どちらも無ければ 502 で理由を正直に返す
         // 解放時は releaseNativeAccess がゲートウェイを閉じる（endpoint は接続不能になる）。
         const accessToken = this.generateAccessToken();
         const upstreamUrl = (process.env.STRAWBERRY_NATIVE_UPSTREAM_URL || '').trim() || null;
         const bindHost = (process.env.STRAWBERRY_NATIVE_BIND_HOST || '127.0.0.1').trim() || '127.0.0.1';
         const sessions = this._getNativeSessions();
+        const providerId = vgpu.providerId || null;
+        const agentHub = getAgentHub();
+        const agentConnected = () => !!(providerId && agentHub && agentHub.hasProvider(providerId));
 
         const tokenOk = (req) => {
             const presented = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '')
@@ -897,6 +917,48 @@ nvidia-cuda-mps-control -d
             const body = JSON.stringify(obj);
             res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
             res.end(body);
+        };
+
+        // エージェント経路の中継。トンネル（WebSocket 上の JSON+base64）の都合で
+        // ボディはバッファリングする（ローカル中継のようなストリーミングはしない）。
+        const AGENT_MAX_BODY_BYTES = 15 * 1024 * 1024;
+        const forwardViaAgent = async (req, res) => {
+            const chunks = [];
+            let total = 0;
+            let tooLarge = false;
+            for await (const chunk of req) {
+                total += chunk.length;
+                if (total > AGENT_MAX_BODY_BYTES) tooLarge = true;
+                else chunks.push(chunk);
+            }
+            if (tooLarge) {
+                sendJson(res, 413, { error: 'Request body too large for provider-agent forwarding' });
+                return;
+            }
+            const headers = {};
+            for (const [k, v] of Object.entries(req.headers)) {
+                if (['authorization', 'x-strawberry-token', 'host', 'connection', 'transfer-encoding', 'content-length'].includes(k)) continue;
+                headers[k] = v;
+            }
+            try {
+                const result = await agentHub.forward(providerId, {
+                    method: req.method,
+                    path: req.url,
+                    headers,
+                    body: Buffer.concat(chunks),
+                });
+                res.writeHead(result.status, result.headers);
+                res.end(result.body);
+            } catch (e) {
+                logger.warn(`Native session gateway agent forward error (allocation ${allocation.id}): ${e.code || ''} ${e.message}`);
+                if (!res.headersSent) {
+                    sendJson(res, 502, {
+                        error: e.code === 'AGENT_TIMEOUT'
+                            ? 'Provider agent did not respond in time'
+                            : 'Provider agent is unreachable',
+                    });
+                } else res.destroy();
+            }
         };
 
         const server = http.createServer((req, res) => {
@@ -912,25 +974,45 @@ nvidia-cuda-mps-control -d
                     allocationId: allocation.id,
                     vgpuId: vgpu.id,
                     upstream: upstreamUrl ? 'configured' : 'not-configured',
+                    providerAgent: providerId
+                        ? (agentConnected() ? 'connected' : 'not-connected')
+                        : 'not-applicable',
                 });
                 return;
             }
-            if (!upstreamUrl) {
-                sendJson(res, 502, {
-                    error: 'No GPU service is configured on this host',
-                    hint: 'The host operator must set STRAWBERRY_NATIVE_UPSTREAM_URL to the local GPU service (e.g. http://127.0.0.1:11434) for requests to be forwarded.',
-                });
-                return;
-            }
-            // ローカルの GPU サービスへ中継（ストリーミング）。
             // SSRF 対策: 絶対形式の request-target（http://別ホスト/...）を受け付けると
             // new URL が base を無視して任意ホストへ向き、トークン保持者が内側の
-            // 別サービスへ到達できてしまう。origin-form（/ 始まり）だけを許可し、
-            // 解決後の origin が設定済み upstream と一致することも確認する。
+            // 別サービスへ到達できてしまう。origin-form（/ 始まり）だけを許可する。
+            // この検査は経路選択（エージェント／ローカル）より前に置き、両経路に効かせる。
             if (!req.url.startsWith('/')) {
                 sendJson(res, 400, { error: 'Only origin-form request targets are accepted' });
                 return;
             }
+            // 提供者エージェント経路（別マシンの提供者 GPU への到達）。
+            if (agentConnected()) {
+                forwardViaAgent(req, res).catch((e) => {
+                    logger.warn(`Native session gateway agent forward error (allocation ${allocation.id}): ${e.message}`);
+                    if (!res.headersSent) sendJson(res, 502, { error: 'Provider agent is unreachable' });
+                    else res.destroy();
+                });
+                return;
+            }
+            if (!upstreamUrl) {
+                if (providerId) {
+                    sendJson(res, 502, {
+                        error: 'Provider agent is not connected',
+                        hint: 'The GPU lives on the provider\'s machine. The provider must run the provider agent (agent/provider-agent.js) so requests can be forwarded to it, or the host operator must set STRAWBERRY_NATIVE_UPSTREAM_URL for a local GPU service.',
+                    });
+                } else {
+                    sendJson(res, 502, {
+                        error: 'No GPU service is configured on this host',
+                        hint: 'The host operator must set STRAWBERRY_NATIVE_UPSTREAM_URL to the local GPU service (e.g. http://127.0.0.1:11434) for requests to be forwarded.',
+                    });
+                }
+                return;
+            }
+            // ローカルの GPU サービスへ中継（ストリーミング）。解決後の origin が
+            // 設定済み upstream と一致することも確認する。
             let target;
             try {
                 target = new URL(req.url, upstreamUrl);
@@ -969,7 +1051,8 @@ nvidia-cuda-mps-control -d
         sessions.set(allocation.id, { server, token: accessToken });
 
         const endpoint = `http://${bindHost}:${port}`;
-        logger.info(`Native GPU session gateway listening for allocation ${allocation.id} at ${endpoint} (upstream: ${upstreamUrl ? 'configured' : 'not-configured'})`);
+        const viaAgent = agentConnected();
+        logger.info(`Native GPU session gateway listening for allocation ${allocation.id} at ${endpoint} (upstream: ${upstreamUrl ? 'configured' : 'not-configured'}, providerAgent: ${providerId ? (viaAgent ? 'connected' : 'not-connected') : 'not-applicable'})`);
 
         return {
             type: 'native',
@@ -979,9 +1062,14 @@ nvidia-cuda-mps-control -d
             },
             deliveryImplemented: true,
             upstream: upstreamUrl ? 'configured' : 'not-configured',
-            message: upstreamUrl
-                ? 'GPU access session is live. Send requests to the endpoint with the access token (Authorization: Bearer); they are forwarded to the GPU service running on this host.'
-                : 'GPU access session is live on this host and answers health checks with the access token. No local GPU service is configured on the host yet (the operator can set STRAWBERRY_NATIVE_UPSTREAM_URL), so compute requests cannot be forwarded until then.',
+            providerAgent: providerId ? (viaAgent ? 'connected' : 'not-connected') : 'not-applicable',
+            message: viaAgent
+                ? 'GPU access session is live. Send requests to the endpoint with the access token (Authorization: Bearer); they are forwarded through the provider agent to the GPU service on the provider\'s machine.'
+                : upstreamUrl
+                    ? 'GPU access session is live. Send requests to the endpoint with the access token (Authorization: Bearer); they are forwarded to the GPU service running on this host.'
+                    : providerId
+                        ? 'GPU access session is live and answers health checks with the access token. The provider agent is not connected yet, so compute requests cannot be forwarded until the provider starts the agent (agent/provider-agent.js).'
+                        : 'GPU access session is live on this host and answers health checks with the access token. No local GPU service is configured on the host yet (the operator can set STRAWBERRY_NATIVE_UPSTREAM_URL), so compute requests cannot be forwarded until then.',
         };
     }
 

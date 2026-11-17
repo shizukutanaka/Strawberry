@@ -1,6 +1,11 @@
-# 開発環境 — API を Dockerfile.api でローカル起動する最小構成。
+# 自己ホストキットの入口 — API を Dockerfile.api で起動する構成。
 # 使い方: docker compose -f docker/docker-compose.yml up --build
-# （リポジトリルートから実行。env はルートの .env を読む。未作成なら開発既定値で起動）
+# （リポジトリルートから実行。手順全体は docs/SELFHOST.md を参照）
+#
+# .env は必須。イメージ内は NODE_ENV=production で、必須シークレット
+# （JWT_SECRET / SESSION_SECRET / ENCRYPTION_KEY）が無いとアプリが
+# fail-fast で起動に失敗するため、.env が無い場合は compose の時点で
+# 明示的に止める（コンテナの再起動ループにしない）。
 services:
   api:
     build:
@@ -10,10 +15,9 @@ services:
     ports:
       - "3000:3000"
     env_file:
-      # 無くても起動は可能（開発モードは ephemeral シークレットで動く）。
-      # 本番相当の確認時は JWT_SECRET 等を .env に記載する。
+      # ルートの .env（.env.example から作成し、必須シークレットを設定する）
       - path: ../.env
-        required: false
+        required: true
     volumes:
       # JSON リポジトリとログをホストへ永続化
       - ../data:/app/data

@@ -101,7 +101,7 @@ flowchart TD
 
 ---
 
-> **日本語/English: OSS P2P GPUマーケットプレイス実装。セットアップ・運用・貢献・質問は日英どちらも歓迎です。**
+> **日本語/English: GPUの貸し借り専用のOSS実装。セットアップ・運用・貢献・質問は日英どちらも歓迎です。**
 
 ---
 
@@ -140,7 +140,7 @@ Strawberryは、GPUリソースの貸借マーケットプレイスを目指す�
    ```sh
    npm start
    # または
-   node src/cli.js
+   node src/api/server.js
    ```
 4. **（将来計画）P2Pノード構成**
    - P2P は現在無効です（現行 libp2p が ESM 専用のため読み込めません）。複数端末で起動しても P2P ネットワークは構成されません。各端末は独立した Web API として動作します
@@ -696,9 +696,9 @@ flowchart LR
 - notifyExternalAlert内で呼び出しを追加するだけで多重通知可能
 
 
-> **🇯🇵 日本語: このリポジトリはP2P型GPUマーケットプレイスのOSS実装です。セットアップ・運用・コントリビュートは日本語/英語どちらでも歓迎します。README・ガイドはバイリンガル対応です。ご質問・PR・Issueもお気軽にどうぞ！**
+> **🇯🇵 日本語: このリポジトリはGPU貸し借り専用のOSS実装です。セットアップ・運用・コントリビュートは日本語/英語どちらでも歓迎します。README・ガイドはバイリンガル対応です。ご質問・PR・Issueもお気軽にどうぞ！**
 >
-> **🇬🇧 English: This repository is an OSS implementation of a P2P GPU marketplace. Setup, usage, and contributions are welcome in both Japanese and English. README and guides are bilingual. Feel free to ask questions, open PRs, or Issues!**
+> **🇬🇧 English: This repository is an OSS implementation of a GPU lending service (GPU lending only — no payments). Setup, usage, and contributions are welcome in both Japanese and English. README and guides are bilingual. Feel free to ask questions, open PRs, or Issues!**
 
 ---
 
@@ -754,38 +754,28 @@ flowchart LR
 2. **環境変数の設定**
    - `.env`ファイルまたは環境変数で`LINE_TOKEN`などを設定（障害アラート通知用）
 
-3. **CLI操作**
+3. **サーバーの起動**
    ```sh
-   node src/cli.js
+   npm start
    ```
+   - 対話型 CLI は現行では存在しません（旧 `src/cli.js` は削除済み）。GPU の登録・注文などの操作は Web UI / API で行います
    - （将来計画）複数端末・サーバーでの P2P ネットワーク構成は、P2P が無効な現行では利用できません
 
 ---
 
 ## CLIコマンド例
 
-- GPU情報の公開:
-  ```
-  gpu gpu01 RTX4090 1000
-  ```
-- 注文の発行:
-  ```
-  order order01 gpu01 1000
-  ```
-- 終了:
-  ```
-  exit
-  ```
+- 対話型 CLI（`gpu` / `order` コマンド等）は現行では存在しません（旧 `src/cli.js` と共に削除済み）。GPU の登録・注文は Web UI または API で行います
 ---
 
 ## 障害監視・自動通知
 
-- ノード死活監視・障害アラートは`p2p-notify.js`で自動化
+- サービスの死活監視はサーバ内蔵の `service-monitor` が行い、異常時は監査証跡への記録と（`.env` に通知先を設定した場合のみ）外部通知を行います
+- GPU ノードの死活監視スクリプト:
   ```sh
-  node src/p2p-notify.js
+  npm run gpu-failure-monitor
   ```
-- ピア接続が0になった場合、LINEで即時通知
-- libp2p 系パッケージ未導入の環境でも外部 API 監視（`MONITOR_TARGETS`）は単独で動作します。P2P ヘルス監視部分には上記 libp2p 系パッケージの追加が必要です。
+- 旧 `src/p2p-notify.js` は P2P の削除に伴い現行では存在しません
 
 ---
 

@@ -1,4 +1,4 @@
-# Contributing to Strawberry P2P GPU Marketplace
+# Contributing to Strawberry
 
 Thank you for considering contributing to Strawberry! 🚀
 
@@ -36,7 +36,7 @@ GitHub Actions workflows that run on PRs (all target `main`; a `develop` branch 
 
 ---
 
-# Strawberry P2P GPU Marketplace コントリビュートガイド
+# Strawberry コントリビュートガイド
 
 ## 貢献方法
 

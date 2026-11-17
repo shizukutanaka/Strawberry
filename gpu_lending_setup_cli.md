@@ -29,7 +29,7 @@ node gpu_lending_setup_auto_register.js
 
 1. `node gpu_lending_setup_auto_register.js` を実行
 2. 成功メッセージ `[SUCCESS] GPU登録:` が出れば貸出登録完了
-3. StrawberryダッシュボードやAPIで貸出状況・収益を確認
+3. StrawberryダッシュボードやAPIで貸出状況を確認
 
 ---
 
@@ -41,7 +41,7 @@ A. NVIDIA/AMD/Intelの主要GPUに対応。自動検出・登録されます。
 **Q. ドライバやAPIが未導入の場合は？**  
 A. セットアップ時に自動で検出・案内。必要に応じてインストールガイドを表示。
 
-**Q. 貸出状況や収益はどこで見られますか？**  
+**Q. 貸出状況はどこで見られますか？**  
 A. Webダッシュボードまたは `GET /api/v1/gpus`（一覧）で確認できます。
 
 ---

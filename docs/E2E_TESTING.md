@@ -36,14 +36,14 @@ E2E_BASE_URL=http://localhost:3000 npm run test:e2e   # webServer 起動をス�
 - 失敗時は `test-results/` に trace とスクリーンショットが残る（`trace: 'retain-on-failure'`）。`npx playwright show-trace test-results/<dir>/trace.zip` で時系列再生できる。
 - 各 spec は `helpers.js` のタイムスタンプ付きユニーク ID でユーザ/リソースを作るため、リセットを挟まない反復実行でも一意性衝突しない。
 
-## スペック一覧（9件）
+## スペック一覧（8件）
 
 | ファイル | describe ブロック |
 |---|---|
 | `auth.spec.js` | auth（登録・ログイン・セッション） |
 | `auth-refresh.spec.js` | token refresh |
 | `marketplace.spec.js` | marketplace |
-| `gpu-detail-and-summaries.spec.js` | GPU detail page・provider earnings・order stats on the orders list |
+| `gpu-detail-and-summaries.spec.js` | GPU detail page・order stats on the orders list |
 | `order-lifecycle.spec.js` | order lifecycle |
 | `admin.spec.js` | admin dashboard |
 | `dispute.spec.js` | dispute |

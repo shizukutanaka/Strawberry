@@ -29,7 +29,7 @@ test.describe('auth', () => {
     await registerAndLoginUI(page, { prefix: 'provider', role: 'provider' });
     await expect(page.locator('#nav a[href="#/my-gpus"]')).toBeVisible();
     await expect(page.locator('#nav a[href="#/gpus/new"]')).toBeVisible();
-    await expect(page.locator('#nav a[href="#/earnings"]')).toBeVisible();
+    await expect(page.locator('#nav a[href="#/earnings"]')).toHaveCount(0);
     await expect(page.locator('#nav a[href="#/admin/payments"]')).toHaveCount(0);
   });
 

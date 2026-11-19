@@ -74,13 +74,14 @@ NODE_ENV=production npm start
 ローカルで動いている GPU サービス（例: Ollama）だけです。
 
 1. 運営者のサーバの画面でアカウントを作成し、「GPU登録」から自分の GPU を掲載する
-2. ログインして自分のアクセストークンを取得する
+2. 「マイGPU」の「エージェント起動コマンドを発行」を押す（サーバ URL と
+   エージェントトークンを埋めたコマンドが表示されます）
 3. 自分のマシンで GPU サービスを起動する（例: Ollama `http://127.0.0.1:11434`）
-4. エージェントを起動する
+4. 表示されたコマンドを Strawberry のフォルダで実行し、エージェントを起動する
 
 ```sh
 STRAWBERRY_SERVER_URL=https://your-strawberry-server.example.com \
-STRAWBERRY_AGENT_TOKEN=<あなたのアクセストークン> \
+STRAWBERRY_AGENT_TOKEN=<発行したエージェントトークン> \
 STRAWBERRY_UPSTREAM_URL=http://127.0.0.1:11434 \
 node agent/provider-agent.js
 ```

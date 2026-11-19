@@ -9,13 +9,13 @@
 // セキュリティ:
 //   - 中継先は起動時に指定した STRAWBERRY_UPSTREAM_URL の origin のみ。
 //     リクエストパスが絶対形式や別 origin を指したら中継せず 400 を返す（SSRF 防止）。
-//   - サーバ接続は提供者本人のアクセストークン（JWT）で認証する。
+//   - サーバ接続は提供者本人のエージェントトークン（JWT、中継接続専用）で認証する。
 //   - 借り手のセッショントークンはサーバ側ゲートウェイが検証済みで、
 //     トークンの無いリクエストはここへ届かない。
 //
 // 使い方:
 //   STRAWBERRY_SERVER_URL=http://localhost:3000 \
-//   STRAWBERRY_AGENT_TOKEN=<プロバイダのアクセストークン> \
+//   STRAWBERRY_AGENT_TOKEN=<マイGPU画面で発行したエージェントトークン> \
 //   STRAWBERRY_UPSTREAM_URL=http://127.0.0.1:11434 \
 //   node agent/provider-agent.js
 //
@@ -125,10 +125,12 @@ function toWebSocketUrl(serverUrl) {
   return u.toString();
 }
 
-// エージェント本体。start() で接続し、切断時は指数バックオフで再接続する。
-// 再接続の間に開始されたセッションのリクエストはサーバ側で 502 になる
-// （セッション自体は維持され、再接続後に同じゲートウェイへ再び届く）。
-function createProviderAgent({ serverUrl, token, upstreamUrl, name } = {}) {
+// エージェント本体。start() で接続し、切断時は指数バックオフ（上限 30s）で
+// 接続できるまで再接続し続ける。再接続の間に開始されたセッションのリクエストは
+// サーバ側で 502 になる（セッション自体は維持され、再接続後に同じゲートウェイへ
+// 再び届く）。サーバがトークンを 401 で拒否したら再試行しても回復しないため、
+// 再接続をやめて onGiveUp(err) を呼ぶ。
+function createProviderAgent({ serverUrl, token, upstreamUrl, name, onGiveUp } = {}) {
   if (!serverUrl) throw new Error('STRAWBERRY_SERVER_URL is required');
   if (!token) throw new Error('STRAWBERRY_AGENT_TOKEN is required');
   if (!upstreamUrl) throw new Error('STRAWBERRY_UPSTREAM_URL is required');
@@ -164,19 +166,30 @@ function createProviderAgent({ serverUrl, token, upstreamUrl, name } = {}) {
     ws.on('close', (code, reason) => {
       ws = null;
       if (stopped) return;
-      log(`disconnected (${code} ${reason || ''}); reconnecting in ${backoffMs}ms`);
-      reconnectTimer = setTimeout(() => {
-        backoffMs = Math.min(backoffMs * 2, 30000);
-        connectOnce().catch((e) => {
-          log(`connect failed: ${e.message}`);
-          if (!stopped) {
-            reconnectTimer = setTimeout(() => connectOnce().catch(() => {}), backoffMs);
-          }
-        });
-      }, backoffMs);
-      if (reconnectTimer.unref) reconnectTimer.unref();
+      log(`disconnected (${code} ${reason || ''})`);
+      scheduleReconnect();
     });
     ws.on('error', (e) => log(`socket error: ${e.message}`));
+  }
+
+  function scheduleReconnect() {
+    log(`reconnecting in ${backoffMs}ms`);
+    const delay = backoffMs;
+    backoffMs = Math.min(backoffMs * 2, 30000);
+    reconnectTimer = setTimeout(() => {
+      if (stopped) return;
+      connectOnce().catch((e) => {
+        log(`connect failed: ${e.message}`);
+        if (stopped) return;
+        if (/HTTP 401\b/.test(e.message)) {
+          stopped = true;
+          log('the server rejected the agent token; issue a new one from マイGPU and restart the agent');
+          if (onGiveUp) onGiveUp(e);
+          return;
+        }
+        scheduleReconnect();
+      });
+    }, delay);
   }
 
   return {
@@ -202,6 +215,7 @@ if (require.main === module) {
       token: agentToken,
       upstreamUrl: process.env.STRAWBERRY_UPSTREAM_URL,
       name: process.env.STRAWBERRY_AGENT_NAME || undefined,
+      onGiveUp: () => process.exit(1),
     });
   } catch (e) {
     console.error(`[provider-agent] configuration error: ${e.message}`);

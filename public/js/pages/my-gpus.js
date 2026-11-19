@@ -2,6 +2,44 @@
 import { el, skeleton, emptyState, toast, fmtSats } from '../ui.js';
 import { api, ApiError } from '../api.js';
 
+// 提供者エージェントの起動コマンド。サーバ URL とトークンを埋めた状態で
+// 表示し、提供者は自分の GPU マシンに貼るだけで貸出を始められる。
+function agentCommand(token) {
+  return [
+    `STRAWBERRY_SERVER_URL=${location.origin} \\`,
+    `STRAWBERRY_AGENT_TOKEN=${token} \\`,
+    'STRAWBERRY_UPSTREAM_URL=http://127.0.0.1:11434 \\',
+    'node agent/provider-agent.js',
+  ].join('\n');
+}
+
+function agentPanel() {
+  const output = el('div', { class: 'stack' });
+  const btn = el('button', {
+    class: 'btn btn-ghost btn-sm',
+    onClick: async () => {
+      btn.disabled = true;
+      try {
+        const res = await api.issueAgentToken();
+        output.replaceChildren(
+          el('pre', { style: 'white-space:pre-wrap;word-break:break-all;font-size:0.8rem' }, agentCommand(res.token)),
+          el('p', { class: 'muted', style: 'font-size:0.85rem' },
+            `GPU マシンで Ollama 等を起動し、Strawberry のフォルダでこのコマンドを実行してください。トークンの有効期限は ${res.expiresIn} です。パスワードを変更すると失効します。`),
+        );
+      } catch (err) {
+        toast(err instanceof ApiError ? err.message : '発行に失敗しました', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    },
+  }, 'エージェント起動コマンドを発行');
+  return el('div', { class: 'stack' },
+    el('p', { class: 'muted' }, '別マシンの GPU を貸すには、そのマシンで提供者エージェントを動かします。'),
+    btn,
+    output,
+  );
+}
+
 export async function render(container) {
   const listWrap = el('div', { class: 'table-wrap' }, skeleton('line', 4));
 
@@ -12,6 +50,7 @@ export async function render(container) {
         el('a', { href: '#/gpus/new', class: 'btn btn-primary' }, '+ GPUを登録'),
       ),
       listWrap,
+      agentPanel(),
     )
   );
 

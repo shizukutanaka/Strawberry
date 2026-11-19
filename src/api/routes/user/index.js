@@ -282,6 +282,26 @@ router.post('/logout',
   })
 );
 
+// 提供者エージェント用トークンの発行（認証必須・提供者/管理者のみ）。
+// アクセストークンは短命（既定 1h）で、エージェントの再接続に使うと期限後に
+// 401 で止まる。中継接続専用の長命トークンを発行し、画面から起動コマンドを
+// そのまま貼れるようにする。
+router.post('/me/agent-token',
+  authLimiter,
+  authenticateJWT,
+  checkRole(['provider', 'admin']),
+  asyncHandler(async (req, res) => {
+    const user = UserRepository.getById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const { signAgentToken, agentTTL } = require('../../utils/tokens');
+    const token = signAgentToken(user);
+    logger.info(`Agent token issued for user: ${user.id}`);
+    res.status(201).json({ token, expiresIn: agentTTL() });
+  })
+);
+
 // 現在のユーザー情報取得 (認証必須)
 router.get('/me',
   authenticateJWT,

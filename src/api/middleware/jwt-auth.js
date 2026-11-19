@@ -69,7 +69,8 @@ module.exports = function(req, res, next) {
     const payload = verifyWithRotation(token);
     // リフレッシュトークンをアクセストークンとして使わせない（type 厳密分離）。
     // type 無しトークンは旧アクセストークンとして許可（後方互換）。
-    if (payload.type === 'refresh') {
+    // エージェント専用トークン（中継接続のみ）も API 認証には使わせない。
+    if (payload.type === 'refresh' || payload.type === 'agent') {
       return res.status(401).json({ error: '無効なトークン' });
     }
     if (payload.jti && isRevoked(payload.jti)) {

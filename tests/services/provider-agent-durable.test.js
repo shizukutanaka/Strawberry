@@ -82,7 +82,8 @@ describe('durable provider agent', () => {
       await new Promise((r) => setTimeout(r, 4500));
       server = await startHubServer(port);
 
-      await waitFor(() => hub.hasProvider(provider.userId), 15000);
+      // サーバ側の登録はクライアントのハンドシェイク完了より先に起きるため両方を待つ
+      await waitFor(() => hub.hasProvider(provider.userId) && agent.isConnected(), 15000);
       expect(agent.isConnected()).toBe(true);
     } finally {
       agent.stop();

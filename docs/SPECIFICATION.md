@@ -77,7 +77,7 @@ P2P GPU マーケットプレイス（GPU 貸し借り専用）。本書は**あ
 | マスター認証 | 3要素(Google+TOTP+メール)、暗号乱数/定時間比較/TTL | ✅(Math.random/timing/await バグ修正済) |
 | CORS | 仕様準拠(ワイルドカード時 credentials 無効) | ✅(修正済) |
 | P2P | libp2p で分散。peer scoring/signed records | ❌(libp2p 系パッケージ未導入＋旧APIのまま。p2p-network は未導入時 degrade) |
-| テスト | `npm test` 完走、コア green | ✅(221スイート・約1726テスト green, env依存の一部skipあり, 2026-11 時点) |
+| テスト | `npm test` 完走、コア green | ✅(222スイート・約1731テスト green, env依存の一部skipあり, 2026-11 時点) |
 | データ整合性 | 注文のトランザクション | 🟡(`updateIf` CAS・`withLock` プロセス内直列化・atomicWrite 済。クロスプロセスロック/実 DB 移行は未) |
 
 ## 6. 不足部分の実装計画（優先順）

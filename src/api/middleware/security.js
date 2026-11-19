@@ -126,7 +126,7 @@ const authenticateJWT = (req, res, next) => {
     // 署名は HS256（文字列シークレットの jwt.sign 既定）で行っている。
     const decoded = verifyWithRotation(token);
     // リフレッシュトークンをアクセストークンとして使わせない（jwt-auth.js と同一ポリシー）
-    if (decoded.type === 'refresh') {
+    if (decoded.type === 'refresh' || decoded.type === 'agent') {
       return next(new APIError(ErrorTypes.UNAUTHORIZED, 'Invalid token', 401));
     }
     // logout で失効済みのトークン(jti)を拒否（jwt-auth.js と同一ポリシー）

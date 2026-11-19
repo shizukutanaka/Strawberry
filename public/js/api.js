@@ -111,6 +111,7 @@ export const api = {
   setGpuWatch: (id, targetPrice) => request(`/api/v1/gpus/${id}/watch`, { method: 'POST', body: { targetPrice } }),
   removeGpuWatch: (id) => request(`/api/v1/gpus/${id}/watch`, { method: 'DELETE' }),
   myGpus: (query) => request('/api/v1/gpus/my', { query }),
+  issueAgentToken: () => request('/api/v1/users/me/agent-token', { method: 'POST' }),
   createGpu: (payload) => request('/api/v1/gpus', { method: 'POST', body: payload }),
   updateGpu: (id, updates) => request(`/api/v1/gpus/${id}`, { method: 'PUT', body: updates }),
 

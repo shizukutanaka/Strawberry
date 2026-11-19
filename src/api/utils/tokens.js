@@ -10,6 +10,7 @@ const { resolveSecret, resolveRefreshSecret } = require('../middleware/jwt-auth'
 // TTL は呼出し毎に env を解決（テスト・運用での動的変更に対応）
 const accessTTL = () => process.env.JWT_EXPIRES_IN || config.security.jwtExpiresIn || '1h';
 const refreshTTL = () => process.env.JWT_REFRESH_EXPIRES_IN || config.security.jwtRefreshExpiresIn || '7d';
+const agentTTL = () => process.env.AGENT_TOKEN_EXPIRES_IN || '30d';
 
 // jti may be supplied by caller so the refresh token can embed ati (access token id)
 // and revoke the prior access token when the refresh token is consumed.
@@ -30,4 +31,15 @@ function signRefreshToken(user, ati) {
   return jwt.sign(payload, resolveRefreshSecret(), { expiresIn: refreshTTL() });
 }
 
-module.exports = { signAccessToken, signRefreshToken, accessTTL, refreshTTL };
+// 提供者エージェント専用トークン。放置運用で再接続できるよう長命だが、
+// 用途は中継接続のみ（REST/GraphQL の認証では type:'agent' を拒否する）。
+// パスワード変更・全セッション失効（iat 境界）で無効になる。
+function signAgentToken(user) {
+  return jwt.sign(
+    { id: user.id, role: user.role, type: 'agent', jti: uuidv4() },
+    resolveSecret(),
+    { expiresIn: agentTTL() }
+  );
+}
+
+module.exports = { signAccessToken, signRefreshToken, signAgentToken, accessTTL, refreshTTL, agentTTL };

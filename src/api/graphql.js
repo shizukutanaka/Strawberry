@@ -177,7 +177,7 @@ async function setupGraphQL(app) {
         // REST(jwt-auth.js) と同一ポリシー: リフレッシュトークンをアクセスとして使わせない、
         // かつ logout で失効済み(jti)のトークンは拒否する。これを欠くと GraphQL 経由で
         // ログアウト済み/リフレッシュ用トークンが認証を通ってしまう。
-        if (payload.type === 'refresh') return { user: null };
+        if (payload.type === 'refresh' || payload.type === 'agent') return { user: null };
         if (payload.jti && isRevoked(payload.jti)) return { user: null };
         // passwordChangedAt check (same as REST middleware): reject tokens issued at or
         // before the password change so that GraphQL is covered by session invalidation.

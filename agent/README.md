@@ -13,14 +13,15 @@ GPU サービス（Ollama 等）へ中継します。これが無いと、あな
 ## 必要なもの
 
 - Node.js 20 以上（追加のインストールは不要。依存は Node 標準のみ）
-- Strawberry のアカウント（プロバイダとしてログインし、アクセストークンを取得）
+- Strawberry のアカウント（プロバイダとしてログインし、「マイGPU」の
+  「エージェント起動コマンドを発行」でエージェントトークン入りのコマンドを取得）
 - ローカルで動いている GPU サービス（例: Ollama `http://127.0.0.1:11434`）
 
 ## 起動
 
 ```sh
 STRAWBERRY_SERVER_URL=https://your-strawberry-server.example.com \
-STRAWBERRY_AGENT_TOKEN=<あなたのアクセストークン> \
+STRAWBERRY_AGENT_TOKEN=<発行したエージェントトークン> \
 STRAWBERRY_UPSTREAM_URL=http://127.0.0.1:11434 \
 node agent/provider-agent.js
 ```
@@ -28,15 +29,17 @@ node agent/provider-agent.js
 | 環境変数 | 必須 | 説明 |
 |---|---|---|
 | `STRAWBERRY_SERVER_URL` | ✓ | Strawberry サーバの URL |
-| `STRAWBERRY_AGENT_TOKEN` | ✓ | あなた（提供者）のアクセストークン |
+| `STRAWBERRY_AGENT_TOKEN` | ✓ | 「マイGPU」で発行したエージェントトークン（中継接続専用、既定 30 日有効） |
 | `STRAWBERRY_UPSTREAM_URL` | ✓ | 中継先のローカル GPU サービス。これ以外の場所へは中継しません |
 | `STRAWBERRY_AGENT_NAME` | | ログ・識別用の任意の名前 |
 
 ## 動作と安全性
 
 - 接続は常にあなたのマシンから外向きです。ポート開放は不要です。
-- 切断されたら自動で再接続します（指数バックオフ）。その間のリクエストは
-  サーバ側で 502 になり、再接続後に同じセッションへ再び届きます。
+- 切断されたら、サーバに再び繋がるまで自動で再接続し続けます（指数バックオフ、
+  上限 30 秒）。その間のリクエストはサーバ側で 502 になり、再接続後に同じ
+  セッションへ再び届きます。サーバがトークンを拒否した（期限切れ・パスワード
+  変更で失効）場合は再接続をやめ、終了コード 1 で停止します。
 - 中継先は `STRAWBERRY_UPSTREAM_URL` の origin のみに固定されています。
   借り手がパスを細工しても、他のホストへ中継されることはありません。
 - 借り手のリクエストはサーバ側ゲートウェイでセッショントークンが
